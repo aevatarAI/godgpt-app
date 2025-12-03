@@ -14,13 +14,13 @@ global using Aevatar.GAgents.AIGAgent.Agent;
 global using Aevatar.GAgents.AIGAgent.Dtos;
 global using Aevatar.GAgents.AIGAgent.GEvents;
 global using Aevatar.GAgents.AIGAgent.State;
-global using Aevatar.GAgents.ChatAgent;
+// NOTE: Aevatar.GAgents.ChatAgent removed - ChatGAgentBase deleted
 global using Aevatar.GAgents.ChatAgent.Dtos;
 global using Aevatar.GAgents.ChatAgent.GAgent;
 global using Aevatar.GAgents.ChatAgent.GAgent.State;
 
 // Legacy AI namespaces
-global using Aevatar.AI.Feature;
+// NOTE: Aevatar.AI.Feature removed - IAIFeature unused
 global using Aevatar.AI.Feature.StreamSyncWoker;
 global using Aevatar.AI.Exceptions;
 

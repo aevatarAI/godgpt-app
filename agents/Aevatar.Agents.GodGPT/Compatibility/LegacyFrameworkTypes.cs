@@ -159,17 +159,6 @@ namespace Aevatar.Core
             Logger.LogDebug($"[PublishAsync] Event published: {typeof(T).Name}");
             return Task.CompletedTask;
         }
-        
-        /// <summary>
-        /// Register a child agent (legacy pattern for parent-child relationship)
-        /// TODO: [P2P_STREAM] Replace with new framework's parent-child relationship when supported
-        /// </summary>
-        protected virtual Task RegisterAsync(Aevatar.Core.Abstractions.IGAgent child)
-        {
-            // Stub implementation - in new framework, use IGAgentActorManager.LinkParentChildAsync
-            Logger.LogDebug($"[RegisterAsync] Child agent registered (stub): {child?.GetType().Name}");
-            return Task.CompletedTask;
-        }
     }
 }
 
@@ -400,47 +389,4 @@ namespace Aevatar.Core
     }
 }
 
-// ============================================================================
-// Aevatar.GAgents.ChatAgent namespace
-// ============================================================================
-namespace Aevatar.GAgents.ChatAgent
-{
-    /// <summary>
-    /// Legacy Chat GAgent base class
-    /// </summary>
-    public abstract class ChatGAgentBase<TState, TEventLog> : Aevatar.Core.GAgentBase<TState, TEventLog>
-        where TState : Aevatar.Core.Abstractions.StateBase, new()
-        where TEventLog : Aevatar.Core.Abstractions.StateLogEventBase<TEventLog>
-    {
-    }
-}
-
-// ============================================================================
-// Aevatar.AI.Features namespace (for streaming)
-// ============================================================================
-namespace Aevatar.AI.Features
-{
-    /// <summary>
-    /// Legacy streaming response interface
-    /// </summary>
-    public interface IStreamingResponse
-    {
-        IAsyncEnumerable<string> StreamAsync();
-    }
-}
-
-// ============================================================================
-// Aevatar.AI.Options namespace
-// ============================================================================
-namespace Aevatar.AI.Options
-{
-    /// <summary>
-    /// Legacy AI execution options
-    /// </summary>
-    public class ExecutionOptions
-    {
-        public bool EnableStreaming { get; set; }
-        public int MaxTokens { get; set; } = 4096;
-        public double Temperature { get; set; } = 0.7;
-    }
-}
+// NOTE: ChatGAgentBase, IStreamingResponse, ExecutionOptions removed - unused

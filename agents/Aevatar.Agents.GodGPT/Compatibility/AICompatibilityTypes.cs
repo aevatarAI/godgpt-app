@@ -171,20 +171,7 @@ namespace Aevatar.GAgents.ChatAgent.Dtos
     }
 }
 
-// ============================================================================
-// Aevatar.AI.Feature namespace
-// ============================================================================
-namespace Aevatar.AI.Feature
-{
-    /// <summary>
-    /// Legacy AI feature interface
-    /// </summary>
-    public interface IAIFeature
-    {
-        string FeatureName { get; }
-        bool IsEnabled { get; }
-    }
-}
+// NOTE: Aevatar.AI.Feature.IAIFeature removed - unused
 
 // ============================================================================
 // Aevatar.AI.Exceptions namespace
