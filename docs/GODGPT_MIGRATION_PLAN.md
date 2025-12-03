@@ -213,6 +213,114 @@ var godChatConfig = new GodChatConfig()
     StreamingBufferingSize = 32
 };
 await godChat.ConfigAsync(godChatConfig);
+```
+
+## 兼容层分析
+
+### 分类总结
+
+| 类别 | 类型 | 状态 | 迁移方案 |
+|------|------|------|----------|
+| **核心基类** | `GAgentBase<TState, TEventLog>` | 待迁移 | → 新框架 `GAgentBase<TState>` |
+| **AI基类** | `AIGAgentBase<TState, TEventLog, TConfig, TEvent>` | 待迁移 | → 新框架 `AIGAgentBase` |
+| **状态基类** | `StateBase` | 待迁移 | → Protobuf `IMessage` |
+| **事件基类** | `StateLogEventBase<T>`, `EventBase` | 待迁移 | → Protobuf Event |
+| **配置** | `GodChatConfig` | ✅ 已迁移 | Protobuf |
+| **配置** | `AIAgentStatusProxyConfig` | 待迁移 | → Protobuf |
+| **属性** | `[GAgent]`, `[EventHandler]` | ✅ 可用 | 新框架已有同名 |
+
+### 详细分析
+
+#### 1. LegacyFrameworkTypes.cs - 核心框架类型
+
+| 类型 | 新框架对应 | 迁移优先级 | 备注 |
+|------|------------|------------|------|
+| `StateBase` | `IMessage<T>` (Protobuf) | 高 | State 需转 Protobuf |
+| `StateLogEventBase<T>` | `IMessage` (Protobuf) | 高 | EventLog 需转 Protobuf |
+| `EventBase` | `IMessage` (Protobuf) | 高 | Event 需转 Protobuf |
+| `IGAgent` | `Aevatar.Agents.Abstractions.IGAgent` | 低 | 接口兼容 |
+| `GAgentAttribute` | `Aevatar.Agents.Abstractions.Attributes.GAgentAttribute` | 低 | 已有对应 |
+| `EventHandlerAttribute` | `Aevatar.Agents.Abstractions.Attributes.EventHandlerAttribute` | 低 | 已有对应 |
+| `GAgentBase<TState, TEventLog>` | `Aevatar.Agents.Core.GAgentBase<TState>` | 高 | 核心迁移 |
+| `AIGAgentBase<...>` | `Aevatar.Agents.AI.Core.AIGAgentBase` | 高 | AI 核心迁移 |
+| `RegisterAsync(child)` | `IGAgentActorManager.LinkParentChildAsync` | 中 | 父子关系 |
+| `PublishAsync<T>()` | `IEventPublisher.PublishEventAsync<T>()` | 中 | 事件发布 |
+| `Version` | `GetCurrentVersion()` | ✅ 已迁移 | 版本号 |
+| `StreamProvider`, `AevatarOptions` | 新框架 Stream | 中 | 客户端推送用 |
+
+#### 2. AICompatibilityTypes.cs - AI 相关类型
+
+| 类型 | 新框架对应 | 迁移方案 |
+|------|------------|----------|
+| `ChatMessage` | `AevatarChatMessage` (Protobuf) | 字段映射 |
+| `ChatRole` | `AevatarChatRole` (Protobuf) | 枚举映射 |
+| `AIExceptionEnum` | 待定 | 保留或新建 |
+| `AIStreamChatContent` | 待定 | 检查新框架 AI |
+| `ExecutionPromptSettings` | `AevatarAIAgentConfig` | 参数映射 |
+| `StreamingConfig` | 新框架有 | 检查字段 |
+| `AIChatContextDto` | `AevatarAIContext` | 字段映射 |
+| `LLMConfigDto` | `AevatarAIAgentConfiguration` | 字段映射 |
+| `InitializeDto` | 配置事件 | → `ConfigAsync` |
+| `ConfigurationBase` | `IMessage` | → Protobuf |
+
+#### 3. MoreCompatibilityTypes.cs - 其他类型
+
+| 类型 | 状态 | 迁移方案 |
+|------|------|----------|
+| `IStreamSyncWorker` | 待定 | 检查新框架 Stream |
+| `IAIGAgent` | 低优先级 | 接口兼容 |
+| `AIStreamingErrorResponseGEvent` | 待定 | → Protobuf Event |
+| `IChatGAgent` | 低优先级 | 接口兼容 |
+| `GoogleCalendar*Dto` | ⏭️ 已禁用 | 后续处理 |
+| `ChatConfigDto` | ✅ 已迁移 | → `GodChatConfig` |
+| `EventWrapper<T>` | 待定 | 检查新框架 |
+
+### 新框架 AI 类型映射
+
+```
+旧框架                          新框架 (Protobuf)
+─────────────────────────────────────────────────────
+ChatMessage                  →  AevatarChatMessage
+  .Role                      →  .role (AevatarChatRole)
+  .Content                   →  .content
+  .Timestamp                 →  .timestamp
+
+AIGAgentStateBase            →  AevatarAIAgentState
+  .History                   →  .history
+  .Context                   →  .context (map)
+  .TotalTokenUsed            →  .total_token_used
+  .LastActivity              →  .last_activity
+
+ExecutionPromptSettings      →  AevatarAIAgentConfig
+  .Temperature               →  .temperature
+  .MaxTokens                 →  .max_output_tokens
+  .TopP                      →  .top_p
+
+LLMConfigDto                 →  AevatarAIAgentConfiguration
+  .ModelId                   →  .model
+  .Temperature               →  .temperature
+  .MaxTokens                 →  .max_tokens
+```
+
+### 迁移顺序建议
+
+1. **Phase 1 - 配置** (✅ 部分完成)
+   - [x] `GodChatConfig` → Protobuf
+   - [ ] `AIAgentStatusProxyConfig` → Protobuf
+   - [ ] 其他配置类型
+
+2. **Phase 2 - State/Event**
+   - [ ] 定义 Protobuf State (保持字段名兼容)
+   - [ ] 定义 Protobuf Event  
+   - [ ] 数据迁移脚本
+
+3. **Phase 3 - 基类迁移**
+   - [ ] `GAgentBase<TState, TEventLog>` → `GAgentBase<TState>`
+   - [ ] `AIGAgentBase` → 新框架 AI 基类
+
+4. **Phase 4 - 功能恢复**
+   - [ ] Google Calendar 重新集成
+   - [ ] Twitter/Google Auth 迁移
 
 ### PublishAsync 详解
 
