@@ -304,24 +304,23 @@ LLMConfigDto                 →  AevatarAIAgentConfiguration
 
 ### 迁移顺序建议
 
-1. **Phase 1 - 配置** (✅ 部分完成)
+1. **Phase 1 - 简单 Agent** (进行中)
+   - [x] `ConfigurationGAgent` → 完成
+   - [ ] `InviteCodeGAgent` 
+   - [ ] `UserStatisticsGAgent`
+
+2. **Phase 2 - 配置类** 
    - [x] `GodChatConfig` → Protobuf
    - [ ] `AIAgentStatusProxyConfig` → Protobuf
-   - [ ] 其他配置类型
 
-2. **Phase 2 - State/Event**
-   - [ ] 定义 Protobuf State (保持字段名兼容)
-   - [ ] 定义 Protobuf Event  
-   - [ ] 数据迁移脚本
-
-3. **Phase 3 - 基类迁移**
+3. **Phase 3 - 复杂 Agent**
    - [ ] `GAgentBase<TState, TEventLog>` → `GAgentBase<TState>`
    - [ ] `AIGAgentBase` → 新框架 AI 基类
 
 4. **Phase 4 - 功能恢复**
-   - [x] ~~Google Calendar~~ (已移除，不再使用)
-   - [x] ~~Twitter/Google Auth~~ (已移除，不再使用)
-   - [x] ~~SignalR~~ (已移除，不再使用)
+   - [x] ~~Google Calendar~~ (已移除)
+   - [x] ~~Twitter/Google Auth~~ (已移除)
+   - [x] ~~SignalR~~ (已移除)
 
 ### PublishAsync 详解
 
@@ -504,3 +503,108 @@ agents/Aevatar.Agents.GodGPT/
 2. All agents can be instantiated
 3. Event sourcing persists correctly
 4. Silo starts successfully
+
+---
+
+## ✅ 已完成迁移: ConfigurationGAgent
+
+### 迁移架构
+
+```
+调用方 → IGAgentFactory.CreateGAgent<ConfigurationGAgent>(id)
+       → ConfigurationGAgent : GAgentBase<ConfigurationState>
+       → Protobuf State + Event Sourcing
+```
+
+### 文件清单
+
+| 文件 | 状态 |
+|------|------|
+| `Protos/configuration.proto` | ✅ 新增 |
+| `Configuration/ConfigurationGAgent.cs` | ✅ 重写 |
+| `Configuration/IConfigurationGAgent.cs` | ✅ 更新 |
+| ~~`ConfigurationGAgentGrain.cs`~~ | ❌ 删除 |
+
+### 调用方模式
+
+```csharp
+private ConfigurationGAgent? _configurationAgent;
+
+private async Task<ConfigurationGAgent> GetConfigurationAsync()
+{
+    if (_configurationAgent == null)
+    {
+        var factory = ServiceProvider.GetRequiredService<IGAgentFactory>();
+        _configurationAgent = factory.CreateGAgent<ConfigurationGAgent>(id);
+        await _configurationAgent.ActivateAsync();
+    }
+    return _configurationAgent;
+}
+```
+
+### 关键变更
+
+| 旧框架 | 新框架 |
+|--------|--------|
+| `Grain + GAgentBase<TState, TEventLog>` | `GAgentBase<TState>` |
+| `GrainFactory.GetGrain<T>(id)` | `IGAgentFactory.CreateGAgent<T>(id)` |
+| 自动激活 | 手动 `ActivateAsync()` |
+| `IGrainWithGuidKey` | `IGAgent` |
+
+---
+
+## ✅ 已完成迁移: InviteCodeGAgent
+
+### Proto 枚举定义规则
+
+**正确做法**：Proto 中定义枚举，值与 C# 枚举一致，代码中直接强转
+
+```protobuf
+// Proto 枚举 - 值与 C# 枚举匹配
+enum InvitationCodeType {
+    INVITATION_CODE_TYPE_FRIEND_INVITATION = 0;  // = C# InvitationCodeType.FriendInvitation
+    INVITATION_CODE_TYPE_FREE_TRIAL_REWARD = 1;  // = C# InvitationCodeType.FreeTrialReward
+}
+
+enum PlanType {
+    PLAN_TYPE_NONE = 0;   // = C# PlanType.None
+    PLAN_TYPE_DAY = 1;    // = C# PlanType.Day
+    PLAN_TYPE_MONTH = 2;  // = C# PlanType.Month
+    PLAN_TYPE_YEAR = 3;   // = C# PlanType.Year
+    PLAN_TYPE_WEEK = 4;   // = C# PlanType.Week
+}
+```
+
+```csharp
+// 使用 using alias 避免命名冲突
+using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
+using CsInvitationCodeType = Aevatar.Application.Grains.Common.Constants.InvitationCodeType;
+
+// 直接强转，不需要映射函数
+PlanType = (PlanType)initDto.PlanType,        // C# -> Proto
+PlanType = (CsPlanType)State.PlanType,        // Proto -> C#
+```
+
+**错误做法**（已修正）：
+- ❌ 用 int32 代替枚举（失去语义）
+- ❌ 创建映射函数（过度设计）
+- ❌ 枚举值不匹配导致需要转换
+
+### 调用方修改模式
+
+```csharp
+// 旧方式
+var agent = GrainFactory.GetGrain<IInviteCodeGAgent>(id);
+
+// 新方式 - 添加辅助方法
+private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid id)
+{
+    var factory = ServiceProvider.GetRequiredService<IGAgentFactory>();
+    var agent = factory.CreateGAgent<InviteCodeGAgent>(id);
+    await agent.ActivateAsync();
+    return agent;
+}
+
+// 使用
+var agent = await GetInviteCodeAgentAsync(id);
+```

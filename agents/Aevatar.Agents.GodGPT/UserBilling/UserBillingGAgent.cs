@@ -25,6 +25,7 @@ using Aevatar.Application.Grains.UserBilling.SEvents;
 using Aevatar.Application.Grains.UserQuota;
 using Aevatar.Core;
 using Aevatar.Core.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
@@ -536,7 +537,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
             var codeUnused = await factoryGAgent.ValidateCodeAvailableAsync(createCheckoutSessionDto.TrialCode);
             if (codeUnused)
             {
-                var inviteCodeGAgent = GrainFactory.GetGrain<IInviteCodeGAgent>(CommonHelper.StringToGuid(createCheckoutSessionDto.TrialCode));
+                var inviteCodeGAgent = await GetInviteCodeAgentAsync(CommonHelper.StringToGuid(createCheckoutSessionDto.TrialCode));
                 var validateCodeResult = await inviteCodeGAgent.ValidateAndGetFreeTrialCodeInfoAsync(createCheckoutSessionDto.UserId);
                 if (validateCodeResult.IsValid)
                 {
@@ -571,7 +572,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         if (trialDays > 0)
         {
             var inviteCodeGAgent =
-                GrainFactory.GetGrain<IInviteCodeGAgent>(CommonHelper.StringToGuid(createCheckoutSessionDto.TrialCode));
+                await GetInviteCodeAgentAsync(CommonHelper.StringToGuid(createCheckoutSessionDto.TrialCode));
             await inviteCodeGAgent.InitializeFreeTrialCodeAsync(new FreeTrialCodeInitDto
             {
                 BatchId = batchInfo.BatchId,
@@ -1231,7 +1232,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
             var batchInfoDto = await factoryGAgent.GetBatchInfoAsync();
             await factoryGAgent.MarkCodeAsUsedAsync(invoiceDetail.TrialCode, userId.ToString());
             var inviteCodeGAgent =
-                GrainFactory.GetGrain<IInviteCodeGAgent>(CommonHelper.StringToGuid(invoiceDetail.TrialCode));
+                await GetInviteCodeAgentAsync(CommonHelper.StringToGuid(invoiceDetail.TrialCode));
             await inviteCodeGAgent.MarkCodeAsUsedAsync();
             trialDays = batchInfoDto?.Config?.TrialDays ?? 0;
             _logger.LogDebug("[UserBillingGAgent][HandleStripeWebhookEventAsync] Use trial code {0}, {1}, {2}, {3}, {4}",
@@ -5448,5 +5449,13 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
     private static decimal GetActualApplePrice(decimal applePrice)
     {
         return applePrice / 1000m;
+    }
+
+    private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
+    {
+        var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
+        var agent = factory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
+        await agent.ActivateAsync();
+        return agent;
     }
 }

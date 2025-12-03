@@ -7,6 +7,7 @@ using Aevatar.Application.Grains.Invitation.SEvents;
 using Aevatar.Application.Grains.UserQuota;
 using Aevatar.Core;
 using Aevatar.Core.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Aevatar.Application.Grains.Invitation;
@@ -36,7 +37,7 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
         }
 
         var inviteCode = await GenerateUniqueCodeAsync();
-        var inviteCodeGrain = GrainFactory.GetGrain<IInviteCodeGAgent>(CommonHelper.StringToGuid(inviteCode));
+        var inviteCodeGrain = await GetInviteCodeAgentAsync(CommonHelper.StringToGuid(inviteCode));
         await inviteCodeGrain.InitializeAsync(this.GetPrimaryKey().ToString(), inviteCode);
 
         RaiseEvent(new SetInviteCodeLogEvent
@@ -332,7 +333,7 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
             attemptCount++;
             string code = ToBase62(timestamp);
             var codeGrainId = CommonHelper.StringToGuid(code);
-            var codeGrain = GrainFactory.GetGrain<IInviteCodeGAgent>(codeGrainId);
+            var codeGrain = await GetInviteCodeAgentAsync(codeGrainId);
             var isUsed = await codeGrain.IsInitialized();
 
             _logger.LogDebug(
@@ -494,5 +495,13 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
         await ConfirmEvents();
 
         return true;
+    }
+
+    private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
+    {
+        var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
+        var agent = factory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
+        await agent.ActivateAsync();
+        return agent;
     }
 }

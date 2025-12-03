@@ -1074,7 +1074,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     public async Task<bool> RedeemInviteCodeAsync(string inviteCode)
     {
         var codeGrainId = CommonHelper.StringToGuid(inviteCode);
-        var codeGrain = GrainFactory.GetGrain<IInviteCodeGAgent>(codeGrainId);
+        var codeGrain = await GetInviteCodeAgentAsync(codeGrainId);
 
         var (isValid, inviterId) = await codeGrain.ValidateAndGetInviterAsync();
 
@@ -1452,6 +1452,14 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             await _configurationAgent.ActivateAsync();
         }
         return _configurationAgent;
+    }
+
+    private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
+    {
+        var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
+        var agent = factory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
+        await agent.ActivateAsync();
+        return agent;
     }
 
     /// <summary>
