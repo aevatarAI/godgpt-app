@@ -308,6 +308,7 @@ LLMConfigDto                 →  AevatarAIAgentConfiguration
    - [x] `ConfigurationGAgent` → 完成
    - [x] `InviteCodeGAgent` → 完成
    - [x] `UserStatisticsGAgent` → 完成
+   - [x] `InvitationGAgent` → 完成
 
 2. **Phase 2 - 配置类** 
    - [x] `GodChatConfig` → Protobuf
@@ -607,4 +608,44 @@ private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid id)
 
 // 使用
 var agent = await GetInviteCodeAgentAsync(id);
+```
+
+---
+
+## ✅ 已完成迁移: InvitationGAgent
+
+### Proto Optional 字段处理
+
+**正确做法**：使用 `!= null` 检查，不用 `HasXxx`
+
+```csharp
+// ❌ 错误 - proto3 不生成 HasXxx 属性
+if (r.HasScheduledDate) { ... }
+
+// ✅ 正确 - 直接检查 null
+if (r.ScheduledDate != null) { ... }
+```
+
+### 访问未迁移 Orleans Grain 的方式
+
+新框架 Agent 不继承 `Grain`，没有 `GrainFactory`。访问未迁移的 Orleans Grain：
+
+```csharp
+// 构造函数注入 IClusterClient
+public class MyGAgent : GAgentBase<MyState>, IMyGAgent
+{
+    private readonly IClusterClient _clusterClient;
+    
+    public MyGAgent(Guid id, IClusterClient clusterClient) : base(id)
+    {
+        _clusterClient = clusterClient;
+    }
+    
+    private async Task UseOrleansGrain()
+    {
+        // 访问未迁移的 Orleans Grain
+        var grain = _clusterClient.GetGrain<IUserQuotaGAgent>(Id);
+        await grain.DoSomethingAsync();
+    }
+}
 ```
