@@ -1863,9 +1863,9 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             }
     }
 
-    private IConfigurationGAgent GetConfiguration()
+    private IConfigurationGAgentGrain GetConfiguration()
     {
-        return GrainFactory.GetGrain<IConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        return GrainFactory.GetGrain<IConfigurationGAgentGrain>(CommonHelper.GetSessionManagerConfigurationId());
     }
 
     /// <summary>

@@ -213,9 +213,9 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState, AnonymousUserE
     /// <summary>
     /// Get configuration agent (exact copy from ChatManagerGAgent)
     /// </summary>
-    private IConfigurationGAgent GetConfiguration()
+    private IConfigurationGAgentGrain GetConfiguration()
     {
-        return GrainFactory.GetGrain<IConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        return GrainFactory.GetGrain<IConfigurationGAgentGrain>(CommonHelper.GetSessionManagerConfigurationId());
     }
 
     /// <summary>

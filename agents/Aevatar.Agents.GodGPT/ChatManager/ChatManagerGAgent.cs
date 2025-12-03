@@ -1439,9 +1439,9 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         await base.OnGAgentActivateAsync(cancellationToken);
     }
 
-    private IConfigurationGAgent GetConfiguration()
+    private IConfigurationGAgentGrain GetConfiguration()
     {
-        return GrainFactory.GetGrain<IConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        return GrainFactory.GetGrain<IConfigurationGAgentGrain>(CommonHelper.GetSessionManagerConfigurationId());
     }
 
     /// <summary>

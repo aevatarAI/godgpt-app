@@ -1,24 +1,18 @@
+using Aevatar.Agents.Abstractions.Attributes;
+using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos;
-using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Google.Protobuf;
-using Json.Schema.Generation;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Orleans;
-using Orleans.Providers;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent;
 
 /// <summary>
 /// Configuration GAgent - manages chat agent configuration
 /// 
-/// Migration Phase 1: Uses Protobuf State + Event Sourcing pattern
-/// Still inherits from Grain for Orleans compatibility during migration
-/// TODO: After all callers are migrated, change to inherit from Aevatar.Agents.Core.GAgentBase
+/// New Framework: Inherits from GAgentBase, NOT Grain
+/// Uses Protobuf State + Event Sourcing pattern
 /// </summary>
-[Description("manage chat agent")]
-[StorageProvider(ProviderName = "PubSubStore")]
-public class ConfigurationGAgent : Grain, IConfigurationGAgent
+public class ConfigurationGAgent : GAgentBase<ConfigurationState>
 {
     private const string DefaultSystemLLM = "OpenAI";
     private const string DefaultUserProfilePrompt = @"
@@ -28,25 +22,11 @@ public class ConfigurationGAgent : Grain, IConfigurationGAgent
         Remember: respond in the same language the user used when filling in the location. 
     ";
 
-    // Protobuf State (new framework style)
-    private ConfigurationState _state = new();
-    protected ConfigurationState State => _state;
-
-    // Event Sourcing
-    private readonly List<IMessage> _pendingEvents = new();
-    private long _eventVersion = 0;
-
-    // Logger
-    private ILogger<ConfigurationGAgent> _logger = null!;
-    protected ILogger<ConfigurationGAgent> Logger => _logger;
-
-    public override async Task OnActivateAsync(CancellationToken cancellationToken)
+    protected override async Task OnActivateAsync(CancellationToken ct = default)
     {
-        _logger = ServiceProvider.GetRequiredService<ILogger<ConfigurationGAgent>>();
+        await base.OnActivateAsync(ct);
 
-        _logger.LogDebug("ConfigurationGAgent OnActivateAsync");
-
-        await base.OnActivateAsync(cancellationToken);
+        Logger.LogDebug("ConfigurationGAgent {Id} activating", Id);
 
         // Initialize default values if not set
         if (string.IsNullOrEmpty(State.SystemLlm))
@@ -64,36 +44,46 @@ public class ConfigurationGAgent : Grain, IConfigurationGAgent
             RaiseEvent(new SetStreamingModeEnabledEvent { StreamingModeEnabled = true });
         }
 
+        await ConfirmEventsAsync(ct);
+    }
+
+    // ============================================================================
+    // Event Handlers (new framework style)
+    // ============================================================================
+
+    [EventHandler]
+    public async Task HandleSetSystemLLMAsync(SetSystemLLMEvent evt)
+    {
+        RaiseEvent(evt);
+        await ConfirmEventsAsync();
+    }
+
+    [EventHandler]
+    public async Task HandleSetPromptAsync(SetPromptEvent evt)
+    {
+        RaiseEvent(evt);
+        await ConfirmEventsAsync();
+    }
+
+    [EventHandler]
+    public async Task HandleSetStreamingModeAsync(SetStreamingModeEnabledEvent evt)
+    {
+        RaiseEvent(evt);
+        await ConfirmEventsAsync();
+    }
+
+    [EventHandler]
+    public async Task HandleSetUserProfilePromptAsync(SetUserProfilePromptEvent evt)
+    {
+        RaiseEvent(evt);
         await ConfirmEventsAsync();
     }
 
     // ============================================================================
-    // Event Sourcing Methods (new framework style)
+    // State Transition (Pure Functional)
     // ============================================================================
 
-    /// <summary>
-    /// Raise an event for state transition (Event Sourcing pattern)
-    /// </summary>
-    protected void RaiseEvent<TEvent>(TEvent evt) where TEvent : IMessage
-    {
-        _pendingEvents.Add(evt);
-        TransitionState(_state, evt);
-    }
-
-    /// <summary>
-    /// Confirm pending events
-    /// </summary>
-    protected Task ConfirmEventsAsync()
-    {
-        _eventVersion += _pendingEvents.Count;
-        _pendingEvents.Clear();
-        return Task.CompletedTask;
-    }
-
-    /// <summary>
-    /// Pure functional state transition
-    /// </summary>
-    protected void TransitionState(ConfigurationState state, IMessage evt)
+    protected override void TransitionState(ConfigurationState state, IMessage evt)
     {
         switch (evt)
         {
@@ -113,45 +103,26 @@ public class ConfigurationGAgent : Grain, IConfigurationGAgent
     }
 
     // ============================================================================
-    // IGAgent Implementation (legacy interface)
+    // Public Methods
     // ============================================================================
 
-    public Task<string> GetDescriptionAsync()
+    public override Task<string> GetDescriptionAsync()
     {
-        return Task.FromResult("Configuration GAgent - manages chat agent configuration");
+        return Task.FromResult($"Configuration GAgent - LLM: {State.SystemLlm}, Streaming: {State.StreamingModeEnabled}");
     }
 
-    // ============================================================================
-    // IConfigurationGAgent Implementation
-    // ============================================================================
+    public string GetSystemLLM() => State.SystemLlm ?? DefaultSystemLLM;
 
-    public Task<string> GetSystemLLM()
-    {
-        return Task.FromResult(State.SystemLlm ?? DefaultSystemLLM);
-    }
+    public bool GetStreamingModeEnabled() => State.StreamingModeEnabled;
 
-    public Task<bool> GetStreamingModeEnabled()
-    {
-        return Task.FromResult(State.StreamingModeEnabled);
-    }
+    public string GetPrompt() => State.Prompt ?? string.Empty;
 
-    public Task<string> GetPrompt()
-    {
-        return Task.FromResult(State.Prompt ?? string.Empty);
-    }
-
-    public Task<string> GetUserProfilePromptAsync()
-    {
-        return Task.FromResult(State.UserProfilePrompt ?? DefaultUserProfilePrompt);
-    }
+    public string GetUserProfilePrompt() => State.UserProfilePrompt ?? DefaultUserProfilePrompt;
 
     public async Task UpdateSystemPromptAsync(string systemPrompt)
     {
-        Logger.LogDebug("[ConfigurationGAgent][UpdateSystemPrompt] Updating prompt to '{NewPrompt}'", systemPrompt);
-
+        Logger.LogDebug("[ConfigurationGAgent] Updating prompt to '{NewPrompt}'", systemPrompt);
         RaiseEvent(new SetPromptEvent { Prompt = systemPrompt });
         await ConfirmEventsAsync();
-
-        Logger.LogDebug("[ConfigurationGAgent][UpdateSystemPrompt] Prompt updated successfully");
     }
 }
