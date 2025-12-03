@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.userstatistics;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.UserStatistics";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// State
+// =============================================================================
+
+message UserStatisticsState {
+    string user_id = 1;                              // [Id(0)] Guid -> string
+    bool is_initialized = 2;                         // [Id(1)]
+    map<string, AppRatingInfo> app_ratings = 3;      // [Id(2)] DeviceId -> AppRatingInfo
+    bool is_real_user = 4;                           // [Id(3)]
+}
+
+message AppRatingInfo {
+    string platform = 1;                             // [Id(0)]
+    string device_id = 2;                            // [Id(1)]
+    google.protobuf.Timestamp first_rating_time = 3; // [Id(2)]
+    google.protobuf.Timestamp last_rating_time = 4;  // [Id(3)]
+    int32 rating_count = 5;                          // [Id(4)]
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+message InitializeUserStatsEvent {
+    string user_id = 1;                              // [Id(0)] Guid -> string
+}
+
+message RecordAppRatingEvent {
+    string platform = 1;                             // [Id(0)]
+    string device_id = 2;                            // [Id(1)]
+    google.protobuf.Timestamp rating_time = 3;       // [Id(2)]
+    int32 rating_count = 4;                          // [Id(3)]
+    optional bool is_real_user = 5;                  // [Id(4)] nullable
+    optional string real_user_id = 6;                // [Id(5)] Guid? -> optional string
+}
+

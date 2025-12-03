@@ -1,22 +1,21 @@
-using Aevatar.Application.Grains.UserStatistics.Dtos;
-using Aevatar.Application.Grains.UserStatistics.SEvents;
-using Aevatar.Core;
-using Aevatar.Core.Abstractions;
+using Aevatar.Agents.Core;
+using Aevatar.Agents.GodGPT.Protos.UserStatistics;
 using Aevatar.Application.Grains.Common.Options;
+using Aevatar.Application.Grains.UserStatistics.Dtos;
+using Aevatar.Core.Abstractions;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Orleans.Concurrency;
 
 namespace Aevatar.Application.Grains.UserStatistics;
 
-public interface IUserStatisticsGAgent : IGAgent
+public interface IUserStatisticsGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
     Task<AppRatingRecordDto> RecordAppRatingAsync(Guid userId, string platform, string deviceId);
-    [ReadOnly]
     Task<UserStatisticsDto> GetUserStatisticsAsync();
-    [ReadOnly]
     Task<List<AppRatingRecordDto>> GetAppRatingRecordsAsync(string? deviceId = null);
-    [ReadOnly]
     Task<bool> CanUserRateAppAsync(string deviceId);
 }
 
@@ -24,15 +23,12 @@ public interface IUserStatisticsGAgent : IGAgent
 /// User Statistics GAgent - manages user behavior statistics including app ratings
 /// </summary>
 [GAgent(nameof(UserStatisticsGAgent))]
-[Reentrant]
-public class UserStatisticsGAgent : GAgentBase<UserStatisticsState, UserStatisticsEventLog>, IUserStatisticsGAgent
+public class UserStatisticsGAgent : GAgentBase<UserStatisticsState>, IUserStatisticsGAgent
 {
-    private readonly ILogger<UserStatisticsGAgent> _logger;
     private readonly IOptionsMonitor<UserStatisticsOptions> _userStatisticsOptions;
 
-    public UserStatisticsGAgent(ILogger<UserStatisticsGAgent> logger, IOptionsMonitor<UserStatisticsOptions> userStatisticsOptions)
+    public UserStatisticsGAgent(Guid id, IOptionsMonitor<UserStatisticsOptions> userStatisticsOptions) : base(id)
     {
-        _logger = logger;
         _userStatisticsOptions = userStatisticsOptions;
     }
     
@@ -41,48 +37,56 @@ public class UserStatisticsGAgent : GAgentBase<UserStatisticsState, UserStatisti
         return Task.FromResult("manages user behavior statistics including app ratings");
     }
 
+    protected override async Task OnActivateAsync(CancellationToken ct = default)
+    {
+        await base.OnActivateAsync(ct);
+        await InitializeUserStatisticsAsync();
+    }
+
     public async Task<AppRatingRecordDto> RecordAppRatingAsync(Guid userId, string platform, string deviceId)
     {
         if (string.IsNullOrWhiteSpace(deviceId))
         {
-            _logger.LogWarning("[UserStatisticsGAgent][RecordAppRatingAsync] DeviceId cannot be empty for user: {UserId}", this.GetPrimaryKey().ToString());
+            Logger.LogWarning("[UserStatisticsGAgent][RecordAppRatingAsync] DeviceId cannot be empty for user: {UserId}", Id);
             return new AppRatingRecordDto();
         }
 
         try
         {
-            var isFirstRating = State.AppRatings == null || !State.AppRatings.ContainsKey(deviceId);
+            var isFirstRating = !State.AppRatings.ContainsKey(deviceId);
             var ratingTime = DateTime.UtcNow;
 
-            _logger.LogDebug("[UserStatisticsGAgent][RecordAppRatingAsync] Recording app rating for user: {UserId}, platform: {Platform}, device: {DeviceID}, isFirstRating: {IsFirstRating}", 
-                this.GetPrimaryKey().ToString(), platform, deviceId, isFirstRating);
+            Logger.LogDebug("[UserStatisticsGAgent][RecordAppRatingAsync] Recording app rating for user: {UserId}, platform: {Platform}, device: {DeviceID}, isFirstRating: {IsFirstRating}", 
+                Id, platform, deviceId, isFirstRating);
 
-            RaiseEvent(new RecordAppRatingEventLog
+            RaiseEvent(new RecordAppRatingEvent
             {
                 Platform = platform,
                 DeviceId = deviceId,
-                RatingTime = ratingTime,
+                RatingTime = Timestamp.FromDateTime(ratingTime),
                 RatingCount = isFirstRating ? 1 : State.AppRatings[deviceId].RatingCount + 1,
                 IsRealUser = false,
-                RealUserId = userId
+                RealUserId = userId.ToString()
             });
 
-            _logger.LogDebug("[UserStatisticsGAgent][RecordAppRatingAsync] App rating recorded successfully for user: {UserId}, platform: {Platform}, device: {DeviceID}", 
-                this.GetPrimaryKey().ToString(), platform, deviceId);
+            await ConfirmEventsAsync();
+
+            Logger.LogDebug("[UserStatisticsGAgent][RecordAppRatingAsync] App rating recorded successfully for user: {UserId}, platform: {Platform}, device: {DeviceID}", 
+                Id, platform, deviceId);
 
             return new AppRatingRecordDto
             {
                 Platform = platform,
                 DeviceId = deviceId,
-                FirstRatingTime = isFirstRating ? ratingTime : State.AppRatings[deviceId].FirstRatingTime,
+                FirstRatingTime = isFirstRating ? ratingTime : State.AppRatings[deviceId].FirstRatingTime.ToDateTime(),
                 LastRatingTime = ratingTime,
                 RatingCount = isFirstRating ? 1 : State.AppRatings[deviceId].RatingCount + 1
             };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[UserStatisticsGAgent][RecordAppRatingAsync] Failed to record app rating for user: {UserId}, platform: {Platform}", 
-                this.GetPrimaryKey().ToString(), platform);
+            Logger.LogError(ex, "[UserStatisticsGAgent][RecordAppRatingAsync] Failed to record app rating for user: {UserId}, platform: {Platform}", 
+                Id, platform);
             throw;
         }
     }
@@ -90,18 +94,17 @@ public class UserStatisticsGAgent : GAgentBase<UserStatisticsState, UserStatisti
     /// <summary>
     /// Get user statistics information
     /// </summary>
-    [ReadOnly]
     public Task<UserStatisticsDto> GetUserStatisticsAsync()
     {
         var result = new UserStatisticsDto
         {
-            UserId = State.UserId,
+            UserId = Guid.TryParse(State.UserId, out var uid) ? uid : Guid.Empty,
             AppRatings = State.AppRatings.Values.Select(rating => new AppRatingRecordDto
             {
                 Platform = rating.Platform,
                 DeviceId = rating.DeviceId,
-                FirstRatingTime = rating.FirstRatingTime,
-                LastRatingTime = rating.LastRatingTime,
+                FirstRatingTime = rating.FirstRatingTime?.ToDateTime() ?? DateTime.MinValue,
+                LastRatingTime = rating.LastRatingTime?.ToDateTime() ?? DateTime.MinValue,
                 RatingCount = rating.RatingCount
             }).ToList(),
         };
@@ -111,14 +114,8 @@ public class UserStatisticsGAgent : GAgentBase<UserStatisticsState, UserStatisti
     /// <summary>
     /// Get app rating records for specific platform or all platforms
     /// </summary>
-    [ReadOnly]
     public Task<List<AppRatingRecordDto>> GetAppRatingRecordsAsync(string? deviceId = null)
     {
-        if (State.AppRatings == null)
-        {
-            return Task.FromResult(new List<AppRatingRecordDto>());
-        }
-
         var query = State.AppRatings.Values.AsEnumerable();
         
         if (!string.IsNullOrWhiteSpace(deviceId))
@@ -130,103 +127,104 @@ public class UserStatisticsGAgent : GAgentBase<UserStatisticsState, UserStatisti
         {
             Platform = rating.Platform,
             DeviceId = rating.DeviceId,
-            FirstRatingTime = rating.FirstRatingTime,
-            LastRatingTime = rating.LastRatingTime,
+            FirstRatingTime = rating.FirstRatingTime?.ToDateTime() ?? DateTime.MinValue,
+            LastRatingTime = rating.LastRatingTime?.ToDateTime() ?? DateTime.MinValue,
             RatingCount = rating.RatingCount
         }).ToList();
 
         return Task.FromResult(result);
     }
     
-    [ReadOnly]
     public Task<bool> CanUserRateAppAsync(string deviceId)
     {
         if (string.IsNullOrWhiteSpace(deviceId))
         {
-            _logger.LogDebug("[UserStatisticsGAgent][CanUserRateAppAsync] DeviceId is null or empty for user: {UserId}", this.GetPrimaryKey().ToString());
+            Logger.LogDebug("[UserStatisticsGAgent][CanUserRateAppAsync] DeviceId is null or empty for user: {UserId}", Id);
             return Task.FromResult(false);
-        }
-
-        if (State.AppRatings == null)
-        {
-            _logger.LogDebug("[UserStatisticsGAgent][CanUserRateAppAsync] No rating records found, user can rate for user: {UserId}, device: {DeviceId}", this.GetPrimaryKey().ToString(), deviceId);
-            return Task.FromResult(true);
         }
 
         if (!State.AppRatings.TryGetValue(deviceId, out var ratingInfo))
         {
-            _logger.LogDebug("[UserStatisticsGAgent][CanUserRateAppAsync] No rating record for device, user can rate for user: {UserId}, device: {DeviceId}", this.GetPrimaryKey().ToString(), deviceId);
+            Logger.LogDebug("[UserStatisticsGAgent][CanUserRateAppAsync] No rating record for device, user can rate for user: {UserId}, device: {DeviceId}", Id, deviceId);
             return Task.FromResult(true);
         }
 
         var ratingIntervalMinutes = _userStatisticsOptions.CurrentValue.RatingIntervalMinutes;
-        var minutesSinceLastRating = (DateTime.UtcNow - ratingInfo.LastRatingTime).TotalMinutes;
+        var lastRatingTime = ratingInfo.LastRatingTime?.ToDateTime() ?? DateTime.MinValue;
+        var minutesSinceLastRating = (DateTime.UtcNow - lastRatingTime).TotalMinutes;
         var canRate = minutesSinceLastRating >= ratingIntervalMinutes;
         
-        _logger.LogDebug("[UserStatisticsGAgent][CanUserRateAppAsync] User: {UserId}, device: {DeviceId}, minutes since last rating: {MinutesSinceLastRating}, interval required: {IntervalMinutes}, can rate: {CanRate}", 
-            this.GetPrimaryKey().ToString(), deviceId, minutesSinceLastRating, ratingIntervalMinutes, canRate);
+        Logger.LogDebug("[UserStatisticsGAgent][CanUserRateAppAsync] User: {UserId}, device: {DeviceId}, minutes since last rating: {MinutesSinceLastRating}, interval required: {IntervalMinutes}, can rate: {CanRate}", 
+            Id, deviceId, minutesSinceLastRating, ratingIntervalMinutes, canRate);
 
         return Task.FromResult(canRate);
     }
 
-    private async Task<bool> InitializeUserStatisticsAsync()
+    private async Task InitializeUserStatisticsAsync()
     {
         if (State.IsInitialized)
         {
-            _logger.LogDebug("[UserStatisticsGAgent][InitializeUserStatisticsAsync] User statistics already initialized for user: {UserId}", this.GetPrimaryKey().ToString());
-            return true;
+            Logger.LogDebug("[UserStatisticsGAgent][InitializeUserStatisticsAsync] User statistics already initialized for user: {UserId}", Id);
+            return;
         }
 
         try
         {
-            RaiseEvent(new InitializeUserStatsEventLog
+            RaiseEvent(new InitializeUserStatsEvent
             {
-                UserId = this.GetPrimaryKey()
+                UserId = Id.ToString()
             });
 
-            _logger.LogDebug("[UserStatisticsGAgent][InitializeUserStatisticsAsync] User statistics initialized for user: {UserId}", this.GetPrimaryKey().ToString());
-            return true;
+            await ConfirmEventsAsync();
+
+            Logger.LogDebug("[UserStatisticsGAgent][InitializeUserStatisticsAsync] User statistics initialized for user: {UserId}", Id);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[UserStatisticsGAgent][InitializeUserStatisticsAsync] Failed to initialize user statistics for user: {UserId}", this.GetPrimaryKey().ToString());
-            return false;
+            Logger.LogError(ex, "[UserStatisticsGAgent][InitializeUserStatisticsAsync] Failed to initialize user statistics for user: {UserId}", Id);
         }
     }
-    
-    protected override async Task OnGAgentActivateAsync(CancellationToken cancellationToken)
+
+    #region EventHandlers
+
+    [EventHandler]
+    public void HandleInitializeUserStatsEvent(InitializeUserStatsEvent @event)
     {
-        await InitializeUserStatisticsAsync();
+        TransitionState(State, @event);
     }
+
+    [EventHandler]
+    public void HandleRecordAppRatingEvent(RecordAppRatingEvent @event)
+    {
+        TransitionState(State, @event);
+    }
+
+    #endregion
 
     /// <summary>
     /// Handle state transitions for events
     /// </summary>
-    protected override void GAgentTransitionState(UserStatisticsState state, StateLogEventBase<UserStatisticsEventLog> @event)
+    protected override void TransitionState(UserStatisticsState state, IMessage evt)
     {
-        switch (@event)
+        switch (evt)
         {
-            case InitializeUserStatsEventLog initEvent:
+            case InitializeUserStatsEvent initEvent:
                 state.UserId = initEvent.UserId;
                 state.IsInitialized = true;
                 break;
 
-            case RecordAppRatingEventLog ratingEvent:
+            case RecordAppRatingEvent ratingEvent:
                 var key = ratingEvent.DeviceId;
-                if (ratingEvent.RealUserId.HasValue)
+                if (ratingEvent.HasRealUserId)
                 {
-                    state.UserId = ratingEvent.RealUserId.Value;
+                    state.UserId = ratingEvent.RealUserId;
                 }
 
-                if (ratingEvent.IsRealUser.HasValue)
+                if (ratingEvent.HasIsRealUser)
                 {
-                    state.IsRealUser = ratingEvent.IsRealUser.Value;
+                    state.IsRealUser = ratingEvent.IsRealUser;
                 }
                 
-                if (state.AppRatings == null)
-                {
-                    state.AppRatings = new Dictionary<string, AppRatingInfo>();
-                }
                 if (state.AppRatings.ContainsKey(key))
                 {
                     var existing = state.AppRatings[key];
@@ -246,6 +244,11 @@ public class UserStatisticsGAgent : GAgentBase<UserStatisticsState, UserStatisti
                     };
                 }
                 break;
+                
+            default:
+                Logger.LogWarning("Unhandled event type {EventType}", evt.GetType().Name);
+                break;
         }
     }
 }
+
