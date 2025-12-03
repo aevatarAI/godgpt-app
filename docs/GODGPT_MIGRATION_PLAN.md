@@ -271,7 +271,7 @@ await godChat.ConfigAsync(godChatConfig);
 | `IAIGAgent` | 低优先级 | 接口兼容 |
 | `AIStreamingErrorResponseGEvent` | 待定 | → Protobuf Event |
 | `IChatGAgent` | 低优先级 | 接口兼容 |
-| `GoogleCalendar*Dto` | ⏭️ 已禁用 | 后续处理 |
+| `GoogleCalendar*Dto` | ✅ 已删除 | 不再使用 |
 | `ChatConfigDto` | ✅ 已迁移 | → `GodChatConfig` |
 | `EventWrapper<T>` | 待定 | 检查新框架 |
 
@@ -319,8 +319,9 @@ LLMConfigDto                 →  AevatarAIAgentConfiguration
    - [ ] `AIGAgentBase` → 新框架 AI 基类
 
 4. **Phase 4 - 功能恢复**
-   - [ ] Google Calendar 重新集成
-   - [ ] Twitter/Google Auth 迁移
+   - [x] ~~Google Calendar~~ (已移除，不再使用)
+   - [x] ~~Twitter/Google Auth~~ (已移除，不再使用)
+   - [x] ~~SignalR~~ (已移除，不再使用)
 
 ### PublishAsync 详解
 
