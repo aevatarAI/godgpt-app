@@ -1,0 +1,94 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.freetrialcode;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.FreeTrialCode";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum FactoryStatus {
+    FACTORY_STATUS_PENDING = 0;
+    FACTORY_STATUS_ACTIVE = 1;
+    FACTORY_STATUS_COMPLETED = 2;
+}
+
+enum FactoryPlanType {
+    FACTORY_PLAN_TYPE_NONE = 0;
+    FACTORY_PLAN_TYPE_DAY = 1;
+    FACTORY_PLAN_TYPE_MONTH = 2;
+    FACTORY_PLAN_TYPE_YEAR = 3;
+    FACTORY_PLAN_TYPE_WEEK = 4;
+}
+
+enum FactoryPaymentPlatform {
+    FACTORY_PAYMENT_PLATFORM_STRIPE = 0;
+    FACTORY_PAYMENT_PLATFORM_APP_STORE = 1;
+    FACTORY_PAYMENT_PLATFORM_GOOGLE_PLAY = 2;
+}
+
+// =============================================================================
+// Nested Types
+// =============================================================================
+
+message BatchConfig {
+    int32 trial_days = 1;
+    string product_id = 2;
+    FactoryPlanType plan_type = 3;
+    bool is_ultimate = 4;
+    FactoryPaymentPlatform platform = 5;
+    google.protobuf.Timestamp start_time = 6;
+    google.protobuf.Timestamp end_time = 7;
+    string description = 8;
+}
+
+// =============================================================================
+// State
+// =============================================================================
+
+message FreeTrialCodeFactoryState {
+    optional int64 batch_id = 1;                          // [Id(0)]
+    string operator_user_id = 2;                          // [Id(1)] Guid -> string
+    optional BatchConfig batch_config = 3;                // [Id(2)]
+    google.protobuf.Timestamp creation_time = 4;          // [Id(3)]
+    FactoryStatus status = 5;                             // [Id(4)]
+    repeated string generated_codes = 6;                  // [Id(5)]
+    repeated string used_codes = 7;                       // [Id(6)]
+    int32 total_codes_generated = 8;                      // [Id(7)]
+    int32 used_count = 9;                                 // [Id(8)]
+    google.protobuf.Timestamp last_generation_time = 10;  // [Id(9)]
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+message InitializeFactoryEvent {
+    int64 batch_id = 1;                                   // [Id(0)]
+    string operator_user_id = 2;                          // [Id(1)]
+    BatchConfig batch_config = 3;                         // [Id(2)]
+    google.protobuf.Timestamp creation_time = 4;          // [Id(3)]
+    FactoryStatus status = 5;                             // [Id(4)]
+}
+
+message GenerateCodesEvent {
+    repeated string generated_codes = 1;                  // [Id(0)]
+    int32 quantity = 2;                                   // [Id(1)]
+    FactoryStatus status = 3;                             // [Id(2)]
+    google.protobuf.Timestamp creation_time = 4;          // [Id(3)]
+}
+
+message MarkCodeUsedEvent {
+    string code = 1;                                      // [Id(0)]
+    string user_id = 2;                                   // [Id(1)]
+    google.protobuf.Timestamp used_at = 3;                // [Id(2)]
+}
+
+message UpdateFactoryStatusEvent {
+    FactoryStatus status = 1;                             // [Id(0)]
+    string reason = 2;                                    // [Id(1)]
+}
+

@@ -679,6 +679,7 @@ public class MyGAgent : GAgentBase<MyState>, IMyGAgent
 | InvitationGAgent | ✅ | ✅ | ✅ |
 | AnonymousUserGAgent | ✅ | ✅ | N/A |
 | UserFeedbackGAgent | ✅ | ✅ | N/A |
+| FreeTrialCodeFactoryGAgent | ✅ | ✅ | ✅ UserBillingGAgent |
 | ChatManagerGAgent | 🔄 Pending | | |
 | GodChatGAgent | 🔄 Pending | | |
 | UserBillingGAgent | 🔄 Pending | | |

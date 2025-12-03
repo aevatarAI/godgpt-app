@@ -17,6 +17,7 @@ using Aevatar.Application.Grains.Common.Helpers;
 using Aevatar.Application.Grains.Common.Observability;
 using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.Common.Service;
+using Aevatar.Agents.Abstractions;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Application.Grains.Invitation;
@@ -37,7 +38,7 @@ using PaymentMethod = Aevatar.Application.Grains.Common.Constants.PaymentMethod;
 
 namespace Aevatar.Application.Grains.UserBilling;
 
-public interface IUserBillingGAgent : IGAgent
+public interface IUserBillingGAgent : Aevatar.Core.Abstractions.IGAgent
 {
     Task<List<StripeProductDto>> GetStripeProductsAsync();
     Task<List<AppleProductDto>> GetAppleProductsAsync();
@@ -125,6 +126,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
     private readonly IOptionsMonitor<GooglePayOptions> _googlePayOptions;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IGooglePayService _googlePayService;
+    private readonly IGAgentFactory _agentFactory;
     
     private readonly IStripeClient _client; 
     
@@ -134,7 +136,8 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         IOptionsMonitor<ApplePayOptions> appleOptions,
         IOptionsMonitor<GooglePayOptions> googlePayOptions,
         IHttpClientFactory httpClientFactory,
-        IGooglePayService googlePayService)
+        IGooglePayService googlePayService,
+        IGAgentFactory agentFactory)
     {
         _logger = logger;
         _stripeOptions = stripeOptions;
@@ -142,10 +145,18 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         _googlePayOptions = googlePayOptions;
         _httpClientFactory = httpClientFactory;
         _googlePayService = googlePayService;
+        _agentFactory = agentFactory;
         
         StripeConfiguration.ApiKey = _stripeOptions.CurrentValue.SecretKey;
         _client ??= new StripeClient(_stripeOptions.CurrentValue.SecretKey);
         _logger.LogDebug("[UserBillingGAgent] Activating agent for user {UserId}", this.GetPrimaryKey().ToString());
+    }
+    
+    private async Task<FreeTrialCodeFactoryGAgent> GetFreeTrialCodeFactoryAgentAsync(long batchId)
+    {
+        var agent = _agentFactory.CreateGAgent<FreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId));
+        await agent.ActivateAsync();
+        return agent;
     }
     
     public override Task<string> GetDescriptionAsync()
@@ -532,8 +543,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
             }
             
             var (codeType, batchId) = InvitationCodeHelper.ParseCodeInfo(createCheckoutSessionDto.TrialCode);
-            var factoryGAgent =
-                GrainFactory.GetGrain<IFreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId));
+            var factoryGAgent = await GetFreeTrialCodeFactoryAgentAsync(batchId);
             var codeUnused = await factoryGAgent.ValidateCodeAvailableAsync(createCheckoutSessionDto.TrialCode);
             if (codeUnused)
             {
@@ -1227,8 +1237,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
             _logger.LogDebug("[UserBillingGAgent][HandleStripeWebhookEventAsync] Use trial code {0}, {1}, {2}, {3}",
                 userId, paymentSummary.SubscriptionId, invoiceDetail.InvoiceId, invoiceDetail.TrialCode);
             var (codeType, batchId) = InvitationCodeHelper.ParseCodeInfo(invoiceDetail.TrialCode);
-            var factoryGAgent =
-                GrainFactory.GetGrain<IFreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId));
+            var factoryGAgent = await GetFreeTrialCodeFactoryAgentAsync(batchId);
             var batchInfoDto = await factoryGAgent.GetBatchInfoAsync();
             await factoryGAgent.MarkCodeAsUsedAsync(invoiceDetail.TrialCode, userId.ToString());
             var inviteCodeGAgent =
