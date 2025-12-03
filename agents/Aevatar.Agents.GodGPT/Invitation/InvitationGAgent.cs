@@ -185,7 +185,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
                                                               !string.IsNullOrEmpty(r.InvoiceId)).ToList();
         if (scheduledRewards.Any())
         {
-            var userQuotaGAgent = _clusterClient.GetGrain<IUserQuotaGAgent>(Id);
+            var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
             foreach (var reward in scheduledRewards)
             {
                 Logger.LogInformation(
@@ -297,7 +297,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
 
     private async Task IssueReward(string inviteeId, int credits, RewardType rewardType)
     {
-        var userQuotaGAgent = _clusterClient.GetGrain<IUserQuotaGAgent>(Id);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
         await userQuotaGAgent.AddCreditsAsync(credits);
 
         RaiseEvent(new AddRewardEvent
@@ -526,7 +526,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         Logger.LogDebug(
             $"[InvitationGAgent][ProcessTwitterRewardAsync] process twitter reward. userId {Id}, tweetId {tweetId}, credits {credits}");
         // Issue the reward
-        var userQuotaGAgent = _clusterClient.GetGrain<IUserQuotaGAgent>(Id);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
         await userQuotaGAgent.AddCreditsAsync(credits);
 
         // Record the reward
@@ -547,6 +547,13 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
     private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
     {
         var agent = _agentFactory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
+        await agent.ActivateAsync();
+        return agent;
+    }
+    
+    private async Task<UserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    {
+        var agent = _agentFactory.CreateGAgent<UserQuotaGAgent>(userId);
         await agent.ActivateAsync();
         return agent;
     }

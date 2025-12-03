@@ -1,0 +1,154 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.userquota;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.UserQuota";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum QuotaPlanType {
+    QUOTA_PLAN_TYPE_NONE = 0;
+    QUOTA_PLAN_TYPE_DAY = 1;
+    QUOTA_PLAN_TYPE_MONTH = 2;
+    QUOTA_PLAN_TYPE_YEAR = 3;
+    QUOTA_PLAN_TYPE_WEEK = 4;
+}
+
+enum QuotaPaymentStatus {
+    QUOTA_PAYMENT_STATUS_NONE = 0;
+    QUOTA_PAYMENT_STATUS_ACTIVE = 1;
+    QUOTA_PAYMENT_STATUS_CANCELLED = 2;
+    QUOTA_PAYMENT_STATUS_EXPIRED = 3;
+    QUOTA_PAYMENT_STATUS_PENDING = 4;
+}
+
+// =============================================================================
+// Nested Types
+// =============================================================================
+
+message SubscriptionInfoProto {
+    bool is_active = 1;
+    QuotaPlanType plan_type = 2;
+    QuotaPaymentStatus status = 3;
+    google.protobuf.Timestamp start_date = 4;
+    google.protobuf.Timestamp end_date = 5;
+    repeated string subscription_ids = 6;
+    repeated string invoice_ids = 7;
+}
+
+message RateLimitInfoProto {
+    int32 count = 1;
+    google.protobuf.Timestamp last_time = 2;
+}
+
+message DailyImageConversationInfoProto {
+    int32 count = 1;
+    google.protobuf.Timestamp last_conversation_time = 2;
+}
+
+message FreeTrialInfoProto {
+    string free_trial_code = 1;
+    int32 trial_days = 2;
+    QuotaPlanType plan_type = 3;
+    bool is_ultimate = 4;
+    string transaction_id = 5;
+}
+
+// =============================================================================
+// State
+// =============================================================================
+
+message UserQuotaState {
+    string user_id = 1;                                        // [Id(0)]
+    int32 credits = 2;                                         // [Id(1)]
+    bool has_initial_credits = 3;                              // [Id(2)]
+    bool has_shown_initial_credits_toast = 4;                  // [Id(3)]
+    SubscriptionInfoProto subscription = 5;                    // [Id(4)]
+    map<string, RateLimitInfoProto> rate_limits = 6;           // [Id(5)]
+    SubscriptionInfoProto ultimate_subscription = 7;           // [Id(6)]
+    google.protobuf.Timestamp created_at = 8;                  // [Id(7)]
+    bool can_receive_invite_reward = 9;                        // [Id(8)]
+    bool is_initialized_from_grain = 10;                       // [Id(9)]
+    DailyImageConversationInfoProto daily_image_conversation = 11;  // [Id(10)]
+    optional FreeTrialInfoProto free_trial_info = 12;          // [Id(11)]
+    repeated string one_time_transaction_ids = 13;             // [Id(12)]
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+message InitializeCreditsEvent {
+    int32 initial_credits = 1;
+}
+
+message SetShownCreditsToastEvent {
+    bool has_shown_initial_credits_toast = 1;
+}
+
+message UpdateRateLimitEvent {
+    string action_type = 1;
+    RateLimitInfoProto rate_limit_info = 2;
+}
+
+message ClearRateLimitEvent {
+    string action_type = 1;
+}
+
+message UpdateSubscriptionEvent {
+    SubscriptionInfoProto subscription_info = 1;
+    bool is_ultimate = 2;
+}
+
+message CancelSubscriptionEvent {
+    bool is_ultimate = 1;
+}
+
+message UpdateCreditsEvent {
+    int32 new_credits = 1;
+}
+
+message UpdateCanReceiveInviteRewardEvent {
+    bool can_receive_invite_reward = 1;
+}
+
+message ClearAllQuotaEvent {
+    bool can_receive_invite_reward = 1;
+}
+
+message InitializeFromGrainEvent {
+    int32 credits = 1;
+    bool has_initial_credits = 2;
+    bool has_shown_initial_credits_toast = 3;
+    SubscriptionInfoProto subscription = 4;
+    map<string, RateLimitInfoProto> rate_limits = 5;
+    SubscriptionInfoProto ultimate_subscription = 6;
+    google.protobuf.Timestamp created_at = 7;
+    bool can_receive_invite_reward = 8;
+}
+
+message MarkInitializedEvent {
+}
+
+message AddPurchasedCreditsEvent {
+    int32 credits_amount = 1;
+    string transaction_id = 2;
+    google.protobuf.Timestamp purchase_date = 3;
+}
+
+message UpdateDailyImageConversationEvent {
+    DailyImageConversationInfoProto daily_image_conversation = 1;
+}
+
+message ActivateFreeTrialEvent {
+    int32 trial_days = 1;
+    QuotaPlanType plan_type = 2;
+    bool is_ultimate = 3;
+    google.protobuf.Timestamp start_date = 4;
+    google.protobuf.Timestamp end_date = 5;
+}
+

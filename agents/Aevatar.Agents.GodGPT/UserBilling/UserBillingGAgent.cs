@@ -159,6 +159,13 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         return agent;
     }
     
+    private async Task<UserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    {
+        var agent = _agentFactory.CreateGAgent<UserQuotaGAgent>(userId);
+        await agent.ActivateAsync();
+        return agent;
+    }
+    
     public override Task<string> GetDescriptionAsync()
     {
         return Task.FromResult($"UserBillingGAgent for user {this.GetPrimaryKey().ToString()}, CustomerId: {State.CustomerId}, PaymentHistory count: {State.PaymentHistory?.Count ?? 0}");
@@ -534,7 +541,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         var tuple = new Tuple<string, int, string, BatchInfoDto>(string.Empty, 0, string.Empty, null);
         if (!createCheckoutSessionDto.TrialCode.IsNullOrWhiteSpace())
         {
-            var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(this.GetPrimaryKey());
+            var userQuotaGAgent = await GetUserQuotaAgentAsync(this.GetPrimaryKey());
             if (await userQuotaGAgent.IsSubscribedAsync() || await userQuotaGAgent.IsSubscribedAsync(true))
             {
                 _logger.LogWarning("[UserBillingGAgent][ProcessTrialCodeIfProvidedAsync] {UserId} Subscribed users cannot use redemption codes {Code}", 
@@ -1117,7 +1124,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         
         var userId = detailsDto.UserId;
         var productConfig = await GetProductConfigAsync(detailsDto.PriceId);
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         _logger.LogDebug("[UserBillingGAgent][HandleStripeWebhookEventAsync] allocate resource {0}, {1}, {2}, {3})",
             userId, detailsDto.OrderId, detailsDto.SubscriptionId, detailsDto.InvoiceId);
         var subscriptionInfoDto = await userQuotaGAgent.GetSubscriptionAsync(productConfig.IsUltimate);
@@ -1277,7 +1284,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
 
     private async Task RollbackQuotaAfterRefundAsync(Guid userId, string subscriptionId, bool isUltimate, PlanType planType, UserBillingInvoiceDetail invoiceDetail)
     {
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         var subscriptionInfoDto = await userQuotaGAgent.GetSubscriptionAsync(isUltimate);
         var subscriptionIds = subscriptionInfoDto.SubscriptionIds ?? new List<string>();
         
@@ -1313,7 +1320,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
     {
         DateTime subscriptionStartDate;
         DateTime subscriptionEndDate;
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         
         // Use unified subscription interface
         var subscription = await userQuotaGAgent.GetAndSetSubscriptionAsync(productConfig.IsUltimate);
@@ -1337,7 +1344,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
     {
         DateTime subscriptionStartDate;
         DateTime subscriptionEndDate;
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         var subscriptionInfoDto = await userQuotaGAgent.GetSubscriptionAsync(ultimate);
         if (subscriptionInfoDto.IsActive)
         {
@@ -1770,7 +1777,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
             return;
         }
 
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(parsedUserId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(parsedUserId);
         var currentSubscription = await userQuotaGAgent.GetSubscriptionAsync(productConfig.IsUltimate);
 
         if (!currentSubscription.IsActive)
@@ -1970,7 +1977,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
 
     private async Task<(DateTime, DateTime)> CalculateGooglePlaySubscriptionDurationAsync(Guid userId, PlanType planType, bool isUltimate)
     {
-        var userQuotaAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaAgent = await GetUserQuotaAgentAsync(userId);
         var subscription = await userQuotaAgent.GetSubscriptionAsync(isUltimate);
 
         DateTime subscriptionStartDate;
@@ -1998,7 +2005,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         
         var paymentSummary = await CreateOrUpdateGooglePlayPaymentSummaryAsync(userId, verificationResult);
         var productConfig = await GetGooglePayProductConfigAsync(verificationResult.ProductId);
-        var userQuotaAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaAgent = await GetUserQuotaAgentAsync(userId);
 
         var subscription = await userQuotaAgent.GetSubscriptionAsync(productConfig.IsUltimate);
         
@@ -2062,7 +2069,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         var paymentSummary = await CreateOrUpdateGooglePlayPaymentSummaryAsync(userId, verificationResult, purchaseType);
 
         // Update user quota
-        var userQuotaAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaAgent = await GetUserQuotaAgentAsync(userId);
 
         // Fix: Use productConfig.IsUltimate to get the correct subscription type
         var subscription = await userQuotaAgent.GetSubscriptionAsync(productConfig.IsUltimate);
@@ -2156,7 +2163,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
             var paymentSummary = await CreateOrUpdateGooglePayPaymentSummaryAsync(userId, verificationResult);
 
             // Update user quota
-            var userQuotaAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+            var userQuotaAgent = await GetUserQuotaAgentAsync(userId);
             var subscription = await userQuotaAgent.GetSubscriptionAsync(productConfig.IsUltimate);
 
             // Reset rate limits if this is a new subscription
@@ -3281,7 +3288,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         AppleProduct appleProduct)
     {
         // Update user quota
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         var subscriptionDto = appleProduct.IsUltimate
             ? await userQuotaGAgent.GetSubscriptionAsync(true)
             : await userQuotaGAgent.GetSubscriptionAsync();
@@ -4649,7 +4656,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         if (revokeImmediately)
         {
             _logger.LogInformation("[UserBillingGAgent][UpdateGooglePlaySubscriptionStatusAsync] Revoking quota for user {UserId} due to {NewStatus}", userId, newStatus);
-            var userQuotaAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+            var userQuotaAgent = await GetUserQuotaAgentAsync(userId);
             var productConfig = await GetGooglePayProductConfigAsync(paymentSummary.PriceId);
             var subscription = await userQuotaAgent.GetSubscriptionAsync(productConfig.IsUltimate);
             if (subscription.IsActive && subscription.SubscriptionIds.Contains(paymentSummary.SubscriptionId))
@@ -5085,7 +5092,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
             await ConfirmEvents();
 
             // Update user quota to extend subscription
-            var userQuotaAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+            var userQuotaAgent = await GetUserQuotaAgentAsync(userId);
             var subscription = await userQuotaAgent.GetSubscriptionAsync(productConfig.IsUltimate);
             
             // Extend the subscription using consistent cumulative logic
@@ -5317,7 +5324,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
                 return;
             }
 
-            var userQuotaAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+            var userQuotaAgent = await GetUserQuotaAgentAsync(userId);
             var subscription = await userQuotaAgent.GetSubscriptionAsync(productConfig.IsUltimate);
 
             // Apply the same refund logic as Apple Pay: rollback subscription days using the product configuration's PlanType (like Apple uses appleProduct.PlanType)
@@ -5369,7 +5376,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
                 return;
             }
 
-            var userQuotaAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+            var userQuotaAgent = await GetUserQuotaAgentAsync(userId);
             var subscription = await userQuotaAgent.GetSubscriptionAsync(productConfig.IsUltimate);
 
             // Remove the subscription ID from the active list

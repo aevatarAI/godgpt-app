@@ -681,6 +681,7 @@ public class MyGAgent : GAgentBase<MyState>, IMyGAgent
 | UserFeedbackGAgent | ✅ | ✅ | N/A |
 | FreeTrialCodeFactoryGAgent | ✅ | ✅ | ✅ UserBillingGAgent |
 | UserInfoCollectionGAgent | ✅ | ✅ | ✅ ChatManager, GodChat |
+| UserQuotaGAgent | ✅ | ✅ | ✅ 6 files updated |
 | ChatManagerGAgent | 🔄 Pending | | |
 | GodChatGAgent | 🔄 Pending | | |
 | UserBillingGAgent | 🔄 Pending | | |

@@ -1,3 +1,6 @@
+using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Core;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
@@ -7,16 +10,21 @@ using Aevatar.Application.Grains.Common.Observability;
 using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.Common.Service;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
-using Aevatar.Application.Grains.UserQuota.SEvents;
-using Aevatar.Core;
-using Aevatar.Core.Abstractions;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
+using Orleans;
+
+// Alias to avoid conflicts with proto-generated types
+using CSharpPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
+using CSharpPaymentStatus = Aevatar.Application.Grains.Common.Constants.PaymentStatus;
+using ProtoUserQuotaState = Aevatar.Agents.GodGPT.Protos.UserQuota.UserQuotaState;
 
 namespace Aevatar.Application.Grains.UserQuota;
 
-public interface IUserQuotaGAgent : IGAgent
+public interface IUserQuotaGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
     Task<bool> InitializeCreditsAsync();
     Task<CreditsInfoDto> GetCreditsAsync();
@@ -26,52 +34,93 @@ public interface IUserQuotaGAgent : IGAgent
     Task<SubscriptionInfoDto> GetAndSetSubscriptionAsync(bool ultimate = false);
     Task UpdateSubscriptionAsync(SubscriptionInfoDto subscriptionInfoDto, bool ultimate = false);
     Task CancelSubscriptionAsync();
-
-    Task<ExecuteActionResultDto> ExecuteActionAsync(string sessionId, string chatManagerGuid,
-        ActionType actionType = ActionType.Conversation);
+    Task<ExecuteActionResultDto> ExecuteActionAsync(string sessionId, string chatManagerGuid, ActionType actionType = ActionType.Conversation);
     Task<ExecuteActionResultDto> ExecuteVoiceActionAsync(string sessionId, string chatManagerGuid);
-
     Task<ExecuteActionResultDto> CanUploadImageAsync();
-
     Task ResetRateLimitsAsync(string actionType = "conversation");
-
     Task ClearAllAsync();
-
-    // New method to support App Store subscriptions
     Task UpdateQuotaAsync(string productId, DateTime expiresDate);
     Task ResetQuotaAsync();
     Task<GrainResultDto<int>> UpdateCreditsAsync(string operatorUserId, int creditsChange);
-    Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateSubscriptionAsync(string operatorUserId, PlanType planType,
-        bool ultimate = false);
+    Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateSubscriptionAsync(string operatorUserId, CSharpPlanType planType, bool ultimate = false);
     Task AddCreditsAsync(int credits);
     Task<bool> RedeemInitialRewardAsync(string userId, DateTime dateTime);
-    Task<UserQuotaGAgentState> GetUserQuotaStateAsync();
-    
-    // New methods for free trial support
-    Task<bool> ActivateFreeTrialAsync(int trialDays, PlanType planType, bool isUltimate);
+    Task<ProtoUserQuotaState> GetUserQuotaStateAsync();
+    Task<bool> ActivateFreeTrialAsync(int trialDays, CSharpPlanType planType, bool isUltimate);
     Task<FreeTrialInfoDto> GetFreeTrialInfoAsync();
 }
 
 [GAgent(nameof(UserQuotaGAgent))]
-public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEvent>, IUserQuotaGAgent
+public class UserQuotaGAgent : GAgentBase<ProtoUserQuotaState>, IUserQuotaGAgent
 {
-    private readonly ILogger<UserQuotaGAgent> _logger;
     private readonly IOptionsMonitor<CreditsOptions> _creditsOptions;
     private readonly IOptionsMonitor<RateLimitOptions> _rateLimiterOptions;
     private readonly ILocalizationService _localizationService;
+    private readonly IClusterClient _clusterClient;
 
-    public UserQuotaGAgent(ILogger<UserQuotaGAgent> logger, IOptionsMonitor<CreditsOptions> creditsOptions,
-        IOptionsMonitor<RateLimitOptions> rateLimiterOptions,ILocalizationService localizationService)
+    public UserQuotaGAgent(
+        Guid id,
+        IOptionsMonitor<CreditsOptions> creditsOptions,
+        IOptionsMonitor<RateLimitOptions> rateLimiterOptions,
+        ILocalizationService localizationService,
+        IClusterClient clusterClient) : base(id)
     {
-        _logger = logger;
         _creditsOptions = creditsOptions;
         _rateLimiterOptions = rateLimiterOptions;
         _localizationService = localizationService;
+        _clusterClient = clusterClient;
     }
 
     public override Task<string> GetDescriptionAsync()
     {
         return Task.FromResult("User Quota Management GAgent");
+    }
+
+    protected override async Task OnActivateAsync(CancellationToken ct = default)
+    {
+        await base.OnActivateAsync(ct);
+        
+        if (!State.IsInitializedFromGrain)
+        {
+            var userQuota = _clusterClient.GetGrain<IUserQuotaGrain>(CommonHelper.GetUserQuotaGAgentId(Id));
+            var userQuotaState = await userQuota.GetUserQuotaStateAsync();
+            if (userQuotaState != null)
+            {
+                Logger.LogInformation("[UserQuotaGAgent][OnActivateAsync] Initializing state from IUserQuotaGrain for user {UserId}", Id);
+                
+                RaiseEvent(new InitializeFromGrainEvent
+                {
+                    Credits = userQuotaState.Credits,
+                    HasInitialCredits = userQuotaState.HasInitialCredits,
+                    HasShownInitialCreditsToast = userQuotaState.HasShownInitialCreditsToast,
+                    Subscription = MapToProtoSubscription(userQuotaState.Subscription),
+                    UltimateSubscription = MapToProtoSubscription(userQuotaState.UltimateSubscription),
+                    CreatedAt = Timestamp.FromDateTime(DateTime.SpecifyKind(userQuotaState.CreatedAt, DateTimeKind.Utc)),
+                    CanReceiveInviteReward = userQuotaState.CanReceiveInviteReward
+                });
+                
+                // Map rate limits
+                if (userQuotaState.RateLimits != null)
+                {
+                    foreach (var kvp in userQuotaState.RateLimits)
+                    {
+                        State.RateLimits[kvp.Key] = new RateLimitInfoProto
+                        {
+                            Count = kvp.Value.Count,
+                            LastTime = Timestamp.FromDateTime(DateTime.SpecifyKind(kvp.Value.LastTime, DateTimeKind.Utc))
+                        };
+                    }
+                }
+                
+                await ConfirmEventsAsync();
+            }
+            else
+            {
+                Logger.LogDebug("[UserQuotaGAgent][OnActivateAsync] No state found in IUserQuotaGrain for user {UserId}, marking as initialized", Id);
+                RaiseEvent(new MarkInitializedEvent());
+                await ConfirmEventsAsync();
+            }
+        }
     }
 
     public async Task<bool> InitializeCreditsAsync()
@@ -83,14 +132,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
 
         var initialCredits = _creditsOptions.CurrentValue.InitialCreditsAmount;
 
-        RaiseEvent(new InitializeCreditsLogEvent
-        {
-            InitialCredits = initialCredits
-        });
-        await ConfirmEvents();
+        RaiseEvent(new InitializeCreditsEvent { InitialCredits = initialCredits });
+        await ConfirmEventsAsync();
 
-        _logger.LogDebug("[UserQuotaGrain][InitializeCreditsAsync] User {UserId} received {Credits} initial credits.",
-            this.GetPrimaryKeyString(), initialCredits);
+        Logger.LogDebug("[UserQuotaGAgent][InitializeCreditsAsync] User {UserId} received {Credits} initial credits.", Id, initialCredits);
         return true;
     }
 
@@ -117,114 +162,90 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
 
     public async Task SetShownCreditsToastAsync(bool hasShownInitialCreditsToast)
     {
-        RaiseEvent(new SetShownCreditsToastLogEvent
-        {
-            HasShownInitialCreditsToast = hasShownInitialCreditsToast
-        });
-        await ConfirmEvents();
+        RaiseEvent(new SetShownCreditsToastEvent { HasShownInitialCreditsToast = hasShownInitialCreditsToast });
+        await ConfirmEventsAsync();
     }
-
-    #region Legacy Compatibility Methods
 
     public async Task<bool> IsSubscribedAsync(bool ultimate = false)
     {
-        var subscriptionInfo = (ultimate ? State.UltimateSubscription : State.Subscription) ?? new SubscriptionInfo();
+        var subscriptionInfo = ultimate ? State.UltimateSubscription : State.Subscription;
+        if (subscriptionInfo == null)
+        {
+            subscriptionInfo = new SubscriptionInfoProto();
+        }
 
         var now = DateTime.UtcNow;
-        var isSubscribed = subscriptionInfo.IsActive &&
-                           subscriptionInfo.StartDate <= now &&
-                           subscriptionInfo.EndDate > now;
+        var startDate = subscriptionInfo.StartDate?.ToDateTime() ?? DateTime.MinValue;
+        var endDate = subscriptionInfo.EndDate?.ToDateTime() ?? DateTime.MinValue;
+        var isSubscribed = subscriptionInfo.IsActive && startDate <= now && endDate > now;
 
-        if (subscriptionInfo.IsActive && subscriptionInfo.EndDate <= now)
+        if (subscriptionInfo.IsActive && endDate <= now)
         {
-            _logger.LogDebug(
-                "[UserQuotaGrain][IsSubscribedAsync] Subscription for user {UserId} expired. Start: {StartDate}, End: {EndDate}, Now: {Now}, Ultimate: {Ultimate}",
-                this.GetPrimaryKey().ToString(), subscriptionInfo.StartDate, subscriptionInfo.EndDate, now, ultimate);
+            Logger.LogDebug("[UserQuotaGAgent][IsSubscribedAsync] Subscription for user {UserId} expired. Ultimate: {Ultimate}", Id, ultimate);
 
             var subscriptionDto = new SubscriptionInfoDto
             {
                 IsActive = false,
-                PlanType = subscriptionInfo.PlanType,
-                Status = subscriptionInfo.Status,
-                StartDate = subscriptionInfo.StartDate,
-                EndDate = subscriptionInfo.EndDate,
-                SubscriptionIds = subscriptionInfo.SubscriptionIds,
-                InvoiceIds = subscriptionInfo.InvoiceIds
+                PlanType = (CSharpPlanType)(int)subscriptionInfo.PlanType,
+                Status = (CSharpPaymentStatus)(int)subscriptionInfo.Status,
+                StartDate = startDate,
+                EndDate = endDate,
+                SubscriptionIds = subscriptionInfo.SubscriptionIds.ToList(),
+                InvoiceIds = subscriptionInfo.InvoiceIds.ToList()
             };
 
-            RaiseEvent(new UpdateSubscriptionLogEvent
+            RaiseEvent(new UpdateSubscriptionEvent
             {
-                SubscriptionInfo = subscriptionDto,
+                SubscriptionInfo = MapToProtoSubscriptionFromDto(subscriptionDto),
                 IsUltimate = ultimate
             });
 
             if (State.RateLimits.ContainsKey("conversation"))
             {
-                RaiseEvent(new ClearRateLimitLogEvent
-                {
-                    ActionType = "conversation"
-                });
+                RaiseEvent(new ClearRateLimitEvent { ActionType = "conversation" });
             }
         }
-
-        _logger.LogDebug("[UserQuotaGrain][IsSubscribedAsync] User {UserId} subscription status: {IsSubscribed}",
-            this.GetPrimaryKey().ToString(), isSubscribed);
 
         return isSubscribed;
     }
 
     public async Task ResetRateLimitsAsync(string actionType = "conversation")
     {
-        RaiseEvent(new ClearRateLimitLogEvent
-        {
-            ActionType = actionType
-        });
-        await ConfirmEvents();
+        RaiseEvent(new ClearRateLimitEvent { ActionType = actionType });
+        await ConfirmEventsAsync();
     }
 
     public async Task ClearAllAsync()
     {
-        _logger.LogInformation("IUserQuotaGrain ClearAllAsync before GrainId={A} CanReceiveInviteReward={B}",
-            this.GrainContext.GrainId, State.CanReceiveInviteReward);
-
-        RaiseEvent(new ClearAllLogEvent
-        {
-            CanReceiveInviteReward = State.CanReceiveInviteReward
-        });
-
-        _logger.LogInformation("IUserQuotaGrain ClearAllAsync before GrainId={A} CanReceiveInviteReward={B}",
-            this.GrainContext.GrainId, State.CanReceiveInviteReward);
-        await ConfirmEvents();
+        Logger.LogInformation("[UserQuotaGAgent] ClearAllAsync before GrainId={A} CanReceiveInviteReward={B}", Id, State.CanReceiveInviteReward);
+        RaiseEvent(new ClearAllQuotaEvent { CanReceiveInviteReward = State.CanReceiveInviteReward });
+        await ConfirmEventsAsync();
     }
 
     public async Task<SubscriptionInfoDto> GetSubscriptionAsync(bool ultimate = false)
     {
-        _logger.LogDebug(
-            "[UserQuotaGrain][GetSubscriptionAsync] Getting subscription info for user {UserId}, ultimate={Ultimate}",
-            this.GetPrimaryKey().ToString(), ultimate);
         var subscriptionInfo = ultimate ? State.UltimateSubscription : State.Subscription;
 
         if (subscriptionInfo == null)
         {
-            RaiseEvent(new UpdateSubscriptionLogEvent
+            RaiseEvent(new UpdateSubscriptionEvent
             {
-                SubscriptionInfo = new SubscriptionInfoDto(),
+                SubscriptionInfo = new SubscriptionInfoProto(),
                 IsUltimate = ultimate
             });
-            await ConfirmEvents();
-
+            await ConfirmEventsAsync();
             subscriptionInfo = ultimate ? State.UltimateSubscription : State.Subscription;
         }
 
         return new SubscriptionInfoDto
         {
-            IsActive = subscriptionInfo.IsActive,
-            PlanType = subscriptionInfo.PlanType,
-            Status = subscriptionInfo.Status,
-            StartDate = subscriptionInfo.StartDate,
-            EndDate = subscriptionInfo.EndDate,
-            SubscriptionIds = subscriptionInfo.SubscriptionIds,
-            InvoiceIds = subscriptionInfo.InvoiceIds
+            IsActive = subscriptionInfo?.IsActive ?? false,
+            PlanType = subscriptionInfo != null ? (CSharpPlanType)(int)subscriptionInfo.PlanType : CSharpPlanType.None,
+            Status = subscriptionInfo != null ? (CSharpPaymentStatus)(int)subscriptionInfo.Status : CSharpPaymentStatus.None,
+            StartDate = subscriptionInfo?.StartDate?.ToDateTime() ?? DateTime.MinValue,
+            EndDate = subscriptionInfo?.EndDate?.ToDateTime() ?? DateTime.MinValue,
+            SubscriptionIds = subscriptionInfo?.SubscriptionIds.ToList() ?? new List<string>(),
+            InvoiceIds = subscriptionInfo?.InvoiceIds.ToList() ?? new List<string>()
         };
     }
 
@@ -236,16 +257,14 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
 
     public async Task UpdateSubscriptionAsync(SubscriptionInfoDto subscriptionInfoDto, bool ultimate = false)
     {
-        _logger.LogInformation(
-            "[UserQuotaGrain][UpdateSubscriptionAsync] Updated subscription for user {UserId}: Data={PlanType}",
-            this.GetPrimaryKeyString(), JsonConvert.SerializeObject(subscriptionInfoDto));
+        Logger.LogInformation("[UserQuotaGAgent][UpdateSubscriptionAsync] Updated subscription for user {UserId}: Data={PlanType}", Id, JsonConvert.SerializeObject(subscriptionInfoDto));
 
-        RaiseEvent(new UpdateSubscriptionLogEvent
+        RaiseEvent(new UpdateSubscriptionEvent
         {
-            SubscriptionInfo = subscriptionInfoDto,
+            SubscriptionInfo = MapToProtoSubscriptionFromDto(subscriptionInfoDto),
             IsUltimate = ultimate
         });
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
     }
 
     public async Task CancelSubscriptionAsync()
@@ -253,59 +272,51 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
         var premiumSubscription = State.Subscription;
         if (premiumSubscription != null && premiumSubscription.IsActive)
         {
-            _logger.LogInformation("[UserQuotaGrain][CancelSubscriptionAsync] cancel premium subscription {0}",
-                this.GetPrimaryKey().ToString());
-
-            RaiseEvent(new CancelSubscriptionLogEvent { IsUltimate = false });
-            await ConfirmEvents();
+            Logger.LogInformation("[UserQuotaGAgent][CancelSubscriptionAsync] cancel premium subscription {0}", Id);
+            RaiseEvent(new CancelSubscriptionEvent { IsUltimate = false });
+            await ConfirmEventsAsync();
         }
 
         var ultimateSubscription = State.UltimateSubscription;
-        if (ultimateSubscription!= null && ultimateSubscription.IsActive)
+        if (ultimateSubscription != null && ultimateSubscription.IsActive)
         {
-            _logger.LogInformation("[UserQuotaGrain][CancelSubscriptionAsync] cancel ultimate subscription {0}",
-                this.GetPrimaryKey().ToString());
-
-            RaiseEvent(new CancelSubscriptionLogEvent { IsUltimate = true });
-            await ConfirmEvents();
+            Logger.LogInformation("[UserQuotaGAgent][CancelSubscriptionAsync] cancel ultimate subscription {0}", Id);
+            RaiseEvent(new CancelSubscriptionEvent { IsUltimate = true });
+            await ConfirmEventsAsync();
         }
     }
 
-    #endregion
-
-    #region Rate Limiting with Ultimate Support
-
-    public async Task<ExecuteActionResultDto> ExecuteActionAsync(string sessionId, string chatManagerGuid,
-        ActionType actionType = ActionType.Conversation)
+    public async Task<ExecuteActionResultDto> ExecuteActionAsync(string sessionId, string chatManagerGuid, ActionType actionType = ActionType.Conversation)
     {
         var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
         Logger.LogDebug($"[ExecuteActionAsync] Language from sessionId:{sessionId} chatManagerGuid: {chatManagerGuid}, language:{language}");
+        
         if (actionType == ActionType.ImageConversation)
         {
-            // For non-subscribed users, check daily limit
             var today = DateTime.UtcNow.Date;
-            var dailyInfo = State.DailyImageConversation;
+            var dailyInfo = State.DailyImageConversation ?? new DailyImageConversationInfoProto();
+            var lastTime = dailyInfo.LastConversationTime?.ToDateTime() ?? DateTime.MinValue;
             
-            // Check if it's a new day, reset count if so
-            if (dailyInfo.LastConversationTime.Date != today)
+            if (lastTime.Date != today)
             {
-                dailyInfo.LastConversationTime = DateTime.UtcNow;
-                dailyInfo.Count = 1;
+                dailyInfo = new DailyImageConversationInfoProto
+                {
+                    LastConversationTime = Timestamp.FromDateTime(DateTime.UtcNow),
+                    Count = 1
+                };
             }
             else
             {
-                // Increment daily count and update last conversation time
-                dailyInfo.Count++;
-                dailyInfo.LastConversationTime = DateTime.UtcNow;
+                dailyInfo = new DailyImageConversationInfoProto
+                {
+                    LastConversationTime = Timestamp.FromDateTime(DateTime.UtcNow),
+                    Count = dailyInfo.Count + 1
+                };
             }
             
-            // Check if user is subscribed (subscribers have no daily limit)
             if (!await IsSubscribedAsync(true) && !await IsSubscribedAsync(false) && dailyInfo.Count > 1)
             {
-                _logger.LogDebug(
-                    "[UserQuotaGAgent][ExecuteActionAsync] userId={chatManagerGuid} sessionId={SessionId} Daily image conversation limit exceeded for non-subscriber. Count={Count}",
-                    chatManagerGuid, sessionId, dailyInfo.Count);
-                var localizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.DailyUpdateLimit,language);
+                var localizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.DailyUpdateLimit, language);
                 return new ExecuteActionResultDto
                 {
                     Code = ExecuteActionStatus.RateLimitExceeded,
@@ -313,59 +324,38 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
                 };
             }
 
-            RaiseEvent(new UpdateDailyImageConversationLogEvent
-            {
-                DailyImageConversation = dailyInfo
-            });
-
-            _logger.LogDebug(
-                "[UserQuotaGAgent][ExecuteActionAsync] userId={chatManagerGuid} sessionId={SessionId} Image conversation allowed. New count={Count}",
-                chatManagerGuid, sessionId, dailyInfo.Count);
-            
+            RaiseEvent(new UpdateDailyImageConversationEvent { DailyImageConversation = dailyInfo });
             return await ExecuteStandardActionAsync(sessionId, chatManagerGuid, ActionType.Conversation);
         }
-        // Apply standard execution logic with rate limiting and credits
+        
         return await ExecuteStandardActionAsync(sessionId, chatManagerGuid, actionType);
     }
+
     public async Task<ExecuteActionResultDto> ExecuteVoiceActionAsync(string sessionId, string chatManagerGuid)
     {
-        // Apply voice-specific execution logic with voice rate limiting and credits
         return await ExecuteStandardActionAsync(sessionId, chatManagerGuid, ActionType.VoiceConversation);
     }
 
     public async Task<ExecuteActionResultDto> CanUploadImageAsync()
     {
-        // Check if user is subscribed (subscribers have no daily limit)
         if (await IsSubscribedAsync(true) || await IsSubscribedAsync(false))
         {
-            return new ExecuteActionResultDto
-            {
-                Success = true
-            };
+            return new ExecuteActionResultDto { Success = true };
         }
 
-        // For non-subscribed users, check daily limit
         var today = DateTime.UtcNow.Date;
         var dailyInfo = State.DailyImageConversation;
+        var lastTime = dailyInfo?.LastConversationTime?.ToDateTime() ?? DateTime.MinValue;
 
-        // Check if it's a new day (if so, user can upload)
-        if (dailyInfo.LastConversationTime.Date != today)
+        if (lastTime.Date != today)
         {
-            return new ExecuteActionResultDto
-            {
-                Success = true
-            };
+            return new ExecuteActionResultDto { Success = true };
         }
 
-        // Check if daily limit exceeded (non-subscribers can only use once per day)
-        if (dailyInfo.Count >= 1)
+        if ((dailyInfo?.Count ?? 0) >= 1)
         {
             var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
-            _logger.LogDebug(
-                "[UserQuotaGAgent][CanUploadImageAsync] UserId={UserId} Daily image upload limit exceeded for non-subscriber. Count={Count} language={language}",
-                this.GetPrimaryKeyString(), dailyInfo.Count, language);
-            var localizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.DailyUpdateLimit,language);
-
+            var localizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.DailyUpdateLimit, language);
             return new ExecuteActionResultDto
             {
                 Success = false,
@@ -374,27 +364,18 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
             };
         }
 
-        // User can still upload image today
-        return new ExecuteActionResultDto
-        {
-            Success = true
-        };
+        return new ExecuteActionResultDto { Success = true };
     }
 
-    private async Task<ExecuteActionResultDto> ExecuteStandardActionAsync(string sessionId, string chatManagerGuid,
-        ActionType actionTypeEnum)
+    private async Task<ExecuteActionResultDto> ExecuteStandardActionAsync(string sessionId, string chatManagerGuid, ActionType actionTypeEnum)
     {
         var now = DateTime.UtcNow;
         var isVoiceMessage = actionTypeEnum == ActionType.VoiceConversation;
         var actionType = actionTypeEnum.ToString().ToLowerInvariant();
 
-        // Ultimate users have unlimited access
         if (await IsSubscribedAsync(true))
         {
-            return new ExecuteActionResultDto
-            {
-                Success = true
-            };
+            return new ExecuteActionResultDto { Success = true };
         }
 
         var isSubscribed = await IsSubscribedAsync(false);
@@ -405,58 +386,35 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
             ? (isVoiceMessage ? _rateLimiterOptions.CurrentValue.VoiceSubscribedUserTimeWindowSeconds : _rateLimiterOptions.CurrentValue.SubscribedUserTimeWindowSeconds)
             : (isVoiceMessage ? _rateLimiterOptions.CurrentValue.VoiceUserTimeWindowSeconds : _rateLimiterOptions.CurrentValue.UserTimeWindowSeconds);
 
-        _logger.LogDebug(
-            "[UserQuotaGrain][ExecuteStandardActionAsync] {MessageType} sessionId={SessionId} chatManagerGuid={ChatManagerGuid} config: maxTokens={MaxTokens}, timeWindow={TimeWindow}, isSubscribed={IsSubscribed}, now(UTC)={Now}",
-            actionType, sessionId, chatManagerGuid, maxTokens, timeWindow, isSubscribed, now);
-
-        // Initialize or update rate limit info
         if (!State.RateLimits.TryGetValue(actionType, out var rateLimitInfo))
         {
-            rateLimitInfo = new RateLimitInfo { Count = maxTokens, LastTime = now };
-            RaiseEvent(new UpdateRateLimitLogEvent
-            {
-                ActionType = actionType,
-                RateLimitInfo = rateLimitInfo
-            });
-
-            _logger.LogDebug(
-                "[UserQuotaGrain][ExecuteStandardActionAsync] {MessageType} sessionId={SessionId} chatManagerGuid={ChatManagerGuid} INIT RateLimitInfo: count={Count}, lastTime(UTC)={LastTime}",
-                actionType, sessionId, chatManagerGuid, rateLimitInfo.Count, rateLimitInfo.LastTime);
+            rateLimitInfo = new RateLimitInfoProto { Count = maxTokens, LastTime = Timestamp.FromDateTime(now) };
+            RaiseEvent(new UpdateRateLimitEvent { ActionType = actionType, RateLimitInfo = rateLimitInfo });
         }
         else
         {
-            var timeElapsed = now - rateLimitInfo.LastTime;
+            var lastTime = rateLimitInfo.LastTime?.ToDateTime() ?? now;
+            var timeElapsed = now - lastTime;
             var elapsedSeconds = timeElapsed.TotalSeconds;
             var refillRate = (double)maxTokens / timeWindow;
             var tokensToAdd = (int)(elapsedSeconds * refillRate);
 
             if (tokensToAdd > 0)
             {
-                rateLimitInfo.Count = Math.Min(maxTokens, rateLimitInfo.Count + tokensToAdd);
-                rateLimitInfo.LastTime = now;
-
-                RaiseEvent(new UpdateRateLimitLogEvent
+                rateLimitInfo = new RateLimitInfoProto
                 {
-                    ActionType = actionType,
-                    RateLimitInfo = rateLimitInfo
-                });
-
-                _logger.LogDebug(
-                    "[UserQuotaGrain][ExecuteStandardActionAsync] {MessageType} sessionId={SessionId} chatManagerGuid={ChatManagerGuid} REFILL: tokensToAdd={TokensToAdd}, newCount={Count}, now(UTC)={Now}",
-                    actionType, sessionId, chatManagerGuid, tokensToAdd, rateLimitInfo.Count, now);
+                    Count = Math.Min(maxTokens, rateLimitInfo.Count + tokensToAdd),
+                    LastTime = Timestamp.FromDateTime(now)
+                };
+                RaiseEvent(new UpdateRateLimitEvent { ActionType = actionType, RateLimitInfo = rateLimitInfo });
             }
         }
 
-        // Check credits for non-subscribers
         if (!isSubscribed)
         {
             var requiredCredits = _creditsOptions.CurrentValue.CreditsPerConversation;
             var credits = (await GetCreditsAsync()).Credits;
             var isAllowed = credits >= requiredCredits;
-
-            _logger.LogDebug(
-                "[UserQuotaGrain][ExecuteStandardActionAsync] {MessageType} sessionId={SessionId} chatManagerGuid={ChatManagerGuid} CREDITS: allowed={IsAllowed}, credits={Credits}, required={RequiredCredits}, now(UTC)={Now}",
-                actionType, sessionId, chatManagerGuid, isAllowed, credits, requiredCredits, now);
 
             if (!isAllowed)
             {
@@ -468,19 +426,17 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
             }
         }
 
-        // Check rate limit
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
+        
         try
         {
             var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
-            var localizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.ChatRateLimit,language);
-            var voiceLocalizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.VoiceChatRateLimit,language);
+            var localizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.ChatRateLimit, language);
+            var voiceLocalizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.VoiceChatRateLimit, language);
 
             var oldValue = State.RateLimits[actionType].Count;
             if (oldValue <= 0)
             {
-                _logger.LogWarning(
-                    $"[UserQuotaGrain][ExecuteStandardActionAsync] {actionType} sessionId={sessionId} chatManagerGuid={chatManagerGuid} RATE LIMITED: count={oldValue}, now(UTC)={now}");
                 return new ExecuteActionResultDto
                 {
                     Code = ExecuteActionStatus.RateLimitExceeded,
@@ -490,91 +446,58 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
         }
         catch (Exception e)
         {
-            _logger.LogWarning(
-                $"[UserQuotaGrain][ExecuteStandardActionAsync] RateLimits check error {actionType} sessionId={sessionId} chatManagerGuid={chatManagerGuid} RATE LIMITED:, now(UTC)={now} msg:{e.Message}");
+            Logger.LogWarning($"[UserQuotaGAgent][ExecuteStandardActionAsync] RateLimits check error {actionType} msg:{e.Message}");
         }
 
-        
-
-        // Execute action - deduct credits and tokens
         if (!isSubscribed)
         {
             try
             {
-                var NewCredits = State.Credits - _creditsOptions.CurrentValue.CreditsPerConversation;
-                RaiseEvent(new UpdateCreditsLogEvent
-                {
-                    NewCredits = NewCredits
-                });
+                var newCredits = State.Credits - _creditsOptions.CurrentValue.CreditsPerConversation;
+                RaiseEvent(new UpdateCreditsEvent { NewCredits = newCredits });
 
-                if (NewCredits == 0)
+                if (newCredits == 0)
                 {
-                    // Report credits exhausted event for conversion analysis
                     await ReportCreditsExhaustedAsync();
                 }
             }
             catch (Exception e)
             {
-                _logger.LogWarning(
-                    $"[UserQuotaGrain][ExecuteStandardActionAsync] ReportCreditsExhaustedAsync error {actionType} sessionId={sessionId} chatManagerGuid={chatManagerGuid} RATE LIMITED:, now(UTC)={now} msg:{e.Message}");
+                Logger.LogWarning($"[UserQuotaGAgent][ExecuteStandardActionAsync] ReportCreditsExhaustedAsync error msg:{e.Message}");
             }
-
-            
         }
 
         var updatedRateLimitInfo = State.RateLimits[actionType];
-        updatedRateLimitInfo.Count--;
-        RaiseEvent(new UpdateRateLimitLogEvent
+        var newRateLimitInfo = new RateLimitInfoProto
         {
-            ActionType = actionType,
-            RateLimitInfo = updatedRateLimitInfo
-        });
-
-        _logger.LogDebug(
-            "[UserQuotaGrain][ExecuteStandardActionAsync] {MessageType} sessionId={SessionId} chatManagerGuid={ChatManagerGuid} AFTER decrement: count={Count}, now(UTC)={Now}",
-            actionType, sessionId, chatManagerGuid, State.RateLimits[actionType].Count, now);
+            Count = updatedRateLimitInfo.Count - 1,
+            LastTime = updatedRateLimitInfo.LastTime
+        };
+        RaiseEvent(new UpdateRateLimitEvent { ActionType = actionType, RateLimitInfo = newRateLimitInfo });
 
         return new ExecuteActionResultDto { Success = true };
     }
 
-    #endregion
-
-    /// <summary>
-    /// Reports credits exhausted event to OpenTelemetry for conversion tracking
-    /// </summary>
     private Task ReportCreditsExhaustedAsync()
     {
         try
         {
-            // Calculate days since signup
-            var daysSinceSignup = (int)(DateTime.UtcNow - State.CreatedAt).TotalDays;
-
-            // Report the telemetry event
-            UserLifecycleTelemetryMetrics.RecordCreditsExhausted(
-                this.GetPrimaryKey().ToString(),
-                daysSinceSignup,
-                _logger);
-
-            _logger.LogDebug(
-                "[UserQuotaGAgent] Credits exhausted event reported - User: {UserId}, Days: {DaysSinceSignup}",
-                this.GetPrimaryKey().ToString(), daysSinceSignup);
+            var createdAt = State.CreatedAt?.ToDateTime() ?? DateTime.UtcNow;
+            var daysSinceSignup = (int)(DateTime.UtcNow - createdAt).TotalDays;
+            UserLifecycleTelemetryMetrics.RecordCreditsExhausted(Id.ToString(), daysSinceSignup, Logger);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[UserQuotaGAgent] Failed to report credits exhausted event for user: {UserId}", this.GetPrimaryKeyString());
+            Logger.LogError(ex, "[UserQuotaGAgent] Failed to report credits exhausted event for user: {UserId}", Id);
         }
-        
         return Task.CompletedTask;
     }
 
     public async Task UpdateQuotaAsync(string productId, DateTime expiresDate)
     {
-        _logger.LogInformation(
-            "[UserQuotaGrain][UpdateQuotaAsync] Updating quota for user {UserId} with product {ProductId}, expires on {ExpiresDate}",
-            this.GetPrimaryKeyString(), productId, expiresDate);
+        Logger.LogInformation("[UserQuotaGAgent][UpdateQuotaAsync] Updating quota for user {UserId} with product {ProductId}, expires on {ExpiresDate}", Id, productId, expiresDate);
 
-        // Determine subscription type based on product ID
-        PlanType planType = DeterminePlanTypeFromProductId(productId);
+        CSharpPlanType planType = DeterminePlanTypeFromProductId(productId);
 
         var subscriptionDto = new SubscriptionInfoDto
         {
@@ -582,78 +505,51 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
             IsActive = true,
             StartDate = DateTime.UtcNow,
             EndDate = expiresDate,
-            Status = PaymentStatus.Completed,
-            SubscriptionIds = State.Subscription.SubscriptionIds,
-            InvoiceIds = State.Subscription.InvoiceIds
+            Status = CSharpPaymentStatus.Completed,
+            SubscriptionIds = State.Subscription?.SubscriptionIds.ToList() ?? new List<string>(),
+            InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>()
         };
 
-        RaiseEvent(new UpdateSubscriptionLogEvent
-        {
-            SubscriptionInfo = subscriptionDto,
-            IsUltimate = false
-        });
-        await ConfirmEvents();
-
-        // Reset rate limits
+        RaiseEvent(new UpdateSubscriptionEvent { SubscriptionInfo = MapToProtoSubscriptionFromDto(subscriptionDto), IsUltimate = false });
+        await ConfirmEventsAsync();
         await ResetRateLimitsAsync();
     }
 
     public async Task ResetQuotaAsync()
     {
-        _logger.LogInformation("[UserQuotaGrain][ResetQuotaAsync] Resetting quota for user {UserId}",
-            this.GetPrimaryKeyString());
+        Logger.LogInformation("[UserQuotaGAgent][ResetQuotaAsync] Resetting quota for user {UserId}", Id);
 
         var subscriptionDto = new SubscriptionInfoDto
         {
             IsActive = false,
-            PlanType = State.Subscription.PlanType,
-            Status = PaymentStatus.None,
-            StartDate = State.Subscription.StartDate,
-            EndDate = State.Subscription.EndDate,
-            SubscriptionIds = State.Subscription.SubscriptionIds,
-            InvoiceIds = State.Subscription.InvoiceIds
+            PlanType = State.Subscription != null ? (CSharpPlanType)(int)State.Subscription.PlanType : CSharpPlanType.None,
+            Status = CSharpPaymentStatus.None,
+            StartDate = State.Subscription?.StartDate?.ToDateTime() ?? DateTime.MinValue,
+            EndDate = State.Subscription?.EndDate?.ToDateTime() ?? DateTime.MinValue,
+            SubscriptionIds = State.Subscription?.SubscriptionIds.ToList() ?? new List<string>(),
+            InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>()
         };
 
-        RaiseEvent(new UpdateSubscriptionLogEvent
-        {
-            SubscriptionInfo = subscriptionDto,
-            IsUltimate = false
-        });
-        await ConfirmEvents();
-
-        // Reset rate limits
+        RaiseEvent(new UpdateSubscriptionEvent { SubscriptionInfo = MapToProtoSubscriptionFromDto(subscriptionDto), IsUltimate = false });
+        await ConfirmEventsAsync();
         await ResetRateLimitsAsync();
     }
 
-    private PlanType DeterminePlanTypeFromProductId(string productId)
+    private CSharpPlanType DeterminePlanTypeFromProductId(string productId)
     {
-        // Determine subscription type based on product ID prefix or naming conventions
-        // Assume product ID contains information about monthly/yearly plan
         if (productId.Contains("monthly") || productId.Contains("month"))
-        {
-            return PlanType.Month;
-        }
-        else if (productId.Contains("yearly") || productId.Contains("year"))
-        {
-            return PlanType.Year;
-        }
-        else if (productId.Contains("daily") || productId.Contains("day"))
-        {
-            return PlanType.Day;
-        }
-
-        // Default to monthly plan
-        return PlanType.Month;
+            return CSharpPlanType.Month;
+        if (productId.Contains("yearly") || productId.Contains("year"))
+            return CSharpPlanType.Year;
+        if (productId.Contains("daily") || productId.Contains("day"))
+            return CSharpPlanType.Day;
+        return CSharpPlanType.Month;
     }
 
     public async Task<GrainResultDto<int>> UpdateCreditsAsync(string operatorUserId, int creditsChange)
     {
         if (!IsUserAuthorizedToUpdateCredits(operatorUserId))
         {
-            _logger.LogWarning(
-                "[UserQuotaGrain][UpdateCreditsAsync] Unauthorized attempt to update credits for user {UserId} by operator {OperatorId}",
-                this.GetPrimaryKey().ToString(), operatorUserId);
-
             return new GrainResultDto<int>
             {
                 Success = false,
@@ -662,22 +558,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
             };
         }
 
-        var oldCredits = State.Credits;
-        var newCredits = State.Credits + creditsChange;
-        if (newCredits < 0)
-        {
-            newCredits = 0;
-        }
-
-        RaiseEvent(new UpdateCreditsLogEvent
-        {
-            NewCredits = newCredits
-        });
-        await ConfirmEvents();
-
-        _logger.LogInformation(
-            "[UserQuotaGrain][UpdateCreditsAsync] Credits updated for user {UserId} by operator {OperatorId}: {OldCredits} -> {NewCredits} (change: {Change})",
-            this.GetPrimaryKey().ToString(), operatorUserId, oldCredits, State.Credits, creditsChange);
+        var newCredits = Math.Max(0, State.Credits + creditsChange);
+        RaiseEvent(new UpdateCreditsEvent { NewCredits = newCredits });
+        await ConfirmEventsAsync();
 
         return new GrainResultDto<int>
         {
@@ -687,14 +570,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
         };
     }
 
-    public async Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateSubscriptionAsync(string operatorUserId, PlanType planType, bool ultimate = false)
+    public async Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateSubscriptionAsync(string operatorUserId, CSharpPlanType planType, bool ultimate = false)
     {
         if (!IsUserAuthorizedToUpdateCredits(operatorUserId))
         {
-            _logger.LogWarning(
-                "[UserQuotaGrain][UpdateSubscriptionAsync] Unauthorized attempt to update subscription for user {UserId} by operator {OperatorId}",
-                this.GetPrimaryKey().ToString(), operatorUserId);
-
             return new GrainResultDto<List<SubscriptionInfoDto>>
             {
                 Success = false,
@@ -711,12 +590,8 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
             {
                 subscriptionInfoDto.PlanType = planType;
             }
-            subscriptionInfoDto.EndDate =
-                SubscriptionHelper.GetSubscriptionEndDate(planType, subscriptionInfoDto.EndDate);
-
+            subscriptionInfoDto.EndDate = SubscriptionHelper.GetSubscriptionEndDate(planType, subscriptionInfoDto.EndDate);
             await UpdateSubscriptionAsync(subscriptionInfoDto, ultimate);
-            _logger.LogWarning("[UserQuotaGrain][UpdateSubscriptionAsync] true, Update subscription for user {UserId} by operator {OperatorId}", 
-                this.GetPrimaryKey().ToString(), operatorUserId);
         }
         else
         {
@@ -725,39 +600,28 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
             {
                 IsActive = true,
                 PlanType = planType,
-                Status = PaymentStatus.Completed,
+                Status = CSharpPaymentStatus.Completed,
                 StartDate = startDate,
                 EndDate = SubscriptionHelper.GetSubscriptionEndDate(planType, startDate),
                 SubscriptionIds = null,
                 InvoiceIds = null
             };
             await UpdateSubscriptionAsync(subscriptionInfoDto, ultimate);
-            
-            _logger.LogWarning("[UserQuotaGrain][UpdateSubscriptionAsync] false, Update subscription for user {UserId} by operator {OperatorId}", 
-                this.GetPrimaryKey().ToString(), operatorUserId);
         }
-        
+
         if (ultimate && await IsSubscribedAsync(false))
         {
             var premiumSubscription = await GetSubscriptionAsync(false);
-            premiumSubscription.StartDate =
-                SubscriptionHelper.GetSubscriptionEndDate(planType, premiumSubscription.StartDate);
-            premiumSubscription.EndDate =
-                SubscriptionHelper.GetSubscriptionEndDate(planType, premiumSubscription.EndDate);
+            premiumSubscription.StartDate = SubscriptionHelper.GetSubscriptionEndDate(planType, premiumSubscription.StartDate);
+            premiumSubscription.EndDate = SubscriptionHelper.GetSubscriptionEndDate(planType, premiumSubscription.EndDate);
             await UpdateSubscriptionAsync(premiumSubscription, false);
-            _logger.LogWarning("[UserQuotaGrain][UpdateSubscriptionAsync] premium, Update subscription for user {UserId} by operator {OperatorId}", 
-                this.GetPrimaryKey().ToString(), operatorUserId);
-            
         }
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
 
         var currentSubscriptionInfoDto = await GetSubscriptionAsync(ultimate);
         return new GrainResultDto<List<SubscriptionInfoDto>>
         {
-            Data = new List<SubscriptionInfoDto>()
-            {
-                oldSubscriptionInfoDto, currentSubscriptionInfoDto
-            }
+            Data = new List<SubscriptionInfoDto> { oldSubscriptionInfoDto, currentSubscriptionInfoDto }
         };
     }
 
@@ -770,91 +634,79 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
     public async Task AddCreditsAsync(int credits)
     {
         await InitializeCreditsAsync();
-
         if (credits < 0)
         {
-            _logger.LogWarning("[UserQuotaGrain][AddCreditsAsync] Attempt to add negative credits: {Credits}", credits);
+            Logger.LogWarning("[UserQuotaGAgent][AddCreditsAsync] Attempt to add negative credits: {Credits}", credits);
             return;
         }
 
         var oldCredits = State.Credits;
-        RaiseEvent(new UpdateCreditsLogEvent
-        {
-            NewCredits = oldCredits + credits
-        });
-        await ConfirmEvents();
-
-        _logger.LogInformation(
-            "[UserQuotaGrain][AddCreditsAsync] Credits updated: {OldCredits} -> {NewCredits} (added: {Added})",
-            oldCredits, State.Credits, credits);
+        RaiseEvent(new UpdateCreditsEvent { NewCredits = oldCredits + credits });
+        await ConfirmEventsAsync();
     }
 
     public async Task<bool> RedeemInitialRewardAsync(string userId, DateTime dateTime)
     {
         if (!State.CanReceiveInviteReward)
         {
-            _logger.LogWarning($"User {userId} cannot receive invite reward, CanReceiveInviteReward is false");
+            Logger.LogWarning($"User {userId} cannot receive invite reward, CanReceiveInviteReward is false");
             return false;
         }
 
         if ((DateTime.UtcNow - dateTime).TotalHours > 72)
         {
-            _logger.LogWarning(
-                $"User {userId} invite reward redemption window expired. now={DateTime.UtcNow} checkIime={dateTime}");
-            RaiseEvent(new UpdateCanReceiveInviteRewardLogEvent { CanReceiveInviteReward = false });
-            await ConfirmEvents();
+            Logger.LogWarning($"User {userId} invite reward redemption window expired.");
+            RaiseEvent(new UpdateCanReceiveInviteRewardEvent { CanReceiveInviteReward = false });
+            await ConfirmEventsAsync();
             return false;
         }
 
-        // This is where the business logic for granting the initial reward (e.g., a 7-day trial) would go.
-        // For now, we just mark that the reward has been redeemed.
         if (await IsSubscribedAsync(false))
         {
-            //TODO
-            _logger.LogWarning($"User {userId} cannot receive invite,reward,IsSubscribedAsync is true.");
-            RaiseEvent(new UpdateCanReceiveInviteRewardLogEvent { CanReceiveInviteReward = false });
-            await ConfirmEvents();
+            Logger.LogWarning($"User {userId} cannot receive invite,reward,IsSubscribedAsync is true.");
+            RaiseEvent(new UpdateCanReceiveInviteRewardEvent { CanReceiveInviteReward = false });
+            await ConfirmEventsAsync();
             return false;
         }
 
-        _logger.LogWarning($"User {userId} receive invite,reward begin");
         var startDate = DateTime.UtcNow;
         await UpdateSubscriptionAsync(new SubscriptionInfoDto
         {
             IsActive = true,
-            PlanType = PlanType.Week,
-            Status = PaymentStatus.Completed,
+            PlanType = CSharpPlanType.Week,
+            Status = CSharpPaymentStatus.Completed,
             StartDate = DateTime.UtcNow,
-            EndDate = SubscriptionHelper.GetSubscriptionEndDate(PlanType.Week, startDate),
+            EndDate = SubscriptionHelper.GetSubscriptionEndDate(CSharpPlanType.Week, startDate),
             SubscriptionIds = null,
             InvoiceIds = null
         }, false);
 
-        RaiseEvent(new UpdateCanReceiveInviteRewardLogEvent { CanReceiveInviteReward = false });
-        await ConfirmEvents();
-        _logger.LogWarning($"User {userId} receive invite,reward end");
+        RaiseEvent(new UpdateCanReceiveInviteRewardEvent { CanReceiveInviteReward = false });
+        await ConfirmEventsAsync();
         return true;
     }
 
-    public async Task<bool> ActivateFreeTrialAsync(int trialDays, PlanType planType, bool isUltimate)
+    public Task<ProtoUserQuotaState> GetUserQuotaStateAsync()
+    {
+        return Task.FromResult(State);
+    }
+
+    public async Task<bool> ActivateFreeTrialAsync(int trialDays, CSharpPlanType planType, bool isUltimate)
     {
         var startDate = DateTime.UtcNow;
         var endDate = startDate.AddDays(trialDays);
 
-        RaiseEvent(new ActivateFreeTrialLogEvent
+        RaiseEvent(new ActivateFreeTrialEvent
         {
             TrialDays = trialDays,
-            PlanType = planType,
+            PlanType = (QuotaPlanType)(int)planType,
             IsUltimate = isUltimate,
-            StartDate = startDate,
-            EndDate = endDate
+            StartDate = Timestamp.FromDateTime(startDate),
+            EndDate = Timestamp.FromDateTime(endDate)
         });
 
-        await ConfirmEvents();
-
-        _logger.LogInformation("Free trial activated for user {UserId}. Days: {TrialDays}, PlanType: {PlanType}, IsUltimate: {IsUltimate}", 
-            this.GetPrimaryKeyString(), trialDays, planType, isUltimate);
-
+        await ConfirmEventsAsync();
+        Logger.LogInformation("Free trial activated for user {UserId}. Days: {TrialDays}, PlanType: {PlanType}, IsUltimate: {IsUltimate}", Id, trialDays, planType, isUltimate);
         return true;
     }
 
@@ -864,177 +716,152 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaGAgentState, UserQuotaLogEven
         {
             return Task.FromResult(new FreeTrialInfoDto());
         }
-        
-        var freeTrialInfo = new FreeTrialInfoDto
+
+        return Task.FromResult(new FreeTrialInfoDto
         {
             FreeTrialCode = State.FreeTrialInfo.FreeTrialCode,
             TrialDays = State.FreeTrialInfo.TrialDays,
-            PlanType = State.FreeTrialInfo.PlanType,
+            PlanType = (CSharpPlanType)(int)State.FreeTrialInfo.PlanType,
             IsUltimate = State.FreeTrialInfo.IsUltimate,
             TransactionId = State.FreeTrialInfo.TransactionId
-        };
+        });
+    }
 
-        return Task.FromResult(freeTrialInfo);
+    #region Helper Methods
+    
+    private static SubscriptionInfoProto MapToProtoSubscription(SubscriptionInfo sub)
+    {
+        if (sub == null) return new SubscriptionInfoProto();
+        var result = new SubscriptionInfoProto
+        {
+            IsActive = sub.IsActive,
+            PlanType = (QuotaPlanType)(int)sub.PlanType,
+            Status = (QuotaPaymentStatus)(int)sub.Status,
+            StartDate = Timestamp.FromDateTime(DateTime.SpecifyKind(sub.StartDate, DateTimeKind.Utc)),
+            EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(sub.EndDate, DateTimeKind.Utc))
+        };
+        if (sub.SubscriptionIds != null) result.SubscriptionIds.AddRange(sub.SubscriptionIds);
+        if (sub.InvoiceIds != null) result.InvoiceIds.AddRange(sub.InvoiceIds);
+        return result;
     }
     
-    protected sealed override void GAgentTransitionState(UserQuotaGAgentState state,
-        StateLogEventBase<UserQuotaLogEvent> @event)
+    private static SubscriptionInfoProto MapToProtoSubscriptionFromDto(SubscriptionInfoDto sub)
     {
-        switch (@event)
+        if (sub == null) return new SubscriptionInfoProto();
+        var result = new SubscriptionInfoProto
         {
-            case MarkInitializedLogEvent:
-                state.UserId = this.GetPrimaryKey().ToString();
+            IsActive = sub.IsActive,
+            PlanType = (QuotaPlanType)(int)sub.PlanType,
+            Status = (QuotaPaymentStatus)(int)sub.Status,
+            StartDate = Timestamp.FromDateTime(DateTime.SpecifyKind(sub.StartDate, DateTimeKind.Utc)),
+            EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(sub.EndDate, DateTimeKind.Utc))
+        };
+        if (sub.SubscriptionIds != null) result.SubscriptionIds.AddRange(sub.SubscriptionIds);
+        if (sub.InvoiceIds != null) result.InvoiceIds.AddRange(sub.InvoiceIds);
+        return result;
+    }
+    
+    #endregion
+
+    #region TransitionState
+
+    protected override void TransitionState(ProtoUserQuotaState state, IMessage evt)
+    {
+        switch (evt)
+        {
+            case MarkInitializedEvent:
+                state.UserId = Id.ToString();
                 state.IsInitializedFromGrain = true;
                 break;
 
-            case InitializeFromGrainLogEvent initializeFromGrain:
-                state.UserId = this.GetPrimaryKey().ToString();
+            case InitializeFromGrainEvent initializeFromGrain:
+                state.UserId = Id.ToString();
                 state.Credits = initializeFromGrain.Credits;
                 state.HasInitialCredits = initializeFromGrain.HasInitialCredits;
                 state.HasShownInitialCreditsToast = initializeFromGrain.HasShownInitialCreditsToast;
                 state.Subscription = initializeFromGrain.Subscription;
-                state.RateLimits = initializeFromGrain.RateLimits;
                 state.UltimateSubscription = initializeFromGrain.UltimateSubscription;
                 state.CreatedAt = initializeFromGrain.CreatedAt;
                 state.CanReceiveInviteReward = initializeFromGrain.CanReceiveInviteReward;
                 state.IsInitializedFromGrain = true;
                 break;
 
-            case InitializeCreditsLogEvent initializeCredits:
+            case InitializeCreditsEvent initializeCredits:
                 state.Credits = initializeCredits.InitialCredits;
                 state.HasInitialCredits = true;
                 break;
 
-            case SetShownCreditsToastLogEvent setShownCreditsToast:
+            case SetShownCreditsToastEvent setShownCreditsToast:
                 state.HasShownInitialCreditsToast = setShownCreditsToast.HasShownInitialCreditsToast;
                 break;
 
-            case UpdateRateLimitLogEvent updateRateLimit:
+            case UpdateRateLimitEvent updateRateLimit:
                 state.RateLimits[updateRateLimit.ActionType] = updateRateLimit.RateLimitInfo;
                 break;
 
-            case ClearRateLimitLogEvent clearRateLimit:
+            case ClearRateLimitEvent clearRateLimit:
                 if (state.RateLimits.ContainsKey(clearRateLimit.ActionType))
                 {
                     state.RateLimits.Remove(clearRateLimit.ActionType);
                 }
-
                 break;
 
-            case UpdateSubscriptionLogEvent updateSubscription:
-                var subscription = updateSubscription.IsUltimate ? state.UltimateSubscription : state.Subscription;
-                if (subscription == null)
+            case UpdateSubscriptionEvent updateSubscription:
+                if (updateSubscription.IsUltimate)
                 {
-                    subscription = new SubscriptionInfo();
-                    if (updateSubscription.IsUltimate)
-                    {
-                        state.UltimateSubscription = subscription;
-                    }
-                    else
-                    {
-                        state.Subscription = subscription;
-                    }
+                    state.UltimateSubscription = updateSubscription.SubscriptionInfo;
                 }
-
-                subscription.IsActive = updateSubscription.SubscriptionInfo.IsActive;
-                subscription.PlanType = updateSubscription.SubscriptionInfo.PlanType;
-                subscription.Status = updateSubscription.SubscriptionInfo.Status;
-                subscription.StartDate = updateSubscription.SubscriptionInfo.StartDate;
-                subscription.EndDate = updateSubscription.SubscriptionInfo.EndDate;
-                subscription.SubscriptionIds = updateSubscription.SubscriptionInfo.SubscriptionIds;
-                subscription.InvoiceIds = updateSubscription.SubscriptionInfo.InvoiceIds;
+                else
+                {
+                    state.Subscription = updateSubscription.SubscriptionInfo;
+                }
                 break;
 
-            case CancelSubscriptionLogEvent cancelSubscription:
+            case CancelSubscriptionEvent cancelSubscription:
                 var sub = cancelSubscription.IsUltimate ? state.UltimateSubscription : state.Subscription;
                 if (sub != null)
                 {
                     sub.IsActive = false;
-                    sub.PlanType = PlanType.None;
-                    sub.StartDate = default;
-                    sub.EndDate = default;
-                    sub.Status = PaymentStatus.None;
+                    sub.PlanType = QuotaPlanType.None;
+                    sub.Status = QuotaPaymentStatus.None;
                 }
-
                 break;
 
-            case UpdateCreditsLogEvent updateCredits:
+            case UpdateCreditsEvent updateCredits:
                 state.Credits = updateCredits.NewCredits;
                 break;
 
-            case UpdateCanReceiveInviteRewardLogEvent updateCanReceiveInviteReward:
+            case UpdateCanReceiveInviteRewardEvent updateCanReceiveInviteReward:
                 state.CanReceiveInviteReward = updateCanReceiveInviteReward.CanReceiveInviteReward;
                 break;
-            
-            case UpdateDailyImageConversationLogEvent updateDailyImageConversation:
-                State.DailyImageConversation = updateDailyImageConversation.DailyImageConversation;
+
+            case UpdateDailyImageConversationEvent updateDailyImageConversation:
+                state.DailyImageConversation = updateDailyImageConversation.DailyImageConversation;
                 break;
 
-            case ActivateFreeTrialLogEvent activateFreeTrialEvent:
+            case ActivateFreeTrialEvent activateFreeTrialEvent:
                 if (state.FreeTrialInfo == null)
                 {
-                    state.FreeTrialInfo = new FreeTrialInfo();
+                    state.FreeTrialInfo = new FreeTrialInfoProto();
                 }
                 state.FreeTrialInfo.FreeTrialCode = string.Empty;
                 state.FreeTrialInfo.TrialDays = activateFreeTrialEvent.TrialDays;
                 state.FreeTrialInfo.PlanType = activateFreeTrialEvent.PlanType;
                 state.FreeTrialInfo.IsUltimate = activateFreeTrialEvent.IsUltimate;
                 break;
+
+            case ClearAllQuotaEvent:
+                state.Subscription = new SubscriptionInfoProto();
+                state.RateLimits.Clear();
+                state.UltimateSubscription = new SubscriptionInfoProto();
+                state.CreatedAt = null;
+                break;
                 
-            case ClearAllLogEvent clearAll:
-                var canReceiveInviteReward = state.CanReceiveInviteReward;
-                //state.Credits = 0;
-               // state.HasInitialCredits = false;
-                //state.HasShownInitialCreditsToast = false;
-                state.Subscription = new SubscriptionInfo();
-                state.RateLimits = new Dictionary<string, RateLimitInfo>();
-                state.UltimateSubscription = new SubscriptionInfo();
-                state.CreatedAt = default;
-                state.CanReceiveInviteReward = canReceiveInviteReward;
+            default:
+                Logger.LogWarning("Unhandled event type {EventType}", evt.GetType().Name);
                 break;
         }
     }
-    public Task<UserQuotaGAgentState> GetUserQuotaStateAsync()
-    {
-        return Task.FromResult(State);
-    }
-    protected override async Task OnGAgentActivateAsync(CancellationToken cancellationToken)
-    {
-        if (!State.IsInitializedFromGrain)
-        {
-            var userQuota =
-                GrainFactory.GetGrain<IUserQuotaGrain>(CommonHelper.GetUserQuotaGAgentId(this.GetPrimaryKey()));
-            var userQuotaState = await userQuota.GetUserQuotaStateAsync();
-            if (userQuotaState != null)
-            {
-                _logger.LogInformation(
-                    "[UserQuotaGAgent][OnGAgentActivateAsync] Initializing state from IUserQuotaGrain for user {UserId}",
-                    this.GetPrimaryKey().ToString());
 
-                RaiseEvent(new InitializeFromGrainLogEvent
-                {
-                    Credits = userQuotaState.Credits,
-                    HasInitialCredits = userQuotaState.HasInitialCredits,
-                    HasShownInitialCreditsToast = userQuotaState.HasShownInitialCreditsToast,
-                    Subscription = userQuotaState.Subscription,
-                    RateLimits = userQuotaState.RateLimits,
-                    UltimateSubscription = userQuotaState.UltimateSubscription,
-                    CreatedAt = userQuotaState.CreatedAt,
-                    CanReceiveInviteReward = userQuotaState.CanReceiveInviteReward
-                });
-
-                _logger.LogDebug(
-                    "[UserQuotaGAgent][OnGAgentActivateAsync] State initialized from IUserQuotaGrain for user {UserId}",
-                    this.GetPrimaryKeyString());
-            }
-            else
-            {
-                _logger.LogDebug(
-                    "[UserQuotaGAgent][OnGAgentActivateAsync] No state found in IUserQuotaGrain for user {UserId}, marking as initialized",
-                    this.GetPrimaryKeyString());
-                    
-                RaiseEvent(new MarkInitializedLogEvent());
-            }
-        }
-    }
+    #endregion
 }

@@ -81,6 +81,13 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         await agent.ActivateAsync();
         return agent;
     }
+    
+    private async Task<UserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    {
+        var agent = _agentFactory.CreateGAgent<UserQuotaGAgent>(userId);
+        await agent.ActivateAsync();
+        return agent;
+    }
 
     protected override async Task PerformConfigAsync(GodChatConfig configuration)
     {
@@ -212,7 +219,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             ? ActionType.Conversation
             : ActionType.ImageConversation;
         
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(State.ChatManagerGuid);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(State.ChatManagerGuid);
         var actionResultDto =
             await userQuotaGAgent.ExecuteActionAsync(sessionId.ToString(), State.ChatManagerGuid.ToString(), actionType);
         if (!actionResultDto.Success)
@@ -483,7 +490,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         Logger.LogDebug($"[GodChatGAgent][StreamVoiceChatWithSession] {sessionId.ToString()} STT result sent to frontend: '{voiceContent}'");
 
         var quotaStopwatch = Stopwatch.StartNew();
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(State.ChatManagerGuid);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(State.ChatManagerGuid);
         var actionResultDto = await userQuotaGAgent.ExecuteVoiceActionAsync(sessionId.ToString(), State.ChatManagerGuid.ToString());
         
         
@@ -2301,7 +2308,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         // Re-enable when Google Calendar integration is migrated to new framework
         Logger.LogDebug($"[GodChatGAgent][GenerateDailyRecommendationsAsync] {this.GetPrimaryKey()} Google Calendar disabled - returning empty prompt");
         
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(State.ChatManagerGuid);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(State.ChatManagerGuid);
         var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(State.ChatManagerGuid);
         var (fullName, prompt) = await userInfoCollectionGAgent.GenerateUserInfoPromptAsync(userLocalTime);
         var isSubscribed = await userQuotaGAgent.IsSubscribedAsync(true) || await userQuotaGAgent.IsSubscribedAsync(false);

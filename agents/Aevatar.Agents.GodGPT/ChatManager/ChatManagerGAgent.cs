@@ -73,6 +73,13 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         await agent.ActivateAsync();
         return agent;
     }
+    
+    private async Task<UserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    {
+        var agent = _agentFactory.CreateGAgent<UserQuotaGAgent>(userId);
+        await agent.ActivateAsync();
+        return agent;
+    }
 
     public override Task<string> GetDescriptionAsync()
     {
@@ -483,7 +490,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     {
         try
         {
-            var userQuotaGrain = GrainFactory.GetGrain<IUserQuotaGAgent>(this.GetPrimaryKey());
+            var userQuotaGrain = await GetUserQuotaAgentAsync(this.GetPrimaryKey());
 
             // Check Ultimate subscription first (higher priority)
             var ultimateSubscription = await userQuotaGrain.GetSubscriptionAsync(ultimate: true);
@@ -882,7 +889,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     {
         //Do not clear the content of ShareGrain. When querying, first determine whether the Session exists
         // Record the event to clear all sessions
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(this.GetPrimaryKey());
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(this.GetPrimaryKey());
         await userQuotaGAgent.ClearAllAsync();
 
         var userBillingGAgent = GrainFactory.GetGrain<IUserBillingGAgent>(this.GetPrimaryKey());
@@ -958,7 +965,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         Logger.LogDebug(
             $"[ChatGAgentManager][GetUserProfileAsync] Active subscription status - Apple: {activeSubscriptionStatus.HasActiveAppleSubscription}, Stripe: {activeSubscriptionStatus.HasActiveStripeSubscription}, GooglePlay: {activeSubscriptionStatus.HasActiveGooglePlaySubscription}");
 
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(this.GetPrimaryKey());
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(this.GetPrimaryKey());
 
         // Check if we need to sync subscription status between UserBillingGAgent and UserQuotaGAgent
         // This is particularly important for Google Pay subscriptions that might not be reflected in UserQuotaGAgent yet
@@ -1102,7 +1109,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         }
 
         // Step 1: First, check if the current user (invitee) is eligible for the reward.
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(this.GetPrimaryKey());
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(this.GetPrimaryKey());
 
         if (State.RegisteredAtUtc == null && State.SessionInfoList.IsNullOrEmpty())
         {

@@ -109,6 +109,13 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         await WriteStateAsync();
         await base.OnDeactivateAsync(reason, cancellationToken);
     }
+    
+    private async Task<UserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    {
+        var agent = _agentFactory.CreateGAgent<UserQuotaGAgent>(userId);
+        await agent.ActivateAsync();
+        return agent;
+    }
 
     public async Task<List<StripeProductDto>> GetStripeProductsAsync()
     {
@@ -948,7 +955,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         
         var userId = detailsDto.UserId;
         var productConfig = await GetProductConfigAsync(detailsDto.PriceId);
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         _logger.LogDebug("[UserBillingGrain][HandleStripeWebhookEventAsync] allocate resource {0}, {1}, {2}, {3})",
             userId, detailsDto.OrderId, detailsDto.SubscriptionId, detailsDto.InvoiceId);
         var subscriptionInfoDto = await userQuotaGAgent.GetSubscriptionAsync(productConfig.IsUltimate);
@@ -1075,7 +1082,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
     {
         DateTime subscriptionStartDate;
         DateTime subscriptionEndDate;
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         
         // Use unified subscription interface
         var subscription = await userQuotaGAgent.GetAndSetSubscriptionAsync(productConfig.IsUltimate);
@@ -1099,7 +1106,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
     {
         DateTime subscriptionStartDate;
         DateTime subscriptionEndDate;
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         var subscriptionInfoDto = await userQuotaGAgent.GetSubscriptionAsync(ultimate);
         if (subscriptionInfoDto.IsActive)
         {
@@ -1490,7 +1497,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             return;
         }
 
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(parsedUserId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(parsedUserId);
         var currentSubscription = await userQuotaGAgent.GetSubscriptionAsync(productConfig.IsUltimate);
 
         if (!currentSubscription.IsActive)
@@ -2199,7 +2206,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         
         try
         {
-            var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(Guid.Parse(userId));
+            var userQuotaGAgent = await GetUserQuotaAgentAsync(Guid.Parse(userId));
             
             switch (eventType)
             {
@@ -2242,7 +2249,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
     private async Task RevokeUserQuotaAsync(string userId)
     {
         // In actual implementation, this should call the user quota management service to revoke user rights
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(Guid.Parse(userId));
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(Guid.Parse(userId));
         await userQuotaGAgent.ResetQuotaAsync();
     }
     
@@ -2632,7 +2639,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         AppleProduct appleProduct)
     {
         // Update user quota
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(userId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         var subscriptionDto = appleProduct.IsUltimate
             ? await userQuotaGAgent.GetSubscriptionAsync(true)
             : await userQuotaGAgent.GetSubscriptionAsync();
@@ -2788,7 +2795,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         }
 
         // Update user quota
-        var userQuotaGAgent = GrainFactory.GetGrain<UserQuotaGAgent>(userId);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         var subscriptionDto = appleProduct.IsUltimate
             ? await userQuotaGAgent.GetSubscriptionAsync(true)
             : await userQuotaGAgent.GetSubscriptionAsync();
