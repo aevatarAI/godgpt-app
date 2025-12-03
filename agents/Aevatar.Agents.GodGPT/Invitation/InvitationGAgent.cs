@@ -5,7 +5,6 @@ using Aevatar.Application.Grains.ChatManager.UserQuota;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Invitation.SEvents;
 using Aevatar.Application.Grains.UserQuota;
-using Aevatar.Application.Grains.Twitter;
 using Aevatar.Core;
 using Aevatar.Core.Abstractions;
 using Microsoft.Extensions.Logging;
@@ -52,9 +51,7 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
 
     public async Task<InvitationStatsDto> GetInvitationStatsAsync()
     {
-        var twitterAuthGAgent = GrainFactory.GetGrain<ITwitterAuthGAgent>(this.GetPrimaryKey());
-        var twitterBindStatusDto = await twitterAuthGAgent.GetBindStatusAsync();
-
+        // Twitter integration removed - no longer used
         return new InvitationStatsDto
         {
             TotalInvites = State.TotalInvites,
@@ -63,7 +60,7 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
             TotalCreditsEarned = State.TotalCreditsEarned,
             InviteCode = State.CurrentInviteCode,
             TotalCreditsFromX = State.TotalCreditsFromX,
-            IsBound = twitterBindStatusDto?.IsBound ?? false
+            IsBound = false  // Twitter binding removed
         };
     }
 

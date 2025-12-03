@@ -14,8 +14,6 @@ using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.Common.Service;
 using Aevatar.Application.Grains.GodChat.Dtos;
-using Aevatar.Application.Grains.GoogleAuth;
-using Aevatar.Application.Grains.GoogleAuth.Dtos;
 using Aevatar.Application.Grains.Invitation;
 using Aevatar.Application.Grains.UserInfo;
 using Aevatar.Application.Grains.UserQuota;

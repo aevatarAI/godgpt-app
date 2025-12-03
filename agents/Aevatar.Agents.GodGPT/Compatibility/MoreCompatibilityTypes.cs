@@ -65,51 +65,6 @@ namespace Aevatar.GAgents.ChatAgent.GAgent
 }
 
 // ============================================================================
-// Google Calendar DTOs (stub for excluded GoogleAuth)
-// ============================================================================
-namespace Aevatar.Application.Grains.GoogleAuth.Dtos
-{
-    /// <summary>
-    /// Stub for Google Calendar event DTO - matches old framework exactly
-    /// </summary>
-    [GenerateSerializer]
-    public class GoogleCalendarEventDto
-    {
-        [Id(0)] public string? Id { get; set; }
-        [Id(1)] public string? Summary { get; set; }
-        [Id(2)] public string? Description { get; set; }
-        [Id(3)] public DateTime? Start { get; set; }
-        [Id(4)] public DateTime? End { get; set; }
-        [Id(5)] public string? Location { get; set; }
-        [Id(6)] public DateTime? StartTime { get; set; }
-        [Id(7)] public DateTime? EndTime { get; set; }
-    }
-
-    /// <summary>
-    /// Stub for Google Calendar list DTO - matches old framework exactly
-    /// </summary>
-    [GenerateSerializer]
-    public class GoogleCalendarListDto
-    {
-        [Id(0)] public List<GoogleCalendarEventDto> Events { get; set; } = new();
-        [Id(1)] public int TotalCount { get; set; }
-        [Id(2)] public bool Success { get; set; }
-        [Id(3)] public string? Error { get; set; }
-    }
-    
-    /// <summary>
-    /// Stub for Google Calendar query DTO
-    /// </summary>
-    [GenerateSerializer]
-    public class GoogleCalendarQueryDto
-    {
-        [Id(0)] public DateTime? StartDate { get; set; }
-        [Id(1)] public DateTime? EndDate { get; set; }
-        [Id(2)] public int MaxResults { get; set; } = 10;
-    }
-}
-
-// ============================================================================
 // Chat Config DTO
 // ============================================================================
 namespace Aevatar.GAgents.ChatAgent.Dtos

@@ -24,8 +24,5 @@ global using Aevatar.AI.Feature;
 global using Aevatar.AI.Feature.StreamSyncWoker;
 global using Aevatar.AI.Exceptions;
 
-// Legacy SignalR namespace - stub
-global using Aevatar.SignalR;
-
 // Use EventHandler from compatibility layer, not System.EventHandler
 global using EventHandlerAttribute = Aevatar.Core.EventHandlerAttribute;
