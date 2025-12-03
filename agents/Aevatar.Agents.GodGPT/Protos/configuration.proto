@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos";
+
+// =============================================================================
+// ConfigurationGAgent State
+// =============================================================================
+
+/// State for ConfigurationGAgent
+message ConfigurationState {
+    string system_llm = 1;
+    string prompt = 2;
+    bool streaming_mode_enabled = 3;
+    string user_profile_prompt = 4;
+}
+
+// =============================================================================
+// ConfigurationGAgent Events (for Event Sourcing)
+// =============================================================================
+
+/// Event to set the system LLM
+message SetSystemLLMEvent {
+    string system_llm = 1;
+}
+
+/// Event to set the prompt
+message SetPromptEvent {
+    string prompt = 1;
+}
+
+/// Event to set streaming mode
+message SetStreamingModeEnabledEvent {
+    bool streaming_mode_enabled = 1;
+}
+
+/// Event to set user profile prompt
+message SetUserProfilePromptEvent {
+    string user_profile_prompt = 1;
+}
+

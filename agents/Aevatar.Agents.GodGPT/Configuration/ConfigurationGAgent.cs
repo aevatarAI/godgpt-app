@@ -1,72 +1,133 @@
+using Aevatar.Agents.GodGPT.Protos;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
-using Aevatar.Core;
-using Aevatar.Core.Abstractions;
+using Google.Protobuf;
 using Json.Schema.Generation;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Orleans;
 using Orleans.Providers;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent;
 
+/// <summary>
+/// Configuration GAgent - manages chat agent configuration
+/// 
+/// Migration Phase 1: Uses Protobuf State + Event Sourcing pattern
+/// Still inherits from Grain for Orleans compatibility during migration
+/// TODO: After all callers are migrated, change to inherit from Aevatar.Agents.Core.GAgentBase
+/// </summary>
 [Description("manage chat agent")]
 [StorageProvider(ProviderName = "PubSubStore")]
-[LogConsistencyProvider(ProviderName = "LogStorage")]
-[GAgent(nameof(ConfigurationGAgent))]
-public class ConfigurationGAgent : GAgentBase<ConfigurationState, ConfigurationLogEvent>, IConfigurationGAgent
+public class ConfigurationGAgent : Grain, IConfigurationGAgent
 {
-    private IDisposable _timerHandle;
-    private const string OpenAILatest = "OpenAILatest";
+    private const string DefaultSystemLLM = "OpenAI";
+    private const string DefaultUserProfilePrompt = @"
+        I'm {Gender} 
+        My Birth date is {BirthDate} and my birth place is {BirthPlace} 
+        Please tell me my fate. 
+        Remember: respond in the same language the user used when filling in the location. 
+    ";
 
-    public override Task<string> GetDescriptionAsync()
-    {
-        return Task.FromResult("Configuration GAgent");
-    }
+    // Protobuf State (new framework style)
+    private ConfigurationState _state = new();
+    protected ConfigurationState State => _state;
 
-    [EventHandler]
-    public async Task HandleEventAsync(SetLLMEvent @event)
+    // Event Sourcing
+    private readonly List<IMessage> _pendingEvents = new();
+    private long _eventVersion = 0;
+
+    // Logger
+    private ILogger<ConfigurationGAgent> _logger = null!;
+    protected ILogger<ConfigurationGAgent> Logger => _logger;
+
+    public override async Task OnActivateAsync(CancellationToken cancellationToken)
     {
-        RaiseEvent(new SetSystemLLMLogEvent()
+        _logger = ServiceProvider.GetRequiredService<ILogger<ConfigurationGAgent>>();
+
+        _logger.LogDebug("ConfigurationGAgent OnActivateAsync");
+
+        await base.OnActivateAsync(cancellationToken);
+
+        // Initialize default values if not set
+        if (string.IsNullOrEmpty(State.SystemLlm))
         {
-            SystemLLM = @event.LLM
-        });
+            RaiseEvent(new SetSystemLLMEvent { SystemLlm = DefaultSystemLLM });
+        }
 
-        await ConfirmEvents();
-    }
-
-    [EventHandler]
-    public async Task HandleEventAsync(SetPromptEvent @event)
-    {
-        RaiseEvent(new SetPromptLogEvent()
+        if (string.IsNullOrEmpty(State.UserProfilePrompt))
         {
-            Prompt = @event.Prompt
-        });
+            RaiseEvent(new SetUserProfilePromptEvent { UserProfilePrompt = DefaultUserProfilePrompt });
+        }
 
-        await ConfirmEvents();
-    }
-
-    [EventHandler]
-    public async Task HandleEventAsync(SetStreamingModeEnabledEvent @event)
-    {
-        RaiseEvent(new SetStreamingModeEnabledLogEvent()
+        if (!State.StreamingModeEnabled)
         {
-            StreamingModeEnabled = @event.StreamingModeEnabled
-        });
+            RaiseEvent(new SetStreamingModeEnabledEvent { StreamingModeEnabled = true });
+        }
 
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
     }
 
-    [EventHandler]
-    public async Task HandleEventAsync(SetUserProfilePromptEvent @event)
+    // ============================================================================
+    // Event Sourcing Methods (new framework style)
+    // ============================================================================
+
+    /// <summary>
+    /// Raise an event for state transition (Event Sourcing pattern)
+    /// </summary>
+    protected void RaiseEvent<TEvent>(TEvent evt) where TEvent : IMessage
     {
-        RaiseEvent(new SetUserProfilePromptLogEvent
-        {
-            UserProfilePrompt = @event.UserProfilePrompt
-        });
-        await ConfirmEvents();
+        _pendingEvents.Add(evt);
+        TransitionState(_state, evt);
     }
+
+    /// <summary>
+    /// Confirm pending events
+    /// </summary>
+    protected Task ConfirmEventsAsync()
+    {
+        _eventVersion += _pendingEvents.Count;
+        _pendingEvents.Clear();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Pure functional state transition
+    /// </summary>
+    protected void TransitionState(ConfigurationState state, IMessage evt)
+    {
+        switch (evt)
+        {
+            case SetSystemLLMEvent e:
+                state.SystemLlm = e.SystemLlm;
+                break;
+            case SetPromptEvent e:
+                state.Prompt = e.Prompt;
+                break;
+            case SetStreamingModeEnabledEvent e:
+                state.StreamingModeEnabled = e.StreamingModeEnabled;
+                break;
+            case SetUserProfilePromptEvent e:
+                state.UserProfilePrompt = e.UserProfilePrompt;
+                break;
+        }
+    }
+
+    // ============================================================================
+    // IGAgent Implementation (legacy interface)
+    // ============================================================================
+
+    public Task<string> GetDescriptionAsync()
+    {
+        return Task.FromResult("Configuration GAgent - manages chat agent configuration");
+    }
+
+    // ============================================================================
+    // IConfigurationGAgent Implementation
+    // ============================================================================
 
     public Task<string> GetSystemLLM()
     {
-        return Task.FromResult(State.SystemLLM);
+        return Task.FromResult(State.SystemLlm ?? DefaultSystemLLM);
     }
 
     public Task<bool> GetStreamingModeEnabled()
@@ -76,137 +137,21 @@ public class ConfigurationGAgent : GAgentBase<ConfigurationState, ConfigurationL
 
     public Task<string> GetPrompt()
     {
-        return Task.FromResult(State.Prompt);
+        return Task.FromResult(State.Prompt ?? string.Empty);
     }
 
     public Task<string> GetUserProfilePromptAsync()
     {
-        return Task.FromResult(State.UserProfilePrompt);
+        return Task.FromResult(State.UserProfilePrompt ?? DefaultUserProfilePrompt);
     }
 
     public async Task UpdateSystemPromptAsync(string systemPrompt)
     {
-        const string logContext = "[ConfigurationGAgent][UpdateSystemPrompt]";
+        Logger.LogDebug("[ConfigurationGAgent][UpdateSystemPrompt] Updating prompt to '{NewPrompt}'", systemPrompt);
 
-        Logger.LogDebug("[{LogContext}] Updating prompt from '{OldPrompt}' to '{NewPrompt}'.", logContext, State.Prompt,
-            systemPrompt);
+        RaiseEvent(new SetPromptEvent { Prompt = systemPrompt });
+        await ConfirmEventsAsync();
 
-        // Raise an event to update the prompt
-        RaiseEvent(new SetPromptLogEvent
-        {
-            Prompt = systemPrompt
-        });
-
-        // Confirm updates to persist the new state
-        await ConfirmEvents();
-
-        Logger.LogDebug("[{LogContext}] Prompt successfully updated to '{NewPrompt}'.", logContext, systemPrompt);
-    }
-
-    protected sealed override void GAgentTransitionState(ConfigurationState state,
-        StateLogEventBase<ConfigurationLogEvent> @event)
-    {
-        switch (@event)
-        {
-            case SetSystemLLMLogEvent @systemLlmLogEvent:
-                state.SystemLLM = @systemLlmLogEvent.SystemLLM;
-                break;
-            case SetPromptLogEvent @setPromptLogEvent:
-                state.Prompt = @setPromptLogEvent.Prompt;
-                break;
-            case SetStreamingModeEnabledLogEvent @setStreamingModeEnabledLogEvent:
-                state.StreamingModeEnabled = @setStreamingModeEnabledLogEvent.StreamingModeEnabled;
-                break;
-            case SetUserProfilePromptLogEvent @setUserProfilePromptLogEvent:
-                state.UserProfilePrompt = @setUserProfilePromptLogEvent.UserProfilePrompt;
-                break;
-        }
-    }
-
-    protected override async Task OnGAgentActivateAsync(CancellationToken cancellationToken)
-    {
-        Logger.LogDebug("ConfigurationGAgent OnGAgentActivateAsync");
-
-        // if (State.SystemLLM.IsNullOrEmpty())
-        // {
-        //     RaiseEvent(new SetSystemLLMLogEvent()
-        //     {
-        //         SystemLLM = OpenAILatest
-        //     });
-        // }
-        RaiseEvent(new SetSystemLLMLogEvent()
-        {
-            SystemLLM = "OpenAI"
-        });
-
-        RaiseEvent(new SetStreamingModeEnabledLogEvent()
-        {
-            StreamingModeEnabled = true
-        });
-
-        await ConfirmEvents();
-
-        // if (State.Prompt.IsNullOrEmpty())
-        // {
-        //     await UpdatePromptPeriodically(null);
-        // }
-
-        // Initialize a periodic task to update the prompt every 5 minutes
-        // #pragma warning disable CS0618
-        // _timerHandle = RegisterTimer(UpdatePromptPeriodically, null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
-        // #pragma warning restore CS0618
-    }
-
-    private async Task UpdatePromptPeriodically(object? state)
-    {
-        const string logContext = "[ConfigurationGAgent][UpdatePromptPeriodically]";
-        try
-        {
-            // Fetch a new prompt from a helper or external source
-            var newPrompt = await GodPromptHelper.LoadNewGodPromptAsync();
-            // var newPrompt =  GodPromptHelper.LoadGodPrompt();
-
-            // Validate that the new prompt is not null or empty
-            if (string.IsNullOrWhiteSpace(newPrompt))
-            {
-                Logger.LogDebug("[{LogContext}] Retrieved an empty or null prompt, skipping update.", logContext);
-                return;
-            }
-
-            // Check if the new prompt is different from the currently stored prompt
-            if (newPrompt != State.Prompt)
-            {
-                Logger.LogDebug("[{LogContext}] Updating prompt from '{OldPrompt}' to '{NewPrompt}'.", logContext,
-                    State.Prompt, newPrompt);
-
-                // Raise an event to update the prompt
-                RaiseEvent(new SetPromptLogEvent
-                {
-                    Prompt = newPrompt
-                });
-
-                // Confirm updates to persist the new state
-                await ConfirmEvents();
-
-                Logger.LogDebug("[{LogContext}] Prompt successfully updated to '{NewPrompt}'.", logContext, newPrompt);
-            }
-            else
-            {
-                Logger.LogDebug("[{LogContext}] New prompt is identical to the current state, no update needed.",
-                    logContext);
-            }
-        }
-        catch (Exception ex)
-        {
-            // Log exceptions with the appropriate log level and context
-            Logger.LogError(ex, "[{LogContext}] Failed to update the prompt due to an exception.", logContext);
-        }
-    }
-
-    public override async Task OnDeactivateAsync(DeactivationReason reason, CancellationToken cancellationToken)
-    {
-        // Dispose of the timer to clean up resources on grain deactivation
-        _timerHandle?.Dispose();
-        await base.OnDeactivateAsync(reason, cancellationToken);
+        Logger.LogDebug("[ConfigurationGAgent][UpdateSystemPrompt] Prompt updated successfully");
     }
 }
