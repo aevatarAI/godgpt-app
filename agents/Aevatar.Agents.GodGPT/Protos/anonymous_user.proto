@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.anonymous;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.Anonymous";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// State
+// =============================================================================
+
+message AnonymousUserState {
+    string user_hash_id = 1;                              // [Id(0)]
+    optional string current_session_id = 2;               // [Id(1)] Guid? -> optional string
+    int32 chat_count = 3;                                 // [Id(2)]
+    google.protobuf.Timestamp last_chat_time = 4;         // [Id(3)]
+    google.protobuf.Timestamp created_at = 5;             // [Id(4)]
+    optional string current_guider = 6;                   // [Id(5)]
+    bool current_session_used = 7;                        // [Id(6)]
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+message CreateGuestSessionEvent {
+    string session_id = 1;                                // [Id(0)] Guid -> string
+    optional string guider = 2;                           // [Id(1)]
+    google.protobuf.Timestamp create_at = 3;              // [Id(2)]
+}
+
+message GuestChatEvent {
+    int32 chat_count = 1;                                 // [Id(0)]
+    google.protobuf.Timestamp chat_at = 2;                // [Id(1)]
+    bool session_used = 3;                                // [Id(2)]
+}
+
+message InitializeAnonymousUserEvent {
+    string user_hash_id = 1;                              // [Id(0)]
+    google.protobuf.Timestamp created_at = 2;             // [Id(1)]
+}
+

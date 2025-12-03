@@ -649,3 +649,37 @@ public class MyGAgent : GAgentBase<MyState>, IMyGAgent
     }
 }
 ```
+
+---
+
+## ✅ 已完成迁移: AnonymousUserGAgent
+
+### 基本信息
+- **文件**: `Anonymous/AnonymousUserGAgent.cs`
+- **Proto**: `Protos/anonymous_user.proto`
+- **状态字段**: 7个（UserHashId, CurrentSessionId, ChatCount, LastChatTime, CreatedAt, CurrentGuider, CurrentSessionUsed）
+- **事件**: 3个（InitializeAnonymousUserEvent, CreateGuestSessionEvent, GuestChatEvent）
+
+### 依赖关系
+- `ConfigurationGAgent` - 已迁移，通过 `IGAgentFactory` 获取
+- `IGodChat` - 未迁移，通过 `IClusterClient` 获取
+
+### 无外部调用者
+此 Agent 没有外部调用者需要更新。
+
+---
+
+## 迁移进度追踪
+
+| Agent | 状态 | Proto | 调用者已更新 |
+|-------|------|-------|-------------|
+| ConfigurationGAgent | ✅ | ✅ | ✅ |
+| UserStatisticsGAgent | ✅ | ✅ | ✅ |
+| InviteCodeGAgent | ✅ | ✅ | ✅ |
+| InvitationGAgent | ✅ | ✅ | ✅ |
+| AnonymousUserGAgent | ✅ | ✅ | N/A |
+| UserFeedbackGAgent | 🔄 Pending | | |
+| ChatManagerGAgent | 🔄 Pending | | |
+| GodChatGAgent | 🔄 Pending | | |
+| UserBillingGAgent | 🔄 Pending | | |
+| UserQuotaGAgent | 🔄 Pending | | |
