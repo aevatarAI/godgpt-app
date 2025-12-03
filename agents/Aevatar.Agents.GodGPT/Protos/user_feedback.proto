@@ -1,0 +1,87 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.userfeedback;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.UserFeedback";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum FeedbackReason {
+    FEEDBACK_REASON_UNSET = 0;
+    FEEDBACK_REASON_TOO_EXPENSIVE = 1;
+    FEEDBACK_REASON_NOT_USING_ENOUGH = 2;
+    FEEDBACK_REASON_FOUND_BETTER_ALTERNATIVE = 3;
+    FEEDBACK_REASON_TECHNICAL_ISSUES = 4;
+    FEEDBACK_REASON_CONTENT_NOT_RELEVANT = 5;
+    FEEDBACK_REASON_TEMPORARY_PAUSE = 6;
+    FEEDBACK_REASON_NEED_MORE_FEATURES = 7;
+    FEEDBACK_REASON_BETTER_PRICING_ON_ANOTHER_PLAN = 8;
+    FEEDBACK_REASON_USAGE_CHANGED = 9;
+    FEEDBACK_REASON_PAYMENT_INVOICE_NEEDS = 10;
+    FEEDBACK_REASON_OTHER = 11;
+}
+
+enum FeedbackPlanType {
+    FEEDBACK_PLAN_TYPE_NONE = 0;
+    FEEDBACK_PLAN_TYPE_DAY = 1;
+    FEEDBACK_PLAN_TYPE_MONTH = 2;
+    FEEDBACK_PLAN_TYPE_YEAR = 3;
+    FEEDBACK_PLAN_TYPE_WEEK = 4;
+}
+
+// =============================================================================
+// Nested Types
+// =============================================================================
+
+message UserSubscriptionInfo {
+    FeedbackPlanType plan_type = 1;
+    bool is_ultimate = 2;
+    google.protobuf.Timestamp start_date = 3;
+    google.protobuf.Timestamp end_date = 4;
+}
+
+message UserFeedbackInfo {
+    string feedback_id = 1;
+    string feedback_type = 2;
+    repeated FeedbackReason reasons = 3;
+    string response = 4;
+    bool contact_requested = 5;
+    string email = 6;
+    google.protobuf.Timestamp submitted_at = 7;
+    repeated string reason_texts_english = 8;
+    optional UserSubscriptionInfo subscription = 9;
+}
+
+// =============================================================================
+// State
+// =============================================================================
+
+message UserFeedbackState {
+    string user_id = 1;                                   // [Id(0)] Guid -> string
+    optional UserFeedbackInfo current_feedback = 2;       // [Id(1)]
+    repeated string archived_feedbacks = 3;               // [Id(2)] JSON strings
+    optional google.protobuf.Timestamp last_feedback_time = 4;  // [Id(3)]
+    int32 feedback_count = 5;                             // [Id(4)]
+    google.protobuf.Timestamp created_at = 6;             // [Id(5)]
+    google.protobuf.Timestamp updated_at = 7;             // [Id(6)]
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+message SubmitFeedbackEvent {
+    string user_id = 1;                                   // [Id(0)]
+    UserFeedbackInfo feedback_info = 2;                   // [Id(1)]
+    google.protobuf.Timestamp submitted_at = 3;           // [Id(2)]
+    int32 feedback_count = 4;                             // [Id(3)]
+}
+
+message SkippedFeedbackEvent {
+    google.protobuf.Timestamp submitted_at = 1;           // [Id(0)]
+}
+

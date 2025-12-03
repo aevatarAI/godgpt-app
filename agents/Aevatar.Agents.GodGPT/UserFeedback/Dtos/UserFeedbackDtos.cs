@@ -47,6 +47,23 @@ public class UserSubscription
 }
 
 /// <summary>
+/// User feedback information model (C# version for JSON serialization compatibility)
+/// </summary>
+[GenerateSerializer]
+public class UserFeedbackInfo
+{
+    [Id(0)] public string FeedbackId { get; set; } = string.Empty;
+    [Id(1)] public string FeedbackType { get; set; } = string.Empty;
+    [Id(2)] public List<FeedbackReasonEnum> Reasons { get; set; } = new();
+    [Id(3)] public string Response { get; set; } = string.Empty;
+    [Id(4)] public bool ContactRequested { get; set; }
+    [Id(5)] public string Email { get; set; } = string.Empty;
+    [Id(6)] public DateTime SubmittedAt { get; set; } = default;
+    [Id(7)] public List<string> ReasonTextsEnglish { get; set; } = new();
+    [Id(8)] public UserSubscription? Subscription { get; set; } = null;
+}
+
+/// <summary>
 /// Submit feedback result
 /// </summary>
 [GenerateSerializer]

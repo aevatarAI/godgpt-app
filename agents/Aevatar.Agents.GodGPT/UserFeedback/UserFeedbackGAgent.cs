@@ -1,45 +1,43 @@
+using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Core;
+using Aevatar.Agents.GodGPT.Protos.UserFeedback;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Service;
 using Aevatar.Application.Grains.UserFeedback.Dtos;
 using Aevatar.Application.Grains.UserFeedback.Options;
-using Aevatar.Application.Grains.UserFeedback.SEvents;
-using Aevatar.Core;
-using Aevatar.Core.Abstractions;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
-using Orleans.Concurrency;
+
+using CsFeedbackReasonEnum = Aevatar.Application.Grains.Common.Constants.FeedbackReasonEnum;
+using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
 
 namespace Aevatar.Application.Grains.UserFeedback;
 
 /// <summary>
 /// Interface for User Feedback GAgent - manages user feedback collection and frequency control
 /// </summary>
-public interface IUserFeedbackGAgent : IGAgent
+public interface IUserFeedbackGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
     Task<SubmitFeedbackResult> SubmitFeedbackAsync(SubmitFeedbackRequest request);
-    [ReadOnly]
     Task<CheckEligibilityResult> CheckFeedbackEligibilityAsync();
-    [ReadOnly]
     Task<GetFeedbackHistoryResult> GetFeedbackHistoryAsync(GetFeedbackHistoryRequest request);
 }
 
 [GAgent(nameof(UserFeedbackGAgent))]
-[Reentrant]
-public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEventLog>, 
-    IUserFeedbackGAgent
+public class UserFeedbackGAgent : GAgentBase<UserFeedbackState>, IUserFeedbackGAgent
 {
-    private readonly ILogger<UserFeedbackGAgent> _logger;
     private readonly ILocalizationService _localizationService;
     private readonly IOptionsMonitor<UserFeedbackOptions> _feedbackOptions;
 
     public UserFeedbackGAgent(
-        ILogger<UserFeedbackGAgent> logger,
+        Guid id,
         ILocalizationService localizationService,
-        IOptionsMonitor<UserFeedbackOptions> feedbackOptions)
+        IOptionsMonitor<UserFeedbackOptions> feedbackOptions) : base(id)
     {
-        _logger = logger;
         _localizationService = localizationService;
         _feedbackOptions = feedbackOptions;
     }
@@ -49,56 +47,12 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
         return Task.FromResult("User feedback management and collection");
     }
 
-    /// <summary>
-    /// Event-driven state transition handler
-    /// </summary>
-    protected sealed override void GAgentTransitionState(UserFeedbackState state,
-        StateLogEventBase<UserFeedbackEventLog> @event)
-    {
-        switch (@event)
-        {
-            case SubmitFeedbackLogEvent submitEvent:
-                // Archive current feedback before adding new one
-                if (state.CurrentFeedback != null)
-                {
-                    var archivedData = JsonConvert.SerializeObject(state.CurrentFeedback);
-                    state.ArchivedFeedbacks.Add(archivedData);
-                    
-                    // Limit archived data count
-                    var maxArchived = _feedbackOptions.CurrentValue.MaxArchivedFeedbacks;
-                    if (state.ArchivedFeedbacks.Count > maxArchived)
-                    {
-                        state.ArchivedFeedbacks.RemoveAt(0);
-                    }
-                }
-
-                state.UserId = submitEvent.UserId;
-                state.CurrentFeedback = submitEvent.FeedbackInfo;
-                state.LastFeedbackTime = submitEvent.SubmittedAt;
-                state.FeedbackCount = submitEvent.FeedbackCount;
-                if (state.CreatedAt == default)
-                {
-                    state.CreatedAt = submitEvent.SubmittedAt;
-                }
-                state.UpdatedAt = submitEvent.SubmittedAt;
-                break;
-            case SkippedFeedbackLogEvent skippedFeedbackLogEvent:
-                state.LastFeedbackTime = skippedFeedbackLogEvent.SubmittedAt;
-                if (state.CreatedAt == default)
-                {
-                    state.CreatedAt = skippedFeedbackLogEvent.SubmittedAt;
-                }
-                state.UpdatedAt = skippedFeedbackLogEvent.SubmittedAt;
-                break;
-        }
-    }
-
     public async Task<SubmitFeedbackResult> SubmitFeedbackAsync(SubmitFeedbackRequest request)
     {
         try
         {
-            _logger.LogDebug("[UserFeedbackGAgent][SubmitFeedbackAsync] Start - UserId: {UserId}, FeedbackType: {FeedbackType}",
-                this.GetPrimaryKey(), request.FeedbackType);
+            Logger.LogDebug("[UserFeedbackGAgent][SubmitFeedbackAsync] Start - UserId: {UserId}, FeedbackType: {FeedbackType}",
+                Id, request.FeedbackType);
             
             var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
             
@@ -106,8 +60,8 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
             var validationResult = ValidateSubmitRequest(request, language);
             if (!validationResult.IsValid)
             {
-                _logger.LogWarning("[UserFeedbackGAgent][SubmitFeedbackAsync] Validation failed for user {UserId}: {ErrorCode} - {Message}",
-                    this.GetPrimaryKey(), validationResult.ErrorCode, validationResult.Message);
+                Logger.LogWarning("[UserFeedbackGAgent][SubmitFeedbackAsync] Validation failed for user {UserId}: {ErrorCode} - {Message}",
+                    Id, validationResult.ErrorCode, validationResult.Message);
                     
                 return new SubmitFeedbackResult
                 {
@@ -119,16 +73,14 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
 
             if (request.SkippedFeedback)
             {
-                _logger.LogDebug("[UserFeedbackGAgent][SubmitFeedbackAsync] User {UserId} skipped feedback",
-                    this.GetPrimaryKey().ToString());
+                Logger.LogDebug("[UserFeedbackGAgent][SubmitFeedbackAsync] User {UserId} skipped feedback", Id);
                 
-                RaiseEvent(new SkippedFeedbackLogEvent
+                RaiseEvent(new SkippedFeedbackEvent
                 {
-                    SubmittedAt = DateTime.UtcNow
+                    SubmittedAt = Timestamp.FromDateTime(DateTime.UtcNow)
                 });
 
-                // Confirm events to persist state changes
-                await ConfirmEvents();
+                await ConfirmEventsAsync();
                 
                 return new SubmitFeedbackResult
                 {
@@ -141,8 +93,8 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
             var eligibilityResult = await CheckFeedbackEligibilityAsync();
             if (!eligibilityResult.Eligible)
             {
-                _logger.LogWarning("[UserFeedbackGAgent][SubmitFeedbackAsync] Frequency limit exceeded for user {UserId}. Last feedback: {LastFeedbackTime}",
-                    this.GetPrimaryKey(), eligibilityResult.LastFeedbackTime);
+                Logger.LogWarning("[UserFeedbackGAgent][SubmitFeedbackAsync] Frequency limit exceeded for user {UserId}. Last feedback: {LastFeedbackTime}",
+                    Id, eligibilityResult.LastFeedbackTime);
                     
                 return new SubmitFeedbackResult
                 {
@@ -155,33 +107,51 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
             // Generate English reason texts
             var englishReasonTexts = FeedbackReasonHelper.GetEnglishReasonTexts(request.Reasons, _localizationService);
 
-            // Create feedback info
-            var feedbackInfo = new UserFeedbackInfo
+            // Create feedback info (Protobuf)
+            var feedbackInfo = new Aevatar.Agents.GodGPT.Protos.UserFeedback.UserFeedbackInfo
             {
                 FeedbackId = Guid.NewGuid().ToString(),
                 FeedbackType = request.FeedbackType,
-                Reasons = request.Reasons,
                 Response = request.Response?.Trim() ?? string.Empty,
                 ContactRequested = request.ContactRequested,
                 Email = request.Email?.Trim() ?? string.Empty,
-                SubmittedAt = DateTime.UtcNow,
-                ReasonTextsEnglish = englishReasonTexts
+                SubmittedAt = Timestamp.FromDateTime(DateTime.UtcNow)
             };
+            
+            // Map reasons
+            foreach (var reason in request.Reasons)
+            {
+                feedbackInfo.Reasons.Add((FeedbackReason)reason);
+            }
+            
+            // Map reason texts
+            feedbackInfo.ReasonTextsEnglish.AddRange(englishReasonTexts);
+
+            // Map subscription if present
+            if (request.Subscription != null)
+            {
+                feedbackInfo.Subscription = new UserSubscriptionInfo
+                {
+                    PlanType = (FeedbackPlanType)request.Subscription.PlanType,
+                    IsUltimate = request.Subscription.IsUltimate,
+                    StartDate = Timestamp.FromDateTime(DateTime.SpecifyKind(request.Subscription.StartDate, DateTimeKind.Utc)),
+                    EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(request.Subscription.EndDate, DateTimeKind.Utc))
+                };
+            }
 
             // Raise event to update state
-            RaiseEvent(new SubmitFeedbackLogEvent
+            RaiseEvent(new SubmitFeedbackEvent
             {
-                UserId = this.GetPrimaryKey(),
+                UserId = Id.ToString(),
                 FeedbackInfo = feedbackInfo,
-                SubmittedAt = DateTime.UtcNow,
+                SubmittedAt = Timestamp.FromDateTime(DateTime.UtcNow),
                 FeedbackCount = State.FeedbackCount + 1
             });
 
-            // Confirm events to persist state changes
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
 
-            _logger.LogInformation("[UserFeedbackGAgent][SubmitFeedbackAsync] User feedback submitted successfully. UserId: {UserId}, FeedbackId: {FeedbackId}, Type: {Type}",
-                this.GetPrimaryKey(), feedbackInfo.FeedbackId, request.FeedbackType);
+            Logger.LogInformation("[UserFeedbackGAgent][SubmitFeedbackAsync] User feedback submitted successfully. UserId: {UserId}, FeedbackId: {FeedbackId}, Type: {Type}",
+                Id, feedbackInfo.FeedbackId, request.FeedbackType);
 
             return new SubmitFeedbackResult
             {
@@ -192,7 +162,7 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
         catch (Exception ex)
         {
             var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
-            _logger.LogError(ex, "[UserFeedbackGAgent][SubmitFeedbackAsync] Error submitting feedback for user: {UserId}", this.GetPrimaryKey());
+            Logger.LogError(ex, "[UserFeedbackGAgent][SubmitFeedbackAsync] Error submitting feedback for user: {UserId}", Id);
             
             return new SubmitFeedbackResult
             {
@@ -205,22 +175,22 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
 
     public Task<CheckEligibilityResult> CheckFeedbackEligibilityAsync()
     {
-        _logger.LogDebug("[UserFeedbackGAgent][CheckFeedbackEligibilityAsync] Checking eligibility for user {UserId}",
-            this.GetPrimaryKey());
+        Logger.LogDebug("[UserFeedbackGAgent][CheckFeedbackEligibilityAsync] Checking eligibility for user {UserId}", Id);
             
         var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
         
         // If no previous feedback, user is eligible
         if (State.LastFeedbackTime == null)
         {
-        return Task.FromResult(new CheckEligibilityResult
-        {
-            Eligible = true,
-            Message = string.Empty
-        });
+            return Task.FromResult(new CheckEligibilityResult
+            {
+                Eligible = true,
+                Message = string.Empty
+            });
         }
 
-        var timeSinceLastFeedback = DateTime.UtcNow - State.LastFeedbackTime.Value;
+        var lastFeedbackTime = State.LastFeedbackTime.ToDateTime();
+        var timeSinceLastFeedback = DateTime.UtcNow - lastFeedbackTime;
         var frequencyDays = _feedbackOptions.CurrentValue.FeedbackFrequencyDays;
         var isEligible = timeSinceLastFeedback.TotalDays >= frequencyDays;
         
@@ -229,18 +199,18 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
             return Task.FromResult(new CheckEligibilityResult
             {
                 Eligible = true,
-                LastFeedbackTime = State.LastFeedbackTime,
+                LastFeedbackTime = lastFeedbackTime,
                 Message = string.Empty
             });
         }
 
-        var nextEligibleTime = State.LastFeedbackTime.Value.AddDays(frequencyDays);
+        var nextEligibleTime = lastFeedbackTime.AddDays(frequencyDays);
         var daysRemaining = (int)Math.Ceiling((nextEligibleTime - DateTime.UtcNow).TotalDays);
         
         return Task.FromResult(new CheckEligibilityResult
         {
             Eligible = false,
-            LastFeedbackTime = State.LastFeedbackTime,
+            LastFeedbackTime = lastFeedbackTime,
             NextEligibleTime = nextEligibleTime,
             Message = _localizationService.GetLocalizedMessage("feedback_frequency_limit", language, 
                 new Dictionary<string, string> { { "days", daysRemaining.ToString() } })
@@ -249,30 +219,21 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
 
     public Task<GetFeedbackHistoryResult> GetFeedbackHistoryAsync(GetFeedbackHistoryRequest request)
     {
-        _logger.LogDebug("[UserFeedbackGAgent][GetFeedbackHistoryAsync] Getting feedback history for user {UserId}. PageSize: {PageSize}, PageIndex: {PageIndex}",
-            this.GetPrimaryKey(), request.PageSize, request.PageIndex);
+        Logger.LogDebug("[UserFeedbackGAgent][GetFeedbackHistoryAsync] Getting feedback history for user {UserId}. PageSize: {PageSize}, PageIndex: {PageIndex}",
+            Id, request.PageSize, request.PageIndex);
             
         var allFeedbacks = new List<FeedbackHistoryItem>();
         
         // Add current feedback if exists
         if (State.CurrentFeedback != null)
         {
-                allFeedbacks.Add(new FeedbackHistoryItem
-                {
-                    FeedbackId = State.CurrentFeedback.FeedbackId,
-                    FeedbackType = State.CurrentFeedback.FeedbackType,
-                    Reasons = State.CurrentFeedback.Reasons,
-                    Response = State.CurrentFeedback.Response,
-                    ContactRequested = State.CurrentFeedback.ContactRequested,
-                    Email = State.CurrentFeedback.Email,
-                    SubmittedAt = State.CurrentFeedback.SubmittedAt
-            });
+            allFeedbacks.Add(ConvertToHistoryItem(State.CurrentFeedback));
         }
         
-        // Add archived feedbacks
+        // Add archived feedbacks (stored as JSON strings for compatibility)
         foreach (var archivedJson in State.ArchivedFeedbacks)
         {
-            var archivedFeedback = JsonConvert.DeserializeObject<UserFeedbackInfo>(archivedJson);
+            var archivedFeedback = JsonConvert.DeserializeObject<Dtos.UserFeedbackInfo>(archivedJson);
             if (archivedFeedback != null)
             {
                 allFeedbacks.Add(new FeedbackHistoryItem
@@ -300,8 +261,8 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
         
         var hasMore = (request.PageIndex + 1) * request.PageSize < totalCount;
         
-        _logger.LogDebug("[UserFeedbackGAgent][GetFeedbackHistoryAsync] Retrieved {Count} feedbacks for user {UserId}. Total: {TotalCount}, HasMore: {HasMore}",
-            pagedFeedbacks.Count, this.GetPrimaryKey(), totalCount, hasMore);
+        Logger.LogDebug("[UserFeedbackGAgent][GetFeedbackHistoryAsync] Retrieved {Count} feedbacks for user {UserId}. Total: {TotalCount}, HasMore: {HasMore}",
+            pagedFeedbacks.Count, Id, totalCount, hasMore);
         
         return Task.FromResult(new GetFeedbackHistoryResult
         {
@@ -310,14 +271,46 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
             HasMore = hasMore
         });
     }
-    
+
+    private FeedbackHistoryItem ConvertToHistoryItem(Aevatar.Agents.GodGPT.Protos.UserFeedback.UserFeedbackInfo info)
+    {
+        var item = new FeedbackHistoryItem
+        {
+            FeedbackId = info.FeedbackId,
+            FeedbackType = info.FeedbackType,
+            Response = info.Response,
+            ContactRequested = info.ContactRequested,
+            Email = info.Email,
+            SubmittedAt = info.SubmittedAt?.ToDateTime() ?? DateTime.MinValue
+        };
+        
+        // Convert reasons
+        foreach (var reason in info.Reasons)
+        {
+            item.Reasons.Add((CsFeedbackReasonEnum)reason);
+        }
+        
+        // Convert subscription if present
+        if (info.Subscription != null)
+        {
+            item.Subscription = new Dtos.UserSubscription
+            {
+                PlanType = (CsPlanType)info.Subscription.PlanType,
+                IsUltimate = info.Subscription.IsUltimate,
+                StartDate = info.Subscription.StartDate?.ToDateTime() ?? DateTime.MinValue,
+                EndDate = info.Subscription.EndDate?.ToDateTime() ?? DateTime.MinValue
+            };
+        }
+        
+        return item;
+    }
+
     /// <summary>
     /// Validate submit feedback request
     /// </summary>
     private (bool IsValid, string Message, string ErrorCode) ValidateSubmitRequest(
         SubmitFeedbackRequest request, GodGPTLanguage language)
     {
-
         if (!IsValidFeedbackType(request.FeedbackType))
         {
             return (false, _localizationService.GetLocalizedValidationMessage("invalid_feedback_type", language), "INVALID_FEEDBACK_TYPE");
@@ -342,19 +335,77 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState, UserFeedbackEven
                feedbackType.Equals(FeedbackTypeConstants.Change, StringComparison.OrdinalIgnoreCase);
     }
 
-    /// <summary>
-    /// Simple email validation
-    /// </summary>
-    private static bool IsValidEmail(string email)
+    #region EventHandlers
+
+    [EventHandler]
+    public void HandleSubmitFeedbackEvent(SubmitFeedbackEvent @event)
     {
-        try
+        TransitionState(State, @event);
+    }
+
+    [EventHandler]
+    public void HandleSkippedFeedbackEvent(SkippedFeedbackEvent @event)
+    {
+        TransitionState(State, @event);
+    }
+
+    #endregion
+
+    protected override void TransitionState(UserFeedbackState state, IMessage evt)
+    {
+        switch (evt)
         {
-            var addr = new System.Net.Mail.MailAddress(email);
-            return addr.Address == email;
-        }
-        catch
-        {
-            return false;
+            case SubmitFeedbackEvent submitEvent:
+                // Archive current feedback before adding new one
+                if (state.CurrentFeedback != null)
+                {
+                    // Convert Protobuf to old format JSON for archival compatibility
+                    var oldFormatFeedback = new Dtos.UserFeedbackInfo
+                    {
+                        FeedbackId = state.CurrentFeedback.FeedbackId,
+                        FeedbackType = state.CurrentFeedback.FeedbackType,
+                        Reasons = state.CurrentFeedback.Reasons.Select(r => (CsFeedbackReasonEnum)r).ToList(),
+                        Response = state.CurrentFeedback.Response,
+                        ContactRequested = state.CurrentFeedback.ContactRequested,
+                        Email = state.CurrentFeedback.Email,
+                        SubmittedAt = state.CurrentFeedback.SubmittedAt?.ToDateTime() ?? DateTime.MinValue,
+                        ReasonTextsEnglish = state.CurrentFeedback.ReasonTextsEnglish.ToList()
+                    };
+                    
+                    var archivedData = JsonConvert.SerializeObject(oldFormatFeedback);
+                    state.ArchivedFeedbacks.Add(archivedData);
+                    
+                    // Limit archived data count
+                    var maxArchived = _feedbackOptions.CurrentValue.MaxArchivedFeedbacks;
+                    if (state.ArchivedFeedbacks.Count > maxArchived)
+                    {
+                        state.ArchivedFeedbacks.RemoveAt(0);
+                    }
+                }
+
+                state.UserId = submitEvent.UserId;
+                state.CurrentFeedback = submitEvent.FeedbackInfo;
+                state.LastFeedbackTime = submitEvent.SubmittedAt;
+                state.FeedbackCount = submitEvent.FeedbackCount;
+                if (state.CreatedAt == null)
+                {
+                    state.CreatedAt = submitEvent.SubmittedAt;
+                }
+                state.UpdatedAt = submitEvent.SubmittedAt;
+                break;
+                
+            case SkippedFeedbackEvent skippedEvent:
+                state.LastFeedbackTime = skippedEvent.SubmittedAt;
+                if (state.CreatedAt == null)
+                {
+                    state.CreatedAt = skippedEvent.SubmittedAt;
+                }
+                state.UpdatedAt = skippedEvent.SubmittedAt;
+                break;
+                
+            default:
+                Logger.LogWarning("Unhandled event type {EventType}", evt.GetType().Name);
+                break;
         }
     }
 }
