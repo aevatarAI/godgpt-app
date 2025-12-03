@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.userinfocollection;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.UserInfoCollection";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// State
+// =============================================================================
+
+message UserInfoCollectionState {
+    string user_id = 1;                                   // [Id(0)] Guid -> string
+    bool is_initialized = 2;                              // [Id(1)]
+    google.protobuf.Timestamp created_at = 3;             // [Id(2)]
+    google.protobuf.Timestamp last_updated = 4;           // [Id(3)]
+    
+    // Name information (Step 2)
+    int32 gender = 5;                                     // [Id(4)] 1:male 2:female
+    string first_name = 6;                                // [Id(5)]
+    string last_name = 7;                                 // [Id(6)]
+    
+    // Location information (Step 3)
+    string country = 8;                                   // [Id(7)]
+    string city = 9;                                      // [Id(8)]
+    
+    // Birth date information (Step 4)
+    int32 day = 10;                                       // [Id(9)]
+    int32 month = 11;                                     // [Id(10)]
+    int32 year = 12;                                      // [Id(11)]
+    
+    // Birth time information (Step 5) - Optional
+    optional int32 hour = 13;                             // [Id(12)]
+    optional int32 minute = 14;                           // [Id(13)]
+    
+    // Seeking interests (Step 6) - Original text values
+    repeated string seeking_interests = 15;               // [Id(14)]
+    
+    // Source channels (Step 7) - Original text values
+    repeated string source_channels = 16;                 // [Id(15)]
+    
+    // Seeking interests codes (Step 6) - Enum values for statistics
+    repeated int32 seeking_interests_code = 17;           // [Id(16)]
+    
+    // Source channels codes (Step 7) - Enum values for statistics
+    repeated int32 source_channels_code = 18;             // [Id(17)]
+    
+    int32 fix_state = 19;                                 // [Id(18)]
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+message InitializeUserInfoCollectionEvent {
+    string user_id = 1;                                   // [Id(0)]
+    google.protobuf.Timestamp created_at = 2;             // [Id(1)]
+}
+
+message UpdateUserInfoCollectionEvent {
+    optional int32 gender = 1;                            // [Id(0)]
+    string first_name = 2;                                // [Id(1)]
+    string last_name = 3;                                 // [Id(2)]
+    string country = 4;                                   // [Id(3)]
+    string city = 5;                                      // [Id(4)]
+    optional int32 day = 6;                               // [Id(5)]
+    optional int32 month = 7;                             // [Id(6)]
+    optional int32 year = 8;                              // [Id(7)]
+    optional int32 hour = 9;                              // [Id(8)]
+    optional int32 minute = 10;                           // [Id(9)]
+    repeated string seeking_interests = 11;               // [Id(10)]
+    repeated string source_channels = 12;                 // [Id(11)]
+    repeated int32 seeking_interests_code = 13;           // [Id(12)]
+    repeated int32 source_channels_code = 14;             // [Id(13)]
+    google.protobuf.Timestamp updated_at = 15;            // [Id(14)]
+    string user_id = 16;                                  // [Id(15)]
+}
+
+message ClearUserInfoCollectionEvent {
+}
+
+message UpdateFixStateEvent {
+    int32 fix_state = 1;                                  // [Id(0)]
+}
+

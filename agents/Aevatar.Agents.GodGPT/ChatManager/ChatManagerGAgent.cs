@@ -19,6 +19,7 @@ using Aevatar.Application.Grains.Common.Observability;
 using Aevatar.Application.Grains.Common.Service;
 using Aevatar.Application.Grains.Invitation;
 using Aevatar.Application.Grains.UserBilling;
+using Aevatar.Agents.Abstractions;
 using Aevatar.Application.Grains.UserInfo;
 using Aevatar.Application.Grains.UserQuota;
 using Aevatar.Core;
@@ -55,13 +56,22 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     private const string FormattedDate = "yyyy-MM-dd";
     const string SessionVersion = "1.0.0";
     private readonly ILocalizationService _localizationService;
+    private readonly IGAgentFactory _agentFactory;
     
     // Cached ConfigurationGAgent instance (new framework)
     private ConfigurationGAgent? _configurationAgent;
 
-    public ChatGAgentManager(ILocalizationService localizationService)
+    public ChatGAgentManager(ILocalizationService localizationService, IGAgentFactory agentFactory)
     {
         _localizationService = localizationService;
+        _agentFactory = agentFactory;
+    }
+    
+    private async Task<UserInfoCollectionGAgent> GetUserInfoCollectionAgentAsync(Guid userId)
+    {
+        var agent = _agentFactory.CreateGAgent<UserInfoCollectionGAgent>(userId);
+        await agent.ActivateAsync();
+        return agent;
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -878,7 +888,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         var userBillingGAgent = GrainFactory.GetGrain<IUserBillingGAgent>(this.GetPrimaryKey());
         await userBillingGAgent.ClearAllAsync();
 
-        var userInfoCollectionGAgent = GrainFactory.GetGrain<IUserInfoCollectionGAgent>(this.GetPrimaryKey());
+        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(this.GetPrimaryKey());
         await userInfoCollectionGAgent.ClearAllAsync();
 
         // TODO: [GOOGLE_AUTH_DISABLED] Unbind Google account - disabled until Google Auth is migrated

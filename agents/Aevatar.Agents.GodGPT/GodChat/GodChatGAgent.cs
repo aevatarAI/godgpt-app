@@ -15,6 +15,7 @@ using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.Common.Service;
 using Aevatar.Application.Grains.GodChat.Dtos;
 using Aevatar.Application.Grains.Invitation;
+using Aevatar.Agents.Abstractions;
 using Aevatar.Application.Grains.UserInfo;
 using Aevatar.Application.Grains.UserQuota;
 using Aevatar.Core.Abstractions;
@@ -52,6 +53,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
     private readonly ISpeechService _speechService;
     private readonly IOptionsMonitor<LLMRegionOptions> _llmRegionOptions;
     private readonly ILocalizationService _localizationService;
+    private readonly IGAgentFactory _agentFactory;
     
     // Cached ConfigurationGAgent instance (new framework)
     private ConfigurationGAgent? _configurationAgent;
@@ -65,12 +67,19 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
     private bool _isAccumulatingForSuggestions = false;
     private string _accumulatedSuggestionContent = "";
 
-    public GodChatGAgent(ISpeechService speechService, IOptionsMonitor<LLMRegionOptions> llmRegionOptions,ILocalizationService localizationService)
+    public GodChatGAgent(ISpeechService speechService, IOptionsMonitor<LLMRegionOptions> llmRegionOptions, ILocalizationService localizationService, IGAgentFactory agentFactory)
     {
         _speechService = speechService;
         _llmRegionOptions = llmRegionOptions;
         _localizationService = localizationService;
-
+        _agentFactory = agentFactory;
+    }
+    
+    private async Task<UserInfoCollectionGAgent> GetUserInfoCollectionAgentAsync(Guid userId)
+    {
+        var agent = _agentFactory.CreateGAgent<UserInfoCollectionGAgent>(userId);
+        await agent.ActivateAsync();
+        return agent;
     }
 
     protected override async Task PerformConfigAsync(GodChatConfig configuration)
@@ -2293,7 +2302,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         Logger.LogDebug($"[GodChatGAgent][GenerateDailyRecommendationsAsync] {this.GetPrimaryKey()} Google Calendar disabled - returning empty prompt");
         
         var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(State.ChatManagerGuid);
-        var userInfoCollectionGAgent = GrainFactory.GetGrain<IUserInfoCollectionGAgent>(State.ChatManagerGuid);
+        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(State.ChatManagerGuid);
         var (fullName, prompt) = await userInfoCollectionGAgent.GenerateUserInfoPromptAsync(userLocalTime);
         var isSubscribed = await userQuotaGAgent.IsSubscribedAsync(true) || await userQuotaGAgent.IsSubscribedAsync(false);
         
