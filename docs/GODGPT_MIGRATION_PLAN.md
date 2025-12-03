@@ -304,10 +304,10 @@ LLMConfigDto                 →  AevatarAIAgentConfiguration
 
 ### 迁移顺序建议
 
-1. **Phase 1 - 简单 Agent** (进行中)
+1. **Phase 1 - 简单 Agent** (✅ 完成)
    - [x] `ConfigurationGAgent` → 完成
-   - [ ] `InviteCodeGAgent` 
-   - [ ] `UserStatisticsGAgent`
+   - [x] `InviteCodeGAgent` → 完成
+   - [x] `UserStatisticsGAgent` → 完成
 
 2. **Phase 2 - 配置类** 
    - [x] `GodChatConfig` → Protobuf
