@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos";
+
+// =============================================================================
+// GodChat Configuration (Protobuf)
+// =============================================================================
+
+/// Configuration for GodChatGAgent
+/// Replaces old ChatConfigDto
+/// NOTE: LLMConfig and StreamingConfig are kept as C# classes for compatibility
+message GodChatConfig {
+    optional string system_prompt = 1;
+    int32 max_history_count = 2;     // default 50
+    bool enable_streaming = 3;       // default true
+    optional string instructions = 5;
+    bool streaming_mode_enabled = 6; // default true
+    
+    // Flattened LLM config fields
+    optional string llm_model_id = 10;
+    optional string llm_provider = 11;
+    double llm_temperature = 12;     // default 0.7
+    int32 llm_max_tokens = 13;       // default 2000
+    optional string llm_system_llm = 14;
+    
+    // Flattened streaming config fields  
+    int32 streaming_buffer_size = 20;    // default 1024
+    int32 streaming_buffering_size = 21; // default 1024
+    optional string streaming_namespace = 22;
+}
+
+// =============================================================================
+// NOTE: Other configuration types (AIAgentStatusProxyConfig, StreamingConfig, LLMConfigDto)
+// remain as C# classes to maintain backward compatibility with existing code.
+// Only GodChatConfig uses Protobuf for new framework configuration.
+// =============================================================================

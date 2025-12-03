@@ -1,0 +1,75 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net10.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <RootNamespace>Aevatar.Application.Grains</RootNamespace>
+        <AssemblyName>Aevatar.Agents.GodGPT</AssemblyName>
+    </PropertyGroup>
+
+    <!-- New Framework Project References -->
+    <ItemGroup>
+        <ProjectReference Include="../../src/Aevatar.Agents.Abstractions/Aevatar.Agents.Abstractions.csproj" />
+        <ProjectReference Include="../../src/Aevatar.Agents.Core/Aevatar.Agents.Core.csproj" />
+        <ProjectReference Include="../../src/Aevatar.Agents.AI.Abstractions/Aevatar.Agents.AI.Abstractions.csproj" />
+        <ProjectReference Include="../../src/Aevatar.Agents.AI.Core/Aevatar.Agents.AI.Core.csproj" />
+        <ProjectReference Include="../../src/Aevatar.Agents.Runtime.Orleans/Aevatar.Agents.Runtime.Orleans.csproj" />
+        <ProjectReference Include="../Aevatar.Agents.Chat/Aevatar.Agents.Chat.csproj" />
+    </ItemGroup>
+
+    <!-- NuGet Packages (via CPM) -->
+    <ItemGroup>
+        <!-- JWT / Auth -->
+        <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
+        <PackageReference Include="Microsoft.IdentityModel.Tokens" />
+        <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+        
+        <!-- ABP Framework -->
+        <PackageReference Include="Volo.Abp.AutoMapper" />
+        <PackageReference Include="Volo.Abp.Core" />
+        <PackageReference Include="Volo.Abp.EventBus.Abstractions" />
+        <PackageReference Include="Volo.Abp.BlobStoring" />
+        
+        <!-- Payment / External Services -->
+        <PackageReference Include="Stripe.net" />
+        <PackageReference Include="Google.Apis.AndroidPublisher.v3" />
+        <PackageReference Include="StackExchange.Redis" />
+        
+        <!-- JSON / Serialization -->
+        <PackageReference Include="Newtonsoft.Json" />
+        <PackageReference Include="JsonSchema.Net.Generation" />
+        
+        <!-- Microsoft Extensions -->
+        <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+        <PackageReference Include="Microsoft.Extensions.Options" />
+        <PackageReference Include="Microsoft.Extensions.Http" />
+        
+        <!-- Orleans -->
+        <PackageReference Include="Microsoft.Orleans.Sdk" />
+        <PackageReference Include="Microsoft.Orleans.Reminders" />
+        <PackageReference Include="Microsoft.Orleans.Streaming" />
+        <PackageReference Include="Microsoft.Orleans.Runtime" />
+        <PackageReference Include="Microsoft.Orleans.EventSourcing" />
+        
+        <!-- Speech -->
+        <PackageReference Include="Microsoft.CognitiveServices.Speech" />
+        
+        <!-- Protobuf -->
+        <PackageReference Include="Google.Protobuf" />
+        <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
+    </ItemGroup>
+
+    <!-- Certificate Files -->
+    <ItemGroup>
+        <None Include="ChatManager/UserBilling/Certificates/AppleRootCA-G3.cer">
+            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+        </None>
+    </ItemGroup>
+
+    <!-- Protobuf Files -->
+    <ItemGroup>
+        <Protobuf Include="**/*.proto" GrpcServices="None" />
+    </ItemGroup>
+
+</Project>

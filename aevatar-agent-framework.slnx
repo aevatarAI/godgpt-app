@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/agents/">
     <Project Path="agents\Aevatar.Agents.Chat\Aevatar.Agents.Chat.csproj" />
+    <Project Path="agents\Aevatar.Agents.GodGPT\Aevatar.Agents.GodGPT.csproj" />
     <Project Path="agents\Aevatar.Agents.Translation\Aevatar.Agents.Translation.csproj" />
     <Project Path="agents\Aevatar.Agents.Twitter\Aevatar.Agents.Twitter.csproj" />
     <Project Path="agents\Aevatar.Agents.Workflow\Aevatar.Agents.Workflow.csproj" />
@@ -54,8 +55,6 @@
     <Project Path="plugins\Aevatar.Agents.Plugins.MassTransit\Aevatar.Agents.Plugins.MassTransit.csproj" Type="Classic C#" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="plugins\Aevatar.Agents.Plugins.CQRS\Aevatar.Agents.Plugins.CQRS.csproj" Type="Classic C#" />
-    <Project Path="plugins\Aevatar.Agents.Plugins.MassTransit\Aevatar.Agents.Plugins.MassTransit.csproj" Type="Classic C#" />
     <Project Path="src\Aevatar.Agents.Abstractions\Aevatar.Agents.Abstractions.csproj" />
     <Project Path="src\Aevatar.Agents.AI.Abstractions\Aevatar.Agents.AI.Abstractions.csproj" />
     <Project Path="src\Aevatar.Agents.AI.Core\Aevatar.Agents.AI.Core.csproj" />

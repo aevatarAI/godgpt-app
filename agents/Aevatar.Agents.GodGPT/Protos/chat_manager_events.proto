@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package Aevatar.Agents.GodGPT.Protos;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos";
+
+// =====================================================
+// NOTE: This file ONLY contains Protobuf-based configurations
+// Event types and other DTOs remain as C# classes for backward compatibility
+// =====================================================
+
+// NOTE: The following types are intentionally NOT defined here to avoid 
+// ambiguous references with existing C# types:
+// - VoiceLanguageEnum (GodGPT.GAgents.SpeechChat)
+// - ProxyInitStatus (Aevatar.Application.Grains.Common.Constants)
+// - UpdateProxyInitStatusGEvent (Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.GEvents)
+// - UserProfileDto (Aevatar.Application.Grains.Agents.ChatManager.Dtos)
+// - Other existing DTOs and events
