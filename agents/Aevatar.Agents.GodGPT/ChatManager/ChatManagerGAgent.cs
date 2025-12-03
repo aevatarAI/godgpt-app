@@ -937,7 +937,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     {
         Logger.LogDebug($"[ChatGAgentManager][GetUserProfileAsync] userId: {this.GetPrimaryKey().ToString()}");
 
-        var invitationGrain = GrainFactory.GetGrain<IInvitationGAgent>(this.GetPrimaryKey());
+        var invitationGrain = await GetInvitationAgentAsync(this.GetPrimaryKey());
         await invitationGrain.ProcessScheduledRewardAsync();
 
         // Sync latest subscription status from UserBillingGAgent before getting user profile
@@ -1066,7 +1066,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
     public async Task<string> GenerateInviteCodeAsync()
     {
-        IInvitationGAgent invitationAgent = GrainFactory.GetGrain<IInvitationGAgent>(this.GetPrimaryKey());
+        var invitationAgent = await GetInvitationAgentAsync(this.GetPrimaryKey());
         var inviteCode = await invitationAgent.GenerateInviteCodeAsync();
         return inviteCode;
     }
@@ -1137,7 +1137,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
         // Step 2: If eligible, record the invitee in the inviter's grain.
         var inviterGuid = Guid.Parse(inviterId);
-        var inviterGrain = GrainFactory.GetGrain<IInvitationGAgent>(inviterGuid);
+        var inviterGrain = await GetInvitationAgentAsync(inviterGuid);
         await inviterGrain.ProcessInviteeRegistrationAsync(this.GetPrimaryKey().ToString());
 
         await SetInviterAsync(inviterGuid);
@@ -1458,6 +1458,14 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     {
         var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
         var agent = factory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
+        await agent.ActivateAsync();
+        return agent;
+    }
+
+    private async Task<InvitationGAgent> GetInvitationAgentAsync(Guid userId)
+    {
+        var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
+        var agent = factory.CreateGAgent<InvitationGAgent>(userId);
         await agent.ActivateAsync();
         return agent;
     }

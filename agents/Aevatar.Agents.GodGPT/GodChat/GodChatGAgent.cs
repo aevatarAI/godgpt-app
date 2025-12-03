@@ -1204,7 +1204,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                 var inviterId = await chatManagerGAgent.GetInviterAsync();
                 if (inviterId != null && inviterId != Guid.Empty)
                 {
-                    var invitationGAgent = GrainFactory.GetGrain<IInvitationGAgent>((Guid)inviterId);
+                    var invitationGAgent = await GetInvitationAgentAsync((Guid)inviterId);
                     await invitationGAgent.ProcessInviteeChatCompletionAsync(State.ChatManagerGuid.ToString());
                 }
             }
@@ -2376,4 +2376,12 @@ xxxxx (A brief one-sentence summary, under 20 words)";
     }
     */
     #endregion
+
+    private async Task<InvitationGAgent> GetInvitationAgentAsync(Guid userId)
+    {
+        var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
+        var agent = factory.CreateGAgent<InvitationGAgent>(userId);
+        await agent.ActivateAsync();
+        return agent;
+    }
 }

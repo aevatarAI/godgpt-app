@@ -1,27 +1,34 @@
 using System.Text;
+using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Core;
+using Aevatar.Agents.GodGPT.Protos.Invitation;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Agents.Invitation;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
-using Aevatar.Application.Grains.Common.Constants;
-using Aevatar.Application.Grains.Invitation.SEvents;
+using Aevatar.Application.Grains.Invitation;
 using Aevatar.Application.Grains.UserQuota;
-using Aevatar.Core;
-using Aevatar.Core.Abstractions;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Orleans;
+using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
+using CsRewardTypeEnum = Aevatar.Application.Grains.Common.Constants.RewardTypeEnum;
+using CsMembershipLevel = Aevatar.Application.Grains.Common.Constants.MembershipLevel;
 
 namespace Aevatar.Application.Grains.Invitation;
 
 [GAgent(nameof(InvitationGAgent))]
-public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>, IInvitationGAgent
+public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
 {
-    private readonly ILogger<InvitationGAgent> _logger;
+    private readonly DateTime DefaultIssueAt = new DateTime(2025, 7, 8, 0, 0, 0, DateTimeKind.Utc);
+    private readonly IClusterClient _clusterClient;
+    private readonly IGAgentFactory _agentFactory;
 
-    private readonly DateTime DefaultIssueAt = new DateTime(2025, 7, 8, 0, 0, 0);
-
-    public InvitationGAgent(ILogger<InvitationGAgent> logger)
+    public InvitationGAgent(Guid id, IClusterClient clusterClient, IGAgentFactory agentFactory) : base(id)
     {
-        _logger = logger;
+        _clusterClient = clusterClient;
+        _agentFactory = agentFactory;
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -38,14 +45,14 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
 
         var inviteCode = await GenerateUniqueCodeAsync();
         var inviteCodeGrain = await GetInviteCodeAgentAsync(CommonHelper.StringToGuid(inviteCode));
-        await inviteCodeGrain.InitializeAsync(this.GetPrimaryKey().ToString(), inviteCode);
+        await inviteCodeGrain.InitializeAsync(Id.ToString(), inviteCode);
 
-        RaiseEvent(new SetInviteCodeLogEvent
+        RaiseEvent(new SetInviteCodeEvent
         {
             InviteCode = inviteCode,
-            InviterId = this.GetPrimaryKey().ToString()
+            InviterId = Id.ToString()
         });
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
 
         return inviteCode;
     }
@@ -117,17 +124,17 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
         {
             InviteeId = r.InviteeId,
             Credits = r.Credits,
-            RewardType = r.RewardType.ToString(),
-            IssuedAt = r.IssuedAt,
+            RewardType = ((CsRewardTypeEnum)r.RewardType).ToString(),
+            IssuedAt = r.IssuedAt?.ToDateTime() ?? DateTime.MinValue,
             IsScheduled = r.IsScheduled,
-            ScheduledDate = r.ScheduledDate,
+            ScheduledDate = r.ScheduledDate != null ? r.ScheduledDate.ToDateTime() : null,
             InvoiceId = r.InvoiceId
         }).ToList());
     }
 
     public Task<PagedResultDto<RewardHistoryDto>> GetRewardHistoryAsync(GetRewardHistoryRequestDto request)
     {
-        var query = State.RewardHistory.AsQueryable();
+        var query = State.RewardHistory.AsEnumerable();
 
         // Filter out scheduled rewards
         query = query.Where(r => !r.IsScheduled);
@@ -135,25 +142,27 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
         // Apply filter
         if (request.RewardType.HasValue)
         {
-            query = query.Where(r => r.RewardType == request.RewardType.Value);
+            var protoRewardType = (RewardType)request.RewardType.Value;
+            query = query.Where(r => r.RewardType == protoRewardType);
         }
 
         // Get total count
-        var totalCount = query.Count();
+        var filteredList = query.ToList();
+        var totalCount = filteredList.Count;
 
         // Apply pagination
-        var items = query
-            .OrderByDescending(r => r.IssuedAt)
+        var items = filteredList
+            .OrderByDescending(r => r.IssuedAt?.ToDateTime() ?? DateTime.MinValue)
             .Skip((request.PageNo - 1) * request.PageSize)
             .Take(request.PageSize)
             .Select(r => new RewardHistoryDto
             {
                 InviteeId = r.InviteeId,
                 Credits = r.Credits,
-                RewardType = r.RewardType.ToString(),
-                IssuedAt = r.IssuedAt,
+                RewardType = ((CsRewardTypeEnum)r.RewardType).ToString(),
+                IssuedAt = r.IssuedAt?.ToDateTime() ?? DateTime.MinValue,
                 IsScheduled = r.IsScheduled,
-                ScheduledDate = r.ScheduledDate,
+                ScheduledDate = r.ScheduledDate != null ? r.ScheduledDate.ToDateTime() : null,
                 InvoiceId = r.InvoiceId,
                 TweetId = r.TweetId
             })
@@ -171,16 +180,16 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
     {
         var utcNow = DateTime.UtcNow;
         var scheduledRewards = State.RewardHistory.Where(r => r.IsScheduled &&
-                                                              r.ScheduledDate.HasValue &&
-                                                              utcNow > r.ScheduledDate.Value &&
+                                                              r.ScheduledDate != null &&
+                                                              utcNow > r.ScheduledDate.ToDateTime() &&
                                                               !string.IsNullOrEmpty(r.InvoiceId)).ToList();
-        if (!scheduledRewards.IsNullOrEmpty())
+        if (scheduledRewards.Any())
         {
-            var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(this.GetPrimaryKey());
+            var userQuotaGAgent = _clusterClient.GetGrain<IUserQuotaGAgent>(Id);
             foreach (var reward in scheduledRewards)
             {
                 Logger.LogInformation(
-                    $"[InvitationGAgent][ProcessScheduledRewardAsync] Processing scheduled reward for user {this.GetPrimaryKey()}, credits: {reward.Credits}");
+                    $"[InvitationGAgent][ProcessScheduledRewardAsync] Processing scheduled reward for user {Id}, credits: {reward.Credits}");
                 await userQuotaGAgent.AddCreditsAsync(reward.Credits);
                 await MarkRewardAsIssuedAsync(reward.InviteeId, reward.InvoiceId);
             }
@@ -194,13 +203,13 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
             return false;
         }
 
-        RaiseEvent(new AddInviteeLogEvent
+        RaiseEvent(new AddInviteeEvent
         {
             InviteeId = inviteeId,
-            InvitedAt = DateTime.UtcNow
+            InvitedAt = Timestamp.FromDateTime(DateTime.UtcNow)
         });
 
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
         return true;
     }
 
@@ -211,31 +220,32 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
             return;
         }
 
-        RaiseEvent(new UpdateInviteeStatusLogEvent
+        RaiseEvent(new UpdateInviteeStatusEvent
         {
             InviteeId = inviteeId,
             HasCompletedChat = true,
             HasPaid = invitee.HasPaid,
             PaidPlan = invitee.PaidPlan,
-            PaidAt = invitee.PaidAt
+            PaidAt = invitee.PaidAt != null ? invitee.PaidAt : null
         });
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
 
         // Issue first invite reward if this is the first valid invite
         if (State.ValidInvites == 0)
         {
-            await IssueReward(inviteeId, 30, RewardTypeEnum.FirstInviteReward);
+            await IssueReward(inviteeId, 30, RewardType.FirstInviteReward);
         }
         // Issue group reward if completing a group of 3
         else if ((State.ValidInvites) % 3 == 0)
         {
-            await IssueReward(inviteeId, 100, RewardTypeEnum.GroupInviteReward);
+            await IssueReward(inviteeId, 100, RewardType.GroupInviteReward);
         }
 
-        RaiseEvent(new UpdateValidInvitesLogEvent { ValidInvites = State.ValidInvites + 1 });
+        RaiseEvent(new UpdateValidInvitesEvent { ValidInvites = State.ValidInvites + 1 });
+        await ConfirmEventsAsync();
     }
 
-    public async Task ProcessInviteeSubscriptionAsync(string inviteeId, PlanType planType, bool isUltimate,
+    public async Task ProcessInviteeSubscriptionAsync(string inviteeId, CsPlanType planType, bool isUltimate,
         string invoiceId)
     {
         if (!State.Invitees.TryGetValue(inviteeId, out var invitee) || invitee.HasPaid)
@@ -249,66 +259,66 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
             return;
         }
 
-        RaiseEvent(new UpdateInviteeStatusLogEvent
+        RaiseEvent(new UpdateInviteeStatusEvent
         {
             InviteeId = inviteeId,
             HasCompletedChat = invitee.HasCompletedChat,
             HasPaid = true,
-            PaidPlan = planType,
-            PaidAt = DateTime.UtcNow,
+            PaidPlan = (InvitationPlanType)planType,
+            PaidAt = Timestamp.FromDateTime(DateTime.UtcNow),
             MembershipLevel = isUltimate
-                ? MembershipLevel.Membership_Level_Ultimate
-                : MembershipLevel.Membership_Level_Premium
+                ? CsMembershipLevel.Membership_Level_Ultimate
+                : CsMembershipLevel.Membership_Level_Premium
         });
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
 
         // For annual plans, schedule the reward for 30 days later
-        if (planType == PlanType.Year)
+        if (planType == CsPlanType.Year)
         {
-            var addRewardLogEvent = new AddRewardLogEvent
+            var addRewardEvent = new AddRewardEvent
             {
                 InviteeId = inviteeId,
                 Credits = credits,
-                RewardType = RewardTypeEnum.SubscriptionReward,
+                RewardType = RewardType.SubscriptionReward,
                 IsScheduled = true,
-                ScheduledDate = DateTime.UtcNow.AddDays(30),
+                ScheduledDate = Timestamp.FromDateTime(DateTime.UtcNow.AddDays(30)),
                 InvoiceId = invoiceId,
-                IssueAt = DateTime.UtcNow
+                IssueAt = Timestamp.FromDateTime(DateTime.UtcNow)
             };
-            RaiseEvent(addRewardLogEvent);
-            await ConfirmEvents();
-            _logger.LogInformation($"Scheduled reward of {credits} credits for invitee {inviteeId} in 30 days {addRewardLogEvent.ScheduledDate}");
+            RaiseEvent(addRewardEvent);
+            await ConfirmEventsAsync();
+            Logger.LogInformation($"Scheduled reward of {credits} credits for invitee {inviteeId} in 30 days {addRewardEvent.ScheduledDate}");
         }
         else
         {
-            await IssueReward(inviteeId, credits, RewardTypeEnum.SubscriptionReward);
+            await IssueReward(inviteeId, credits, RewardType.SubscriptionReward);
         }
     }
 
-    private async Task IssueReward(string inviteeId, int credits, RewardTypeEnum rewardType)
+    private async Task IssueReward(string inviteeId, int credits, RewardType rewardType)
     {
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(this.GetPrimaryKey());
+        var userQuotaGAgent = _clusterClient.GetGrain<IUserQuotaGAgent>(Id);
         await userQuotaGAgent.AddCreditsAsync(credits);
 
-        RaiseEvent(new AddRewardLogEvent
+        RaiseEvent(new AddRewardEvent
         {
             InviteeId = inviteeId,
             Credits = credits,
             RewardType = rewardType,
-            IssueAt = DateTime.UtcNow
+            IssueAt = Timestamp.FromDateTime(DateTime.UtcNow)
         });
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
     }
 
-    private int GetSubscriptionRewardCredits(PlanType planType, bool isUltimate)
+    private int GetSubscriptionRewardCredits(CsPlanType planType, bool isUltimate)
     {
         if (isUltimate)
         {
             return planType switch
             {
-                PlanType.Week => 500,
-                PlanType.Month => 2000,
-                PlanType.Year => 20000,
+                CsPlanType.Week => 500,
+                CsPlanType.Month => 2000,
+                CsPlanType.Year => 20000,
                 _ => 0
             };
         }
@@ -316,9 +326,9 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
         {
             return planType switch
             {
-                PlanType.Week => 100,
-                PlanType.Month => 400,
-                PlanType.Year => 4000,
+                CsPlanType.Week => 100,
+                CsPlanType.Month => 400,
+                CsPlanType.Year => 4000,
                 _ => 0
             };
         }
@@ -336,7 +346,7 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
             var codeGrain = await GetInviteCodeAgentAsync(codeGrainId);
             var isUsed = await codeGrain.IsInitialized();
 
-            _logger.LogDebug(
+            Logger.LogDebug(
                 $"[InvitationGAgent][GenerateUniqueCodeAsync] Attempt {attemptCount}: Generated invite code {code}, isUsed: {isUsed}");
 
             if (!isUsed)
@@ -363,17 +373,56 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
         return sb.ToString();
     }
 
-    protected sealed override void GAgentTransitionState(InvitationState state,
-        StateLogEventBase<InvitationLogEvent> @event)
+    #region EventHandlers
+
+    [EventHandler]
+    public void HandleSetInviteCodeEvent(SetInviteCodeEvent @event)
     {
-        switch (@event)
+        TransitionState(State, @event);
+    }
+
+    [EventHandler]
+    public void HandleAddInviteeEvent(AddInviteeEvent @event)
+    {
+        TransitionState(State, @event);
+    }
+
+    [EventHandler]
+    public void HandleUpdateInviteeStatusEvent(UpdateInviteeStatusEvent @event)
+    {
+        TransitionState(State, @event);
+    }
+
+    [EventHandler]
+    public void HandleAddRewardEvent(AddRewardEvent @event)
+    {
+        TransitionState(State, @event);
+    }
+
+    [EventHandler]
+    public void HandleUpdateValidInvitesEvent(UpdateValidInvitesEvent @event)
+    {
+        TransitionState(State, @event);
+    }
+
+    [EventHandler]
+    public void HandleMarkRewardIssuedEvent(MarkRewardIssuedEvent @event)
+    {
+        TransitionState(State, @event);
+    }
+
+    #endregion
+
+    protected override void TransitionState(InvitationState state, IMessage evt)
+    {
+        switch (evt)
         {
-            case SetInviteCodeLogEvent setInviteCode:
+            case SetInviteCodeEvent setInviteCode:
                 state.InviterId = setInviteCode.InviterId;
                 state.CurrentInviteCode = setInviteCode.InviteCode;
                 break;
 
-            case AddInviteeLogEvent addInvitee:
+            case AddInviteeEvent addInvitee:
                 state.Invitees[addInvitee.InviteeId] = new InviteeInfo
                 {
                     InviteeId = addInvitee.InviteeId,
@@ -382,39 +431,40 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
                 state.TotalInvites++;
                 break;
 
-            case UpdateInviteeStatusLogEvent updateStatus:
+            case UpdateInviteeStatusEvent updateStatus:
                 if (state.Invitees.TryGetValue(updateStatus.InviteeId, out var invitee))
                 {
                     invitee.HasCompletedChat = updateStatus.HasCompletedChat;
                     invitee.HasPaid = updateStatus.HasPaid;
                     invitee.PaidPlan = updateStatus.PaidPlan;
-                    invitee.PaidAt = updateStatus.PaidAt;
+                    if (updateStatus.PaidAt != null)
+                    {
+                        invitee.PaidAt = updateStatus.PaidAt;
+                    }
                     invitee.IsValid = updateStatus.HasCompletedChat;
                 }
-
                 break;
 
-            case AddRewardLogEvent addReward:
+            case AddRewardEvent addReward:
                 var rewardRecord = new RewardRecord
                 {
                     InviteeId = addReward.InviteeId,
                     Credits = addReward.Credits,
                     RewardType = addReward.RewardType,
-                    IssuedAt = addReward.IssueAt,
+                    IssuedAt = addReward.IssueAt ?? Timestamp.FromDateTime(DefaultIssueAt),
                     IsScheduled = addReward.IsScheduled,
-                    ScheduledDate = addReward.ScheduledDate,
-                    InvoiceId = addReward.InvoiceId,
-                    TweetId = addReward.TweetId
+                    InvoiceId = addReward.InvoiceId ?? string.Empty,
+                    TweetId = addReward.TweetId ?? string.Empty
                 };
-                if (addReward.IssueAt == null || addReward.IssueAt == default)
+                if (addReward.ScheduledDate != null)
                 {
-                    rewardRecord.IssuedAt = DefaultIssueAt;
+                    rewardRecord.ScheduledDate = addReward.ScheduledDate;
                 }
 
                 state.RewardHistory.Add(rewardRecord);
                 if (!addReward.IsScheduled)
                 {
-                    if (addReward.RewardType == RewardTypeEnum.TwitterReward)
+                    if (addReward.RewardType == RewardType.TwitterReward)
                     {
                         state.TotalCreditsFromX += addReward.Credits;
                     }
@@ -423,14 +473,13 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
                         state.TotalCreditsEarned += addReward.Credits;
                     }
                 }
-
                 break;
 
-            case UpdateValidInvitesLogEvent updateValidInvites:
+            case UpdateValidInvitesEvent updateValidInvites:
                 state.ValidInvites = updateValidInvites.ValidInvites;
                 break;
 
-            case MarkRewardIssuedLogEvent markIssued:
+            case MarkRewardIssuedEvent markIssued:
                 var reward = state.RewardHistory.FirstOrDefault(r =>
                     r.InviteeId == markIssued.InviteeId &&
                     r.InvoiceId == markIssued.InvoiceId &&
@@ -441,7 +490,10 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
                     reward.IsScheduled = false;
                     state.TotalCreditsEarned += reward.Credits;
                 }
+                break;
 
+            default:
+                Logger.LogWarning("Unhandled event type {EventType}", evt.GetType().Name);
                 break;
         }
     }
@@ -455,52 +507,46 @@ public class InvitationGAgent : GAgentBase<InvitationState, InvitationLogEvent>,
 
         if (reward != null)
         {
-            RaiseEvent(new MarkRewardIssuedLogEvent
+            RaiseEvent(new MarkRewardIssuedEvent
             {
                 InviteeId = inviteeId,
                 InvoiceId = invoiceId
             });
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
         }
         else
         {
-            _logger.LogWarning(
-                $"[InvitationGAgent][MarkRewardAsIssuedAsync] reward not found. userId {this.GetPrimaryKey().ToString()}, inviteeId {inviteeId}, invoiceId {inviteeId}");
+            Logger.LogWarning(
+                $"[InvitationGAgent][MarkRewardAsIssuedAsync] reward not found. userId {Id}, inviteeId {inviteeId}, invoiceId {inviteeId}");
         }
     }
 
     public async Task<bool> ProcessTwitterRewardAsync(string tweetId, int credits)
     {
-        // Check if the tweet has already been rewarded
-        // if (State.RewardHistory.Any(r => r.TweetId == tweetId && r.RewardType == RewardTypeEnum.TwitterReward))
-        // {
-        //     return false;
-        // }
-        _logger.LogDebug(
-            $"[InvitationGAgent][ProcessTwitterRewardAsync] process twitter reward. userId {this.GetPrimaryKey().ToString()}, tweetId {tweetId}, credits {credits}");
+        Logger.LogDebug(
+            $"[InvitationGAgent][ProcessTwitterRewardAsync] process twitter reward. userId {Id}, tweetId {tweetId}, credits {credits}");
         // Issue the reward
-        var userQuotaGAgent = GrainFactory.GetGrain<IUserQuotaGAgent>(this.GetPrimaryKey());
+        var userQuotaGAgent = _clusterClient.GetGrain<IUserQuotaGAgent>(Id);
         await userQuotaGAgent.AddCreditsAsync(credits);
 
         // Record the reward
-        RaiseEvent(new AddRewardLogEvent
+        RaiseEvent(new AddRewardEvent
         {
-            InviteeId = this.GetPrimaryKey().ToString(), // Use the current user's ID
+            InviteeId = Id.ToString(), // Use the current user's ID
             Credits = credits,
-            RewardType = RewardTypeEnum.TwitterReward,
+            RewardType = RewardType.TwitterReward,
             IsScheduled = false,
             TweetId = tweetId,
-            IssueAt = DateTime.UtcNow
+            IssueAt = Timestamp.FromDateTime(DateTime.UtcNow)
         });
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
 
         return true;
     }
 
     private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
     {
-        var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
-        var agent = factory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
+        var agent = _agentFactory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
         await agent.ActivateAsync();
         return agent;
     }

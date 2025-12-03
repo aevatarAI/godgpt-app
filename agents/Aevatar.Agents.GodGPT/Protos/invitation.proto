@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.invitation;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.Invitation";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+// Matches C# RewardTypeEnum
+enum RewardType {
+    REWARD_TYPE_FIRST_INVITE_REWARD = 0;
+    REWARD_TYPE_GROUP_INVITE_REWARD = 1;
+    REWARD_TYPE_SUBSCRIPTION_REWARD = 2;
+    REWARD_TYPE_TWITTER_REWARD = 3;
+}
+
+// Matches C# PlanType
+enum InvitationPlanType {
+    INVITATION_PLAN_TYPE_NONE = 0;
+    INVITATION_PLAN_TYPE_DAY = 1;
+    INVITATION_PLAN_TYPE_MONTH = 2;
+    INVITATION_PLAN_TYPE_YEAR = 3;
+    INVITATION_PLAN_TYPE_WEEK = 4;
+}
+
+// =============================================================================
+// Nested Types
+// =============================================================================
+
+message InviteeInfo {
+    string invitee_id = 1;                            // [Id(0)]
+    google.protobuf.Timestamp invited_at = 2;         // [Id(1)]
+    bool has_completed_chat = 3;                      // [Id(2)]
+    bool has_paid = 4;                                // [Id(3)]
+    InvitationPlanType paid_plan = 5;                 // [Id(4)]
+    optional google.protobuf.Timestamp paid_at = 6;   // [Id(5)]
+    bool reward_issued = 7;                           // [Id(6)]
+    bool is_valid = 8;                                // [Id(7)]
+}
+
+message RewardRecord {
+    string invitee_id = 1;                            // [Id(0)]
+    int32 credits = 2;                                // [Id(1)]
+    RewardType reward_type = 3;                       // [Id(2)]
+    google.protobuf.Timestamp issued_at = 4;          // [Id(3)]
+    bool is_scheduled = 5;                            // [Id(4)]
+    optional google.protobuf.Timestamp scheduled_date = 6;  // [Id(5)]
+    string invoice_id = 7;                            // [Id(6)]
+    string tweet_id = 8;                              // [Id(7)]
+}
+
+// =============================================================================
+// State
+// =============================================================================
+
+message InvitationState {
+    string inviter_id = 1;                            // [Id(0)]
+    string current_invite_code = 2;                   // [Id(1)]
+    map<string, InviteeInfo> invitees = 3;            // [Id(2)]
+    int32 total_invites = 4;                          // [Id(3)]
+    int32 valid_invites = 5;                          // [Id(4)]
+    int32 total_credits_earned = 6;                   // [Id(5)]
+    repeated RewardRecord reward_history = 7;         // [Id(6)]
+    google.protobuf.Timestamp last_reward_tier_update = 8;  // [Id(7)]
+    int32 total_credits_from_x = 9;                   // [Id(8)]
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+message SetInviteCodeEvent {
+    string invite_code = 1;                           // [Id(0)]
+    string inviter_id = 2;                            // [Id(1)]
+}
+
+message AddInviteeEvent {
+    string invitee_id = 1;                            // [Id(0)]
+    google.protobuf.Timestamp invited_at = 2;         // [Id(1)]
+}
+
+message UpdateInviteeStatusEvent {
+    string invitee_id = 1;                            // [Id(0)]
+    bool has_completed_chat = 2;                      // [Id(1)]
+    bool has_paid = 3;                                // [Id(2)]
+    InvitationPlanType paid_plan = 4;                 // [Id(3)]
+    optional google.protobuf.Timestamp paid_at = 5;   // [Id(4)]
+    string membership_level = 6;                      // [Id(5)]
+}
+
+message AddRewardEvent {
+    string invitee_id = 1;                            // [Id(0)]
+    int32 credits = 2;                                // [Id(1)]
+    RewardType reward_type = 3;                       // [Id(2)]
+    bool is_scheduled = 4;                            // [Id(3)]
+    optional google.protobuf.Timestamp scheduled_date = 5;  // [Id(4)]
+    string invoice_id = 6;                            // [Id(5)]
+    string tweet_id = 7;                              // [Id(6)]
+    google.protobuf.Timestamp issue_at = 8;           // [Id(7)]
+}
+
+message UpdateValidInvitesEvent {
+    int32 valid_invites = 1;                          // [Id(0)]
+}
+
+message MarkRewardIssuedEvent {
+    string invitee_id = 1;                            // [Id(0)]
+    string invoice_id = 2;                            // [Id(1)]
+}
+

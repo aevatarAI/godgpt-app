@@ -3951,7 +3951,7 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
         var inviterId = await chatManagerGAgent.GetInviterAsync();
         if (inviterId != null && inviterId != Guid.Empty)
         {
-            var invitationGAgent = GrainFactory.GetGrain<IInvitationGAgent>((Guid)inviterId);
+            var invitationGAgent = await GetInvitationAgentAsync((Guid)inviterId);
             await invitationGAgent.ProcessInviteeSubscriptionAsync(userId.ToString(), planType, isUltimate, invoiceId);
         }
     }
@@ -5455,6 +5455,14 @@ public class UserBillingGAgent : GAgentBase<UserBillingGAgentState, UserBillingL
     {
         var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
         var agent = factory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
+        await agent.ActivateAsync();
+        return agent;
+    }
+
+    private async Task<InvitationGAgent> GetInvitationAgentAsync(Guid userId)
+    {
+        var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
+        var agent = factory.CreateGAgent<InvitationGAgent>(userId);
         await agent.ActivateAsync();
         return agent;
     }

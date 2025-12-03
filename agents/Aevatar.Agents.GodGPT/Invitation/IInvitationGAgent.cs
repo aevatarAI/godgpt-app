@@ -1,11 +1,9 @@
 using Aevatar.Application.Grains.Common.Constants;
-using Aevatar.Core.Abstractions;
 using Aevatar.Application.Grains.Agents.Invitation;
-using Orleans.Concurrency;
 
 namespace Aevatar.Application.Grains.Invitation;
 
-public interface IInvitationGAgent : IGAgent
+public interface IInvitationGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
     /// <summary>
     /// Generate a new invite code for the user
@@ -15,25 +13,21 @@ public interface IInvitationGAgent : IGAgent
     /// <summary>
     /// Get invitation statistics for the user
     /// </summary>
-    [ReadOnly]
     Task<InvitationStatsDto> GetInvitationStatsAsync();
 
     /// <summary>
     /// Get reward tiers based on current invitation count
     /// </summary>
-    [ReadOnly]
     Task<List<RewardTierDto>> GetRewardTiersAsync();
     
     /// <summary>
     /// Get reward history for the user with pagination and filtering
     /// </summary>
-    [ReadOnly]
     Task<List<RewardHistoryDto>> GetRewardHistoryAsync();
 
     /// <summary>
     /// Get reward history for the user with pagination and filtering
     /// </summary>
-    [ReadOnly]
     Task<PagedResultDto<RewardHistoryDto>> GetRewardHistoryAsync(GetRewardHistoryRequestDto request);
     Task ProcessScheduledRewardAsync();
     /// <summary>

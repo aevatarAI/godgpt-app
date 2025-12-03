@@ -20,6 +20,7 @@ using Microsoft.IdentityModel.Tokens;
 using Aevatar.Application.Grains.Common;
 using System.Security.Cryptography.X509Certificates;
 using Aevatar.Application.Grains.Agents.ChatManager;
+using Aevatar.Agents.Abstractions;
 using Aevatar.Application.Grains.Invitation;
 using Aevatar.Application.Grains.UserQuota;
 using Newtonsoft.Json.Linq;
@@ -68,6 +69,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
     private readonly IOptionsMonitor<GooglePayOptions> _googlePayOptions;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IGooglePayService _googlePayService;
+    private readonly IGAgentFactory _agentFactory;
     
     private IStripeClient _client; 
     
@@ -77,7 +79,8 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         IOptionsMonitor<ApplePayOptions> appleOptions,
         IOptionsMonitor<GooglePayOptions> googlePayOptions,
         IHttpClientFactory httpClientFactory,
-        IGooglePayService googlePayService)
+        IGooglePayService googlePayService,
+        IGAgentFactory agentFactory)
     {
         _logger = logger;
         _stripeOptions = stripeOptions;
@@ -85,6 +88,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         _googlePayOptions = googlePayOptions;
         _httpClientFactory = httpClientFactory;
         _googlePayService = googlePayService;
+        _agentFactory = agentFactory;
     }
 
     public override async Task OnActivateAsync(CancellationToken cancellationToken)
@@ -3614,7 +3618,8 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         var inviterId = await chatManagerGAgent.GetInviterAsync();
         if (inviterId != null && inviterId != Guid.Empty)
         {
-            var invitationGAgent = GrainFactory.GetGrain<IInvitationGAgent>((Guid)inviterId);
+            var invitationGAgent = _agentFactory.CreateGAgent<InvitationGAgent>((Guid)inviterId);
+            await invitationGAgent.ActivateAsync();
             await invitationGAgent.ProcessInviteeSubscriptionAsync(userId.ToString(), planType, isUltimate, invoiceId);
         }
     }
