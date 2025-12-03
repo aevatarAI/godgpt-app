@@ -55,6 +55,9 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     private const string FormattedDate = "yyyy-MM-dd";
     const string SessionVersion = "1.0.0";
     private readonly ILocalizationService _localizationService;
+    
+    // Cached ConfigurationGAgent instance (new framework)
+    private ConfigurationGAgent? _configurationAgent;
 
     public ChatGAgentManager(ILocalizationService localizationService)
     {
@@ -335,7 +338,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     {
         Logger.LogDebug($"[ChatManagerGAgent][CreateSessionAsync] Start - UserId: {this.GetPrimaryKey()}");
 
-        var configuration = GetConfiguration();
+        var configuration = await GetConfigurationAsync();
         Stopwatch sw = new Stopwatch();
         sw.Start();
         IGodChat godChat = GrainFactory.GetGrain<IGodChat>(Guid.NewGuid());
@@ -369,7 +372,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         {
             Instructions = sysMessage, 
             MaxHistoryCount = 32,
-            LlmSystemLlm = await configuration.GetSystemLLM(),
+            LlmSystemLlm = configuration.GetSystemLLM(),  // Now sync call
             StreamingModeEnabled = true, 
             StreamingBufferingSize = 32
         };
@@ -1439,9 +1442,16 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         await base.OnGAgentActivateAsync(cancellationToken);
     }
 
-    private IConfigurationGAgentGrain GetConfiguration()
+    private async Task<ConfigurationGAgent> GetConfigurationAsync()
     {
-        return GrainFactory.GetGrain<IConfigurationGAgentGrain>(CommonHelper.GetSessionManagerConfigurationId());
+        if (_configurationAgent == null)
+        {
+            var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
+            _configurationAgent = factory.CreateGAgent<ConfigurationGAgent>(
+                CommonHelper.GetSessionManagerConfigurationId());
+            await _configurationAgent.ActivateAsync();
+        }
+        return _configurationAgent;
     }
 
     /// <summary>

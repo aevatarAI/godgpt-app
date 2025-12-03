@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Aevatar.Agents.GodGPT.Protos;
+using Microsoft.Extensions.DependencyInjection;
 using Aevatar.Application.Grains.Agents.Anonymous.Options;
 using Aevatar.Application.Grains.Agents.Anonymous.SEvents;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
@@ -32,6 +33,9 @@ namespace Aevatar.Application.Grains.Agents.Anonymous;
 public class AnonymousUserGAgent : GAgentBase<AnonymousUserState, AnonymousUserEventLog>, 
     IAnonymousUserGAgent
 {
+    // Cached ConfigurationGAgent instance (new framework)
+    private ConfigurationGAgent? _configurationAgent;
+
     public override Task<string> GetDescriptionAsync()
     {
         return Task.FromResult("Anonymous User GAgent for guest chat sessions");
@@ -88,13 +92,13 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState, AnonymousUserE
             }
         }
 
-        var configuration = GetConfiguration();
+        var configuration = await GetConfigurationAsync();
 
         // Create new GodChat session (mimic ChatManagerGAgent.CreateSessionAsync)
         IGodChat godChat = GrainFactory.GetGrain<IGodChat>(Guid.NewGuid());
 
         // Get system prompt and append role prompt if provided (exact copy from ChatManagerGAgent)
-        var sysMessage = await configuration.GetPrompt();
+        var sysMessage = configuration.GetPrompt();
         
         if (!string.IsNullOrEmpty(guider))
         {
@@ -111,7 +115,7 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState, AnonymousUserE
         {
             Instructions = sysMessage, 
             MaxHistoryCount = 32,
-            LlmSystemLlm = await configuration.GetSystemLLM(),
+            LlmSystemLlm = configuration.GetSystemLLM(),
             StreamingModeEnabled = true, 
             StreamingBufferingSize = 32
         };
@@ -161,14 +165,14 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState, AnonymousUserE
         }
 
         IGodChat godChat = GrainFactory.GetGrain<IGodChat>(State.CurrentSessionId.Value);
-        var configuration = GetConfiguration();
+        var configuration = await GetConfigurationAsync();
 
         // Execute streaming chat (exact copy from ChatManagerGAgent.StreamChatWithSessionAsync)
         var stopwatch = Stopwatch.StartNew();
         await godChat.GodStreamChatAsync(
             State.CurrentSessionId.Value,
-            await configuration.GetSystemLLM(), 
-            await configuration.GetStreamingModeEnabled(),
+            configuration.GetSystemLLM(), 
+            configuration.GetStreamingModeEnabled(),
             content, 
             chatId,
             null, isHttpRequest: true);
@@ -211,11 +215,18 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState, AnonymousUserE
     }
 
     /// <summary>
-    /// Get configuration agent (exact copy from ChatManagerGAgent)
+    /// Get configuration agent (new framework style)
     /// </summary>
-    private IConfigurationGAgentGrain GetConfiguration()
+    private async Task<ConfigurationGAgent> GetConfigurationAsync()
     {
-        return GrainFactory.GetGrain<IConfigurationGAgentGrain>(CommonHelper.GetSessionManagerConfigurationId());
+        if (_configurationAgent == null)
+        {
+            var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
+            _configurationAgent = factory.CreateGAgent<ConfigurationGAgent>(
+                CommonHelper.GetSessionManagerConfigurationId());
+            await _configurationAgent.ActivateAsync();
+        }
+        return _configurationAgent;
     }
 
     /// <summary>

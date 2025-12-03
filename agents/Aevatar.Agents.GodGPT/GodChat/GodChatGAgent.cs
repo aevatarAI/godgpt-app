@@ -52,6 +52,9 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
     private readonly ISpeechService _speechService;
     private readonly IOptionsMonitor<LLMRegionOptions> _llmRegionOptions;
     private readonly ILocalizationService _localizationService;
+    
+    // Cached ConfigurationGAgent instance (new framework)
+    private ConfigurationGAgent? _configurationAgent;
 
     // Dictionary to maintain text accumulator for voice chat sessions
     // Key: chatId, Value: accumulated text buffer for sentence detection
@@ -264,9 +267,9 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         Logger.LogDebug($"[GodChatGAgent][StartStreamChatAsync] {sessionId.ToString()} - Validation passed");
         
         await SetSessionTitleAsync(sessionId, content);
-        var configuration = GetConfiguration();
-        await GodStreamChatAsync(sessionId, await configuration.GetSystemLLM(),
-            await configuration.GetStreamingModeEnabled(),
+        var configuration = await GetConfigurationAsync();
+        await GodStreamChatAsync(sessionId, configuration.GetSystemLLM(),
+            configuration.GetStreamingModeEnabled(),
             content, chatId, promptSettings, isHttpRequest, region, images: images, 
             userLocalTime: input.UserLocalTime, userTimeZoneId: input.UserTimeZoneId);
         
@@ -563,9 +566,9 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         await SetSessionTitleAsync(sessionId, voiceContent);
 
         var llmStopwatch = Stopwatch.StartNew();
-        var configuration = GetConfiguration();
-        await GodVoiceStreamChatAsync(sessionId, await configuration.GetSystemLLM(),
-            await configuration.GetStreamingModeEnabled(),
+        var configuration = await GetConfigurationAsync();
+        await GodVoiceStreamChatAsync(sessionId, configuration.GetSystemLLM(),
+            configuration.GetStreamingModeEnabled(),
             voiceContent, chatId, promptSettings, isHttpRequest, region, voiceLanguage, voiceDurationSeconds);
         llmStopwatch.Stop();
         
@@ -847,7 +850,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             return new List<Guid>();
         }
         
-        var oldSystemPrompt = await GetConfiguration().GetPrompt();
+        var oldSystemPrompt = (await GetConfigurationAsync()).GetPrompt();
 
         var proxies = new List<Guid>();
         var totalProxyStopwatch = Stopwatch.StartNew();
@@ -1039,8 +1042,8 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         {
             Logger.LogError(
                 $"[GodChatGAgent][ChatMessageCallbackAsync] RequestLimitError retry. contextDto {JsonConvert.SerializeObject(contextDto)}");
-            var configuration = GetConfiguration();
-            var systemLlm = await configuration.GetSystemLLM();
+            var configuration = await GetConfigurationAsync();
+            var systemLlm = configuration.GetSystemLLM();
             var dictionary = JsonConvert.DeserializeObject<Dictionary<string, object>>(contextDto.MessageId);
             
             // Check if this is a voice chat retry to call the appropriate method
@@ -1503,9 +1506,9 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             return new List<ChatMessage>();
         }
 
-        var configuration = GetConfiguration();
-        var llm = await configuration.GetSystemLLM();
-        var streamingModeEnabled = await configuration.GetStreamingModeEnabled();
+        var configuration = await GetConfigurationAsync();
+        var llm = configuration.GetSystemLLM();
+        var streamingModeEnabled = configuration.GetStreamingModeEnabled();
 
         var aiAgentStatusProxy = await GetInitializedProxyAsync(region, sessionId);
         if (aiAgentStatusProxy == null)
@@ -1533,9 +1536,9 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         var sw = new Stopwatch();
         sw.Start();
 
-        var configuration = GetConfiguration();
-        var llm = await configuration.GetSystemLLM();
-        var streamingModeEnabled = await configuration.GetStreamingModeEnabled();
+        var configuration = await GetConfigurationAsync();
+        var llm = configuration.GetSystemLLM();
+        var streamingModeEnabled = configuration.GetStreamingModeEnabled();
         
         var aiAgentStatusProxy = await GetInitializedProxyAsync(region, sessionId);
         if (aiAgentStatusProxy == null)
@@ -1863,9 +1866,16 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             }
     }
 
-    private IConfigurationGAgentGrain GetConfiguration()
+    private async Task<ConfigurationGAgent> GetConfigurationAsync()
     {
-        return GrainFactory.GetGrain<IConfigurationGAgentGrain>(CommonHelper.GetSessionManagerConfigurationId());
+        if (_configurationAgent == null)
+        {
+            var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
+            _configurationAgent = factory.CreateGAgent<ConfigurationGAgent>(
+                CommonHelper.GetSessionManagerConfigurationId());
+            await _configurationAgent.ActivateAsync();
+        }
+        return _configurationAgent;
     }
 
     /// <summary>
@@ -2047,8 +2057,8 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             });
         }
 
-        var configuration = GetConfiguration();
-        var response = await GodChatAsync(await configuration.GetSystemLLM(), content, promptSettings);
+        var configuration = await GetConfigurationAsync();
+        var response = await GodChatAsync(configuration.GetSystemLLM(), content, promptSettings);
         return new Tuple<string, string>(response, title);
     }
 
@@ -2069,8 +2079,8 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             $"[GodChatGAgent][GodVoiceStreamChatAsync] {sessionId.ToString()} start with message: {message}, language: {voiceLanguage}");
 
         // Step 1: Get configuration and system message (same as GodStreamChatAsync)
-        var configuration = GetConfiguration();
-        var sysMessage = await configuration.GetPrompt();
+        var configuration = await GetConfigurationAsync();
+        var sysMessage = configuration.GetPrompt();
 
         // Step 2: Initialize LLM if needed (same as GodStreamChatAsync)
 
