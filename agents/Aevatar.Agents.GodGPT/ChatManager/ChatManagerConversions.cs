@@ -100,30 +100,19 @@ public static class ChatManagerConversions
         var proto = new UserDeviceInfoV2Proto
         {
             PushToken = info.PushToken ?? "",
-            DeviceType = info.DeviceType ?? "",
+            DeviceType = info.Platform ?? "",  // Platform maps to DeviceType
             RegisteredAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.RegisteredAt, DateTimeKind.Utc)),
             LastActiveAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.LastActiveAt, DateTimeKind.Utc)),
-            IsPushEnabled = info.IsPushEnabled,
-            Timezone = info.Timezone ?? "",
+            IsPushEnabled = info.PushEnabled,
+            Timezone = info.TimeZoneId ?? "",
             ConsecutiveFailures = info.ConsecutiveFailures,
-            PushStatus = (int)info.PushStatus
+            PushStatus = (int)info.Status
         };
-        if (info.LocalTime.HasValue)
+        if (info.LastSuccessfulPush.HasValue)
         {
-            proto.LocalTime = Timestamp.FromDateTime(DateTime.SpecifyKind(info.LocalTime.Value, DateTimeKind.Utc));
+            proto.LastSuccessAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.LastSuccessfulPush.Value, DateTimeKind.Utc));
         }
-        if (info.LastFailureAt.HasValue)
-        {
-            proto.LastFailureAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.LastFailureAt.Value, DateTimeKind.Utc));
-        }
-        if (info.LastSuccessAt.HasValue)
-        {
-            proto.LastSuccessAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.LastSuccessAt.Value, DateTimeKind.Utc));
-        }
-        if (info.TokenUpdatedAt.HasValue)
-        {
-            proto.TokenUpdatedAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.TokenUpdatedAt.Value, DateTimeKind.Utc));
-        }
+        proto.TokenUpdatedAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.LastTokenUpdate, DateTimeKind.Utc));
         return proto;
     }
 
@@ -131,18 +120,21 @@ public static class ChatManagerConversions
     {
         return new UserDeviceInfoV2
         {
+            DeviceId = "",  // Not in proto
+            UserId = Guid.Empty,  // Not in proto
             PushToken = proto.PushToken,
-            DeviceType = proto.DeviceType,
+            TimeZoneId = proto.Timezone,
+            PushLanguage = "en",
+            PushEnabled = proto.IsPushEnabled,
             RegisteredAt = proto.RegisteredAt?.ToDateTime() ?? DateTime.MinValue,
+            LastTokenUpdate = proto.TokenUpdatedAt?.ToDateTime() ?? DateTime.MinValue,
             LastActiveAt = proto.LastActiveAt?.ToDateTime() ?? DateTime.MinValue,
-            IsPushEnabled = proto.IsPushEnabled,
-            LocalTime = proto.LocalTime?.ToDateTime(),
-            Timezone = proto.Timezone,
+            Platform = proto.DeviceType,
+            AppVersion = "",
+            StructureVersion = 2,
+            Status = (DeviceStatus)proto.PushStatus,
             ConsecutiveFailures = proto.ConsecutiveFailures,
-            LastFailureAt = proto.LastFailureAt?.ToDateTime(),
-            LastSuccessAt = proto.LastSuccessAt?.ToDateTime(),
-            PushStatus = (DevicePushStatus)proto.PushStatus,
-            TokenUpdatedAt = proto.TokenUpdatedAt?.ToDateTime()
+            LastSuccessfulPush = proto.LastSuccessAt?.ToDateTime()
         };
     }
 
