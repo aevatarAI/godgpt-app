@@ -58,15 +58,21 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
     private readonly ILocalizationService _localizationService;
     private readonly IGAgentFactory _agentFactory;
     private readonly IClusterClient _clusterClient;
+    private readonly IServiceProvider _serviceProvider;
     
     // Cached ConfigurationGAgent instance (new framework)
     private ConfigurationGAgent? _configurationAgent;
 
-    public ChatGAgentManager(ILocalizationService localizationService, IGAgentFactory agentFactory, IClusterClient clusterClient)
+    public ChatGAgentManager(
+        ILocalizationService localizationService, 
+        IGAgentFactory agentFactory, 
+        IClusterClient clusterClient,
+        IServiceProvider serviceProvider)
     {
         _localizationService = localizationService;
         _agentFactory = agentFactory;
         _clusterClient = clusterClient;
+        _serviceProvider = serviceProvider;
     }
     
     private async Task<UserInfoCollectionGAgent> GetUserInfoCollectionAgentAsync(Guid userId)
@@ -1535,7 +1541,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         try
         {
             var roleOptions =
-                (ServiceProvider.GetService(typeof(IOptionsMonitor<RolePromptOptions>)) as
+                (_serviceProvider.GetService(typeof(IOptionsMonitor<RolePromptOptions>)) as
                     IOptionsMonitor<RolePromptOptions>)?.CurrentValue;
             var rolePrompt = roleOptions?.RolePrompts.GetValueOrDefault(roleName, string.Empty) ?? string.Empty;
 
@@ -1644,7 +1650,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
     {
         // Check device registration switch
         var options =
-            ServiceProvider.GetService(typeof(IOptionsMonitor<DailyPushOptions>)) as IOptionsMonitor<DailyPushOptions>;
+            _serviceProvider.GetService(typeof(IOptionsMonitor<DailyPushOptions>)) as IOptionsMonitor<DailyPushOptions>;
         if (options != null && !options.CurrentValue.DeviceRegistrationEnabled)
         {
             Logger.LogInformation("Mark read disabled - returning mock success for device {DeviceId}", deviceId);
@@ -1661,13 +1667,13 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             RaiseEvent(new MarkDailyPushReadEvent
             {
                 DateKey = dateKey,
-                ReadTime = DateTime.UtcNow
+                ReadTime = DateTime.UtcNow.ToTimestamp()
             });
 
             await ConfirmEventsAsync();
 
             // 2. Record device-level read status in Redis (new logic)
-            var deduplicationService = ServiceProvider.GetRequiredService<IPushDeduplicationService>();
+            var deduplicationService = _serviceProvider.GetRequiredService<IPushDeduplicationService>();
             var deviceReadSuccess = await deduplicationService.MarkDeviceAsReadAsync(deviceId, date);
 
             if (deviceReadSuccess)
@@ -1735,13 +1741,13 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         // 🔥 V2-ONLY: Collect expired devices (30+ days old) from V2 structure
         var expiredDevices = State.UserDevicesV2.Values
-            .Where(d => d.LastTokenUpdate <= thirtyDaysAgo)
+            .Where(d => d.LastTokenUpdate.LessOrEqualThan(thirtyDaysAgo))
             .Select(d => d.DeviceId)
             .ToList();
 
         // 🔥 V2-ONLY: Collect long-disabled devices (7+ days disabled) from V2 structure
         var disabledDevices = State.UserDevicesV2.Values
-            .Where(d => !d.PushEnabled && d.LastTokenUpdate <= sevenDaysAgo)
+            .Where(d => !d.PushEnabled && d.LastTokenUpdate.LessOrEqualThan(sevenDaysAgo))
             .Select(d => d.DeviceId)
             .ToList();
 
@@ -1923,7 +1929,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             var globalJwtProvider = await GetGlobalJwtProviderAgentAsync();
 
             // Get Firebase project configuration via FirebaseService
-            var firebaseService = ServiceProvider.GetService(typeof(FirebaseService)) as FirebaseService;
+            var firebaseService = _serviceProvider.GetService(typeof(FirebaseService)) as FirebaseService;
             if (firebaseService == null)
             {
                 Logger.LogError("FirebaseService not available for push notifications");
@@ -1943,7 +1949,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             // 🎯 Redis-based deduplication for push notifications
             var eligibleDevices = new List<UserDeviceInfo>();
             var deduplicationService =
-                ServiceProvider.GetService(typeof(IPushDeduplicationService)) as IPushDeduplicationService;
+                _serviceProvider.GetService(typeof(IPushDeduplicationService)) as IPushDeduplicationService;
             var date = DateOnly.FromDateTime(targetDate);
 
             if (deduplicationService == null)
@@ -2185,7 +2191,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
     public async Task<object> GetPushDebugInfoAsync(string deviceId, DateOnly date, string timeZoneId)
     {
         var deduplicationService =
-            ServiceProvider.GetService(typeof(IPushDeduplicationService)) as IPushDeduplicationService;
+            _serviceProvider.GetService(typeof(IPushDeduplicationService)) as IPushDeduplicationService;
         var readKey = date.ToString("yyyy-MM-dd");
 
         // Get Redis deduplication status
@@ -2455,7 +2461,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             };
 
             // Send HTTP request to Firebase FCM API
-            var httpClient = ServiceProvider.GetService(typeof(HttpClient)) as HttpClient;
+            var httpClient = _serviceProvider.GetService(typeof(HttpClient)) as HttpClient;
             if (httpClient == null)
             {
                 Logger.LogError("HttpClient not available for push notification");
@@ -2606,7 +2612,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
     {
         // Check device registration switch
         var options =
-            ServiceProvider.GetService(typeof(IOptionsMonitor<DailyPushOptions>)) as IOptionsMonitor<DailyPushOptions>;
+            _serviceProvider.GetService(typeof(IOptionsMonitor<DailyPushOptions>)) as IOptionsMonitor<DailyPushOptions>;
         if (options != null && !options.CurrentValue.DeviceRegistrationEnabled)
         {
             Logger.LogInformation("Device registration disabled - returning mock success for device {DeviceId}",
@@ -2793,7 +2799,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
             // Use existing Redis deduplication logic
             var deduplicationService =
-                ServiceProvider.GetService(typeof(IPushDeduplicationService)) as IPushDeduplicationService;
+                _serviceProvider.GetService(typeof(IPushDeduplicationService)) as IPushDeduplicationService;
             var date = DateOnly.FromDateTime(targetDate);
 
             bool canSend = true; // Default for test pushes
@@ -2884,7 +2890,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         {
             // Get Global JWT Provider and Firebase project configuration
             var globalJwtProvider = await GetGlobalJwtProviderAgentAsync();
-            var firebaseService = ServiceProvider.GetService(typeof(FirebaseService)) as FirebaseService;
+            var firebaseService = _serviceProvider.GetService(typeof(FirebaseService)) as FirebaseService;
 
             if (firebaseService == null)
             {

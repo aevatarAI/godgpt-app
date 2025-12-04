@@ -64,12 +64,25 @@ message UserDeviceInfoV2Proto {
   optional google.protobuf.Timestamp local_time = 6;
   string timezone = 7;
   
-  // V2 enhanced fields
-  int32 consecutive_failures = 8;
-  optional google.protobuf.Timestamp last_failure_at = 9;
-  optional google.protobuf.Timestamp last_success_at = 10;
-  int32 push_status = 11;  // DevicePushStatus enum as int
-  optional google.protobuf.Timestamp token_updated_at = 12;
+  // V2 enhanced fields (matching C# UserDeviceInfoV2 properties)
+  string device_id = 8;
+  string time_zone_id = 9;
+  string push_language = 10;
+  bool push_enabled = 11;
+  google.protobuf.Timestamp last_token_update = 12;
+  int32 consecutive_failures = 13;
+  optional google.protobuf.Timestamp last_failure_at = 14;
+  optional google.protobuf.Timestamp last_success_at = 15;
+  int32 push_status = 16;  // DevicePushStatus enum as int
+  optional google.protobuf.Timestamp token_updated_at = 17;
+  
+  // Additional fields from C# UserDeviceInfoV2
+  string user_id = 18;  // Guid as string
+  string platform = 19;
+  string app_version = 20;
+  int32 status = 21;  // DeviceStatus enum as int
+  int32 structure_version = 22;
+  optional google.protobuf.Timestamp last_successful_push = 23;
 }
 
 // =============================================================================
