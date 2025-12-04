@@ -190,3 +190,74 @@ message CleanupDevicesV2Event {
   map<string, string> cleanup_details = 4;
   google.protobuf.Timestamp cleanup_time = 5;
 }
+
+// =============================================================================
+// Response Events (for PublishAsync to subscribers)
+// =============================================================================
+
+message ResponseCreateGodProto {
+  int32 response_type = 1;  // ResponseType enum
+  string session_id = 2;     // Guid as string
+  string session_version = 3;
+}
+
+message ResponseGodChatProto {
+  int32 response_type = 1;
+  string response = 2;
+  string new_title = 3;
+}
+
+message ResponseStreamGodChatProto {
+  int32 response_type = 1;
+  string response = 2;
+  string new_title = 3;
+  string chat_id = 4;
+  bool is_last_chunk = 5;
+  int32 serial_number = 6;
+  string session_id = 7;
+  bytes audio_data = 8;
+}
+
+message ResponseGodSessionListProto {
+  int32 response_type = 1;
+  repeated SessionInfoProto session_list = 2;
+}
+
+message ResponseSessionChatHistoryProto {
+  int32 response_type = 1;
+  repeated ChatMessageProto chat_history = 2;
+}
+
+message ChatMessageProto {
+  string role = 1;  // user/assistant/system
+  string content = 2;
+}
+
+message ResponseDeleteSessionProto {
+  int32 response_type = 1;
+  bool if_success = 2;
+}
+
+message ResponseRenameSessionProto {
+  int32 response_type = 1;
+  string session_id = 2;
+  string title = 3;
+}
+
+message ResponseClearAllProto {
+  int32 response_type = 1;
+  bool success = 2;
+}
+
+message ResponseSetUserProfileProto {
+  int32 response_type = 1;
+  bool success = 2;
+}
+
+message ResponseGetUserProfileProto {
+  int32 response_type = 1;
+  string gender = 2;
+  google.protobuf.Timestamp birth_date = 3;
+  string birth_place = 4;
+  string full_name = 5;
+}

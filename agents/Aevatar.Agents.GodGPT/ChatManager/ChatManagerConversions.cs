@@ -309,4 +309,138 @@ public static class ChatManagerConversions
     {
         proto.ShareId = shareId.ToString();
     }
+
+    // =============================================================================
+    // Response Event Conversions (for PublishAsync)
+    // =============================================================================
+
+    public static ResponseCreateGodProto ToProto(this ResponseCreateGod response)
+    {
+        return new ResponseCreateGodProto
+        {
+            ResponseType = (int)response.ResponseType,
+            SessionId = response.SessionId.ToString(),
+            SessionVersion = response.SessionVersion ?? ""
+        };
+    }
+
+    public static ResponseGodChatProto ToProto(this ResponseGodChat response)
+    {
+        return new ResponseGodChatProto
+        {
+            ResponseType = (int)response.ResponseType,
+            Response = response.Response ?? "",
+            NewTitle = response.NewTitle ?? ""
+        };
+    }
+
+    public static ResponseStreamGodChatProto ToProto(this ResponseStreamGodChat response)
+    {
+        var proto = new ResponseStreamGodChatProto
+        {
+            ResponseType = (int)response.ResponseType,
+            Response = response.Response ?? "",
+            NewTitle = response.NewTitle ?? "",
+            ChatId = response.ChatId ?? "",
+            IsLastChunk = response.IsLastChunk,
+            SerialNumber = response.SerialNumber,
+            SessionId = response.SessionId.ToString()
+        };
+        if (response.AudioData != null)
+        {
+            proto.AudioData = Google.Protobuf.ByteString.CopyFrom(response.AudioData);
+        }
+        return proto;
+    }
+
+    public static ResponseGodSessionListProto ToProto(this ResponseGodSessionList response)
+    {
+        var proto = new ResponseGodSessionListProto
+        {
+            ResponseType = (int)response.ResponseType
+        };
+        if (response.SessionList != null)
+        {
+            foreach (var session in response.SessionList)
+            {
+                proto.SessionList.Add(new SessionInfoProto
+                {
+                    SessionId = session.SessionId.ToString(),
+                    Title = session.Title ?? "",
+                    CreateAt = session.CreateAt.ToTimestamp(),
+                    Guider = session.Guider ?? ""
+                });
+            }
+        }
+        return proto;
+    }
+
+    public static ResponseSessionChatHistoryProto ToProto(this ResponseSessionChatHistory response)
+    {
+        var proto = new ResponseSessionChatHistoryProto
+        {
+            ResponseType = (int)response.ResponseType
+        };
+        if (response.ChatHistory != null)
+        {
+            foreach (var msg in response.ChatHistory)
+            {
+                proto.ChatHistory.Add(new ChatMessageProto
+                {
+                    Role = msg.Role?.ToString() ?? "",
+                    Content = msg.Content ?? ""
+                });
+            }
+        }
+        return proto;
+    }
+
+    public static ResponseDeleteSessionProto ToProto(this ResponseDeleteSession response)
+    {
+        return new ResponseDeleteSessionProto
+        {
+            ResponseType = (int)response.ResponseType,
+            IfSuccess = response.IfSuccess
+        };
+    }
+
+    public static ResponseRenameSessionProto ToProto(this ResponseRenameSession response)
+    {
+        return new ResponseRenameSessionProto
+        {
+            ResponseType = (int)response.ResponseType,
+            SessionId = response.SessionId.ToString(),
+            Title = response.Title ?? ""
+        };
+    }
+
+    public static ResponseClearAllProto ToProto(this ResponseClearAll response)
+    {
+        return new ResponseClearAllProto
+        {
+            ResponseType = (int)response.ResponseType,
+            Success = response.Success
+        };
+    }
+
+    public static ResponseSetUserProfileProto ToProto(this ResponseSetUserProfile response)
+    {
+        return new ResponseSetUserProfileProto
+        {
+            ResponseType = (int)response.ResponseType,
+            Success = response.Success
+        };
+    }
+
+    public static ResponseGetUserProfileProto ToProto(this ResponseGetUserProfile response)
+    {
+        return new ResponseGetUserProfileProto
+        {
+            ResponseType = (int)response.ResponseType,
+            Gender = response.Gender ?? "",
+            BirthDate = response.BirthDate.ToTimestamp(),
+            BirthPlace = response.BirthPlace ?? "",
+            FullName = response.FullName ?? ""
+        };
+    }
 }

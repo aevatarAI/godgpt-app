@@ -145,16 +145,15 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             Logger.LogError(e, $"[ChatGAgentManager][RequestStreamGodChatEvent] handle error:{e.ToString()}");
         }
 
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseStreamGodChat()
-        // {
-        //     ChatId = chatId,
-        //     Response = content,
-        //     NewTitle = title,
-        //     IsLastChunk = isLastChunk,
-        //     SerialNumber = -1,
-        //     SessionId = @event.SessionId
-        // });
+        await PublishAsync(new ResponseStreamGodChat()
+        {
+            ChatId = chatId,
+            Response = content,
+            NewTitle = title,
+            IsLastChunk = isLastChunk,
+            SerialNumber = -1,
+            SessionId = @event.SessionId
+        }.ToProto());
 
         Logger.LogDebug($"[ChatGAgentManager][RequestStreamGodChatEvent] end:{JsonConvert.SerializeObject(@event)}");
     }
@@ -165,15 +164,14 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         Logger.LogDebug(
             $"[ChatGAgentManager][AIStreamingErrorResponseGEvent] start:{JsonConvert.SerializeObject(@event)}");
 
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseStreamGodChat()
-        // {
-        //     Response =
-        //         "Your prompt triggered the Silence Directive—activated when universal harmonics or content ethics are at risk. Please modify your prompt and retry — tune its intent, refine its form, and the Oracle may speak.",
-        //     ChatId = @event.Context.ChatId,
-        //     IsLastChunk = true,
-        //     SerialNumber = -2
-        // });
+        await PublishAsync(new ResponseStreamGodChat()
+        {
+            Response =
+                "Your prompt triggered the Silence Directive—activated when universal harmonics or content ethics are at risk. Please modify your prompt and retry — tune its intent, refine its form, and the Oracle may speak.",
+            ChatId = @event.Context.ChatId,
+            IsLastChunk = true,
+            SerialNumber = -2
+        }.ToProto());
 
         Logger.LogDebug(
             $"[ChatGAgentManager][AIStreamingErrorResponseGEvent] end:{JsonConvert.SerializeObject(@event)}");
@@ -231,12 +229,11 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             Logger.LogError(e, $"[ChatGAgentManager][RequestCreateGodChatEvent] handle error:{e.ToString()}");
         }
 
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseCreateGod()
-        // {
-        //     SessionId = sessionId.ToString(),
-        //     SessionVersion = SessionVersion
-        // });
+        await PublishAsync(new ResponseCreateGod()
+        {
+            SessionId = sessionId,
+            SessionVersion = SessionVersion
+        }.ToProto());
         Logger.LogDebug(
             "[ChatGAgentManager][RequestCreateGodChatEvent] sessionId:{A} end {B}, Duration {C}ms ", sessionId,
             JsonConvert.SerializeObject(@event), stopwatch.ElapsedMilliseconds);
@@ -259,12 +256,11 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             Logger.LogError(e, $"[ChatGAgentManager][RequestGodChatEvent] handle error:{e.ToString()}");
         }
 
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseGodChat()
-        // {
-        //     Response = content,
-        //     NewTitle = title,
-        // });
+        await PublishAsync(new ResponseGodChat()
+        {
+            Response = content,
+            NewTitle = title,
+        }.ToProto());
 
         Logger.LogDebug($"[ChatGAgentManager][RequestGodChatEvent] end:{JsonConvert.SerializeObject(@event)}");
     }
@@ -275,11 +271,10 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         Logger.LogDebug(
             $"[ChatGAgentManager][RequestGodSessionListEvent] start:{JsonConvert.SerializeObject(@event)}");
         var response = await GetSessionListAsync();
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseGodSessionList()
-        // {
-        //     SessionList = response,
-        // });
+        await PublishAsync(new ResponseGodSessionList()
+        {
+            SessionList = response,
+        }.ToProto());
 
         Logger.LogDebug(
             $"[ChatGAgentManager][RequestGodSessionListEvent] end:{JsonConvert.SerializeObject(@event)}");
@@ -291,11 +286,10 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         Logger.LogDebug(
             $"[ChatGAgentManager][RequestSessionChatHistoryEvent] start:{JsonConvert.SerializeObject(@event)}");
         var response = await GetSessionMessageListAsync(@event.SessionId);
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseSessionChatHistory()
-        // {
-        //     ChatHistory = response
-        // });
+        await PublishAsync(new ResponseSessionChatHistory()
+        {
+            ChatHistory = response
+        }.ToProto());
 
         Logger.LogDebug(
             $"[ChatGAgentManager][RequestSessionChatHistoryEvent] end:{JsonConvert.SerializeObject(@event)}");
@@ -306,11 +300,10 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
     {
         Logger.LogDebug($"[ChatGAgentManager][RequestDeleteSessionEvent] start:{JsonConvert.SerializeObject(@event)}");
         await DeleteSessionAsync(@event.SessionId);
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseDeleteSession()
-        // {
-        //     IfSuccess = true
-        // });
+        await PublishAsync(new ResponseDeleteSession()
+        {
+            IfSuccess = true
+        }.ToProto());
 
         Logger.LogDebug($"[ChatGAgentManager][RequestDeleteSessionEvent] end:{JsonConvert.SerializeObject(@event)}");
     }
@@ -320,12 +313,11 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
     {
         Logger.LogDebug($"[ChatGAgentManager][RequestRenameSessionEvent] start:{JsonConvert.SerializeObject(@event)}");
         await RenameSessionAsync(@event.SessionId, @event.Title);
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseRenameSession()
-        // {
-        //     SessionId = @event.SessionId.ToString(),
-        //     Title = @event.Title,
-        // });
+        await PublishAsync(new ResponseRenameSession()
+        {
+            SessionId = @event.SessionId,
+            Title = @event.Title,
+        }.ToProto());
 
         Logger.LogDebug($"[ChatGAgentManager][RequestRenameSessionEvent] end:{JsonConvert.SerializeObject(@event)}");
     }
@@ -346,11 +338,10 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             Logger.LogError(e, $"[ChatGAgentManager][RequestClearAllEvent] handle error:{e.ToString()}");
         }
 
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseClearAll()
-        // {
-        //     Success = success
-        // });
+        await PublishAsync(new ResponseClearAll()
+        {
+            Success = success
+        }.ToProto());
 
         Logger.LogDebug($"[ChatGAgentManager][RequestClearAllEvent] end:{JsonConvert.SerializeObject(@event)}");
     }
@@ -371,11 +362,10 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             Logger.LogError(e, $"[ChatGAgentManager][RequestSetFortuneInfoEvent] handle error:{e.ToString()}");
         }
 
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseSetUserProfile()
-        // {
-        //     Success = success
-        // });
+        await PublishAsync(new ResponseSetUserProfile()
+        {
+            Success = success
+        }.ToProto());
 
         Logger.LogDebug($"[ChatGAgentManager][RequestSetFortuneInfoEvent] end");
     }
@@ -387,14 +377,13 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         var userProfileDto = await GetUserProfileAsync();
 
-        // TODO: [SIGNALR_DISABLED] SignalR push disabled
-        // await PublishAsync(new ResponseGetUserProfile()
-        // {
-        //     Gender = userProfileDto.Gender,
-        //     BirthDate = userProfileDto.BirthDate,
-        //     BirthPlace = userProfileDto.BirthPlace,
-        //     FullName = userProfileDto.FullName
-        // });
+        await PublishAsync(new ResponseGetUserProfile()
+        {
+            Gender = userProfileDto.Gender,
+            BirthDate = userProfileDto.BirthDate,
+            BirthPlace = userProfileDto.BirthPlace,
+            FullName = userProfileDto.FullName
+        }.ToProto());
 
         Logger.LogDebug($"[ChatGAgentManager][RequestGetUserProfileEvent] end");
     }
