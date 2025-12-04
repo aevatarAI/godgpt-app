@@ -1,0 +1,145 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.godchat;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.GodChat";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+enum ProxyInitStatusProto {
+  PROXY_INIT_STATUS_NOT_INITIALIZED = 0;
+  PROXY_INIT_STATUS_INITIALIZING = 1;
+  PROXY_INIT_STATUS_INITIALIZED = 2;
+}
+
+// =============================================================================
+// Nested Types
+// =============================================================================
+
+message UserProfileProto {
+  string gender = 1;
+  google.protobuf.Timestamp birth_date = 2;
+  string birth_place = 3;
+  string full_name = 4;
+}
+
+message ChatMessageMetaProto {
+  bool is_voice_message = 1;
+  int32 voice_language = 2;  // VoiceLanguageEnum as int (has -1 value)
+  bool voice_parse_success = 3;
+  optional string voice_parse_error_message = 4;
+  double voice_duration_seconds = 5;
+}
+
+message ChatMessageProto {
+  string id = 1;
+  string role = 2;  // user, assistant, system
+  string content = 3;
+  google.protobuf.Timestamp timestamp = 4;
+  map<string, string> metadata = 5;
+}
+
+message RegionProxiesEntryProto {
+  string region = 1;
+  repeated string proxy_ids = 2;  // Guid as string
+}
+
+message ProxyInitStatusEntryProto {
+  string proxy_id = 1;  // Guid as string
+  ProxyInitStatusProto status = 2;
+}
+
+// =============================================================================
+// GodChatState
+// =============================================================================
+
+message GodChatStateProto {
+  // Inherited from ChatGAgentState
+  repeated ChatMessageProto chat_history = 1;
+  int32 max_history_count = 2;
+  optional string prompt_template = 3;
+  
+  // GodChatState specific fields
+  optional UserProfileProto user_profile = 10;
+  optional string title = 11;
+  string chat_manager_guid = 12;  // Guid as string
+  repeated RegionProxiesEntryProto region_proxies = 14;
+  optional google.protobuf.Timestamp first_chat_time = 15;
+  optional google.protobuf.Timestamp last_chat_time = 16;
+  repeated ChatMessageMetaProto chat_message_metas = 17;
+  repeated ProxyInitStatusEntryProto proxy_init_statuses = 18;
+}
+
+// =============================================================================
+// GodChat Events (for Event Sourcing)
+// =============================================================================
+
+message UpdateUserProfileEvent {
+  string gender = 1;
+  google.protobuf.Timestamp birth_date = 2;
+  string birth_place = 3;
+  string full_name = 4;
+}
+
+message RenameChatTitleEvent {
+  string title = 1;
+}
+
+message SetChatManagerGuidEvent {
+  string chat_manager_guid = 1;  // Guid as string
+}
+
+message UpdateRegionProxiesEvent {
+  repeated RegionProxiesEntryProto region_proxies = 1;
+}
+
+message UpdateSingleRegionProxyEvent {
+  string region = 1;
+  repeated string proxy_ids = 2;  // Guid as string
+}
+
+message UpdateChatTimeEvent {
+  google.protobuf.Timestamp chat_time = 1;
+}
+
+message AddChatMessageMetasEvent {
+  repeated ChatMessageMetaProto chat_message_metas = 1;
+}
+
+message AddPromptTemplateEvent {
+  string prompt_template = 1;
+}
+
+message UpdateProxyInitStatusEvent {
+  string proxy_id = 1;  // Guid as string
+  ProxyInitStatusProto status = 2;
+}
+
+message SetMaxHistoryCountEvent {
+  int32 max_history_count = 1;
+}
+
+// Combined event for PerformConfig optimization
+message PerformConfigCombinedEvent {
+  string region = 1;
+  repeated string proxy_ids = 2;  // Guid as string
+  string prompt_template = 3;
+  int32 max_history_count = 4;
+}
+
+// Combined event for StreamChat optimization
+message StreamChatCombinedEvent {
+  repeated ChatMessageProto chat_list = 1;
+  google.protobuf.Timestamp chat_time = 2;
+  repeated ChatMessageMetaProto chat_message_metas = 3;
+}
+
+// Add chat messages event
+message AddChatMessagesEvent {
+  repeated ChatMessageProto messages = 1;
+}
+
