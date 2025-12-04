@@ -1,4 +1,3 @@
-using Aevatar.Core.Abstractions;
 using GodGPT.GAgents.SpeechChat;
 using GodGPT.GAgents.Awakening.Dtos;
 using Orleans.Concurrency;
@@ -8,9 +7,9 @@ namespace GodGPT.GAgents.Awakening;
 /// <summary>
 /// AwakeningGAgent - Personalized awakening system
 /// Note: This Grain uses userId (Guid) as Primary Key, each user has an independent instance
-/// Client calling method: var agent = _clusterClient.GetGrain<IAwakeningGAgent>(userId);
+/// Client calling method: var agent = _agentFactory.CreateGAgent<AwakeningGAgent>(userId);
 /// </summary>
-public interface IAwakeningGAgent : IGAgent
+public interface IAwakeningGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
     /// <summary>
     /// Get the user's latest non-empty session records

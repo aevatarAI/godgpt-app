@@ -754,6 +754,7 @@ protected override async Task OnActivateAsync()
 | FirebaseTokenProviderGAgent | State方法移至Agent | ✅ |
 | DailyContentGAgent | 完整Event Sourcing迁移 | ✅ |
 | DailyPushCoordinatorGAgent | 暂停：依赖Orleans Reminders | ⏸️ |
+| PushSubscriberIndexGAgent | HashSet → repeated string | ✅ |
 
 ---
 

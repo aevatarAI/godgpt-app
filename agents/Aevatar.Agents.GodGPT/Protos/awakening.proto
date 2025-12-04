@@ -1,0 +1,88 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.awakening;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.Awakening";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+// Note: VoiceLanguageEnum from C# has -1 for Unset, which is invalid in Proto3 enum
+// We store as int32 in State and convert in code
+// VOICE_LANGUAGE_UNSET = -1, ENGLISH = 0, CHINESE = 1, SPANISH = 2
+
+enum AwakeningStatusProto {
+  AWAKENING_STATUS_UNSPECIFIED = 0;
+  AWAKENING_STATUS_NOT_STARTED = 1;   // Maps to NotStarted = 0
+  AWAKENING_STATUS_GENERATING = 2;    // Maps to Generating = 1
+  AWAKENING_STATUS_COMPLETED = 3;     // Maps to Completed = 2
+}
+
+// =============================================================================
+// AwakeningState
+// =============================================================================
+
+message AwakeningStateProto {
+  // Timestamp in seconds
+  int64 last_generated_timestamp = 1;
+  
+  // Awakening level 1-10
+  int32 awakening_level = 2;
+  
+  // Awakening message
+  string awakening_message = 3;
+  
+  // Language type (stored as int32 since VoiceLanguageEnum has -1 value)
+  int32 language = 4;
+  
+  // Based session ID
+  string session_id = 5;
+  
+  // Creation time
+  google.protobuf.Timestamp created_at = 6;
+  
+  // Generation attempt count
+  int32 generation_attempts = 7;
+  
+  // Generation status
+  AwakeningStatusProto status = 8;
+}
+
+// =============================================================================
+// Awakening Events
+// =============================================================================
+
+message GenerateAwakeningEvent {
+  int64 timestamp = 1;
+  int32 awakening_level = 2;
+  string awakening_message = 3;
+  int32 language = 4;  // VoiceLanguageEnum stored as int
+  string session_id = 5;
+  bool is_success = 6;
+  int32 attempt_count = 7;
+}
+
+message LockGenerationTimestampEvent {
+  int64 timestamp = 1;
+}
+
+message UpdateAwakeningStatusEvent {
+  AwakeningStatusProto status = 1;
+}
+
+message ResetAwakeningContentEvent {
+  int64 timestamp = 1;
+  int32 language = 2;  // VoiceLanguageEnum stored as int
+}
+
+message ResetAwakeningStateForTestingEvent {
+  google.protobuf.Timestamp reset_at = 1;
+}
+
+message ResetTodayContentEvent {
+  // Empty event - just triggers the reset
+}
+

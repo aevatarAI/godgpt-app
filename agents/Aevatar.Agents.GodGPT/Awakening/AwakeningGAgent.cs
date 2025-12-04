@@ -1,9 +1,8 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Aevatar.Agents.Core;
 using Aevatar.Application.Grains.Common;
-using Aevatar.Core.Abstractions;
-using Aevatar.Core;
 using Aevatar.GAgents.AI.Common;
 using Aevatar.GAgents.AI.Options;
 using Aevatar.Application.Grains.Agents.ChatManager;
@@ -11,21 +10,31 @@ using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using GodGPT.GAgents.SpeechChat;
 using GodGPT.GAgents.Awakening.Dtos;
 using GodGPT.GAgents.Awakening.Options;
-using GodGPT.GAgents.Awakening.SEvents;
 using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
 using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.Dtos;
 using Aevatar.GAgents.AIGAgent.Dtos;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Orleans;
+
+// Protobuf types aliases
+using AwakeningStateProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStateProto;
+using AwakeningStatusProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStatusProto;
+using GenerateAwakeningEvent = Aevatar.Agents.GodGPT.Protos.Awakening.GenerateAwakeningEvent;
+using LockGenerationTimestampEvent = Aevatar.Agents.GodGPT.Protos.Awakening.LockGenerationTimestampEvent;
+using UpdateAwakeningStatusEvent = Aevatar.Agents.GodGPT.Protos.Awakening.UpdateAwakeningStatusEvent;
+using ResetAwakeningContentEvent = Aevatar.Agents.GodGPT.Protos.Awakening.ResetAwakeningContentEvent;
+using ResetAwakeningStateForTestingEvent = Aevatar.Agents.GodGPT.Protos.Awakening.ResetAwakeningStateForTestingEvent;
+using ResetTodayContentEvent = Aevatar.Agents.GodGPT.Protos.Awakening.ResetTodayContentEvent;
 
 namespace GodGPT.GAgents.Awakening;
 
 /// <summary>
 /// Awakening system grain implementation
 /// </summary>
-[GAgent(nameof(AwakeningGAgent))]
-public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IAwakeningGAgent
+public class AwakeningGAgent : GAgentBase<AwakeningStateProto>, IAwakeningGAgent
 {
     private const string NovaChimeGuider = "Nova·Chime";
     
@@ -42,6 +51,23 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
         _options = options;
         _logger = logger;
     }
+    
+    // === Helper: Convert between C# enum and Proto enum ===
+    private static AwakeningStatusProto ToProto(AwakeningStatus status) => status switch
+    {
+        AwakeningStatus.NotStarted => AwakeningStatusProto.AwakeningStatusNotStarted,
+        AwakeningStatus.Generating => AwakeningStatusProto.AwakeningStatusGenerating,
+        AwakeningStatus.Completed => AwakeningStatusProto.AwakeningStatusCompleted,
+        _ => AwakeningStatusProto.AwakeningStatusUnspecified
+    };
+    
+    private static AwakeningStatus FromProto(AwakeningStatusProto status) => status switch
+    {
+        AwakeningStatusProto.AwakeningStatusNotStarted => AwakeningStatus.NotStarted,
+        AwakeningStatusProto.AwakeningStatusGenerating => AwakeningStatus.Generating,
+        AwakeningStatusProto.AwakeningStatusCompleted => AwakeningStatus.Completed,
+        _ => AwakeningStatus.NotStarted
+    };
 
     public override Task<string> GetDescriptionAsync()
     {
@@ -53,7 +79,7 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
         try
         {
             // Get current user ID through Grain's Primary Key
-            var userId = this.GetPrimaryKey();
+            var userId = Id;
             
             // Get ChatManagerGAgent for this user
             var chatManager = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
@@ -143,7 +169,7 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to get latest non-empty sessions for user {UserId}", this.GetPrimaryKey());
+            _logger.LogError(ex, "Failed to get latest non-empty sessions for user {UserId}", Id);
             return new List<SessionContentDto>();
         }
     }
@@ -168,24 +194,24 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
             if (result.IsSuccess)
             {
                 // Save successful generation
-                RaiseEvent(new GenerateAwakeningLogEvent
+                RaiseEvent(new GenerateAwakeningEvent
                 {
                     Timestamp = result.Timestamp,
                     AwakeningLevel = result.AwakeningLevel,
                     AwakeningMessage = result.AwakeningMessage,
-                    Language = language,
+                    Language = (int)language,
                     SessionId = sessionContents.First().SessionId.ToString(),
                     IsSuccess = true,
                     AttemptCount = State.GenerationAttempts + 1
                 });
 
-                await ConfirmEvents();
+                await ConfirmEventsAsync();
             }
             else
             {
                 // Log failure (only in memory log, not persisted event)
                 _logger.LogWarning("Awakening generation failed for user {UserId}: {ErrorMessage}", 
-                    this.GetPrimaryKey(), result.ErrorMessage);
+                    Id, result.ErrorMessage);
             }
 
             return result;
@@ -223,19 +249,19 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
             if (sessionContentList == null || sessionContentList.Count == 0)
             {
                 // No session content, generate empty result immediately and return completed
-                RaiseEvent(new GenerateAwakeningLogEvent
+                RaiseEvent(new GenerateAwakeningEvent
                 {
                     Timestamp = GetTodayTimestamp(),
                     AwakeningLevel = 0,
                     AwakeningMessage = string.Empty,
-                    Language = language,
+                    Language = (int)language,
                     SessionId = string.Empty,
                     IsSuccess = true,
                     AttemptCount = 1
                 });
 
                 await SetStatusAsync(AwakeningStatus.Completed);
-                await ConfirmEvents();
+                await ConfirmEventsAsync();
                 
                 return new AwakeningContentDto
                 {
@@ -448,7 +474,7 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
                 using var cts = new CancellationTokenSource(timeout);
                 
                 // Get current user ID
-                var userId = this.GetPrimaryKey();
+                var userId = Id;
                 
                 // Get IGodChat instance for current user
                 var godChat = _clusterClient.GetGrain<IGodChat>(userId);
@@ -659,36 +685,36 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
         }
         
         // Atomically update timestamp to today and reset content
-        RaiseEvent(new LockGenerationTimestampLogEvent 
+        RaiseEvent(new LockGenerationTimestampEvent 
         { 
             Timestamp = todayTimestamp 
         });
         
         // Reset awakening content for new day
-        RaiseEvent(new ResetAwakeningContentLogEvent
+        RaiseEvent(new ResetAwakeningContentEvent
         {
             Timestamp = todayTimestamp,
-            Language = language
+            Language = (int)language
         });
         
         // Set status to generating
-        RaiseEvent(new UpdateAwakeningStatusLogEvent
+        RaiseEvent(new UpdateAwakeningStatusEvent
         {
-            Status = AwakeningStatus.Generating
+            Status = AwakeningStatusProto.AwakeningStatusGenerating
         });
         
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
         return true; // Successfully locked and initialized
     }
 
     private async Task SetStatusAsync(AwakeningStatus status)
     {
-        RaiseEvent(new UpdateAwakeningStatusLogEvent
+        RaiseEvent(new UpdateAwakeningStatusEvent
         {
-            Status = status
+            Status = ToProto(status)
         });
         
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
     }
 
     private AwakeningContentDto? BuildAwakeningContentDto()
@@ -704,7 +730,7 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
         {
             AwakeningLevel = State.AwakeningLevel,
             AwakeningMessage = State.AwakeningMessage,
-            Status = State.Status
+            Status = FromProto(State.Status)
         };
     }
 
@@ -715,7 +741,7 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
         
         if (!isSuccess)
         {
-            _logger.LogWarning("Awakening generation completed with failure for user {UserId}", this.GetPrimaryKey());
+            _logger.LogWarning("Awakening generation completed with failure for user {UserId}", Id);
         }
     }
 
@@ -723,22 +749,22 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
     {
         try
         {
-            _logger.LogInformation("Resetting awakening state for testing for user {UserId}", this.GetPrimaryKey());
+            _logger.LogInformation("Resetting awakening state for testing for user {UserId}", Id);
             
             // Trigger reset event
-            RaiseEvent(new ResetAwakeningStateForTestingLogEvent
+            RaiseEvent(new ResetAwakeningStateForTestingEvent
             {
-                ResetAt = DateTime.UtcNow
+                ResetAt = Timestamp.FromDateTime(DateTime.UtcNow)
             });
             
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
             
-            _logger.LogInformation("Successfully reset awakening state for testing for user {UserId}", this.GetPrimaryKey());
+            _logger.LogInformation("Successfully reset awakening state for testing for user {UserId}", Id);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to reset awakening state for testing for user {UserId}", this.GetPrimaryKey());
+            _logger.LogError(ex, "Failed to reset awakening state for testing for user {UserId}", Id);
             return false;
         }
     }
@@ -747,45 +773,44 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
     {
         try
         {
-                    // Simply reset level and message to empty values
-        RaiseEvent(new ResetTodayContentLogEvent());
+            // Simply reset level and message to empty values
+            RaiseEvent(new ResetTodayContentEvent());
             
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
             
-            _logger.LogInformation("Successfully reset awakening content for user {UserId}", this.GetPrimaryKey());
+            _logger.LogInformation("Successfully reset awakening content for user {UserId}", Id);
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to reset content for user {UserId}", this.GetPrimaryKey());
+            _logger.LogError(ex, "Failed to reset content for user {UserId}", Id);
             return false;
         }
     }
 
-    protected sealed override void GAgentTransitionState(AwakeningState state,
-        StateLogEventBase<AwakeningLogEvent> @event)
+    protected override void TransitionState(AwakeningStateProto state, IMessage @event)
     {
         switch (@event)
         {
-            case ResetAwakeningContentLogEvent resetEvent:
+            case ResetAwakeningContentEvent resetEvent:
                 state.LastGeneratedTimestamp = resetEvent.Timestamp;
                 state.Language = resetEvent.Language;
                 state.AwakeningMessage = string.Empty;
                 state.AwakeningLevel = 0;
                 state.SessionId = string.Empty;
                 state.GenerationAttempts = 0;
-                state.Status = AwakeningStatus.NotStarted;
+                state.Status = AwakeningStatusProto.AwakeningStatusNotStarted;
                 break;
 
-            case LockGenerationTimestampLogEvent lockEvent:
+            case LockGenerationTimestampEvent lockEvent:
                 state.LastGeneratedTimestamp = lockEvent.Timestamp;
                 break;
 
-            case UpdateAwakeningStatusLogEvent statusEvent:
+            case UpdateAwakeningStatusEvent statusEvent:
                 state.Status = statusEvent.Status;
                 break;
 
-            case GenerateAwakeningLogEvent generateEvent:
+            case GenerateAwakeningEvent generateEvent:
                 state.LastGeneratedTimestamp = generateEvent.Timestamp;
                 state.AwakeningLevel = generateEvent.AwakeningLevel;
                 state.AwakeningMessage = generateEvent.AwakeningMessage;
@@ -794,17 +819,17 @@ public class AwakeningGAgent : GAgentBase<AwakeningState, AwakeningLogEvent>, IA
                 state.GenerationAttempts = generateEvent.AttemptCount;
                 break;
 
-            case ResetAwakeningStateForTestingLogEvent resetTestingEvent:
+            case ResetAwakeningStateForTestingEvent resetTestingEvent:
                 state.LastGeneratedTimestamp = 0;
                 state.AwakeningLevel = 0;
                 state.AwakeningMessage = string.Empty;
-                state.Language = VoiceLanguageEnum.Unset;
+                state.Language = (int)VoiceLanguageEnum.Unset;
                 state.SessionId = string.Empty;
                 state.GenerationAttempts = 0;
-                state.Status = AwakeningStatus.NotStarted;
+                state.Status = AwakeningStatusProto.AwakeningStatusNotStarted;
                 break;
                 
-            case ResetTodayContentLogEvent resetTodayEvent:
+            case ResetTodayContentEvent resetTodayEvent:
                 // Only reset level and message, preserve all other fields
                 state.AwakeningLevel = 0;
                 state.AwakeningMessage = string.Empty;
