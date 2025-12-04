@@ -755,6 +755,7 @@ protected override async Task OnActivateAsync()
 | DailyContentGAgent | 完整Event Sourcing迁移 | ✅ |
 | DailyPushCoordinatorGAgent | 暂停：依赖Orleans Reminders | ⏸️ |
 | PushSubscriberIndexGAgent | HashSet → repeated string | ✅ |
+| AwakeningGAgent | VoiceLanguageEnum用int32处理 | ✅ |
 
 ---
 
@@ -833,6 +834,36 @@ var lastRefresh = State.LastRefresh?.ToDateTime() ?? DateTime.MinValue;
 // 写入 - 需要 Timestamp.FromDateTime + ToUniversalTime
 State.LastRefresh = Timestamp.FromDateTime(DateTime.UtcNow);
 ```
+
+### Rule 6: C# 枚举带负数值
+
+Proto3 不支持负数枚举值。当 C# 枚举有负值时，使用 `int32` 存储：
+
+```csharp
+// C# 枚举 (有负值)
+public enum VoiceLanguageEnum { Unset = -1, English = 0, Chinese = 1 }
+```
+
+```protobuf
+// Proto 定义 - 使用 int32
+message MyState {
+  int32 language = 4;  // VoiceLanguageEnum 存储为 int
+}
+```
+
+```csharp
+// 代码中直接转换
+State.Language = (int)language;
+var lang = (VoiceLanguageEnum)State.Language;
+```
+
+### Rule 7: Orleans Reminders 限制
+
+⚠️ 使用 `IRemindable` 的 Agent **暂不能迁移**到新框架：
+
+- 新框架 `GAgentBase<T>` 不继承 `Orleans.Grain`
+- Orleans Reminder 扩展方法需要 `Grain` 基类
+- **解决方案**: 保持旧框架，等待新框架提供定时器支持
 
 ---
 
