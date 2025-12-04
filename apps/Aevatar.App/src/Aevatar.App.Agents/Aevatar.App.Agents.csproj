@@ -18,7 +18,6 @@
 
   <ItemGroup>
     <Protobuf Include="Protos\business_agent.proto" GrpcServices="None" />
-    <Protobuf Include="Protos\complex_state_agent.proto" GrpcServices="None" />
   </ItemGroup>
 
 </Project>

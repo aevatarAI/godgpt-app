@@ -12,7 +12,6 @@ using Aevatar.Agents.Core.Extensions;
 using Aevatar.Agents.Runtime.Local;
 using Aevatar.Agents.Runtime.Local.Subscription;
 using Aevatar.App.Controllers;
-using Aevatar.App.HttpApi.Host.Services;
 using Elastic.Clients.Elasticsearch;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -139,7 +138,8 @@ public static class AgentRuntimeExtensions
         });
         
         // State Query Service - needed for HttpApi to query ES
-        services.AddScoped<IStateQueryService, StateQueryService>();
+        // TODO: IStateQueryService implementation moved - fix later if needed
+        // services.AddScoped<IStateQueryService, StateQueryService>();
         
         // State Projector - ONLY for Local mode
         // In Orleans mode, Agent runs in Silo, so Silo registers IStateProjector

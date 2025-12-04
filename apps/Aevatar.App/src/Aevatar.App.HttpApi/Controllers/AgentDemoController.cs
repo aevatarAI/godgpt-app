@@ -245,11 +245,10 @@ public class AgentDemoController : AbpControllerBase
     }
 
     // ========== Complex State Agent Endpoints (for CQRS ES testing) ==========
-
-    /// <summary>
-    /// Create a complex state agent with test data.
-    /// Used for testing ES handling of complex types (List, Dict, nested objects).
-    /// </summary>
+    // TODO: ComplexStateAgent has been removed during migration cleanup
+    // These endpoints were for testing complex state handling
+    // Uncomment and fix when needed for testing
+    /*
     [HttpPost("complex-agent")]
     public async Task<ActionResult<ComplexAgentCreatedResponse>> CreateComplexAgent()
     {
@@ -397,6 +396,7 @@ public class AgentDemoController : AbpControllerBase
             return StatusCode(500, $"Error: {ex.Message}");
         }
     }
+    */
 }
 
 // ========== DTOs ==========
