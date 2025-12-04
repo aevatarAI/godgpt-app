@@ -722,14 +722,30 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 break;
 
             case UpdateSubscriptionEvent updateSubscription:
-                if (updateSubscription.IsUltimate)
+                var subscription = updateSubscription.IsUltimate ? state.UltimateSubscription : state.Subscription;
+                
+                if (subscription == null)
                 {
-                    state.UltimateSubscription = updateSubscription.SubscriptionInfo;
+                    subscription = new SubscriptionInfoProto();
+                    if (updateSubscription.IsUltimate)
+                    {
+                        state.UltimateSubscription = subscription;
+                    }
+                    else
+                    {
+                        state.Subscription = subscription;
+                    }
                 }
-                else
-                {
-                    state.Subscription = updateSubscription.SubscriptionInfo;
-                }
+                
+                subscription.IsActive = updateSubscription.SubscriptionInfo.IsActive;
+                subscription.PlanType = updateSubscription.SubscriptionInfo.PlanType;
+                subscription.Status = updateSubscription.SubscriptionInfo.Status;
+                subscription.StartDate = updateSubscription.SubscriptionInfo.StartDate;
+                subscription.EndDate = updateSubscription.SubscriptionInfo.EndDate;
+                subscription.SubscriptionIds.Clear();
+                subscription.SubscriptionIds.AddRange(updateSubscription.SubscriptionInfo.SubscriptionIds);
+                subscription.InvoiceIds.Clear();
+                subscription.InvoiceIds.AddRange(updateSubscription.SubscriptionInfo.InvoiceIds);
                 break;
 
             case CancelSubscriptionEvent cancelSubscription:
