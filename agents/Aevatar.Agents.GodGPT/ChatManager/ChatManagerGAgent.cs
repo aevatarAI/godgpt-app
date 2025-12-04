@@ -1704,8 +1704,8 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                 TimeZoneId = deviceV2.TimeZoneId,
                 PushLanguage = deviceV2.PushLanguage,
                 PushEnabled = deviceV2.PushEnabled,
-                RegisteredAt = deviceV2.RegisteredAt,
-                LastTokenUpdate = deviceV2.LastTokenUpdate
+                RegisteredAt = deviceV2.RegisteredAt?.ToDateTime() ?? DateTime.MinValue,
+                LastTokenUpdate = deviceV2.LastTokenUpdate?.ToDateTime() ?? DateTime.MinValue
             };
         }
 
@@ -1785,13 +1785,14 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             Logger.LogInformation("🧹 Cleaning up {Count} devices for user {UserId}: {Reasons}",
                 devicesToRemove.Count, State.UserId, reasonText);
 
-            RaiseEvent(new CleanExpiredDevicesEvent
+            var cleanEvent = new CleanExpiredDevicesEvent
             {
-                DeviceIdsToRemove = devicesToRemove,
-                CleanupTime = now,
+                CleanupTime = now.ToTimestamp(),
                 CleanupReason = reasonText,
                 RemovedCount = devicesToRemove.Count
-            });
+            };
+            cleanEvent.DeviceIdsToRemove.AddRange(devicesToRemove);
+            RaiseEvent(cleanEvent);
 
             await ConfirmEventsAsync();
         }
@@ -1839,7 +1840,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         string timeZoneId, bool bypassReadStatusCheck = false, bool isRetryPush = false, bool isTestPush = false)
     {
         // 🔒 Acquire user-level semaphore to prevent concurrent push processing
-        var userSemaphore = _pushSemaphores.GetOrAdd(State.UserId, _ => new SemaphoreSlim(1, 1));
+        var userSemaphore = _pushSemaphores.GetOrAdd(State.UserId.ToGuid(), _ => new SemaphoreSlim(1, 1));
 
         await userSemaphore.WaitAsync();
         try
@@ -2224,8 +2225,8 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                     PushEnabled = deviceV2.PushEnabled,
                     TimeZoneId = deviceV2.TimeZoneId,
                     Language = deviceV2.PushLanguage,
-                    RegisteredAt = deviceV2.RegisteredAt.ToString("yyyy-MM-dd HH:mm:ss"),
-                    LastTokenUpdate = deviceV2.LastTokenUpdate.ToString("yyyy-MM-dd HH:mm:ss"),
+                    RegisteredAt = deviceV2.RegisteredAt.ToFormattedString("yyyy-MM-dd HH:mm:ss"),
+                    LastTokenUpdate = deviceV2.LastTokenUpdate.ToFormattedString("yyyy-MM-dd HH:mm:ss"),
                     Platform = deviceV2.Platform,
                     Status = deviceV2.Status
                 }
@@ -2267,7 +2268,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                 var oldIndexGAgent =
                     await GetPushSubscriberIndexAgentAsync(DailyPushConstants.TimezoneToGuid(oldTimeZone));
                 await oldIndexGAgent.InitializeAsync(oldTimeZone);
-                await oldIndexGAgent.RemoveUserFromTimezoneAsync(State.UserId);
+                await oldIndexGAgent.RemoveUserFromTimezoneAsync(State.UserId.ToGuid());
                 Logger.LogDebug($"Removed user {State.UserId} from timezone index: {oldTimeZone}");
             }
 
@@ -2277,7 +2278,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                 var newIndexGAgent =
                     await GetPushSubscriberIndexAgentAsync(DailyPushConstants.TimezoneToGuid(newTimeZone));
                 await newIndexGAgent.InitializeAsync(newTimeZone);
-                await newIndexGAgent.AddUserToTimezoneAsync(State.UserId);
+                await newIndexGAgent.AddUserToTimezoneAsync(State.UserId.ToGuid());
                 Logger.LogDebug($"Added user {State.UserId} to timezone index: {newTimeZone}");
 
                 // CRITICAL: Complete timezone ecosystem initialization
@@ -2626,26 +2627,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         // 🔄 V2 ONLY: No migration from V1, V2 uses completely new data
         var deviceInfo = isNewDevice
             ? new UserDeviceInfoV2()
-            : new UserDeviceInfoV2
-            {
-                DeviceId = State.UserDevicesV2[deviceId].DeviceId,
-                UserId = State.UserDevicesV2[deviceId].UserId,
-                PushToken = State.UserDevicesV2[deviceId].PushToken,
-                TimeZoneId = State.UserDevicesV2[deviceId].TimeZoneId,
-                PushLanguage = State.UserDevicesV2[deviceId].PushLanguage,
-                PushEnabled = State.UserDevicesV2[deviceId].PushEnabled,
-                RegisteredAt = State.UserDevicesV2[deviceId].RegisteredAt,
-                LastTokenUpdate = State.UserDevicesV2[deviceId].LastTokenUpdate,
-                LastActiveAt = State.UserDevicesV2[deviceId].LastActiveAt,
-                Platform = State.UserDevicesV2[deviceId].Platform,
-                AppVersion = State.UserDevicesV2[deviceId].AppVersion,
-                Status = State.UserDevicesV2[deviceId].Status,
-                PushTokenHistory = State.UserDevicesV2[deviceId].PushTokenHistory,
-                LastSuccessfulPush = State.UserDevicesV2[deviceId].LastSuccessfulPush,
-                ConsecutiveFailures = State.UserDevicesV2[deviceId].ConsecutiveFailures,
-                Metadata = State.UserDevicesV2[deviceId].Metadata,
-                StructureVersion = 2
-            };
+            : State.UserDevicesV2[deviceId].FromProto();
 
         // Store old values for cleanup and change detection
         var oldPushToken = deviceInfo.PushToken;
@@ -2655,7 +2637,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         // Update device information
         deviceInfo.DeviceId = deviceId;
-        deviceInfo.UserId = State.UserId;
+        deviceInfo.UserId = State.UserId.ToGuid();
         deviceInfo.PushToken = pushToken;
         deviceInfo.TimeZoneId = timeZoneId;
         deviceInfo.PushLanguage = pushLanguage;
@@ -2714,7 +2696,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         RaiseEvent(new RegisterOrUpdateDeviceV2Event
         {
             DeviceId = deviceId,
-            DeviceInfo = deviceInfo,
+            DeviceInfo = deviceInfo.ToProto(),
             IsNewDevice = isNewDevice,
             OldPushToken = tokenChanged ? oldPushToken : null,
             IsMigration = false
@@ -2749,7 +2731,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
     {
         // ✅ SIMPLIFIED: V2 devices only - no migration logic
         // V1 and V2 are completely separate data sources
-        return State.UserDevicesV2.Values.ToList();
+        return State.UserDevicesV2.Values.Select(p => p.FromProto()).ToList();
     }
 
 
@@ -3047,13 +3029,15 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                     v2DevicesToRemove.Count, string.Join(",", v2DevicesToRemove), errorCode);
 
                 // Remove V2 devices  
-                RaiseEvent(new CleanupDevicesV2Event
+                var cleanupEvent = new CleanupDevicesV2Event
                 {
-                    DeviceIdsToRemove = v2DevicesToRemove,
                     RemovedCount = v2DevicesToRemove.Count,
-                    CleanupReason = $"fcm_token_invalid_{errorCode}",
-                    CleanupDetails = cleanupDetails
-                });
+                    CleanupReason = $"fcm_token_invalid_{errorCode}"
+                };
+                cleanupEvent.DeviceIdsToRemove.AddRange(v2DevicesToRemove);
+                foreach (var kvp in cleanupDetails)
+                    cleanupEvent.CleanupDetails[kvp.Key] = kvp.Value;
+                RaiseEvent(cleanupEvent);
             }
 
             if (devicesToRemove.Any())
@@ -3093,8 +3077,8 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             TimeZoneId = v2.TimeZoneId,
             PushLanguage = v2.PushLanguage,
             PushEnabled = v2.PushEnabled,
-            RegisteredAt = v2.RegisteredAt,
-            LastTokenUpdate = v2.LastTokenUpdate
+            RegisteredAt = v2.RegisteredAt?.ToDateTime() ?? DateTime.MinValue,
+            LastTokenUpdate = v2.LastTokenUpdate?.ToDateTime() ?? DateTime.MinValue
         }).ToList();
 
         Logger.LogDebug("GetUnifiedDevicesAsync: V2-only devices. Count: {DeviceCount}", v2Devices.Count);
@@ -3117,7 +3101,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         // 1. Remove devices with consecutive push failures (token likely invalid)
         var failedDevices = State.UserDevicesV2.Values
-            .Where(d => d.ConsecutiveFailures >= 5 && d.LastActiveAt <= threeDaysAgo)
+            .Where(d => d.ConsecutiveFailures >= 5 && d.LastActiveAt.LessOrEqualThan(threeDaysAgo))
             .Select(d => d.DeviceId)
             .ToList();
         devicesToRemove.AddRange(failedDevices);
@@ -3128,7 +3112,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         // 2. Remove very old devices (30+ days inactive)
         var expiredDevices = State.UserDevicesV2.Values
-            .Where(d => d.LastActiveAt <= thirtyDaysAgo)
+            .Where(d => d.LastActiveAt.LessOrEqualThan(thirtyDaysAgo))
             .Select(d => d.DeviceId)
             .ToList();
         devicesToRemove.AddRange(expiredDevices);
@@ -3139,7 +3123,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         // 3. Remove devices marked for cleanup
         var pendingCleanupDevices = State.UserDevicesV2.Values
-            .Where(d => d.Status == DeviceStatus.PendingCleanup)
+            .Where(d => d.Status == (int)DeviceStatus.PendingCleanup)
             .Select(d => d.DeviceId)
             .ToList();
         devicesToRemove.AddRange(pendingCleanupDevices);
@@ -3170,14 +3154,16 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         if (devicesToRemove.Any())
         {
-            RaiseEvent(new CleanupDevicesV2Event
+            var cleanupEvent = new CleanupDevicesV2Event
             {
-                DeviceIdsToRemove = devicesToRemove,
                 RemovedCount = devicesToRemove.Count,
                 CleanupReason = "enhanced_criteria",
-                CleanupDetails = cleanupDetails,
-                CleanupTime = now
-            });
+                CleanupTime = now.ToTimestamp()
+            };
+            cleanupEvent.DeviceIdsToRemove.AddRange(devicesToRemove);
+            foreach (var kvp in cleanupDetails)
+                cleanupEvent.CleanupDetails[kvp.Key] = kvp.Value;
+            RaiseEvent(cleanupEvent);
 
             await ConfirmEventsAsync();
 
