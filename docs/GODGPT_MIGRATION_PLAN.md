@@ -757,13 +757,21 @@ protected override async Task OnActivateAsync()
 | PushSubscriberIndexGAgent | HashSet → repeated string | ✅ |
 | AwakeningGAgent | VoiceLanguageEnum用int32处理 | ✅ |
 
-### 🔴 大型 Agents (待迁移)
+### 🔴 大型 Agents (建议暂不迁移)
 
-| Agent | 行数 | 复杂度 | 状态 |
-|-------|------|--------|------|
-| UserBillingGAgent | 5484 | 极高 (Payment逻辑复杂) | ⏳ |
-| ChatManagerGAgent | 3173 | 高 | ⏳ |
-| GodChatGAgent | 2403 | 高 | ⏳ |
+这些 Agent 行数多、改动点多，建议等新旧系统稳定后再迁移：
+
+| Agent | 行数 | 估算改动点 | 原因 |
+|-------|------|-----------|------|
+| UserBillingGAgent | 5484 | ~100+ | 支付逻辑复杂，PaymentSummary嵌套深 |
+| ChatManagerGAgent | 3173 | ~50+ | AI聊天核心逻辑 |
+| GodChatGAgent | 2403 | ~40+ | 聊天会话管理 |
+
+**建议策略**:
+1. 这些 Agent 保持旧框架暂不迁移
+2. 使用 `IClusterClient.GetGrain` 从新框架 Agent 调用它们
+3. 等待整体迁移完成后，再逐个迁移这些大型 Agent
+4. 已创建迁移工具方法 (`MigrationHelpers.cs`, `AgentRetrievalHelpers.cs`) 供后续使用
 
 ---
 
