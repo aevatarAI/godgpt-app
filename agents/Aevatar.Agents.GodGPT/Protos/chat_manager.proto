@@ -1,0 +1,179 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.protos.chatmanager;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.ChatManager";
+
+// =============================================================================
+// State
+// =============================================================================
+
+message ChatManagerStateProto {
+  repeated SessionInfoProto session_info_list = 1;
+  string user_id = 2;  // Guid as string
+  int32 max_session = 3;
+  string gender = 4;
+  google.protobuf.Timestamp birth_date = 5;
+  string birth_place = 6;
+  string full_name = 7;
+  int32 max_share_count = 8;
+  int32 current_share_count = 9;
+  optional bool is_first_conversation = 10;
+  optional google.protobuf.Timestamp registered_at_utc = 11;
+  optional string inviter_id = 12;  // Guid? as string
+  int32 voice_language = 13;  // VoiceLanguageEnum as int
+  
+  // Daily Push Notification Fields
+  map<string, UserDeviceInfoProto> user_devices = 14;
+  map<string, string> token_to_device_map = 15;
+  map<string, bool> daily_push_read_status = 16;
+  
+  // Enhanced Device Management V2
+  map<string, UserDeviceInfoV2Proto> user_devices_v2 = 17;
+  map<string, string> token_to_device_map_v2 = 18;
+  repeated string migrated_device_ids = 19;  // HashSet as repeated
+  int32 state_version = 20;
+}
+
+message SessionInfoProto {
+  string session_id = 1;  // Guid as string
+  string title = 2;
+  google.protobuf.Timestamp create_at = 3;
+  optional string guider = 4;
+  optional string share_id = 5;  // Guid? as string
+}
+
+message UserDeviceInfoProto {
+  string push_token = 1;
+  string device_type = 2;
+  google.protobuf.Timestamp registered_at = 3;
+  google.protobuf.Timestamp last_active_at = 4;
+  bool is_push_enabled = 5;
+  optional google.protobuf.Timestamp local_time = 6;
+  string timezone = 7;
+}
+
+message UserDeviceInfoV2Proto {
+  string push_token = 1;
+  string device_type = 2;
+  google.protobuf.Timestamp registered_at = 3;
+  google.protobuf.Timestamp last_active_at = 4;
+  bool is_push_enabled = 5;
+  optional google.protobuf.Timestamp local_time = 6;
+  string timezone = 7;
+  
+  // V2 enhanced fields
+  int32 consecutive_failures = 8;
+  optional google.protobuf.Timestamp last_failure_at = 9;
+  optional google.protobuf.Timestamp last_success_at = 10;
+  int32 push_status = 11;  // DevicePushStatus enum as int
+  optional google.protobuf.Timestamp token_updated_at = 12;
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+message CleanExpiredSessionsEvent {
+  google.protobuf.Timestamp clean_before = 1;
+}
+
+message CreateSessionInfoEvent {
+  string session_id = 1;  // Guid as string
+  string title = 2;
+  google.protobuf.Timestamp create_at = 3;
+  optional string guider = 4;
+}
+
+message DeleteSessionEvent {
+  string session_id = 1;  // Guid as string
+}
+
+message RenameTitleEvent {
+  string session_id = 1;  // Guid as string
+  string title = 2;
+}
+
+message ClearAllEvent {
+}
+
+message SetUserProfileEvent {
+  string gender = 1;
+  google.protobuf.Timestamp birth_date = 2;
+  string birth_place = 3;
+  string full_name = 4;
+}
+
+message SetVoiceLanguageEvent {
+  int32 voice_language = 1;  // VoiceLanguageEnum as int
+}
+
+message GenerateChatShareContentEvent {
+  string session_id = 1;  // Guid as string
+  string share_id = 2;    // Guid as string
+}
+
+message SetMaxShareCountEvent {
+  int32 max_share_count = 1;
+}
+
+message SetInviterEvent {
+  string inviter_id = 1;  // Guid as string
+}
+
+message SetRegisteredAtUtcEvent {
+  google.protobuf.Timestamp registered_at_utc = 1;
+}
+
+message InitializeNewUserStatusEvent {
+  bool is_first_conversation = 1;
+  string user_id = 2;  // Guid as string
+  optional google.protobuf.Timestamp registered_at_utc = 3;
+  int32 max_share_count = 4;
+}
+
+message RegisterOrUpdateDeviceEvent {
+  string device_id = 1;
+  UserDeviceInfoProto device_info = 2;
+  bool is_new_device = 3;
+  optional string old_push_token = 4;
+}
+
+message MarkDailyPushReadEvent {
+  string date_key = 1;
+  google.protobuf.Timestamp read_time = 2;
+}
+
+message CleanExpiredDevicesEvent {
+  repeated string device_ids_to_remove = 1;
+  google.protobuf.Timestamp cleanup_time = 2;
+  string cleanup_reason = 3;
+  int32 removed_count = 4;
+}
+
+// V2 Events
+
+message RegisterOrUpdateDeviceV2Event {
+  string device_id = 1;
+  UserDeviceInfoV2Proto device_info = 2;
+  bool is_new_device = 3;
+  optional string old_push_token = 4;
+  bool is_migration = 5;
+}
+
+message MigrateDeviceToV2Event {
+  string device_id = 1;
+  UserDeviceInfoProto old_device_info = 2;
+  UserDeviceInfoV2Proto new_device_info = 3;
+  google.protobuf.Timestamp migration_time = 4;
+}
+
+message CleanupDevicesV2Event {
+  repeated string device_ids_to_remove = 1;
+  int32 removed_count = 2;
+  string cleanup_reason = 3;
+  map<string, string> cleanup_details = 4;
+  google.protobuf.Timestamp cleanup_time = 5;
+}

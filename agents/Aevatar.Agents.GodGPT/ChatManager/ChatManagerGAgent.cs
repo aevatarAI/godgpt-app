@@ -5,6 +5,7 @@ using System.Net.Mime;
 using System.Text;
 using System.Text.Json;
 using Aevatar.Agents.GodGPT.Protos;
+using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent;
@@ -22,8 +23,6 @@ using Aevatar.Application.Grains.UserBilling;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Application.Grains.UserInfo;
 using Aevatar.Application.Grains.UserQuota;
-using Aevatar.Core;
-using Aevatar.Core.Abstractions;
 using Aevatar.GAgents.AI.Common;
 using Aevatar.GAgents.AI.Options;
 using Aevatar.GAgents.AIGAgent.Dtos;
@@ -32,11 +31,14 @@ using Aevatar.GAgents.ChatAgent.Dtos;
 using GodGPT.GAgents.DailyPush;
 using GodGPT.GAgents.DailyPush.Options;
 using GodGPT.GAgents.SpeechChat;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Json.Schema.Generation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
+using Orleans;
 using Orleans.Concurrency;
 using Orleans.Providers;
 using Volo.Abp;
@@ -46,25 +48,25 @@ using JsonSerializer = System.Text.Json.JsonSerializer;
 namespace Aevatar.Application.Grains.Agents.ChatManager;
 
 [Description("manage chat agent")]
-[StorageProvider(ProviderName = "PubSubStore")]
-[LogConsistencyProvider(ProviderName = "LogStorage")]
 [GAgent(nameof(ChatGAgentManager))]
 [Reentrant]
-public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEventLog>,
+public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerStateProto>,
     IChatManagerGAgent
 {
     private const string FormattedDate = "yyyy-MM-dd";
     const string SessionVersion = "1.0.0";
     private readonly ILocalizationService _localizationService;
     private readonly IGAgentFactory _agentFactory;
+    private readonly IClusterClient _clusterClient;
     
     // Cached ConfigurationGAgent instance (new framework)
     private ConfigurationGAgent? _configurationAgent;
 
-    public ChatGAgentManager(ILocalizationService localizationService, IGAgentFactory agentFactory)
+    public ChatGAgentManager(ILocalizationService localizationService, IGAgentFactory agentFactory, IClusterClient clusterClient)
     {
         _localizationService = localizationService;
         _agentFactory = agentFactory;
+        _clusterClient = clusterClient;
     }
     
     private async Task<UserInfoCollectionGAgent> GetUserInfoCollectionAgentAsync(Guid userId)
@@ -192,7 +194,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     {
         Logger.LogDebug($"[ChatGAgentManager][RenameChatTitleEvent] start:{JsonConvert.SerializeObject(@event)}");
 
-        RaiseEvent(new RenameTitleEventLog()
+        RaiseEvent(new RenameTitleEvent()
         {
             SessionId = @event.SessionId,
             Title = @event.Title
@@ -212,7 +214,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         try
         {
             sessionId = await CreateSessionAsync(@event.SystemLLM, @event.Prompt, @event.UserProfile, @event.Guider);
-            IGodChat godChat = GrainFactory.GetGrain<IGodChat>(sessionId);
+            IGodChat godChat = _clusterClient.GetGrain<IGodChat>(sessionId);
             // TODO: [MIGRATION] RegisterAsync removed - Orleans grains are auto-managed
             // Old: await RegisterAsync(godChat);
         }
@@ -383,12 +385,12 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     public async Task<Guid> CreateSessionAsync(string systemLLM, string prompt, UserProfileDto? userProfile = null,
         string? guider = null, DateTime? userLocalTime = null)
     {
-        Logger.LogDebug($"[ChatManagerGAgent][CreateSessionAsync] Start - UserId: {this.GetPrimaryKey()}");
+        Logger.LogDebug($"[ChatManagerGAgent][CreateSessionAsync] Start - UserId: {Id}");
 
         var configuration = await GetConfigurationAsync();
         Stopwatch sw = new Stopwatch();
         sw.Start();
-        IGodChat godChat = GrainFactory.GetGrain<IGodChat>(Guid.NewGuid());
+        IGodChat godChat = _clusterClient.GetGrain<IGodChat>(Guid.NewGuid());
         // await RegisterAsync(godChat);
         sw.Stop();
         Logger.LogDebug($"CreateSessionAsync - step,time use:{sw.ElapsedMilliseconds}");
@@ -443,7 +445,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
         // Record user activity metrics for retention analysis (before RaiseEvent to ensure proper deduplication)
         await RecordUserActivityMetricsAsync();
-        RaiseEvent(new CreateSessionInfoEventLog()
+        RaiseEvent(new CreateSessionInfoEvent()
         {
             SessionId = sessionId,
             Title = "",
@@ -452,7 +454,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         });
 
         var initStopwatch = Stopwatch.StartNew();
-        await godChat.InitAsync(this.GetPrimaryKey());
+        await godChat.InitAsync(Id);
         initStopwatch.Stop();
         Logger.LogDebug(
             $"[ChatManagerGAgent][CreateSessionAsync] InitAsync completed - Duration: {initStopwatch.ElapsedMilliseconds}ms");
@@ -479,7 +481,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                 // Today already has session creation, skip duplicate reporting
                 Logger.LogDebug(
                     "[GodChatGAgent][RecordUserActivityMetricsAsync] {UserId} User activity metrics already recorded today",
-                    this.GetPrimaryKey().ToString());
+                    Id.ToString());
                 return;
             }
 
@@ -520,7 +522,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     {
         try
         {
-            var userQuotaGrain = await GetUserQuotaAgentAsync(this.GetPrimaryKey());
+            var userQuotaGrain = await GetUserQuotaAgentAsync(Id);
 
             // Check Ultimate subscription first (higher priority)
             var ultimateSubscription = await userQuotaGrain.GetSubscriptionAsync(ultimate: true);
@@ -579,11 +581,11 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         if (hasExpiredSessions)
         {
             Logger.LogDebug($"[ChatGAgentManager][GetSessionListAsync] Cleaning sessions older than {sevenDaysAgo}");
-            RaiseEvent(new CleanExpiredSessionsEventLog
+            RaiseEvent(new CleanExpiredSessionsEvent
             {
                 CleanBefore = sevenDaysAgo
             });
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
         }
 
         var result = new List<SessionInfoDto>();
@@ -656,7 +658,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                 string contentPreview = "";
                 try
                 {
-                    var godChat = GrainFactory.GetGrain<IGodChat>(sessionInfo.SessionId);
+                    var godChat = _clusterClient.GetGrain<IGodChat>(sessionInfo.SessionId);
                     var chatMessages = await godChat.GetChatMessageAsync();
                     contentPreview = ExtractChatContent(chatMessages);
                 }
@@ -826,7 +828,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             throw new UserFriendlyException($"Unable to load conversation {sessionId}");
         }
 
-        var godChat = GrainFactory.GetGrain<IGodChat>(sessionInfo.SessionId);
+        var godChat = _clusterClient.GetGrain<IGodChat>(sessionInfo.SessionId);
         return await godChat.GetChatMessageAsync();
     }
 
@@ -850,7 +852,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             throw new UserFriendlyException(localizedMessage);
         }
 
-        var godChat = GrainFactory.GetGrain<IGodChat>(sessionInfo.SessionId);
+        var godChat = _clusterClient.GetGrain<IGodChat>(sessionInfo.SessionId);
         var result = await godChat.GetChatMessageWithMetaAsync();
 
         Logger.LogDebug(
@@ -888,12 +890,12 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
         //Do not clear the content of ShareGrain. When querying, first determine whether the Session exists
 
-        RaiseEvent(new DeleteSessionEventLog()
+        RaiseEvent(new DeleteSessionEvent()
         {
             SessionId = sessionId
         });
 
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
         return sessionId;
     }
 
@@ -905,13 +907,13 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             return sessionId;
         }
 
-        RaiseEvent(new RenameTitleEventLog()
+        RaiseEvent(new RenameTitleEvent()
         {
             SessionId = sessionId,
             Title = title,
         });
 
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
         return sessionId;
     }
 
@@ -919,27 +921,27 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     {
         //Do not clear the content of ShareGrain. When querying, first determine whether the Session exists
         // Record the event to clear all sessions
-        var userQuotaGAgent = await GetUserQuotaAgentAsync(this.GetPrimaryKey());
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
         await userQuotaGAgent.ClearAllAsync();
 
-        var userBillingGAgent = GrainFactory.GetGrain<IUserBillingGAgent>(this.GetPrimaryKey());
+        var userBillingGAgent = _clusterClient.GetGrain<IUserBillingGAgent>(Id);
         await userBillingGAgent.ClearAllAsync();
 
-        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(this.GetPrimaryKey());
+        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(Id);
         await userInfoCollectionGAgent.ClearAllAsync();
 
         // TODO: [GOOGLE_AUTH_DISABLED] Unbind Google account - disabled until Google Auth is migrated
-        // var googleAuthGAgent = GrainFactory.GetGrain<IGoogleAuthGAgent>(this.GetPrimaryKey());
+        // var googleAuthGAgent = _clusterClient.GetGrain<IGoogleAuthGAgent>(Id);
         // await googleAuthGAgent.UnbindAccountAsync();
 
-        RaiseEvent(new ClearAllEventLog());
-        await ConfirmEvents();
-        return this.GetPrimaryKey();
+        RaiseEvent(new ClearAllEvent());
+        await ConfirmEventsAsync();
+        return Id;
     }
 
     public async Task<Guid> SetUserProfileAsync(string gender, DateTime birthDate, string birthPlace, string fullName)
     {
-        RaiseEvent(new SetUserProfileEventLog()
+        RaiseEvent(new SetUserProfileEvent()
         {
             Gender = gender,
             BirthDate = birthDate,
@@ -947,7 +949,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             FullName = fullName
         });
 
-        return this.GetPrimaryKey();
+        return Id;
     }
 
     /// <summary>
@@ -960,7 +962,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     public async Task<Guid> SetVoiceLanguageAsync(VoiceLanguageEnum voiceLanguage)
     {
         // Check if user is properly initialized (has at least one session or profile data)
-        var userId = this.GetPrimaryKey();
+        var userId = Id;
         if (userId == Guid.Empty)
         {
             Logger.LogWarning("[ChatGAgentManager][SetVoiceLanguageAsync] Invalid user ID");
@@ -968,12 +970,12 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         }
 
         // Raise event to update voice language
-        RaiseEvent(new SetVoiceLanguageEventLog()
+        RaiseEvent(new SetVoiceLanguageEvent()
         {
             VoiceLanguage = voiceLanguage
         });
 
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
 
         Logger.LogDebug(
             $"[ChatGAgentManager][SetVoiceLanguageAsync] Successfully set voice language to {voiceLanguage} for user {userId}");
@@ -982,20 +984,20 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
     public async Task<UserProfileDto> GetUserProfileAsync()
     {
-        Logger.LogDebug($"[ChatGAgentManager][GetUserProfileAsync] userId: {this.GetPrimaryKey().ToString()}");
+        Logger.LogDebug($"[ChatGAgentManager][GetUserProfileAsync] userId: {Id.ToString()}");
 
-        var invitationGrain = await GetInvitationAgentAsync(this.GetPrimaryKey());
+        var invitationGrain = await GetInvitationAgentAsync(Id);
         await invitationGrain.ProcessScheduledRewardAsync();
 
         // Sync latest subscription status from UserBillingGAgent before getting user profile
         // This ensures Google Pay and other platform subscriptions are up-to-date
-        var userBillingGAgent = GrainFactory.GetGrain<IUserBillingGAgent>(this.GetPrimaryKey());
+        var userBillingGAgent = _clusterClient.GetGrain<IUserBillingGAgent>(Id);
         var activeSubscriptionStatus = await userBillingGAgent.GetActiveSubscriptionStatusAsync();
 
         Logger.LogDebug(
             $"[ChatGAgentManager][GetUserProfileAsync] Active subscription status - Apple: {activeSubscriptionStatus.HasActiveAppleSubscription}, Stripe: {activeSubscriptionStatus.HasActiveStripeSubscription}, GooglePlay: {activeSubscriptionStatus.HasActiveGooglePlaySubscription}");
 
-        var userQuotaGAgent = await GetUserQuotaAgentAsync(this.GetPrimaryKey());
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
 
         // Check if we need to sync subscription status between UserBillingGAgent and UserQuotaGAgent
         // This is particularly important for Google Pay subscriptions that might not be reflected in UserQuotaGAgent yet
@@ -1015,7 +1017,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         //     
         // foreach (var reward in scheduledRewards)
         // {
-        //     Logger.LogInformation($"[ChatGAgentManager][GetUserProfileAsync] Processing scheduled reward for user {this.GetPrimaryKey()}, credits: {reward.Credits}");
+        //     Logger.LogInformation($"[ChatGAgentManager][GetUserProfileAsync] Processing scheduled reward for user {Id}, credits: {reward.Credits}");
         //     await userQuotaGAgent.AddCreditsAsync(reward.Credits);
         //     await invitationGrain.MarkRewardAsIssuedAsync(reward.InviteeId, reward.InvoiceId);
         //     credits.Credits += reward.Credits;
@@ -1030,7 +1032,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             Credits = credits,
             Subscription = subscriptionInfo,
             UltimateSubscription = ultimateSubscriptionInfo,
-            Id = this.GetPrimaryKey(),
+            Id = Id,
             InviterId = State.InviterId,
             VoiceLanguage = State.VoiceLanguage
         };
@@ -1065,22 +1067,22 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         }
 
         var shareId = Guid.NewGuid();
-        var shareLinkGrain = GrainFactory.GetGrain<IShareLinkGrain>(shareId);
+        var shareLinkGrain = _clusterClient.GetGrain<IShareLinkGrain>(shareId);
         await shareLinkGrain.SaveShareContentAsync(new ShareLinkDto
         {
-            UserId = this.GetPrimaryKey(),
+            UserId = Id,
             SessionId = sessionId,
             Messages = chatMessages
         });
         Logger.LogDebug(
             $"[ChatGAgentManager][GenerateChatShareContentAsync] - session: {sessionId.ToString()}, save success");
-        RaiseEvent(new GenerateChatShareContentLogEvent
+        RaiseEvent(new GenerateChatShareContentEvent
         {
             SessionId = sessionId,
             ShareId = shareId
         });
 
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
         return shareId;
     }
 
@@ -1107,13 +1109,13 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             throw new UserFriendlyException(localizedMessage);
         }
 
-        var shareLinkGrain = GrainFactory.GetGrain<IShareLinkGrain>(shareId);
+        var shareLinkGrain = _clusterClient.GetGrain<IShareLinkGrain>(shareId);
         return await shareLinkGrain.GetShareContentAsync();
     }
 
     public async Task<string> GenerateInviteCodeAsync()
     {
-        var invitationAgent = await GetInvitationAgentAsync(this.GetPrimaryKey());
+        var invitationAgent = await GetInvitationAgentAsync(Id);
         var inviteCode = await invitationAgent.GenerateInviteCodeAsync();
         return inviteCode;
     }
@@ -1131,35 +1133,35 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             return false;
         }
 
-        if (inviterId.Equals(this.GetPrimaryKey().ToString()))
+        if (inviterId.Equals(Id.ToString()))
         {
             Logger.LogWarning(
-                $"Invalid invite code,the code belongs to the user themselves. userId:{this.GetPrimaryKey().ToString()} InviteCode:{inviteCode}");
+                $"Invalid invite code,the code belongs to the user themselves. userId:{Id.ToString()} InviteCode:{inviteCode}");
             return false;
         }
 
         // Step 1: First, check if the current user (invitee) is eligible for the reward.
-        var userQuotaGAgent = await GetUserQuotaAgentAsync(this.GetPrimaryKey());
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
 
         if (State.RegisteredAtUtc == null && State.SessionInfoList.IsNullOrEmpty())
         {
-            RaiseEvent(new SetRegisteredAtUtcEventLog()
+            RaiseEvent(new SetRegisteredAtUtcEvent()
             {
                 RegisteredAtUtc = DateTime.UtcNow
             });
 
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
         }
 
         bool redeemResult = false;
 
         var registeredAtUtc = State.RegisteredAtUtc;
         Logger.LogWarning(
-            $"State.RegisteredAtUtc {this.GetPrimaryKey().ToString()} {registeredAtUtc?.ToString() ?? "null"}");
+            $"State.RegisteredAtUtc {Id.ToString()} {registeredAtUtc?.ToString() ?? "null"}");
 
         if (registeredAtUtc == null)
         {
-            Logger.LogWarning($"State.RegisteredAtUtc == null userId:{this.GetPrimaryKey().ToString()}");
+            Logger.LogWarning($"State.RegisteredAtUtc == null userId:{Id.ToString()}");
             redeemResult = false;
         }
         else
@@ -1168,24 +1170,24 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             var now = DateTime.UtcNow;
             var minutes = (now - registeredAtUtc.Value).TotalMinutes;
             Logger.LogWarning(
-                $"State.RegisteredAtUtc userId:{this.GetPrimaryKey().ToString()} RegisteredAtUtc={registeredAtUtc.Value} now={now} minutes={minutes}");
+                $"State.RegisteredAtUtc userId:{Id.ToString()} RegisteredAtUtc={registeredAtUtc.Value} now={now} minutes={minutes}");
             //
 
             redeemResult =
-                await userQuotaGAgent.RedeemInitialRewardAsync(this.GetPrimaryKey().ToString(), registeredAtUtc.Value);
+                await userQuotaGAgent.RedeemInitialRewardAsync(Id.ToString(), registeredAtUtc.Value);
         }
 
         if (!redeemResult)
         {
             Logger.LogWarning(
-                $"Failed to redeem initial reward for user {this.GetPrimaryKey().ToString()} with code {inviteCode}. Eligibility check failed");
+                $"Failed to redeem initial reward for user {Id.ToString()} with code {inviteCode}. Eligibility check failed");
             return false;
         }
 
         // Step 2: If eligible, record the invitee in the inviter's grain.
         var inviterGuid = Guid.Parse(inviterId);
         var inviterGrain = await GetInvitationAgentAsync(inviterGuid);
-        await inviterGrain.ProcessInviteeRegistrationAsync(this.GetPrimaryKey().ToString());
+        await inviterGrain.ProcessInviteeRegistrationAsync(Id.ToString());
 
         await SetInviterAsync(inviterGuid);
 
@@ -1200,20 +1202,20 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             return new UserProfileDto();
         }
 
-        var godChat = GrainFactory.GetGrain<IGodChat>(sessionInfo.SessionId);
+        var godChat = _clusterClient.GetGrain<IGodChat>(sessionInfo.SessionId);
         var userProfileDto = await godChat.GetUserProfileAsync();
         return userProfileDto ?? new UserProfileDto();
     }
 
     public async Task<Guid> SetInviterAsync(Guid inviterId)
     {
-        RaiseEvent(new SetInviterEventLog()
+        RaiseEvent(new SetInviterEvent()
         {
             InviterId = inviterId
         });
 
-        await ConfirmEvents();
-        return this.GetPrimaryKey();
+        await ConfirmEventsAsync();
+        return Id;
     }
 
     public Task<Guid?> GetInviterAsync()
@@ -1221,15 +1223,14 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         return Task.FromResult(State.InviterId);
     }
 
-    protected override void GAgentTransitionState(ChatManagerGAgentState state,
-        StateLogEventBase<ChatManageEventLog> @event)
+    protected override void TransitionState(ChatManagerStateProto state, IMessage @event)
     {
         switch (@event)
         {
-            case SetRegisteredAtUtcEventLog @setRegisteredAtUtcEventLog:
+            case SetRegisteredAtUtcEvent setRegisteredAtUtcEvent:
                 state.RegisteredAtUtc = setRegisteredAtUtcEventLog.RegisteredAtUtc;
                 break;
-            case CreateSessionInfoEventLog @createSessionInfo:
+            case CreateSessionInfoEvent @createSessionInfo:
                 if (state.SessionInfoList.IsNullOrEmpty() && state.RegisteredAtUtc == null)
                 {
                     state.RegisteredAtUtc = DateTime.UtcNow;
@@ -1243,7 +1244,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                     Guider = @createSessionInfo.Guider
                 });
                 break;
-            case DeleteSessionEventLog @deleteSessionEventLog:
+            case DeleteSessionEvent @deleteSessionEventLog:
                 var deleteSession = state.GetSession(@deleteSessionEventLog.SessionId);
                 if (deleteSession != null && !deleteSession.ShareIds.IsNullOrEmpty())
                 {
@@ -1252,7 +1253,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
                 state.SessionInfoList.RemoveAll(f => f.SessionId == @deleteSessionEventLog.SessionId);
                 break;
-            case CleanExpiredSessionsEventLog @cleanExpiredSessionsEventLog:
+            case CleanExpiredSessionsEvent @cleanExpiredSessionsEventLog:
                 var expiredSessionIds = state.SessionInfoList
                     .Where(s => s.CreateAt <= @cleanExpiredSessionsEventLog.CleanBefore &&
                                 string.IsNullOrEmpty(s.Title))
@@ -1270,7 +1271,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
                 state.SessionInfoList.RemoveAll(s => expiredSessionIds.Contains(s.SessionId));
                 break;
-            case RenameTitleEventLog @renameTitleEventLog:
+            case RenameTitleEvent @renameTitleEventLog:
                 Logger.LogDebug(
                     $"[ChatGAgentManager][RenameChatTitleEvent] event:{JsonConvert.SerializeObject(@renameTitleEventLog)}");
                 var sessionInfoList = state.SessionInfoList;
@@ -1280,7 +1281,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                 sessionInfo.Title = @renameTitleEventLog.Title;
                 state.SessionInfoList = sessionInfoList;
                 break;
-            case ClearAllEventLog:
+            case ClearAllEvent:
                 state.SessionInfoList.Clear();
                 state.Gender = string.Empty;
                 state.BirthDate = default;
@@ -1290,22 +1291,22 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                 state.InviterId = null;
                 state.VoiceLanguage = VoiceLanguageEnum.Unset;
                 break;
-            case SetUserProfileEventLog @setFortuneInfoEventLog:
+            case SetUserProfileEvent @setFortuneInfoEventLog:
                 state.Gender = @setFortuneInfoEventLog.Gender;
                 state.BirthDate = @setFortuneInfoEventLog.BirthDate;
                 state.BirthPlace = @setFortuneInfoEventLog.BirthPlace;
                 state.FullName = @setFortuneInfoEventLog.FullName;
                 break;
-            case SetVoiceLanguageEventLog @setVoiceLanguageEventLog:
+            case SetVoiceLanguageEvent @setVoiceLanguageEventLog:
                 // Update the voice language preference for the user
                 state.VoiceLanguage = @setVoiceLanguageEventLog.VoiceLanguage;
                 break;
-            case GenerateChatShareContentLogEvent generateChatShareContentLogEvent:
+            case GenerateChatShareContentEvent generateChatShareContentLogEvent:
                 var session = state.GetSession(generateChatShareContentLogEvent.SessionId);
                 if (session == null)
                 {
                     Logger.LogDebug(
-                        $"[ChatGAgentManager][GenerateChatShareContentLogEvent] session not fuound: {generateChatShareContentLogEvent.SessionId.ToString()}");
+                        $"[ChatGAgentManager][GenerateChatShareContentEvent] session not fuound: {generateChatShareContentLogEvent.SessionId.ToString()}");
                     break;
                 }
 
@@ -1317,13 +1318,13 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
                 session.ShareIds.Add(generateChatShareContentLogEvent.ShareId);
                 break;
-            case SetMaxShareCountLogEvent setMaxShareCountLogEvent:
+            case SetMaxShareCountEvent setMaxShareCountLogEvent:
                 state.MaxShareCount = setMaxShareCountLogEvent.MaxShareCount;
                 break;
-            case SetInviterEventLog setInviterEventLog:
+            case SetInviterEvent setInviterEventLog:
                 state.InviterId = setInviterEventLog.InviterId;
                 break;
-            case InitializeNewUserStatusLogEvent initializeNewUserStatusLogEvent:
+            case InitializeNewUserStatusEvent initializeNewUserStatusLogEvent:
                 state.IsFirstConversation = initializeNewUserStatusLogEvent.IsFirstConversation;
                 state.UserId = initializeNewUserStatusLogEvent.UserId;
                 if (initializeNewUserStatusLogEvent.RegisteredAtUtc != null)
@@ -1333,7 +1334,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
                 state.MaxShareCount = initializeNewUserStatusLogEvent.MaxShareCount;
                 break;
-            case RegisterOrUpdateDeviceEventLog registerDeviceEvent:
+            case RegisterOrUpdateDeviceEvent registerDeviceEvent:
                 // V1 compatibility: Keep V1 state but don't use in logic
                 // Remove old token mapping if token changed
                 if (!string.IsNullOrEmpty(registerDeviceEvent.OldPushToken))
@@ -1349,10 +1350,10 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                 }
 
                 break;
-            case MarkDailyPushReadEventLog markReadEvent:
+            case MarkDailyPushReadEvent markReadEvent:
                 state.DailyPushReadStatus[markReadEvent.DateKey] = true;
                 break;
-            case CleanExpiredDevicesEventLog cleanDevicesEvent:
+            case CleanExpiredDevicesEvent cleanDevicesEvent:
                 // Remove devices specified in the cleanup event
                 foreach (var deviceIdToRemove in cleanDevicesEvent.DeviceIdsToRemove)
                 {
@@ -1376,7 +1377,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                 break;
 
             // === V2 Device Management Events ===
-            case RegisterOrUpdateDeviceV2EventLog registerDeviceV2Event:
+            case RegisterOrUpdateDeviceV2Event registerDeviceV2Event:
                 // Update V2 device info and token mapping
                 state.UserDevicesV2[registerDeviceV2Event.DeviceId] = registerDeviceV2Event.DeviceInfo;
                 if (!string.IsNullOrEmpty(registerDeviceV2Event.DeviceInfo.PushToken))
@@ -1390,7 +1391,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
             // ✅ V2-only: Migration events removed - V1 and V2 are completely separate
 
-            case CleanupDevicesV2EventLog cleanDevicesV2Event:
+            case CleanupDevicesV2Event cleanDevicesV2Event:
                 // Remove V2 devices specified in the cleanup event
                 foreach (var deviceIdToRemove in cleanDevicesV2Event.DeviceIdsToRemove)
                 {
@@ -1435,19 +1436,19 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         // Version > 0 means there are existing events, so it's a historical user
         // Version == 0 means no events yet, so it's a new user
         var isFirstAccess = Version == 0;
-        var userId = this.GetPrimaryKey();
+        var userId = Id;
 
         if (isFirstAccess)
         {
             // For new users: initialize all fields in one combined event
-            RaiseEvent(new InitializeNewUserStatusLogEvent
+            RaiseEvent(new InitializeNewUserStatusEvent
             {
                 IsFirstConversation = true,
                 UserId = userId,
                 RegisteredAtUtc = DateTime.UtcNow,
                 MaxShareCount = 10000
             });
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
             return true;
         }
         else
@@ -1455,32 +1456,34 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             // For historical users: use separate events to maintain backward compatibility
             // Don't set RegisteredAtUtc and MaxShareCount for historical users here
             // as they should be handled by existing logic if needed
-            RaiseEvent(new InitializeNewUserStatusLogEvent
+            RaiseEvent(new InitializeNewUserStatusEvent
             {
                 IsFirstConversation = false,
                 UserId = userId,
                 RegisteredAtUtc = null,
                 MaxShareCount = 10000
             });
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
             return false;
         }
     }
 
-    protected override async Task OnGAgentActivateAsync(CancellationToken cancellationToken)
+    protected override async Task OnActivateAsync(CancellationToken cancellationToken = default)
     {
+        await base.OnActivateAsync(cancellationToken);
+        
         // Check and initialize first access status if needed
         var firstAccess = await CheckAndInitializeFirstAccessStatus();
         if (firstAccess)
         {
             // Record signup success event via OpenTelemetry
-            var userId = this.GetPrimaryKey().ToString();
+            var userId = Id.ToString();
             UserLifecycleTelemetryMetrics.RecordSignupSuccess(userId: userId, logger: Logger);
         }
 
         if (State.MaxShareCount == 0)
         {
-            RaiseEvent(new SetMaxShareCountLogEvent
+            RaiseEvent(new SetMaxShareCountEvent
             {
                 MaxShareCount = 10000
             });
@@ -1650,13 +1653,13 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             var date = DateOnly.FromDateTime(DateTime.UtcNow);
 
             // 1. Record user-level read status (existing logic)
-            RaiseEvent(new MarkDailyPushReadEventLog
+            RaiseEvent(new MarkDailyPushReadEvent
             {
                 DateKey = dateKey,
                 ReadTime = DateTime.UtcNow
             });
 
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
 
             // 2. Record device-level read status in Redis (new logic)
             var deduplicationService = ServiceProvider.GetRequiredService<IPushDeduplicationService>();
@@ -1771,7 +1774,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             Logger.LogInformation("🧹 Cleaning up {Count} devices for user {UserId}: {Reasons}",
                 devicesToRemove.Count, State.UserId, reasonText);
 
-            RaiseEvent(new CleanExpiredDevicesEventLog
+            RaiseEvent(new CleanExpiredDevicesEvent
             {
                 DeviceIdsToRemove = devicesToRemove,
                 CleanupTime = now,
@@ -1779,7 +1782,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                 RemovedCount = devicesToRemove.Count
             });
 
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
         }
     }
 
@@ -1810,7 +1813,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                     keysToRemove.Count, State.UserId, currentDateKey, yesterdayDateKey);
             }
 
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
         }
         catch (Exception ex)
         {
@@ -2309,7 +2312,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
             // Step 2: Initialize and fully activate DailyPushCoordinatorGAgent
             var coordinatorGAgent =
-                GrainFactory.GetGrain<IDailyPushCoordinatorGAgent>(DailyPushConstants.TimezoneToGuid(newTimeZone));
+                _clusterClient.GetGrain<IDailyPushCoordinatorGAgent>(DailyPushConstants.TimezoneToGuid(newTimeZone));
 
             // Force complete initialization and activation
             await coordinatorGAgent.InitializeAsync(newTimeZone);
@@ -2697,7 +2700,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         }
 
         // Raise V2 event
-        RaiseEvent(new RegisterOrUpdateDeviceV2EventLog
+        RaiseEvent(new RegisterOrUpdateDeviceV2Event
         {
             DeviceId = deviceId,
             DeviceInfo = deviceInfo,
@@ -2706,7 +2709,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             IsMigration = false
         });
 
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
 
         // 🎯 CRITICAL: Update timezone index for V2 devices  
         // This ensures the user appears in PushSubscriberIndexGAgent for coordinated push
@@ -3033,7 +3036,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                     v2DevicesToRemove.Count, string.Join(",", v2DevicesToRemove), errorCode);
 
                 // Remove V2 devices  
-                RaiseEvent(new CleanupDevicesV2EventLog
+                RaiseEvent(new CleanupDevicesV2Event
                 {
                     DeviceIdsToRemove = v2DevicesToRemove,
                     RemovedCount = v2DevicesToRemove.Count,
@@ -3044,7 +3047,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
             if (devicesToRemove.Any())
             {
-                await ConfirmEvents();
+                await ConfirmEventsAsync();
                 Logger.LogWarning(
                     "🗑️ Automatically removed {Count} devices with invalid pushToken - Error: {ErrorCode}, Token: {TokenPrefix}..., DeviceIds: {DeviceIds}",
                     devicesToRemove.Count, errorCode,
@@ -3156,7 +3159,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
 
         if (devicesToRemove.Any())
         {
-            RaiseEvent(new CleanupDevicesV2EventLog
+            RaiseEvent(new CleanupDevicesV2Event
             {
                 DeviceIdsToRemove = devicesToRemove,
                 RemovedCount = devicesToRemove.Count,
@@ -3165,7 +3168,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
                 CleanupTime = now
             });
 
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
 
             Logger.LogInformation("🧹 V2 Enhanced device cleanup: removed {Count} devices. Details: {Details}",
                 devicesToRemove.Count, JsonSerializer.Serialize(cleanupDetails));
