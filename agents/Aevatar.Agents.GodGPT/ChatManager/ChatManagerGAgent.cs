@@ -198,7 +198,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         RaiseEvent(new RenameTitleEvent()
         {
-            SessionId = @event.SessionId,
+            SessionId = @event.SessionId.ToString(),
             Title = @event.Title
         });
 
@@ -228,7 +228,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         // TODO: [SIGNALR_DISABLED] SignalR push disabled
         // await PublishAsync(new ResponseCreateGod()
         // {
-        //     SessionId = sessionId,
+        //     SessionId = sessionId.ToString(),
         //     SessionVersion = SessionVersion
         // });
         Logger.LogDebug(
@@ -317,7 +317,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         // TODO: [SIGNALR_DISABLED] SignalR push disabled
         // await PublishAsync(new ResponseRenameSession()
         // {
-        //     SessionId = @event.SessionId,
+        //     SessionId = @event.SessionId.ToString(),
         //     Title = @event.Title,
         // });
 
@@ -458,9 +458,9 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         await RecordUserActivityMetricsAsync();
         RaiseEvent(new CreateSessionInfoEvent()
         {
-            SessionId = sessionId,
+            SessionId = sessionId.ToString(),
             Title = "",
-            CreateAt = DateTime.UtcNow,
+            CreateAt = DateTime.UtcNow.ToTimestamp(),
             Guider = guider // Set the role information for the conversation
         });
 
@@ -487,7 +487,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
             // Check SessionInfoList for the last session's creation time
             var lastSession = State.SessionInfoList?.LastOrDefault();
-            if (lastSession != null && lastSession.CreateAt.Date == today)
+            if (lastSession != null && lastSession.CreateAt.Date() == today)
             {
                 // Today already has session creation, skip duplicate reporting
                 Logger.LogDebug(
@@ -498,13 +498,13 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
             // First session creation today, need to record metrics
             var todayString = today.ToString("yyyy-MM-dd");
-            var userRegistrationDate = State.RegisteredAtUtc?.ToString("yyyy-MM-dd") ?? todayString;
+            var userRegistrationDate = State.RegisteredAtUtc?.ToFormattedString("yyyy-MM-dd") ?? todayString;
 
             // Get user membership level
             var membershipLevel = await DetermineMembershipLevelAsync();
 
             // Calculate days since registration
-            var registrationDate = State.RegisteredAtUtc?.Date ?? today;
+            var registrationDate = State.RegisteredAtUtc?.Date() ?? today;
             var daysSinceRegistration = (int)(today - registrationDate).TotalDays;
 
             // Record user activity metrics (ensure each user is counted only once per day)
@@ -586,7 +586,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         // Clean expired sessions (7 days old and empty title)
         var sevenDaysAgo = DateTime.UtcNow.AddDays(-7);
         var hasExpiredSessions = State.SessionInfoList.Any(s =>
-            s.CreateAt <= sevenDaysAgo &&
+            s.CreateAt.LessOrEqualThan(sevenDaysAgo) &&
             string.IsNullOrEmpty(s.Title));
 
         if (hasExpiredSessions)
@@ -594,7 +594,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             Logger.LogDebug($"[ChatGAgentManager][GetSessionListAsync] Cleaning sessions older than {sevenDaysAgo}");
             RaiseEvent(new CleanExpiredSessionsEvent
             {
-                CleanBefore = sevenDaysAgo
+                CleanBefore = sevenDaysAgo.ToTimestamp()
             });
             await ConfirmEventsAsync();
         }
@@ -603,7 +603,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         foreach (var item in State.SessionInfoList)
         {
-            var createAt = item.CreateAt;
+            var createAt = item.CreateAt?.ToDateTime() ?? DateTime.MinValue;
             if (createAt == default)
             {
                 createAt = new DateTime(2025, 4, 18);
@@ -611,7 +611,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
             result.Add(new SessionInfoDto()
             {
-                SessionId = item.SessionId,
+                SessionId = Guid.Parse(item.SessionId),
                 Title = item.Title,
                 CreateAt = createAt,
                 Guider = item.Guider // Include role information in the response
@@ -669,7 +669,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                 string contentPreview = "";
                 try
                 {
-                    var godChat = _clusterClient.GetGrain<IGodChat>(sessionInfo.SessionId);
+                    var godChat = _clusterClient.GetGrain<IGodChat>(Guid.Parse(sessionInfo.SessionId));
                     var chatMessages = await godChat.GetChatMessageAsync();
                     contentPreview = ExtractChatContent(chatMessages);
                 }
@@ -695,7 +695,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                 {
                     matchScore = titleMatchScore * 2 + contentMatchScore; // Title matching gets higher priority
 
-                    var createAt = sessionInfo.CreateAt;
+                    var createAt = sessionInfo.CreateAt?.ToDateTime() ?? DateTime.MinValue;
                     if (createAt == default || createAt == DateTime.MinValue)
                     {
                         // Use a reasonable fallback time instead of hardcoded future date
@@ -704,7 +704,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
                     var dto = new SessionInfoDto
                     {
-                        SessionId = sessionInfo.SessionId,
+                        SessionId = Guid.Parse(sessionInfo.SessionId),
                         Title = sessionInfo.Title,
                         CreateAt = createAt,
                         Guider = sessionInfo.Guider,
@@ -839,7 +839,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             throw new UserFriendlyException($"Unable to load conversation {sessionId}");
         }
 
-        var godChat = _clusterClient.GetGrain<IGodChat>(sessionInfo.SessionId);
+        var godChat = _clusterClient.GetGrain<IGodChat>(Guid.Parse(sessionInfo.SessionId));
         return await godChat.GetChatMessageAsync();
     }
 
@@ -863,7 +863,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             throw new UserFriendlyException(localizedMessage);
         }
 
-        var godChat = _clusterClient.GetGrain<IGodChat>(sessionInfo.SessionId);
+        var godChat = _clusterClient.GetGrain<IGodChat>(Guid.Parse(sessionInfo.SessionId));
         var result = await godChat.GetChatMessageWithMetaAsync();
 
         Logger.LogDebug(
@@ -885,9 +885,9 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         return new SessionCreationInfoDto
         {
-            SessionId = sessionInfo.SessionId,
+            SessionId = Guid.Parse(sessionInfo.SessionId),
             Title = sessionInfo.Title,
-            CreateAt = sessionInfo.CreateAt,
+            CreateAt = sessionInfo.CreateAt?.ToDateTime() ?? DateTime.MinValue,
             Guider = sessionInfo.Guider
         };
     }
@@ -903,7 +903,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         RaiseEvent(new DeleteSessionEvent()
         {
-            SessionId = sessionId
+            SessionId = sessionId.ToString()
         });
 
         await ConfirmEventsAsync();
@@ -920,7 +920,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         RaiseEvent(new RenameTitleEvent()
         {
-            SessionId = sessionId,
+            SessionId = sessionId.ToString(),
             Title = title,
         });
 
@@ -955,7 +955,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         RaiseEvent(new SetUserProfileEvent()
         {
             Gender = gender,
-            BirthDate = birthDate,
+            BirthDate = birthDate.ToTimestamp(),
             BirthPlace = birthPlace,
             FullName = fullName
         });
@@ -983,7 +983,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         // Raise event to update voice language
         RaiseEvent(new SetVoiceLanguageEvent()
         {
-            VoiceLanguage = voiceLanguage
+            VoiceLanguage = (int)voiceLanguage
         });
 
         await ConfirmEventsAsync();
@@ -1037,15 +1037,15 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         return new UserProfileDto
         {
             Gender = State.Gender,
-            BirthDate = State.BirthDate,
+            BirthDate = State.BirthDate?.ToDateTime() ?? DateTime.MinValue,
             BirthPlace = State.BirthPlace,
             FullName = State.FullName,
             Credits = credits,
             Subscription = subscriptionInfo,
             UltimateSubscription = ultimateSubscriptionInfo,
             Id = Id,
-            InviterId = State.InviterId,
-            VoiceLanguage = State.VoiceLanguage
+            InviterId = string.IsNullOrEmpty(State.InviterId) ? null : Guid.Parse(State.InviterId),
+            VoiceLanguage = (VoiceLanguageEnum)State.VoiceLanguage
         };
     }
 
@@ -1089,8 +1089,8 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             $"[ChatGAgentManager][GenerateChatShareContentAsync] - session: {sessionId.ToString()}, save success");
         RaiseEvent(new GenerateChatShareContentEvent
         {
-            SessionId = sessionId,
-            ShareId = shareId
+            SessionId = sessionId.ToString(),
+            ShareId = shareId.ToString()
         });
 
         await ConfirmEventsAsync();
@@ -1111,7 +1111,8 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             throw new UserFriendlyException(localizedMessage);
         }
 
-        if (sessionInfo.ShareIds.IsNullOrEmpty() || !sessionInfo.ShareIds.Contains(shareId))
+        var shareIds = sessionInfo.GetShareIds();
+        if (shareIds.IsNullOrEmpty() || !shareIds.Contains(shareId))
         {
             Logger.LogDebug(
                 $"[ChatGAgentManager][GetChatShareContentAsync] - session {sessionId.ToString()}, shareId not found.");
@@ -1158,7 +1159,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         {
             RaiseEvent(new SetRegisteredAtUtcEvent()
             {
-                RegisteredAtUtc = DateTime.UtcNow
+                RegisteredAtUtc = DateTime.UtcNow.ToTimestamp()
             });
 
             await ConfirmEventsAsync();
@@ -1179,13 +1180,13 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         {
             //show time
             var now = DateTime.UtcNow;
-            var minutes = (now - registeredAtUtc.Value).TotalMinutes;
+            var minutes = (now - registeredAtUtc.Value()).TotalMinutes;
             Logger.LogWarning(
-                $"State.RegisteredAtUtc userId:{Id.ToString()} RegisteredAtUtc={registeredAtUtc.Value} now={now} minutes={minutes}");
+                $"State.RegisteredAtUtc userId:{Id.ToString()} RegisteredAtUtc={registeredAtUtc.Value()} now={now} minutes={minutes}");
             //
 
             redeemResult =
-                await userQuotaGAgent.RedeemInitialRewardAsync(Id.ToString(), registeredAtUtc.Value);
+                await userQuotaGAgent.RedeemInitialRewardAsync(Id.ToString(), registeredAtUtc.Value());
         }
 
         if (!redeemResult)
@@ -1207,13 +1208,13 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
     public async Task<UserProfileDto> GetLastSessionUserProfileAsync()
     {
-        var sessionInfo = State.SessionInfoList.LastOrDefault(new SessionInfo());
-        if (sessionInfo.SessionId == Guid.Empty)
+        var sessionInfo = State.SessionInfoList.LastOrDefault();
+        if (sessionInfo == null || string.IsNullOrEmpty(sessionInfo.SessionId))
         {
             return new UserProfileDto();
         }
 
-        var godChat = _clusterClient.GetGrain<IGodChat>(sessionInfo.SessionId);
+        var godChat = _clusterClient.GetGrain<IGodChat>(Guid.Parse(sessionInfo.SessionId));
         var userProfileDto = await godChat.GetUserProfileAsync();
         return userProfileDto ?? new UserProfileDto();
     }
@@ -1222,7 +1223,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
     {
         RaiseEvent(new SetInviterEvent()
         {
-            InviterId = inviterId
+            InviterId = inviterId.ToString()
         });
 
         await ConfirmEventsAsync();
@@ -1231,7 +1232,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
     public Task<Guid?> GetInviterAsync()
     {
-        return Task.FromResult(State.InviterId);
+        return Task.FromResult(State.InviterId.ToGuidNullable());
     }
 
     protected override void TransitionState(ChatManagerStateProto state, IMessage @event)
@@ -1239,15 +1240,15 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         switch (@event)
         {
             case SetRegisteredAtUtcEvent setRegisteredAtUtcEvent:
-                state.RegisteredAtUtc = setRegisteredAtUtcEventLog.RegisteredAtUtc;
+                state.RegisteredAtUtc = setRegisteredAtUtcEvent.RegisteredAtUtc;
                 break;
             case CreateSessionInfoEvent @createSessionInfo:
                 if (state.SessionInfoList.IsNullOrEmpty() && state.RegisteredAtUtc == null)
                 {
-                    state.RegisteredAtUtc = DateTime.UtcNow;
+                    state.RegisteredAtUtc = DateTime.UtcNow.ToTimestamp();
                 }
 
-                state.SessionInfoList.Add(new SessionInfo()
+                state.SessionInfoList.Add(new SessionInfoProto()
                 {
                     SessionId = @createSessionInfo.SessionId,
                     Title = @createSessionInfo.Title,
@@ -1257,16 +1258,18 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                 break;
             case DeleteSessionEvent @deleteSessionEventLog:
                 var deleteSession = state.GetSession(@deleteSessionEventLog.SessionId);
-                if (deleteSession != null && !deleteSession.ShareIds.IsNullOrEmpty())
+                if (deleteSession != null && deleteSession.HasShareIds())
                 {
-                    state.CurrentShareCount -= deleteSession.ShareIds.Count;
+                    state.CurrentShareCount -= deleteSession.GetShareIds().Count;
                 }
 
-                state.SessionInfoList.RemoveAll(f => f.SessionId == @deleteSessionEventLog.SessionId);
+                var toRemove = state.SessionInfoList.FirstOrDefault(f => f.SessionId == @deleteSessionEventLog.SessionId);
+                if (toRemove != null) state.SessionInfoList.Remove(toRemove);
                 break;
             case CleanExpiredSessionsEvent @cleanExpiredSessionsEventLog:
+                var cleanBefore = @cleanExpiredSessionsEventLog.CleanBefore?.ToDateTime() ?? DateTime.MinValue;
                 var expiredSessionIds = state.SessionInfoList
-                    .Where(s => s.CreateAt <= @cleanExpiredSessionsEventLog.CleanBefore &&
+                    .Where(s => (s.CreateAt?.ToDateTime() ?? DateTime.MinValue) <= cleanBefore &&
                                 string.IsNullOrEmpty(s.Title))
                     .Select(s => s.SessionId)
                     .ToList();
@@ -1274,33 +1277,33 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                 foreach (var expiredSessionId in expiredSessionIds)
                 {
                     var expiredSession = state.GetSession(expiredSessionId);
-                    if (expiredSession != null && !expiredSession.ShareIds.IsNullOrEmpty())
+                    if (expiredSession != null && expiredSession.HasShareIds())
                     {
-                        state.CurrentShareCount -= expiredSession.ShareIds.Count;
+                        state.CurrentShareCount -= expiredSession.GetShareIds().Count;
                     }
                 }
 
-                state.SessionInfoList.RemoveAll(s => expiredSessionIds.Contains(s.SessionId));
+                var sessionsToRemove = state.SessionInfoList.Where(s => expiredSessionIds.Contains(s.SessionId)).ToList();
+                foreach (var s in sessionsToRemove) state.SessionInfoList.Remove(s);
                 break;
             case RenameTitleEvent @renameTitleEventLog:
                 Logger.LogDebug(
                     $"[ChatGAgentManager][RenameChatTitleEvent] event:{JsonConvert.SerializeObject(@renameTitleEventLog)}");
-                var sessionInfoList = state.SessionInfoList;
-                var sessionInfo = sessionInfoList.First(f => f.SessionId == @renameTitleEventLog.SessionId);
+                var sessionInfo = state.SessionInfoList.First(f => f.SessionId == @renameTitleEventLog.SessionId);
                 Logger.LogDebug(
                     $"[ChatGAgentManager][RenameChatTitleEvent] event exist:{JsonConvert.SerializeObject(@renameTitleEventLog)}");
                 sessionInfo.Title = @renameTitleEventLog.Title;
-                state.SessionInfoList = sessionInfoList;
+                // Note: RepeatedField is modified in-place, no need to reassign
                 break;
             case ClearAllEvent:
                 state.SessionInfoList.Clear();
                 state.Gender = string.Empty;
-                state.BirthDate = default;
+                state.BirthDate = null;
                 state.BirthPlace = string.Empty;
                 state.FullName = string.Empty;
                 state.CurrentShareCount = 0;
-                state.InviterId = null;
-                state.VoiceLanguage = VoiceLanguageEnum.Unset;
+                state.InviterId = "";
+                state.VoiceLanguage = (int)VoiceLanguageEnum.Unset;
                 break;
             case SetUserProfileEvent @setFortuneInfoEventLog:
                 state.Gender = @setFortuneInfoEventLog.Gender;
@@ -1322,12 +1325,8 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                 }
 
                 state.CurrentShareCount += 1;
-                if (session.ShareIds == null)
-                {
-                    session.ShareIds = new List<Guid>();
-                }
-
-                session.ShareIds.Add(generateChatShareContentLogEvent.ShareId);
+                // SessionInfoProto has single ShareId field
+                session.AddShareId(Guid.Parse(generateChatShareContentLogEvent.ShareId));
                 break;
             case SetMaxShareCountEvent setMaxShareCountLogEvent:
                 state.MaxShareCount = setMaxShareCountLogEvent.MaxShareCount;
@@ -1446,7 +1445,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         // Use Version property to determine if this is a historical user or new user
         // Version > 0 means there are existing events, so it's a historical user
         // Version == 0 means no events yet, so it's a new user
-        var isFirstAccess = Version == 0;
+        var isFirstAccess = GetCurrentVersion() == 0;
         var userId = Id;
 
         if (isFirstAccess)
@@ -1455,8 +1454,8 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             RaiseEvent(new InitializeNewUserStatusEvent
             {
                 IsFirstConversation = true,
-                UserId = userId,
-                RegisteredAtUtc = DateTime.UtcNow,
+                UserId = userId.ToString(),
+                RegisteredAtUtc = DateTime.UtcNow.ToTimestamp(),
                 MaxShareCount = 10000
             });
             await ConfirmEventsAsync();
@@ -1470,7 +1469,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             RaiseEvent(new InitializeNewUserStatusEvent
             {
                 IsFirstConversation = false,
-                UserId = userId,
+                UserId = userId.ToString(),
                 RegisteredAtUtc = null,
                 MaxShareCount = 10000
             });
@@ -1499,16 +1498,13 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                 MaxShareCount = 10000
             });
         }
-
-        await base.OnGAgentActivateAsync(cancellationToken);
     }
 
     private async Task<ConfigurationGAgent> GetConfigurationAsync()
     {
         if (_configurationAgent == null)
         {
-            var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
-            _configurationAgent = factory.CreateGAgent<ConfigurationGAgent>(
+            _configurationAgent = _agentFactory.CreateGAgent<ConfigurationGAgent>(
                 CommonHelper.GetSessionManagerConfigurationId());
             await _configurationAgent.ActivateAsync();
         }
@@ -1517,16 +1513,14 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
     private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
     {
-        var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
-        var agent = factory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
+        var agent = _agentFactory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
         await agent.ActivateAsync();
         return agent;
     }
 
     private async Task<InvitationGAgent> GetInvitationAgentAsync(Guid userId)
     {
-        var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
-        var agent = factory.CreateGAgent<InvitationGAgent>(userId);
+        var agent = _agentFactory.CreateGAgent<InvitationGAgent>(userId);
         await agent.ActivateAsync();
         return agent;
     }

@@ -204,4 +204,109 @@ public static class ChatManagerConversions
     {
         return state.SessionInfoList.FirstOrDefault(s => s.SessionId == sessionId);
     }
+
+    // =============================================================================
+    // Timestamp Extension Methods (for Timestamp -> DateTime operations)
+    // =============================================================================
+
+    /// <summary>
+    /// Get the Date part of a Timestamp (like DateTime.Date)
+    /// </summary>
+    public static DateTime Date(this Timestamp timestamp)
+    {
+        return timestamp.ToDateTime().Date;
+    }
+
+    /// <summary>
+    /// Get the underlying DateTime value from a Timestamp (like DateTime?.Value)
+    /// </summary>
+    public static DateTime Value(this Timestamp timestamp)
+    {
+        return timestamp.ToDateTime();
+    }
+
+    /// <summary>
+    /// Convert Timestamp to DateTime safely (null returns MinValue)
+    /// </summary>
+    public static DateTime ToDateTimeSafe(this Timestamp? timestamp)
+    {
+        return timestamp?.ToDateTime() ?? DateTime.MinValue;
+    }
+
+    /// <summary>
+    /// Check if Timestamp equals a DateTime
+    /// </summary>
+    public static bool EqualsDateTime(this Timestamp? timestamp, DateTime dateTime)
+    {
+        if (timestamp == null) return false;
+        return timestamp.ToDateTime() == dateTime;
+    }
+
+    /// <summary>
+    /// Check if Timestamp is less than or equal to DateTime
+    /// </summary>
+    public static bool LessOrEqualThan(this Timestamp? timestamp, DateTime dateTime)
+    {
+        if (timestamp == null) return true;
+        return timestamp.ToDateTime() <= dateTime;
+    }
+
+    /// <summary>
+    /// Format Timestamp to string with format (like DateTime.ToString(format))
+    /// </summary>
+    public static string ToFormattedString(this Timestamp timestamp, string format)
+    {
+        return timestamp.ToDateTime().ToString(format);
+    }
+
+    // =============================================================================
+    // String/Guid Extension Methods
+    // =============================================================================
+
+    /// <summary>
+    /// Parse string to Guid, returns Guid.Empty if null/empty
+    /// </summary>
+    public static Guid ToGuid(this string? str)
+    {
+        if (string.IsNullOrEmpty(str)) return Guid.Empty;
+        return Guid.Parse(str);
+    }
+
+    /// <summary>
+    /// Parse string to nullable Guid
+    /// </summary>
+    public static Guid? ToGuidNullable(this string? str)
+    {
+        if (string.IsNullOrEmpty(str)) return null;
+        return Guid.Parse(str);
+    }
+
+    // =============================================================================
+    // SessionInfoProto Extension Methods
+    // =============================================================================
+
+    /// <summary>
+    /// Get ShareIds as List of Guids from SessionInfoProto
+    /// </summary>
+    public static List<Guid> GetShareIds(this SessionInfoProto proto)
+    {
+        if (string.IsNullOrEmpty(proto.ShareId)) return new List<Guid>();
+        return new List<Guid> { Guid.Parse(proto.ShareId) };
+    }
+
+    /// <summary>
+    /// Check if session has any ShareIds
+    /// </summary>
+    public static bool HasShareIds(this SessionInfoProto proto)
+    {
+        return !string.IsNullOrEmpty(proto.ShareId);
+    }
+
+    /// <summary>
+    /// Add a ShareId to SessionInfoProto (replaces existing since proto has single ShareId)
+    /// </summary>
+    public static void AddShareId(this SessionInfoProto proto, Guid shareId)
+    {
+        proto.ShareId = shareId.ToString();
+    }
 }
