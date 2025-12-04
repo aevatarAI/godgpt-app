@@ -757,6 +757,14 @@ protected override async Task OnActivateAsync()
 | PushSubscriberIndexGAgent | HashSet → repeated string | ✅ |
 | AwakeningGAgent | VoiceLanguageEnum用int32处理 | ✅ |
 
+### 🔴 大型 Agents (待迁移)
+
+| Agent | 行数 | 复杂度 | 状态 |
+|-------|------|--------|------|
+| UserBillingGAgent | 5484 | 极高 (Payment逻辑复杂) | ⏳ |
+| ChatManagerGAgent | 3173 | 高 | ⏳ |
+| GodChatGAgent | 2403 | 高 | ⏳ |
+
 ---
 
 ## 🔵 Event Sourcing 迁移规则
