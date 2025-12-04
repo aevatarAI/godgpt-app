@@ -873,6 +873,60 @@ var lang = (VoiceLanguageEnum)State.Language;
 - Orleans Reminder 扩展方法需要 `Grain` 基类
 - **解决方案**: 保持旧框架，等待新框架提供定时器支持
 
+### Rule 8: 使用迁移工具方法
+
+已创建 `Common/MigrationHelpers.cs` 和 `Common/AgentRetrievalHelpers.cs` 简化迁移：
+
+#### 8.1 RepeatedField 操作
+
+```csharp
+using Aevatar.Agents.GodGPT.Common;
+
+// ❌ 旧方式 - State.PaymentHistory = newList; // 不能直接赋值!
+
+// ✅ 新方式 - 使用扩展方法
+State.PaymentHistory.ReplaceWith(newList.Select(ToProto));
+
+// 查找
+var index = State.PaymentHistory.FindIndex(p => p.PaymentGrainId == id);
+var item = State.PaymentHistory.FindFirst(p => p.SubscriptionId == subId);
+
+// 删除
+State.PaymentHistory.RemoveFirst(p => p.PaymentGrainId == id);
+```
+
+#### 8.2 类型转换
+
+```csharp
+// Timestamp
+var protoTs = dateTime.ToProtoTimestamp();
+var dt = protoTs.ToDateTime();
+
+// Guid
+var protoGuid = guid.ToProtoString();
+var guid = protoGuid.ToGuid();
+
+// Decimal (Proto uses double)
+var protoAmount = amount.ToProtoDouble();
+var amount = protoAmount.ToDecimal();
+
+// Enum
+var protoEnum = myEnum.ToProtoInt();
+var myEnum = protoInt.ToEnum<MyEnum>();
+```
+
+#### 8.3 Agent 获取
+
+```csharp
+using Aevatar.Agents.GodGPT.Common;
+
+// 新框架 Agent
+var agent = await _agentFactory.GetAgentAsync<SomeAgent>(id);
+
+// 旧框架 Grain (未迁移的)
+var grain = _clusterClient.GetLegacyGrain<ISomeGrain>(id);
+```
+
 ---
 
 ## 🟢 级联依赖更新规则
