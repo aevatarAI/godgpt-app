@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using Aevatar.Agents.GodGPT.Protos;
+using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.AI.Exceptions;
 using Aevatar.AI.Feature.StreamSyncWoker;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
@@ -18,19 +19,20 @@ using Aevatar.Application.Grains.Invitation;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Application.Grains.UserInfo;
 using Aevatar.Application.Grains.UserQuota;
-using Aevatar.Core.Abstractions;
 using Aevatar.GAgents.AI.Common;
 using Aevatar.GAgents.AI.Options;
 using Aevatar.GAgents.AIGAgent.Dtos;
 using Aevatar.GAgents.ChatAgent.Dtos;
 using GodGPT.GAgents.Common.Constants;
 using GodGPT.GAgents.SpeechChat;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Json.Schema.Generation;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
+using Orleans;
 using Orleans.Concurrency;
-using Aevatar.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp.BlobStoring;
 using Volo.Abp.Threading;
@@ -38,9 +40,8 @@ using Volo.Abp.Threading;
 namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 
 [Description("god chat agent")]
-[GAgent]
-[Reentrant]
-public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase, GodChatConfig>, IGodChat
+[GAgent(nameof(GodChatGAgent))]
+public class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatStateProto, GodChatConfig>, IGodChat
 {
     private static readonly TimeSpan RequestRecoveryDelay = TimeSpan.FromSeconds(600);
     private const string DefaultRegion = "DEFAULT";
@@ -54,6 +55,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
     private readonly IOptionsMonitor<LLMRegionOptions> _llmRegionOptions;
     private readonly ILocalizationService _localizationService;
     private readonly IGAgentFactory _agentFactory;
+    private readonly IClusterClient _clusterClient;
     
     // Cached ConfigurationGAgent instance (new framework)
     private ConfigurationGAgent? _configurationAgent;
@@ -67,12 +69,13 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
     private bool _isAccumulatingForSuggestions = false;
     private string _accumulatedSuggestionContent = "";
 
-    public GodChatGAgent(ISpeechService speechService, IOptionsMonitor<LLMRegionOptions> llmRegionOptions, ILocalizationService localizationService, IGAgentFactory agentFactory)
+    public GodChatGAgent(ISpeechService speechService, IOptionsMonitor<LLMRegionOptions> llmRegionOptions, ILocalizationService localizationService, IGAgentFactory agentFactory, IClusterClient clusterClient)
     {
         _speechService = speechService;
         _llmRegionOptions = llmRegionOptions;
         _localizationService = localizationService;
         _agentFactory = agentFactory;
+        _clusterClient = clusterClient;
     }
     
     private async Task<UserInfoCollectionGAgent> GetUserInfoCollectionAgentAsync(Guid userId)
@@ -89,15 +92,18 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         return agent;
     }
 
-    protected override async Task PerformConfigAsync(GodChatConfig configuration)
+    /// <summary>
+    /// New framework ConfigAsync - replaces PerformConfigAsync
+    /// </summary>
+    public new async Task ConfigAsync(GodChatConfig configuration)
     {
         var stopwatch = Stopwatch.StartNew();
-        Logger.LogDebug($"[GodChatGAgent][PerformConfigAsync] Start - SessionId: {this.GetPrimaryKey()}");
+        Logger.LogDebug($"[GodChatGAgent][ConfigAsync] Start - SessionId: {Id}");
         
         var regionToLLMsMap = _llmRegionOptions.CurrentValue.RegionToLLMsMap;
         if (regionToLLMsMap.IsNullOrEmpty())
         {
-            Logger.LogDebug($"[GodChatGAgent][PerformConfigAsync] LLMConfigs is null or empty.");
+            Logger.LogDebug($"[GodChatGAgent][ConfigAsync] LLMConfigs is null or empty.");
             return;
         }
         var isCN = GodGPTLanguageHelper.CheckClientIsCNFromContext();
@@ -107,12 +113,9 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             defaultRegion = CNDefaultRegion;
         }
         Logger.LogDebug(
-            $"[GodChatGAgent][InitializeRegionProxiesAsync] session {this.GetPrimaryKey().ToString()},isCN:{isCN}, region:{defaultRegion}");
+            $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()},isCN:{isCN}, region:{defaultRegion}");
 
         var proxyIds = await InitializeRegionProxiesAsync(defaultRegion, configuration.Instructions);
-        
-        Dictionary<string, List<Guid>> regionProxies = new();
-        regionProxies[defaultRegion] = proxyIds;
         
         // Optimize: Use combined event to reduce RaiseEvent calls from 3 to 1
         var maxHistoryCount = configuration.MaxHistoryCount;
@@ -126,18 +129,19 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             maxHistoryCount = 10;
         }
         
-        RaiseEvent(new PerformConfigCombinedEventLog
+        // Use Protobuf event
+        RaiseEvent(new PerformConfigCombinedEvent
         {
             Region = defaultRegion,
-            ProxyIds = proxyIds,
-            PromptTemplate = configuration.Instructions,
+            ProxyIds = { proxyIds.Select(g => g.ToString()) },
+            PromptTemplate = configuration.Instructions ?? "",
             MaxHistoryCount = maxHistoryCount
         });
 
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
         
         stopwatch.Stop();
-        Logger.LogDebug($"[GodChatGAgent][PerformConfigAsync] End - Total Duration: {stopwatch.ElapsedMilliseconds}ms, SessionId: {this.GetPrimaryKey()}");
+        Logger.LogDebug($"[GodChatGAgent][ConfigAsync] End - Total Duration: {stopwatch.ElapsedMilliseconds}ms, SessionId: {Id}");
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -162,23 +166,22 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         };
         Logger.LogDebug(
             $"[GodChatGAgent][RequestStreamChatEvent] decommission :{JsonConvert.SerializeObject(@event)} chatID:{chatId}");
-        await PublishAsync(chatMessage);
+        await PublishAsync(chatMessage.ToProto());
     }
 
     [EventHandler]
     public async Task HandleEventAsync(UpdateProxyInitStatusGEvent @event)
     {
         var stopwatch = Stopwatch.StartNew();
-        Logger.LogDebug($"[GodChatGAgent][HandleEventAsync][UpdateProxyInitStatusGEvent] Start - SessionId: {this.GetPrimaryKey()}, ProxyId: {@event.ProxyId}, Status: {@event.Status}");
+        Logger.LogDebug($"[GodChatGAgent][HandleEventAsync][UpdateProxyInitStatusGEvent] Start - SessionId: {Id}, ProxyId: {@event.ProxyId}, Status: {@event.Status}");
         
-        // Update the proxy initialization status
-        // Using old C# class UpdateProxyInitStatusGEvent where ProxyId is Guid
-        RaiseEvent(new UpdateProxyInitStatusLogEvent
+        // Update the proxy initialization status using Protobuf event
+        RaiseEvent(new UpdateProxyInitStatusEvent
         {
-            ProxyId = @event.ProxyId,
-            Status = @event.Status
+            ProxyId = @event.ProxyId.ToString(),
+            Status = @event.Status.ToProto()
         });
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
         
         stopwatch.Stop();
         Logger.LogDebug($"[GodChatGAgent][HandleEventAsync][UpdateProxyInitStatusGEvent] End - Duration: {stopwatch.ElapsedMilliseconds}ms, Status updated to: {@event.Status} for proxy: {@event.ProxyId}");
@@ -219,7 +222,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             ? ActionType.Conversation
             : ActionType.ImageConversation;
         
-        var userQuotaGAgent = await GetUserQuotaAgentAsync(State.ChatManagerGuid);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(Guid.Parse(State.ChatManagerGuid));
         var actionResultDto =
             await userQuotaGAgent.ExecuteActionAsync(sessionId.ToString(), State.ChatManagerGuid.ToString(), actionType);
         if (!actionResultDto.Success)
@@ -244,17 +247,17 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                 ChatRole = ChatRole.Assistant,
                 Content = actionResultDto.Message
             });
-            RaiseEvent(new GodAddChatHistoryLogEvent
+            RaiseEvent(new AddChatMessagesEvent
             {
-                ChatList = chatMessages
+                Messages = { chatMessages.ToProtoList() }
             });
             
-            RaiseEvent(new AddChatMessageMetasLogEvent
+            RaiseEvent(new AddChatMessageMetasEvent
             {
-                ChatMessageMetas = new List<ChatMessageMeta>()
+                ChatMessageMetas = { }
             });
             
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
 
             //2、Directly respond with error information.
             var chatMessage = new ResponseStreamGodChat()
@@ -274,7 +277,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             }
             else
             {
-                await PublishAsync(chatMessage);
+                await PublishAsync(chatMessage.ToProto());
             }
 
             return;
@@ -348,7 +351,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             }
             else
             {
-                await PublishAsync(errorMessage);
+                await PublishAsync(errorMessage.ToProto());
             }
 
             return;
@@ -419,17 +422,17 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                 VoiceDurationSeconds = voiceDurationSeconds
             };
 
-            RaiseEvent(new GodAddChatHistoryLogEvent
+            RaiseEvent(new AddChatMessagesEvent
             {
-                ChatList = chatMessages
+                Messages = { chatMessages.ToProtoList() }
             });
             
-            RaiseEvent(new AddChatMessageMetasLogEvent
+            RaiseEvent(new AddChatMessageMetasEvent
             {
-                ChatMessageMetas = new List<ChatMessageMeta> { chatMessageMeta }
+                ChatMessageMetas = { chatMessageMeta.ToProto() }
             });
             
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
 
             // Send error response
             var errorResponse = new ResponseStreamGodChat()
@@ -450,7 +453,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             }
             else
             {
-                await PublishAsync(errorResponse);
+                await PublishAsync(errorResponse.ToProto());
             }
 
             totalStopwatch.Stop();
@@ -484,13 +487,13 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         }
         else
         {
-            await PublishAsync(sttResultMessage);
+            await PublishAsync(sttResultMessage.ToProto());
         }
 
         Logger.LogDebug($"[GodChatGAgent][StreamVoiceChatWithSession] {sessionId.ToString()} STT result sent to frontend: '{voiceContent}'");
 
         var quotaStopwatch = Stopwatch.StartNew();
-        var userQuotaGAgent = await GetUserQuotaAgentAsync(State.ChatManagerGuid);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(Guid.Parse(State.ChatManagerGuid));
         var actionResultDto = await userQuotaGAgent.ExecuteVoiceActionAsync(sessionId.ToString(), State.ChatManagerGuid.ToString());
         
         
@@ -531,17 +534,17 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                 VoiceDurationSeconds = 0.0
             };
 
-            RaiseEvent(new GodAddChatHistoryLogEvent
+            RaiseEvent(new AddChatMessagesEvent
             {
-                ChatList = chatMessages
+                Messages = { chatMessages.ToProtoList() }
             });
             
-            RaiseEvent(new AddChatMessageMetasLogEvent
+            RaiseEvent(new AddChatMessageMetasEvent
             {
-                ChatMessageMetas = new List<ChatMessageMeta> { userVoiceMeta, assistantResponseMeta }
+                ChatMessageMetas = { userVoiceMeta.ToProto(), assistantResponseMeta.ToProto() }
             });
             
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
 
             //2、Directly respond with error information.
             var errorCode = actionResultDto.Code switch
@@ -569,7 +572,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             }
             else
             {
-                await PublishAsync(chatMessage);
+                await PublishAsync(chatMessage.ToProto());
             }
 
             totalStopwatch.Stop();
@@ -604,11 +607,11 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             {
                 title = title.Substring(0, 100);
             }
-            RaiseEvent(new RenameChatTitleEventLog()
+            RaiseEvent(new Aevatar.Agents.GodGPT.Protos.GodChat.RenameChatTitleEvent()
             {
                 Title = title
             });
-            var chatManagerGAgent = GrainFactory.GetGrain<IChatManagerGAgent>((Guid)State.ChatManagerGuid);
+            var chatManagerGAgent = _clusterClient.GetGrain<IChatManagerGAgent>(Guid.Parse(State.ChatManagerGuid));
             await chatManagerGAgent.RenameChatTitleAsync(new RenameChatTitleEvent()
             {
                 SessionId = sessionId,
@@ -690,30 +693,30 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
 
             var settings = promptSettings ?? new ExecutionPromptSettings();
             settings.Temperature = "1.0";
-            var result = await aiAgentStatusProxy.PromptWithStreamAsync(enhancedMessage, State.ChatHistory, settings,
+            var result = await aiAgentStatusProxy.PromptWithStreamAsync(enhancedMessage, State.ChatHistory.FromProtoList(), settings,
                 context: aiChatContextDto, imageKeys: images);
             if (!result)
             {
-                Logger.LogError($"Failed to initiate streaming response. {this.GetPrimaryKey().ToString()}");
+                Logger.LogError($"Failed to initiate streaming response. {Id.ToString()}");
             }
 
             if (addToHistory)
             {
                 var historyStopwatch = Stopwatch.StartNew();
                 // Optimize: Use combined event to reduce RaiseEvent calls from 3 to 1
-                RaiseEvent(new GodStreamChatCombinedEventLog
+                RaiseEvent(new StreamChatCombinedEvent
                 {
-                    ChatList = new List<ChatMessage>()
+                    ChatList = 
                     {
                         new ChatMessage
                         {
                             ChatRole = ChatRole.User,
                             Content = message,
                             ImageKeys = images
-                        }
+                        }.ToProto()
                     },
-                    ChatTime = DateTime.UtcNow,
-                    ChatMessageMetas = new List<ChatMessageMeta>()
+                    ChatTime = Timestamp.FromDateTime(DateTime.UtcNow),
+                    ChatMessageMetas = { }
                 });
 
                 historyStopwatch.Stop();
@@ -796,57 +799,61 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             }
         }
         Logger.LogDebug(
-            $"[GodChatGAgent][GetProxyByRegionAsync] session {this.GetPrimaryKey().ToString()},isCN:{isCN}, Region: {region}");
+            $"[GodChatGAgent][GetProxyByRegionAsync] session {Id.ToString()},isCN:{isCN}, Region: {region}");
 
-        if (State.RegionProxies == null || !State.RegionProxies.TryGetValue(region, out var proxyIds) ||
-            proxyIds.IsNullOrEmpty())
+        var existingProxy = State.RegionProxies?.FirstOrDefault(r => r.Region == region);
+        var proxyIds = existingProxy?.ProxyIds?.Select(Guid.Parse).ToList();
+        
+        if (proxyIds == null || !proxyIds.Any())
         {
             Logger.LogDebug(
-                $"[GodChatGAgent][GetProxyByRegionAsync] session {this.GetPrimaryKey().ToString()}, No proxies found for region {region}, initializing.");
+                $"[GodChatGAgent][GetProxyByRegionAsync] session {Id.ToString()}, No proxies found for region {region}, initializing.");
             
             var initStopwatch = Stopwatch.StartNew();
             proxyIds = await InitializeRegionProxiesAsync(region);
             initStopwatch.Stop();
-            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] InitializeRegionProxiesAsync - Duration: {initStopwatch.ElapsedMilliseconds}ms, SessionId: {this.GetPrimaryKey()}, Region: {region}");
-            
-            Dictionary<string, List<Guid>> regionProxies = new()
-            {
-                { region, proxyIds }
-            };
+            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] InitializeRegionProxiesAsync - Duration: {initStopwatch.ElapsedMilliseconds}ms, SessionId: {Id}, Region: {region}");
             
             var eventStopwatch = Stopwatch.StartNew();
-            RaiseEvent(new UpdateRegionProxiesLogEvent
+            RaiseEvent(new UpdateRegionProxiesEvent
             {
-                RegionProxies = regionProxies
+                RegionProxies = 
+                {
+                    new RegionProxiesEntryProto
+                    {
+                        Region = region,
+                        ProxyIds = { proxyIds.Select(g => g.ToString()) }
+                    }
+                }
             });
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
             eventStopwatch.Stop();
-            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] UpdateRegionProxiesEvent - Duration: {eventStopwatch.ElapsedMilliseconds}ms, SessionId: {this.GetPrimaryKey()}");
+            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] UpdateRegionProxiesEvent - Duration: {eventStopwatch.ElapsedMilliseconds}ms, SessionId: {Id}");
         }
 
         foreach (var proxyId in proxyIds)
         {
-            var proxy = GrainFactory.GetGrain<IAIAgentStatusProxy>(proxyId);
+            var proxy = _clusterClient.GetGrain<IAIAgentStatusProxy>(proxyId);
             if (await proxy.IsAvailableAsync())
             {
                 totalStopwatch.Stop();
-                Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] TOTAL_Time - Duration: {totalStopwatch.ElapsedMilliseconds}ms, SessionId: {this.GetPrimaryKey()}");
+                Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] TOTAL_Time - Duration: {totalStopwatch.ElapsedMilliseconds}ms, SessionId: {Id}");
                 return proxy;
             }
-            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] ProxyCheck_Failed -, ProxyId: {proxyId}, SessionId: {this.GetPrimaryKey()}");
+            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] ProxyCheck_Failed -, ProxyId: {proxyId}, SessionId: {Id}");
         }
 
         Logger.LogDebug(
-            $"[GodChatGAgent][GetProxyByRegionAsync] session {this.GetPrimaryKey().ToString()}, No proxies initialized for region {region}");
+            $"[GodChatGAgent][GetProxyByRegionAsync] session {Id.ToString()}, No proxies initialized for region {region}");
         if (region == DefaultRegion || region == CNDefaultRegion)
         {
             totalStopwatch.Stop();
-            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] TOTAL_Time (no proxies) - Duration: {totalStopwatch.ElapsedMilliseconds}ms, SessionId: {this.GetPrimaryKey()}");
+            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] TOTAL_Time (no proxies) - Duration: {totalStopwatch.ElapsedMilliseconds}ms, SessionId: {Id}");
             return null;
         }
 
         totalStopwatch.Stop();
-        Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] Recursive call to DefaultRegion - Duration: {totalStopwatch.ElapsedMilliseconds}ms, SessionId: {this.GetPrimaryKey()}");
+        Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] Recursive call to DefaultRegion - Duration: {totalStopwatch.ElapsedMilliseconds}ms, SessionId: {Id}");
         if (isCN)
         {
             return await GetProxyByRegionAsync(CNDefaultRegion);
@@ -862,7 +869,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         {
             stopwatch.Stop();
             Logger.LogDebug(
-                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {this.GetPrimaryKey().ToString()}, initialized proxy for region {region}, LLM not config Duration: {stopwatch.ElapsedMilliseconds}ms");
+                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, initialized proxy for region {region}, LLM not config Duration: {stopwatch.ElapsedMilliseconds}ms");
             return new List<Guid>();
         }
         
@@ -893,8 +900,8 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                     systemPrompt = $"{oldSystemPrompt} {systemPrompt}\n\n{ChatPrompts.ConversationSuggestionsPrompt}\n\n{dateInfo}";
                 }
             }
-            //Logger.LogDebug($"[GodChatGAgent][InitializeRegionProxiesAsync] {this.GetPrimaryKey().ToString()} - {llm} system prompt: {systemPrompt}");
-            var proxy = GrainFactory.GetGrain<IAIAgentStatusProxy>(Guid.NewGuid());
+            //Logger.LogDebug($"[GodChatGAgent][InitializeRegionProxiesAsync] {Id.ToString()} - {llm} system prompt: {systemPrompt}");
+            var proxy = _clusterClient.GetGrain<IAIAgentStatusProxy>(Guid.NewGuid());
             
             // TODO: [P2P_STREAM] Currently using direct grain call because new framework doesn't support P2P stream yet.
             // When framework adds SendEventToActorAsync or similar P2P capability, change back to stream-based approach.
@@ -906,19 +913,19 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                 StreamingModeEnabled = true,
                 StreamingConfig = new StreamingConfig { BufferingSize = 32 },
                 RequestRecoveryDelay = RequestRecoveryDelay,
-                ParentId = this.GetPrimaryKey()
+                ParentId = Id
             }); // Fire and forget - don't await
-            RaiseEvent(new UpdateProxyInitStatusLogEvent
+            RaiseEvent(new UpdateProxyInitStatusEvent
             {
-                ProxyId = proxy.GetPrimaryKey(),
-                Status = ProxyInitStatus.Initializing
+                ProxyId = proxy.GetPrimaryKey().ToString(),
+                Status = ProxyInitStatus.Initializing.ToProto()
             });
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
             Logger.LogDebug(
-                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {this.GetPrimaryKey().ToString()}, UpdateProxyInitStatusLogEvent status Initializing proxyId {proxy.GetPrimaryKey().ToString()}");
+                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, UpdateProxyInitStatusEvent status Initializing proxyId {proxy.GetPrimaryKey().ToString()}");
             proxies.Add(proxy.GetPrimaryKey());
             Logger.LogDebug(
-                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {this.GetPrimaryKey().ToString()}, initialized proxy for region {region} with LLM {llm}. id {proxy.GetPrimaryKey().ToString()}");
+                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, initialized proxy for region {region} with LLM {llm}. id {proxy.GetPrimaryKey().ToString()}");
         }
         totalProxyStopwatch.Stop();
         stopwatch.Stop();
@@ -951,11 +958,13 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         
         while (retryCount < maxRetries)
         {
-            if (State.ProxyInitStatuses.IsNullOrEmpty() || !State.ProxyInitStatuses.TryGetValue(proxyId, out proxyInitStatus))
+            var statusEntry = State.ProxyInitStatuses?.FirstOrDefault(s => s.ProxyId == proxyId.ToString());
+            if (State.ProxyInitStatuses.IsNullOrEmpty() || statusEntry == null)
             {
                 Logger.LogDebug($"[GodChatGAgent][EnsureProxyInitializedAsync] Historical data detected based on FirstChatTime, skipping proxy initialization check - ProxyId: {proxyId}, SessionId: {sessionId}");
                 break;
             }
+            proxyInitStatus = statusEntry.Status.FromProto();
 
             if (proxyInitStatus != ProxyInitStatus.Initialized)
             {
@@ -1005,15 +1014,15 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             return;
         }
 
-        RaiseEvent(new UpdateUserProfileGodChatEventLog
+        RaiseEvent(new UpdateUserProfileEvent
         {
             Gender = userProfileDto.Gender,
-            BirthDate = userProfileDto.BirthDate,
+            BirthDate = Timestamp.FromDateTime(DateTime.SpecifyKind(userProfileDto.BirthDate, DateTimeKind.Utc)),
             BirthPlace = userProfileDto.BirthPlace,
             FullName = userProfileDto.FullName
         });
 
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
     }
 
     public async Task<UserProfileDto?> GetUserProfileAsync()
@@ -1026,7 +1035,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         return new UserProfileDto
         {
             Gender = State.UserProfile.Gender,
-            BirthDate = State.UserProfile.BirthDate,
+            BirthDate = State.UserProfile.BirthDate?.ToDateTime() ?? DateTime.MinValue,
             BirthPlace = State.UserProfile.BirthPlace,
             FullName = State.UserProfile.FullName
         };
@@ -1041,14 +1050,14 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
 
     public async Task InitAsync(Guid ChatManagerGuid)
     {
-        Logger.LogDebug($"[GodChatGAgent][InitAsync] Start - SessionId: {this.GetPrimaryKey()}, ChatManagerGuid: {ChatManagerGuid}");
+        Logger.LogDebug($"[GodChatGAgent][InitAsync] Start - SessionId: {Id}, ChatManagerGuid: {ChatManagerGuid}");
         
-        RaiseEvent(new SetChatManagerGuidEventLog
+        RaiseEvent(new SetChatManagerGuidEvent
         {
-            ChatManagerGuid = ChatManagerGuid
+            ChatManagerGuid = ChatManagerGuid.ToString()
         });
 
-        Logger.LogDebug($"[GodChatGAgent][InitAsync] End -  SessionId: {this.GetPrimaryKey()}");
+        Logger.LogDebug($"[GodChatGAgent][InitAsync] End -  SessionId: {Id}");
     }
 
     public async Task ChatMessageCallbackAsync(AIChatContextDto contextDto,
@@ -1135,7 +1144,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             };
             if (contextDto.MessageId.IsNullOrWhiteSpace())
             {
-                await PublishAsync(chatMessage);
+                await PublishAsync(chatMessage.ToProto());
                 return;
             }
 
@@ -1190,33 +1199,33 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                 }
             }
 
-            RaiseEvent(new GodAddChatHistoryLogEvent
+            RaiseEvent(new AddChatMessagesEvent
             {
-                ChatList = new List<ChatMessage>()
+                Messages = 
                 {
                     new ChatMessage
                     {
                         ChatRole = ChatRole.Assistant,
                         Content = cleanMainContent // Store clean content without suggestions
-                    }
+                    }.ToProto()
                 }
             });
 
-            RaiseEvent(new UpdateChatTimeEventLog
+            RaiseEvent(new UpdateChatTimeEvent
             {
-                ChatTime = DateTime.UtcNow
+                ChatTime = Timestamp.FromDateTime(DateTime.UtcNow)
             });
             
-            RaiseEvent(new AddChatMessageMetasLogEvent
+            RaiseEvent(new AddChatMessageMetasEvent
             {
-                ChatMessageMetas = new List<ChatMessageMeta>()
+                ChatMessageMetas = { }
             });
 
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
 
-            if (State.ChatManagerGuid != Guid.Empty)
+            if (!string.IsNullOrEmpty(State.ChatManagerGuid))
             {
-                var chatManagerGAgent = GrainFactory.GetGrain<IChatManagerGAgent>(State.ChatManagerGuid);
+                var chatManagerGAgent = _clusterClient.GetGrain<IChatManagerGAgent>(Guid.Parse(State.ChatManagerGuid));
                 var inviterId = await chatManagerGAgent.GetInviterAsync();
                 if (inviterId != null && inviterId != Guid.Empty)
                 {
@@ -1489,7 +1498,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
 
         if (contextDto.MessageId.IsNullOrWhiteSpace())
         {
-            await PublishAsync(partialMessage);
+            await PublishAsync(partialMessage.ToProto());
         }
         else
         {
@@ -1538,7 +1547,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
 
         var aiChatContextDto = CreateAIChatContext(sessionId, llm, streamingModeEnabled, content, chatId,
             promptSettings, isHttpRequest, region);
-        var response = await aiAgentStatusProxy.ChatWithHistory(content, State.ChatHistory, settings, aiChatContextDto);
+        var response = await aiAgentStatusProxy.ChatWithHistory(content, State.ChatHistory.FromProtoList(), settings, aiChatContextDto);
         sw.Stop();
         Logger.LogDebug(
             $"[GodChatGAgent][ChatWithHistory] {sessionId.ToString()}, response:{JsonConvert.SerializeObject(response)} - step4,time use:{sw.ElapsedMilliseconds}");
@@ -1567,7 +1576,7 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         settings.Temperature = "1.0";
         
         var aiChatContextDto = CreateAIChatContext(sessionId, llm, streamingModeEnabled, content, chatId, promptSettings, isHttpRequest, region);
-        var response = await aiAgentStatusProxy.ChatWithHistory(content,  State.ChatHistory, settings, aiChatContextDto);
+        var response = await aiAgentStatusProxy.ChatWithHistory(content,  State.ChatHistory.FromProtoList(), settings, aiChatContextDto);
         sw.Stop();
         Logger.LogDebug($"[GodChatGAgent][ChatWithUserId] {sessionId.ToString()}, response:{JsonConvert.SerializeObject(response)} - step4,time use:{sw.ElapsedMilliseconds}");
         return response;
@@ -1579,122 +1588,123 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
     
     private async Task PushMessageToClientAsync(ResponseStreamGodChat chatMessage)
     {
-        var streamId = StreamId.Create(StreamNamespace, this.GetPrimaryKey());
+        var streamId = StreamId.Create(StreamNamespace, Id);
         Logger.LogDebug(
-            $"[GodChatGAgent][PushMessageToClientAsync] sessionId {this.GetPrimaryKey().ToString()}, namespace {StreamNamespace}, streamId {streamId.ToString()}");
-        var streamProvider = this.GetStreamProvider(StreamProviderName);
-        var stream = streamProvider.GetStream<ResponseStreamGodChat>(streamId);
-        await stream.OnNextAsync(chatMessage);
+            $"[GodChatGAgent][PushMessageToClientAsync] sessionId {Id.ToString()}, namespace {StreamNamespace}, streamId {streamId.ToString()}");
+        // TODO: [CLIENT_STREAM] New framework doesn't inherit Grain, need alternative for client push
+        // Original: var streamProvider = this.GetStreamProvider(StreamProviderName);
+        // var stream = streamProvider.GetStream<ResponseStreamGodChat>(streamId);
+        // await stream.OnNextAsync(chatMessage);
+        // For now, use PublishAsync which broadcasts to child agents
+        await PublishAsync(chatMessage.ToProto());
     }
 
     public Task<List<ChatMessage>> GetChatMessageAsync()
     {
         Logger.LogDebug(
-            $"[ChatGAgentManager][GetSessionMessageListAsync] - session:ID {this.GetPrimaryKey().ToString()} ,message={JsonConvert.SerializeObject(State.ChatHistory)}");
-        return Task.FromResult(State.ChatHistory);
+            $"[ChatGAgentManager][GetSessionMessageListAsync] - session:ID {Id.ToString()} ,message={JsonConvert.SerializeObject(State.ChatHistory)}");
+        return Task.FromResult(State.ChatHistory.FromProtoList());
     }
 
     public Task<List<ChatMessageWithMetaDto>> GetChatMessageWithMetaAsync()
     {
         Logger.LogDebug(
-            $"[GodChatGAgent][GetChatMessageWithMetaAsync] - sessionId: {this.GetPrimaryKey()}, messageCount: {State.ChatHistory.Count}, metaCount: {State.ChatMessageMetas.Count}");
+            $"[GodChatGAgent][GetChatMessageWithMetaAsync] - sessionId: {Id}, messageCount: {State.ChatHistory.Count}, metaCount: {State.ChatMessageMetas.Count}");
 
         var result = new List<ChatMessageWithMetaDto>();
 
         // Combine ChatHistory with ChatMessageMetas
         for (int i = 0; i < State.ChatHistory.Count; i++)
         {
-            var message = State.ChatHistory[i];
-            var meta = i < State.ChatMessageMetas.Count ? State.ChatMessageMetas[i] : null;
+            var message = State.ChatHistory[i].FromProto();
+            var meta = i < State.ChatMessageMetas.Count ? State.ChatMessageMetas[i].FromProto() : null;
 
             result.Add(ChatMessageWithMetaDto.Create(message, meta));
         }
 
         Logger.LogDebug(
-            $"[GodChatGAgent][GetChatMessageWithMetaAsync] - sessionId: {this.GetPrimaryKey()}, returned {result.Count} messages with metadata");
+            $"[GodChatGAgent][GetChatMessageWithMetaAsync] - sessionId: {Id}, returned {result.Count} messages with metadata");
 
         return Task.FromResult(result);
     }
 
     public Task<DateTime?> GetFirstChatTimeAsync()
     {
-        return Task.FromResult(State.FirstChatTime);
+        return Task.FromResult(State.FirstChatTime?.ToDateTime());
     }
 
     public Task<DateTime?> GetLastChatTimeAsync()
     {
-        return Task.FromResult(State.LastChatTime);
+        return Task.FromResult(State.LastChatTime?.ToDateTime());
     }
     
-    protected sealed override void GAgentTransitionState(GodChatState state,
-        StateLogEventBase<GodChatEventLog> @event)
+    /// <summary>
+    /// New framework TransitionState - handles Protobuf events
+    /// Keep original logic structure, just change type names
+    /// </summary>
+    protected override void TransitionState(GodChatStateProto state, IMessage @event)
     {
         switch (@event)
         {
-            case UpdateUserProfileGodChatEventLog updateUserProfileGodChatEventLog:
+            case UpdateUserProfileEvent evt:
                 if (state.UserProfile == null)
                 {
-                    state.UserProfile = new UserProfile();
+                    state.UserProfile = new UserProfileProto();
                 }
-
-                state.UserProfile.Gender = updateUserProfileGodChatEventLog.Gender;
-                state.UserProfile.BirthDate = updateUserProfileGodChatEventLog.BirthDate;
-                state.UserProfile.BirthPlace = updateUserProfileGodChatEventLog.BirthPlace;
-                state.UserProfile.FullName = updateUserProfileGodChatEventLog.FullName;
+                state.UserProfile.Gender = evt.Gender;
+                state.UserProfile.BirthDate = evt.BirthDate;
+                state.UserProfile.BirthPlace = evt.BirthPlace;
+                state.UserProfile.FullName = evt.FullName;
                 break;
-            case RenameChatTitleEventLog renameChatTitleEventLog:
-                state.Title = renameChatTitleEventLog.Title;
+            case RenameChatTitleEvent evt:
+                state.Title = evt.Title;
                 break;
-            case SetChatManagerGuidEventLog setChatManagerGuidEventLog:
-                state.ChatManagerGuid = setChatManagerGuidEventLog.ChatManagerGuid;
+            case SetChatManagerGuidEvent evt:
+                state.ChatManagerGuid = evt.ChatManagerGuid;
                 break;
-            case SetAIAgentIdLogEvent setAiAgentIdLogEvent:
-                state.AIAgentIds = setAiAgentIdLogEvent.AIAgentIds;
+            case UpdateRegionProxiesEvent evt:
+                state.RegionProxies.Clear();
+                state.RegionProxies.AddRange(evt.RegionProxies);
                 break;
-            case UpdateRegionProxiesLogEvent updateRegionProxiesLogEvent:
-                foreach (var regionProxy in updateRegionProxiesLogEvent.RegionProxies)
+            case UpdateSingleRegionProxyEvent evt:
+                var existingRegion = state.RegionProxies.FirstOrDefault(r => r.Region == evt.Region);
+                if (existingRegion != null)
                 {
-                    if (state.RegionProxies == null)
-                    {
-                        state.RegionProxies = new Dictionary<string, List<Guid>>();
-                    }
-
-                    state.RegionProxies[regionProxy.Key] = regionProxy.Value;
+                    existingRegion.ProxyIds.Clear();
+                    existingRegion.ProxyIds.AddRange(evt.ProxyIds);
                 }
-
+                else
+                {
+                    state.RegionProxies.Add(new RegionProxiesEntryProto
+                    {
+                        Region = evt.Region,
+                        ProxyIds = { evt.ProxyIds }
+                    });
+                }
                 break;
-            case UpdateChatTimeEventLog updateChatTimeEventLog:
+            case UpdateChatTimeEvent evt:
                 if (state.FirstChatTime == null)
                 {
-                    state.FirstChatTime = updateChatTimeEventLog.ChatTime;
+                    state.FirstChatTime = evt.ChatTime;
                 }
-
-                state.LastChatTime = updateChatTimeEventLog.ChatTime;
+                state.LastChatTime = evt.ChatTime;
                 break;
-            case AddChatMessageMetasLogEvent addChatMessageMetasLogEvent:
-                if (addChatMessageMetasLogEvent.ChatMessageMetas != null &&
-                    addChatMessageMetasLogEvent.ChatMessageMetas.Any())
+            case AddChatMessageMetasEvent evt:
+                if (evt.ChatMessageMetas != null && evt.ChatMessageMetas.Any())
                 {
                     // Calculate the starting index for new metadata based on current ChatHistory count
                     // minus the number of new metadata items we're adding
-                    int newMetadataCount = addChatMessageMetasLogEvent.ChatMessageMetas.Count;
+                    int newMetadataCount = evt.ChatMessageMetas.Count;
                     int targetStartIndex = Math.Max(0, state.ChatHistory.Count - newMetadataCount);
 
                     // Ensure we have enough default metadata up to the target start index
                     while (state.ChatMessageMetas.Count < targetStartIndex)
                     {
-                        state.ChatMessageMetas.Add(new ChatMessageMeta
-                        {
-                            IsVoiceMessage = false,
-                            VoiceLanguage = VoiceLanguageEnum.English,
-                            VoiceParseSuccess = true,
-                            VoiceParseErrorMessage = null,
-                            VoiceDurationSeconds = 0.0
-                        });
+                        state.ChatMessageMetas.Add(GodChatConversions.CreateDefaultMetaProto());
                     }
 
                     // Add the new metadata
-                    foreach (var meta in addChatMessageMetasLogEvent.ChatMessageMetas)
+                    foreach (var meta in evt.ChatMessageMetas)
                     {
                         state.ChatMessageMetas.Add(meta);
                     }
@@ -1703,28 +1713,20 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                 // Final sync: ensure ChatMessageMetas matches ChatHistory count
                 while (state.ChatMessageMetas.Count < state.ChatHistory.Count)
                 {
-                    state.ChatMessageMetas.Add(new ChatMessageMeta
-                    {
-                        IsVoiceMessage = false,
-                        VoiceLanguage = VoiceLanguageEnum.English,
-                        VoiceParseSuccess = true,
-                        VoiceParseErrorMessage = null,
-                        VoiceDurationSeconds = 0.0
-                    });
+                    state.ChatMessageMetas.Add(GodChatConversions.CreateDefaultMetaProto());
                 }
-
-                    break;  
-             case AddPromptTemplateLogEvent addPromptTemplateLogEvent :
-                 if (addPromptTemplateLogEvent.PromptTemplate.IsNullOrEmpty())
-                 {
-                     break;
-                 }
-                 state.PromptTemplate = addPromptTemplateLogEvent.PromptTemplate;
-                 break;
-            case GodAddChatHistoryLogEvent godAddChatHistoryLogEvent :
-                if (godAddChatHistoryLogEvent.ChatList.Count > 0)
+                break;  
+            case AddPromptTemplateEvent evt:
+                if (string.IsNullOrEmpty(evt.PromptTemplate))
                 {
-                    state.ChatHistory.AddRange(godAddChatHistoryLogEvent.ChatList);
+                    break;
+                }
+                state.PromptTemplate = evt.PromptTemplate;
+                break;
+            case AddChatMessagesEvent evt:
+                if (evt.Messages.Count > 0)
+                {
+                    state.ChatHistory.AddRange(evt.Messages);
                 }
 
                 var maxChatHistoryCount = 32;
@@ -1733,70 +1735,63 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                     maxChatHistoryCount = state.MaxHistoryCount;
                 }
 
-                if (state.ChatHistory.Count() > maxChatHistoryCount)
+                // Trim chat history if needed (pure state transition, no side effects)
+                while (state.ChatHistory.Count > maxChatHistoryCount)
                 {
-                    var toDeleteImageKeys = new List<string>();
-                    var recordsToDelete = state.ChatHistory.Take(state.ChatHistory.Count() - maxChatHistoryCount);
-                    foreach (var record in recordsToDelete)
-                    {
-                        if (record.ImageKeys != null && record.ImageKeys.Count > 0)
-                        {
-                            toDeleteImageKeys.AddRange(record.ImageKeys);
-                        }
-                    }
-
-                    if (toDeleteImageKeys.Any())
-                    {
-                        var blobContainer = ServiceProvider.GetRequiredService<IBlobContainer>();
-                        var downloadTasks = toDeleteImageKeys.Select(async key =>
-                        {
-                            await blobContainer.DeleteAsync(key);
-                        });
-
-                        AsyncHelper.RunSync(async () => await Task.WhenAll(downloadTasks));
-                    }
-
-                    state.ChatHistory.RemoveRange(0, state.ChatHistory.Count() - maxChatHistoryCount);
+                    state.ChatHistory.RemoveAt(0);
                 }
                 break;
-            case GodSetMaxHistoryCount godSetMaxHistoryCount:
-                state.MaxHistoryCount = godSetMaxHistoryCount.MaxHistoryCount;
+            case SetMaxHistoryCountEvent evt:
+                state.MaxHistoryCount = evt.MaxHistoryCount;
                 break;
-            case UpdateProxyInitStatusLogEvent updateProxyInitStatusLogEvent:
-                state.ProxyInitStatuses[updateProxyInitStatusLogEvent.ProxyId] = updateProxyInitStatusLogEvent.Status;
-                break;
-            case UpdateSingleRegionProxyLogEvent updateSingleRegionProxyLogEvent:
-                // Optimized path for single region updates
-                if (state.RegionProxies == null)
+            case UpdateProxyInitStatusEvent evt:
+                var existingStatus = state.ProxyInitStatuses.FirstOrDefault(p => p.ProxyId == evt.ProxyId);
+                if (existingStatus != null)
                 {
-                    state.RegionProxies = new Dictionary<string, List<Guid>>();
+                    existingStatus.Status = evt.Status;
                 }
-                state.RegionProxies[updateSingleRegionProxyLogEvent.Region] = updateSingleRegionProxyLogEvent.ProxyIds;
+                else
+                {
+                    state.ProxyInitStatuses.Add(new ProxyInitStatusEntryProto
+                    {
+                        ProxyId = evt.ProxyId,
+                        Status = evt.Status
+                    });
+                }
                 break;
-            case PerformConfigCombinedEventLog performConfigCombinedEventLog:
+            case PerformConfigCombinedEvent evt:
                 // Handle combined config event - equivalent to the three separate events
-                // 1. UpdateSingleRegionProxyLogEvent equivalent
-                if (state.RegionProxies == null)
+                // 1. Update region proxy
+                var configRegion = state.RegionProxies.FirstOrDefault(r => r.Region == evt.Region);
+                if (configRegion != null)
                 {
-                    state.RegionProxies = new Dictionary<string, List<Guid>>();
+                    configRegion.ProxyIds.Clear();
+                    configRegion.ProxyIds.AddRange(evt.ProxyIds);
                 }
-                state.RegionProxies[performConfigCombinedEventLog.Region] = performConfigCombinedEventLog.ProxyIds;
-                
-                // 2. AddPromptTemplateLogEvent equivalent
-                if (!performConfigCombinedEventLog.PromptTemplate.IsNullOrEmpty())
+                else
                 {
-                    state.PromptTemplate = performConfigCombinedEventLog.PromptTemplate;
+                    state.RegionProxies.Add(new RegionProxiesEntryProto
+                    {
+                        Region = evt.Region,
+                        ProxyIds = { evt.ProxyIds }
+                    });
                 }
                 
-                // 3. GodSetMaxHistoryCount equivalent
-                state.MaxHistoryCount = performConfigCombinedEventLog.MaxHistoryCount;
+                // 2. AddPromptTemplateEvent equivalent
+                if (!string.IsNullOrEmpty(evt.PromptTemplate))
+                {
+                    state.PromptTemplate = evt.PromptTemplate;
+                }
+                
+                // 3. SetMaxHistoryCountEvent equivalent
+                state.MaxHistoryCount = evt.MaxHistoryCount;
                 break;
-            case GodStreamChatCombinedEventLog godStreamChatCombinedEventLog:
+            case StreamChatCombinedEvent evt:
                 // Handle combined stream chat event - equivalent to the three separate events
-                // 1. GodAddChatHistoryLogEvent equivalent
-                if (godStreamChatCombinedEventLog.ChatList.Count > 0)
+                // 1. AddChatMessagesEvent equivalent
+                if (evt.ChatList.Count > 0)
                 {
-                    state.ChatHistory.AddRange(godStreamChatCombinedEventLog.ChatList);
+                    state.ChatHistory.AddRange(evt.ChatList);
                 }
 
                 var maxHistoryCount = 32;
@@ -1805,62 +1800,35 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                     maxHistoryCount = state.MaxHistoryCount;
                 }
 
-                if (state.ChatHistory.Count() > maxHistoryCount)
+                // Trim chat history (pure state transition)
+                while (state.ChatHistory.Count > maxHistoryCount)
                 {
-                    var toDeleteImageKeys = new List<string>();
-                    var recordsToDelete = state.ChatHistory.Take(state.ChatHistory.Count() - maxHistoryCount);
-                    foreach (var record in recordsToDelete)
-                    {
-                        if (record.ImageKeys != null && record.ImageKeys.Count > 0)
-                        {
-                            toDeleteImageKeys.AddRange(record.ImageKeys);
-                        }
-                    }
-
-                    if (toDeleteImageKeys.Any())
-                    {
-                        var blobContainer = ServiceProvider.GetRequiredService<IBlobContainer>();
-                        var downloadTasks = toDeleteImageKeys.Select(async key =>
-                        {
-                            await blobContainer.DeleteAsync(key);
-                        });
-
-                        AsyncHelper.RunSync(async () => await Task.WhenAll(downloadTasks));
-                    }
-
-                    state.ChatHistory.RemoveRange(0, state.ChatHistory.Count() - maxHistoryCount);
+                    state.ChatHistory.RemoveAt(0);
                 }
                 
-                // 2. UpdateChatTimeEventLog equivalent
+                // 2. UpdateChatTimeEvent equivalent
                 if (state.FirstChatTime == null)
                 {
-                    state.FirstChatTime = godStreamChatCombinedEventLog.ChatTime;
+                    state.FirstChatTime = evt.ChatTime;
                 }
-                state.LastChatTime = godStreamChatCombinedEventLog.ChatTime;
+                state.LastChatTime = evt.ChatTime;
                 
-                // 3. AddChatMessageMetasLogEvent equivalent
-                if (godStreamChatCombinedEventLog.ChatMessageMetas != null && godStreamChatCombinedEventLog.ChatMessageMetas.Any())
+                // 3. AddChatMessageMetasEvent equivalent
+                if (evt.ChatMessageMetas != null && evt.ChatMessageMetas.Any())
                 {
                     // Calculate the starting index for new metadata based on current ChatHistory count
                     // minus the number of new metadata items we're adding
-                    int newMetadataCount = godStreamChatCombinedEventLog.ChatMessageMetas.Count;
+                    int newMetadataCount = evt.ChatMessageMetas.Count;
                     int targetStartIndex = Math.Max(0, state.ChatHistory.Count - newMetadataCount);
                     
                     // Ensure we have enough default metadata up to the target start index
                     while (state.ChatMessageMetas.Count < targetStartIndex)
                     {
-                        state.ChatMessageMetas.Add(new ChatMessageMeta
-                        {
-                            IsVoiceMessage = false,
-                            VoiceLanguage = VoiceLanguageEnum.English,
-                            VoiceParseSuccess = true,
-                            VoiceParseErrorMessage = null,
-                            VoiceDurationSeconds = 0.0
-                        });
+                        state.ChatMessageMetas.Add(GodChatConversions.CreateDefaultMetaProto());
                     }
                     
                     // Add the new metadata
-                    foreach (var meta in godStreamChatCombinedEventLog.ChatMessageMetas)
+                    foreach (var meta in evt.ChatMessageMetas)
                     {
                         state.ChatMessageMetas.Add(meta);
                     }
@@ -1869,25 +1837,17 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                 // Final sync: ensure ChatMessageMetas matches ChatHistory count
                 while (state.ChatMessageMetas.Count < state.ChatHistory.Count)
                 {
-                    state.ChatMessageMetas.Add(new ChatMessageMeta
-                    {
-                        IsVoiceMessage = false,
-                        VoiceLanguage = VoiceLanguageEnum.English,
-                        VoiceParseSuccess = true,
-                        VoiceParseErrorMessage = null,
-                        VoiceDurationSeconds = 0.0
-                    });
+                    state.ChatMessageMetas.Add(GodChatConversions.CreateDefaultMetaProto());
                 }
                 break;
-            }
+        }
     }
 
     private async Task<ConfigurationGAgent> GetConfigurationAsync()
     {
         if (_configurationAgent == null)
         {
-            var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
-            _configurationAgent = factory.CreateGAgent<ConfigurationGAgent>(
+            _configurationAgent = _agentFactory.CreateGAgent<ConfigurationGAgent>(
                 CommonHelper.GetSessionManagerConfigurationId());
             await _configurationAgent.ActivateAsync();
         }
@@ -2057,15 +2017,15 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                 title = title.Substring(0, 100);
             }
 
-            RaiseEvent(new RenameChatTitleEventLog()
+            RaiseEvent(new Aevatar.Agents.GodGPT.Protos.GodChat.RenameChatTitleEvent()
             {
                 Title = title
             });
 
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
 
             IChatManagerGAgent chatManagerGAgent =
-                GrainFactory.GetGrain<IChatManagerGAgent>((Guid)State.ChatManagerGuid);
+                _clusterClient.GetGrain<IChatManagerGAgent>(Guid.Parse(State.ChatManagerGuid));
             await chatManagerGAgent.RenameChatTitleAsync(new RenameChatTitleEvent()
             {
                 SessionId = sessionId,
@@ -2141,12 +2101,12 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
             }
             Logger.LogDebug($"[GodChatGAgent][GodVoiceStreamChatAsync] promptMsg: {promptMsg}");
 
-            var result = await aiAgentStatusProxy.PromptWithStreamAsync(promptMsg, State.ChatHistory, settings,
+            var result = await aiAgentStatusProxy.PromptWithStreamAsync(promptMsg, State.ChatHistory.FromProtoList(), settings,
                 context: aiChatContextDto);
             if (!result)
             {
                 Logger.LogError(
-                    $"[GodChatGAgent][GodVoiceStreamChatAsync] Failed to initiate voice streaming response. {this.GetPrimaryKey().ToString()}");
+                    $"[GodChatGAgent][GodVoiceStreamChatAsync] Failed to initiate voice streaming response. {Id.ToString()}");
             }
 
             if (!addToHistory)
@@ -2166,21 +2126,21 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
                 VoiceDurationSeconds = voiceDurationSeconds
             };
 
-            RaiseEvent(new GodAddChatHistoryLogEvent
+            RaiseEvent(new AddChatMessagesEvent
             {
-                ChatList = new List<ChatMessage>()
+                Messages = 
                 {
                     new ChatMessage
                     {
                         ChatRole = ChatRole.User,
                         Content = message
-                    }
+                    }.ToProto()
                 }
             });
                 
-            RaiseEvent(new AddChatMessageMetasLogEvent
+            RaiseEvent(new AddChatMessageMetasEvent
             {
-                ChatMessageMetas = new List<ChatMessageMeta> { userVoiceMeta }
+                ChatMessageMetas = { userVoiceMeta.ToProto() }
             });
 
             historyStopwatch.Stop();
@@ -2306,11 +2266,11 @@ public class GodChatGAgent : GAgentBase<GodChatState, GodChatEventLog, EventBase
         // TODO: [GOOGLE_CALENDAR_DISABLED] Google Calendar integration temporarily disabled
         // This method previously fetched calendar events and generated personalized recommendations
         // Re-enable when Google Calendar integration is migrated to new framework
-        Logger.LogDebug($"[GodChatGAgent][GenerateDailyRecommendationsAsync] {this.GetPrimaryKey()} Google Calendar disabled - returning empty prompt");
+        Logger.LogDebug($"[GodChatGAgent][GenerateDailyRecommendationsAsync] {Id} Google Calendar disabled - returning empty prompt");
         
-        var userQuotaGAgent = await GetUserQuotaAgentAsync(State.ChatManagerGuid);
-        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(State.ChatManagerGuid);
-        var (fullName, prompt) = await userInfoCollectionGAgent.GenerateUserInfoPromptAsync(userLocalTime);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(Guid.Parse(State.ChatManagerGuid));
+        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(Guid.Parse(State.ChatManagerGuid));
+        (string fullName, string prompt) = await userInfoCollectionGAgent.GenerateUserInfoPromptAsync(userLocalTime);
         var isSubscribed = await userQuotaGAgent.IsSubscribedAsync(true) || await userQuotaGAgent.IsSubscribedAsync(false);
         
         var languageEnglishName = GodGPTLanguageHelper.GetLanguageEnglishName(language);
@@ -2395,8 +2355,7 @@ xxxxx (A brief one-sentence summary, under 20 words)";
 
     private async Task<InvitationGAgent> GetInvitationAgentAsync(Guid userId)
     {
-        var factory = ServiceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
-        var agent = factory.CreateGAgent<InvitationGAgent>(userId);
+        var agent = _agentFactory.CreateGAgent<InvitationGAgent>(userId);
         await agent.ActivateAsync();
         return agent;
     }

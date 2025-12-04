@@ -218,5 +218,45 @@ public static class GodChatConversions
             VoiceDurationSeconds = 0.0
         };
     }
+    
+    // =============================================================================
+    // ResponseStreamGodChat Conversions
+    // =============================================================================
+    
+    public static ResponseStreamGodChatProto ToProto(this Aevatar.Application.Grains.Agents.ChatManager.ResponseStreamGodChat msg)
+    {
+        var proto = new ResponseStreamGodChatProto
+        {
+            ResponseType = msg.ResponseType switch
+            {
+                Aevatar.Application.Grains.Agents.ChatManager.ResponseType.ChatResponse => ResponseTypeProto.ResponseTypeChatResponse,
+                // Map other response types to ChatResponse as fallback
+                _ => ResponseTypeProto.ResponseTypeChatResponse
+            },
+            Response = msg.Response ?? "",
+            NewTitle = msg.NewTitle ?? "",
+            ChatId = msg.ChatId ?? "",
+            IsLastChunk = msg.IsLastChunk,
+            SerialNumber = msg.SerialNumber,
+            SessionId = msg.SessionId.ToString()
+        };
+        
+        if (msg.AudioData != null)
+        {
+            proto.AudioData = Google.Protobuf.ByteString.CopyFrom(msg.AudioData);
+        }
+        
+        if (msg.AudioMetadata != null)
+        {
+            proto.AudioMetadata = new AudioMetadataProto
+            {
+                DurationSeconds = msg.AudioMetadata.Duration,
+                Format = "",  // AudioMetadata doesn't have Format field
+                Language = ""  // AudioMetadata doesn't have Language field
+            };
+        }
+        
+        return proto;
+    }
 }
 

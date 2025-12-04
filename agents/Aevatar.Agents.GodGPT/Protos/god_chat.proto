@@ -143,3 +143,32 @@ message AddChatMessagesEvent {
   repeated ChatMessageProto messages = 1;
 }
 
+// =============================================================================
+// Stream Response Events (for PublishAsync)
+// =============================================================================
+
+enum ResponseTypeProto {
+  RESPONSE_TYPE_UNSPECIFIED = 0;
+  RESPONSE_TYPE_CHAT_RESPONSE = 1;
+  RESPONSE_TYPE_ERROR = 2;
+  RESPONSE_TYPE_TITLE_RENAME = 3;
+}
+
+message AudioMetadataProto {
+  double duration_seconds = 1;
+  string format = 2;
+  string language = 3;
+}
+
+message ResponseStreamGodChatProto {
+  ResponseTypeProto response_type = 1;
+  string response = 2;
+  string new_title = 3;
+  string chat_id = 4;
+  bool is_last_chunk = 5;
+  int32 serial_number = 6;
+  string session_id = 7;  // Guid as string
+  bytes audio_data = 8;
+  optional AudioMetadataProto audio_metadata = 9;
+}
+
