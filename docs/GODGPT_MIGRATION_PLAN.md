@@ -972,3 +972,54 @@ var agent = GrainFactory.GetGrain<IMigratedAgent>(id);
 // ✅ 新代码
 var agent = await GetMigratedAgentAsync(id);
 ```
+
+---
+
+## 🔶 大型 Agent 迁移状态 (2024-12)
+
+### 三个大型Agent当前状态
+
+| Agent | 代码行数 | 事件类型 | 当前状态 | Protobuf定义 |
+|-------|---------|---------|---------|-------------|
+| UserBillingGAgent | 5485 | 10+ | ✅ 兼容层工作 | ❌ 待创建 |
+| ChatManagerGAgent | 3174 | 15+ | ✅ 兼容层工作 | ❌ 待创建 |
+| GodChatGAgent | 2403 | 12 | ✅ 兼容层工作 | ✅ god_chat.proto |
+
+### 兼容层实现
+
+这三个Agent使用 `Aevatar.Core.GAgentBase<TState, TEventLog>` 兼容层：
+- 继承自 Orleans Grain
+- 支持事件源 (RaiseEvent + ConfirmEvents)
+- 保持原有业务逻辑
+- 编译通过，正常工作
+
+### 完整迁移评估
+
+**迁移工作量** (每个Agent):
+- State C#类 → Protobuf: 50-100行proto
+- EventLog C#类 → Protobuf Events: 100-150行proto
+- TransitionState重写: 100-300行C#
+- 类型转换代码: 200-400行C#
+- API替换 (GetPrimaryKey, GrainFactory等): 50-100处
+
+**风险评估**:
+- 高风险: 大量代码修改可能引入bug
+- 需要全面回归测试
+- 预计每个Agent需要4-8小时
+
+### 建议策略
+
+1. **当前**: 保持兼容层实现（已正常工作）
+2. **准备**: 创建Protobuf定义（已完成GodChat）
+3. **按需**: 根据业务需要逐步迁移
+4. **优先**: 关注新功能开发而非架构迁移
+
+### 已创建的迁移准备文件
+
+```
+agents/Aevatar.Agents.GodGPT/
+├── Protos/
+│   └── god_chat.proto          # GodChat State/Events Protobuf定义
+└── GodChat/
+    └── GodChatConversions.cs   # C#/Protobuf类型转换辅助类
+```
