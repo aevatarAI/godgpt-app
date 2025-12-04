@@ -4,16 +4,13 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
-using Aevatar.Core;
-using Aevatar.Core.Abstractions;
+using Aevatar.Agents.Core;
+using Aevatar.Agents.GodGPT.Protos.DailyPush;
 using GodGPT.GAgents.DailyPush.Options;
-using GodGPT.GAgents.DailyPush.SEvents;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
-using Orleans.Providers;
 
 namespace GodGPT.GAgents.DailyPush;
 
@@ -33,13 +30,11 @@ public class TokenResult
 /// Manages JWT creation, caching, and global push token deduplication
 /// Eliminates concurrency issues and resource waste from per-user JWT creation
 /// </summary>
-[StorageProvider(ProviderName = "PubSubStore")]
-[LogConsistencyProvider(ProviderName = "LogStorage")]
 [GAgent(nameof(GlobalJwtProviderGAgent))]
-public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyPushLogEvent>, IGlobalJwtProviderGAgent
+public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState>, IGlobalJwtProviderGAgent
 {
-    private readonly ILogger<GlobalJwtProviderGAgent> _logger;
     private readonly IOptionsMonitor<DailyPushOptions> _options;
+    private readonly HttpClient _httpClient;
     
     
     // JWT caching and creation control - ALL IN MEMORY for zero-latency access
@@ -62,11 +57,12 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
     private static readonly TimeSpan FAILURE_COOLDOWN = TimeSpan.FromMinutes(5);
 
     public GlobalJwtProviderGAgent(
-        ILogger<GlobalJwtProviderGAgent> logger,
-        IOptionsMonitor<DailyPushOptions> options)
+        Guid id,
+        IOptionsMonitor<DailyPushOptions> options,
+        HttpClient httpClient) : base(id)
     {
-        _logger = logger;
         _options = options;
+        _httpClient = httpClient;
     }
 
     public override async Task<string> GetDescriptionAsync()
@@ -84,18 +80,18 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
         if (!string.IsNullOrEmpty(_cachedJwtToken) && DateTime.UtcNow < _tokenExpiry.AddSeconds(-30))
         {
             var remainingTime = _tokenExpiry.Subtract(DateTime.UtcNow);
-            _logger.LogDebug("Using cached JWT token");
+            Logger.LogDebug("Using cached JWT token");
             return _cachedJwtToken;
         }
         
         // Check if we're in failure cooldown period (token is null but expiry is set to prevent rapid retries)
         if (string.IsNullOrEmpty(_cachedJwtToken) && _tokenExpiry > DateTime.MinValue && DateTime.UtcNow < _tokenExpiry)
         {
-            _logger.LogDebug("JWT creation in failure cooldown period, returning null");
+            Logger.LogDebug("JWT creation in failure cooldown period, returning null");
             return null;
         }
         
-        _logger.LogDebug("JWT token expired or not cached, creating new token");
+        Logger.LogDebug("JWT token expired or not cached, creating new token");
 
         // Check for failure cooldown period to prevent rapid retries after consecutive failures
         if (_consecutiveFailures >= MAX_CONSECUTIVE_FAILURES)
@@ -104,13 +100,13 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
             if (timeSinceLastFailure < FAILURE_COOLDOWN)
             {
                 var remainingCooldown = FAILURE_COOLDOWN - timeSinceLastFailure;
-                _logger.LogWarning("JWT creation in cooldown period due to {FailureCount} consecutive failures", _consecutiveFailures);
+                Logger.LogWarning("JWT creation in cooldown period due to {FailureCount} consecutive failures", _consecutiveFailures);
                 return null;
             }
             else
             {
                 // Reset failure count after cooldown period
-                _logger.LogDebug("Cooldown period expired, resetting failure count");
+                Logger.LogDebug("Cooldown period expired, resetting failure count");
                 _consecutiveFailures = 0;
             }
         }
@@ -130,7 +126,7 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
             // Double-check failure cooldown period
             if (string.IsNullOrEmpty(_cachedJwtToken) && _tokenExpiry > DateTime.MinValue && DateTime.UtcNow < _tokenExpiry)
             {
-                _logger.LogDebug("JWT creation in failure cooldown period after acquiring lock, returning null");
+                Logger.LogDebug("JWT creation in failure cooldown period after acquiring lock, returning null");
                 return null;
             }
 
@@ -138,7 +134,7 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
             var currentTask = _tokenCreationTask;
             if (currentTask != null && !currentTask.IsCompleted)
             {
-                _logger.LogDebug("JWT creation already in progress, releasing semaphore and awaiting result");
+                Logger.LogDebug("JWT creation already in progress, releasing semaphore and awaiting result");
                 // 🔧 DEADLOCK FIX: Release semaphore before awaiting external task
                 _tokenSemaphore.Release();
                 try
@@ -148,7 +144,7 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
                 }
                 catch (OperationCanceledException)
                 {
-                    _logger.LogWarning("JWT creation task timed out, will retry");
+                    Logger.LogWarning("JWT creation task timed out, will retry");
                     // Re-acquire semaphore for cleanup
                     await _tokenSemaphore.WaitAsync(timeoutCts.Token);
                     _tokenCreationTask = null; // Clear hung task
@@ -163,7 +159,7 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
             }
 
             // Create token with timeout protection
-            _logger.LogDebug("Creating new JWT token with deadlock protection");
+            Logger.LogDebug("Creating new JWT token with deadlock protection");
             using var createTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(1));
             var tokenResult = await CreateJwtTokenInternalWithExpiryAsync().WaitAsync(createTimeout.Token);
             
@@ -171,7 +167,7 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
             {
                 _cachedJwtToken = tokenResult.Token;
                 _tokenExpiry = tokenResult.Expiry;
-                _logger.LogDebug("JWT token cached successfully with expiry: {Expiry}", _tokenExpiry);
+                Logger.LogDebug("JWT token cached successfully with expiry: {Expiry}", _tokenExpiry);
                 
                 // Clear the task reference since we completed successfully
                 _tokenCreationTask = null;
@@ -184,13 +180,13 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
             // 🔧 CONCURRENCY FIX: Set short-term failure cache to prevent immediate retry by other threads
             // This prevents all waiting threads from attempting creation if first one fails
             _tokenExpiry = DateTime.UtcNow.AddSeconds(30); // 30-second failure cache
-            _logger.LogWarning("JWT creation failed, setting 30-second failure cache to prevent concurrent retries");
+            Logger.LogWarning("JWT creation failed, setting 30-second failure cache to prevent concurrent retries");
             
             return null;
         }
         catch (OperationCanceledException)
         {
-            _logger.LogError("JWT creation timed out - preventing potential deadlock");
+            Logger.LogError("JWT creation timed out - preventing potential deadlock");
             _tokenCreationTask = null;
             
             // Set short-term failure cache for timeout scenarios as well
@@ -230,13 +226,13 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
 
     public async Task RefreshTokenAsync()
     {
-        _logger.LogInformation("Force refreshing JWT token");
+        Logger.LogInformation("Force refreshing JWT token");
         _cachedJwtToken = null;
         _tokenExpiry = DateTime.MinValue;
         _tokenCreationTask = null;
         
         var newToken = await GetFirebaseAccessTokenAsync();
-        _logger.LogInformation("JWT token force refreshed: {HasToken}", !string.IsNullOrEmpty(newToken));
+        Logger.LogInformation("JWT token force refreshed: {HasToken}", !string.IsNullOrEmpty(newToken));
     }
 
     /// <summary>
@@ -270,16 +266,15 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
             if (string.IsNullOrEmpty(firebaseKeyPath))
             {
                 var error = "❌ CRITICAL: DailyPushOptions.FilePaths.FirebaseKeyPath not configured for GlobalJwtProviderGAgent";
-                _logger.LogError(error);
+                Logger.LogError(error);
                 _lastError = error;
                 return null;
             }
 
-            var httpClient = ServiceProvider.GetService(typeof(HttpClient)) as HttpClient;
-            if (httpClient == null)
+            if (_httpClient == null)
             {
                 var error = "HttpClient not available for GlobalJwtProviderGAgent";
-                _logger.LogError(error);
+                Logger.LogError(error);
                 _lastError = error;
                 return null;
             }
@@ -289,7 +284,7 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
             if (serviceAccount == null)
             {
                 var error = $"Failed to load service account from {firebaseKeyPath}";
-                _logger.LogError(error);
+                Logger.LogError(error);
                 _lastError = error;
                 return null;
             }
@@ -306,13 +301,13 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
                     }
 
                     // Exchange JWT for access token
-                    var tokenResponse = await ExchangeJwtForAccessTokenAsync(httpClient, jwt);
+                    var tokenResponse = await ExchangeJwtForAccessTokenAsync(_httpClient, jwt);
                     if (tokenResponse != null && !string.IsNullOrEmpty(tokenResponse.AccessToken))
                     {
                         // Note: Token caching (_cachedJwtToken, _tokenExpiry) is now handled by the calling method
                         // within proper semaphore protection to prevent race conditions
                         
-                        _logger.LogDebug("Token expiry calculated: expires in {ExpiresInSeconds}s", tokenResponse.ExpiresIn);
+                        Logger.LogDebug("Token expiry calculated: expires in {ExpiresInSeconds}s", tokenResponse.ExpiresIn);
                         
                         // Record success in memory only - avoid slow State operations
                         Interlocked.Increment(ref _successfulTokenCreations);
@@ -323,13 +318,13 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
                         _consecutiveFailures = 0;
                         _lastFailureTime = DateTime.MinValue;
                         
-                        _logger.LogInformation("Global JWT token created successfully");
+                        Logger.LogInformation("Global JWT token created successfully");
                         return tokenResponse.AccessToken;
                     }
                     else
                     {
                         var httpError = $"Firebase OAuth returned empty token on attempt {attempt}/{maxRetries}";
-                        _logger.LogWarning(httpError);
+                        Logger.LogWarning(httpError);
                         
                         if (attempt < maxRetries)
                         {
@@ -347,7 +342,7 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
                 catch (Exception ex)
                 {
                     var exceptionError = $"Exception during global JWT creation attempt {attempt}: {ex.Message}";
-                    _logger.LogError(ex, exceptionError);
+                    Logger.LogError(ex, exceptionError);
                     
                     if (attempt < maxRetries)
                     {
@@ -383,7 +378,7 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
         _cachedJwtToken = null;
         _tokenExpiry = DateTime.MinValue;
         
-        _logger.LogError(
+        Logger.LogError(
             "🔥 JWT creation failed. Consecutive failures: {FailureCount}/{MaxFailures}. " +
             "Next attempt blocked until: {CooldownEnd}",
             _consecutiveFailures,
@@ -449,7 +444,7 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Critical error in global JWT creation: {ErrorMessage}", ex.Message);
+            Logger.LogError(ex, "Critical error in global JWT creation: {ErrorMessage}", ex.Message);
             return null;
         }
     }
@@ -461,39 +456,39 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
     {
         try
         {
-            _logger.LogDebug("Loading Firebase key from path: {KeyPath}", firebaseKeyPath);
+            Logger.LogDebug("Loading Firebase key from path: {KeyPath}", firebaseKeyPath);
 
             if (!File.Exists(firebaseKeyPath))
             {
-                _logger.LogWarning("Firebase key file not found: {KeyPath}", firebaseKeyPath);
+                Logger.LogWarning("Firebase key file not found: {KeyPath}", firebaseKeyPath);
                 return null;
             }
 
             var jsonContent = File.ReadAllText(firebaseKeyPath);
             if (string.IsNullOrWhiteSpace(jsonContent))
             {
-                _logger.LogWarning("Firebase key file is empty: {KeyPath}", firebaseKeyPath);
+                Logger.LogWarning("Firebase key file is empty: {KeyPath}", firebaseKeyPath);
                 return null;
             }
 
             var serviceAccount = JsonSerializer.Deserialize<ServiceAccountInfo>(jsonContent);
             if (serviceAccount != null)
             {
-                _logger.LogDebug("Successfully loaded Firebase service account for global JWT provider");
+                Logger.LogDebug("Successfully loaded Firebase service account for global JWT provider");
                 return serviceAccount;
             }
 
-            _logger.LogWarning("Failed to deserialize Firebase service account from file: {KeyPath}", firebaseKeyPath);
+            Logger.LogWarning("Failed to deserialize Firebase service account from file: {KeyPath}", firebaseKeyPath);
             return null;
         }
         catch (JsonException jsonEx)
         {
-            _logger.LogError(jsonEx, "JSON parsing error loading Firebase service account from file: {KeyPath}", firebaseKeyPath);
+            Logger.LogError(jsonEx, "JSON parsing error loading Firebase service account from file: {KeyPath}", firebaseKeyPath);
             return null;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Critical error loading Firebase service account from file: {KeyPath}", firebaseKeyPath);
+            Logger.LogError(ex, "Critical error loading Firebase service account from file: {KeyPath}", firebaseKeyPath);
             return null;
         }
     }
@@ -517,18 +512,18 @@ public class GlobalJwtProviderGAgent : GAgentBase<GlobalJwtProviderState, DailyP
             if (response.IsSuccessStatusCode)
             {
                 var tokenResponse = JsonSerializer.Deserialize<TokenResponse>(responseContent);
-                _logger.LogDebug("Firebase OAuth response received");
+                Logger.LogDebug("Firebase OAuth response received");
                 return tokenResponse;
             }
             else
             {
-                _logger.LogError("Firebase OAuth API error: {StatusCode} - {Content}", response.StatusCode, responseContent);
+                Logger.LogError("Firebase OAuth API error: {StatusCode} - {Content}", response.StatusCode, responseContent);
                 return null;
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Exception during Firebase OAuth token exchange: {ErrorMessage}", ex.Message);
+            Logger.LogError(ex, "Exception during Firebase OAuth token exchange: {ErrorMessage}", ex.Message);
             return null;
         }
     }

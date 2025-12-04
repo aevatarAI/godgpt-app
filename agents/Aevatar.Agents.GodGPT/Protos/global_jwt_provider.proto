@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.dailypush;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.DailyPush";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// GlobalJwtProviderState
+// =============================================================================
+
+message GlobalJwtProviderState {
+  // Total number of JWT token requests served globally
+  int32 total_token_requests = 1;
+  
+  // Total number of deduplication checks performed
+  int32 total_deduplication_checks = 2;
+  
+  // Number of duplicate pushes prevented
+  int32 prevented_duplicates = 3;
+  
+  // Number of successful JWT token creations
+  int32 successful_token_creations = 4;
+  
+  // Last successful JWT token creation time
+  optional google.protobuf.Timestamp last_token_creation = 5;
+  
+  // Last cleanup operation time
+  optional google.protobuf.Timestamp last_cleanup = 6;
+  
+  // Last error message, if any
+  optional string last_error = 7;
+  
+  // GAgent activation time for diagnostics
+  optional google.protobuf.Timestamp activation_time = 8;
+  
+  // Global deduplication tracking - stores device/token keys and their claim dates
+  // Key format: "device:{deviceId}:{date}:{hour}:{timezone}" or "token:{token}:{date}:{hour}"
+  // Value: DateOnly (stored as string YYYY-MM-DD) when the key was claimed
+  map<string, string> last_push_dates = 9;
+}
+

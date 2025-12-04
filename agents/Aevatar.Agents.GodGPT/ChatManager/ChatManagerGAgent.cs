@@ -80,6 +80,16 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         await agent.ActivateAsync();
         return agent;
     }
+    
+    /// <summary>
+    /// Get GlobalJwtProviderGAgent via IGAgentFactory (new framework)
+    /// </summary>
+    private async Task<GlobalJwtProviderGAgent> GetGlobalJwtProviderAgentAsync()
+    {
+        var agent = _agentFactory.CreateGAgent<GlobalJwtProviderGAgent>(DailyPushConstants.GLOBAL_JWT_PROVIDER_ID);
+        await agent.ActivateAsync();
+        return agent;
+    }
 
     public override Task<string> GetDescriptionAsync()
     {
@@ -1882,8 +1892,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             }
 
             // Get Global JWT Provider (new architecture - single instance for entire system)
-            var globalJwtProvider =
-                GrainFactory.GetGrain<IGlobalJwtProviderGAgent>(DailyPushConstants.GLOBAL_JWT_PROVIDER_ID);
+            var globalJwtProvider = await GetGlobalJwtProviderAgentAsync();
 
             // Get Firebase project configuration via FirebaseService
             var firebaseService = ServiceProvider.GetService(typeof(FirebaseService)) as FirebaseService;
@@ -2345,7 +2354,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
     /// This replaces the FirebaseService architecture with a more efficient global JWT approach
     /// </summary>
     private async Task<bool> SendDirectPushNotificationAsync(
-        IGlobalJwtProviderGAgent globalJwtProvider,
+        GlobalJwtProviderGAgent globalJwtProvider,
         string projectId,
         string pushToken,
         string title,
@@ -2846,8 +2855,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         try
         {
             // Get Global JWT Provider and Firebase project configuration
-            var globalJwtProvider =
-                GrainFactory.GetGrain<IGlobalJwtProviderGAgent>(DailyPushConstants.GLOBAL_JWT_PROVIDER_ID);
+            var globalJwtProvider = await GetGlobalJwtProviderAgentAsync();
             var firebaseService = ServiceProvider.GetService(typeof(FirebaseService)) as FirebaseService;
 
             if (firebaseService == null)
