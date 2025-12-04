@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.dailypush;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.DailyPush";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// FirebaseTokenProviderState
+// =============================================================================
+
+message FirebaseTokenProviderState {
+  // Cached Firebase access token
+  optional string cached_access_token = 1;
+  
+  // Token expiry time (UTC)
+  google.protobuf.Timestamp token_expiry = 2;
+  
+  // Total number of token requests served
+  int32 total_requests = 3;
+  
+  // Number of successful token creations
+  int32 successful_creations = 4;
+  
+  // Number of failed token creation attempts
+  int32 failed_attempts = 5;
+  
+  // Last successful token creation time
+  optional google.protobuf.Timestamp last_success_time = 6;
+  
+  // Last error message, if any
+  optional string last_error = 7;
+  
+  // GAgent activation time for diagnostics
+  google.protobuf.Timestamp activation_time = 8;
+}
+

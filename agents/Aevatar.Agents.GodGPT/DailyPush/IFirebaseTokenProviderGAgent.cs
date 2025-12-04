@@ -1,4 +1,4 @@
-using Aevatar.Core.Abstractions;
+using Orleans;
 
 namespace GodGPT.GAgents.DailyPush;
 
@@ -6,7 +6,7 @@ namespace GodGPT.GAgents.DailyPush;
 /// Firebase access token provider GAgent for individual ChatManager
 /// Provides JWT token management without concurrency conflicts
 /// </summary>
-public interface IFirebaseTokenProviderGAgent : IGAgent, IGrainWithIntegerKey
+public interface IFirebaseTokenProviderGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
     /// <summary>
     /// Get Firebase access token for FCM API v1
