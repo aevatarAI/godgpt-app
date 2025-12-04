@@ -1,11 +1,9 @@
-using Aevatar.Core.Abstractions;
-
 namespace GodGPT.GAgents.DailyPush;
 
 /// <summary>
 /// Push subscriber mapping index GAgent for efficient user lookup
 /// </summary>
-public interface IPushSubscriberIndexGAgent : IGAgent, IGrainWithGuidKey
+public interface IPushSubscriberIndexGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
     /// <summary>
     /// Initialize timezone user index with timezone ID

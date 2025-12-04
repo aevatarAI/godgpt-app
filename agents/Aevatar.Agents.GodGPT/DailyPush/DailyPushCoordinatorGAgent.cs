@@ -53,6 +53,16 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
         await agent.ActivateAsync();
         return agent;
     }
+    
+    /// <summary>
+    /// Get PushSubscriberIndexGAgent via IGAgentFactory (new framework)
+    /// </summary>
+    private async Task<PushSubscriberIndexGAgent> GetPushSubscriberIndexAgentAsync(Guid timezoneGuid)
+    {
+        var agent = _agentFactory.CreateGAgent<PushSubscriberIndexGAgent>(timezoneGuid);
+        await agent.ActivateAsync();
+        return agent;
+    }
 
     public override Task<string> GetDescriptionAsync()
     {
@@ -318,7 +328,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
 
             // Get users in this timezone
             var timezoneIndexGAgent =
-                _grainFactory.GetGrain<IPushSubscriberIndexGAgent>(DailyPushConstants.TimezoneToGuid(_timeZoneId));
+                await GetPushSubscriberIndexAgentAsync(DailyPushConstants.TimezoneToGuid(_timeZoneId));
 
             // Process users in batches
             const int batchSize = 1000;
@@ -406,7 +416,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
 
             // Get users in this timezone
             var timezoneIndexGAgent =
-                _grainFactory.GetGrain<IPushSubscriberIndexGAgent>(DailyPushConstants.TimezoneToGuid(_timeZoneId));
+                await GetPushSubscriberIndexAgentAsync(DailyPushConstants.TimezoneToGuid(_timeZoneId));
 
             // Process users in batches (only those who haven't read morning push)
             const int batchSize = 1000;

@@ -1,0 +1,61 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.dailypush;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.DailyPush";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// PushSubscriberIndexState
+// =============================================================================
+
+message PushSubscriberIndexStateProto {
+  // Timezone ID (e.g., "Asia/Shanghai", "America/New_York")
+  string time_zone_id = 1;
+  
+  // Active users in this timezone (users with enabled push devices)
+  // Note: Protobuf doesn't have native HashSet, using repeated string
+  repeated string active_users = 2;
+  
+  // Last index update timestamp
+  google.protobuf.Timestamp last_updated = 3;
+  
+  // Total active user count for quick access
+  int32 active_user_count = 4;
+}
+
+// =============================================================================
+// PushSubscriberIndex Events
+// =============================================================================
+
+message InitializeTimezoneIndexEvent {
+  string time_zone_id = 1;
+  google.protobuf.Timestamp init_time = 2;
+}
+
+message AddUserToTimezoneEvent {
+  string user_id = 1;
+  string time_zone_id = 2;
+  google.protobuf.Timestamp update_time = 3;
+}
+
+message RemoveUserFromTimezoneEvent {
+  string user_id = 1;
+  string time_zone_id = 2;
+  google.protobuf.Timestamp update_time = 3;
+}
+
+message TimezoneUpdateRequestProto {
+  string user_id = 1;
+  string source_timezone = 2;
+  string target_timezone = 3;
+  bool is_add = 4;
+}
+
+message BatchUpdateUsersEvent {
+  repeated TimezoneUpdateRequestProto updates = 1;
+  int32 updated_count = 2;
+  google.protobuf.Timestamp update_time = 3;
+}
+

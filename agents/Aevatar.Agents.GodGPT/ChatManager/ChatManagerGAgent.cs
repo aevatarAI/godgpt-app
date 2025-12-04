@@ -100,6 +100,16 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         await agent.ActivateAsync();
         return agent;
     }
+    
+    /// <summary>
+    /// Get PushSubscriberIndexGAgent via IGAgentFactory (new framework)
+    /// </summary>
+    private async Task<PushSubscriberIndexGAgent> GetPushSubscriberIndexAgentAsync(Guid timezoneGuid)
+    {
+        var agent = _agentFactory.CreateGAgent<PushSubscriberIndexGAgent>(timezoneGuid);
+        await agent.ActivateAsync();
+        return agent;
+    }
 
     public override Task<string> GetDescriptionAsync()
     {
@@ -2241,7 +2251,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             if (!string.IsNullOrEmpty(oldTimeZone))
             {
                 var oldIndexGAgent =
-                    GrainFactory.GetGrain<IPushSubscriberIndexGAgent>(DailyPushConstants.TimezoneToGuid(oldTimeZone));
+                    await GetPushSubscriberIndexAgentAsync(DailyPushConstants.TimezoneToGuid(oldTimeZone));
                 await oldIndexGAgent.InitializeAsync(oldTimeZone);
                 await oldIndexGAgent.RemoveUserFromTimezoneAsync(State.UserId);
                 Logger.LogDebug($"Removed user {State.UserId} from timezone index: {oldTimeZone}");
@@ -2251,7 +2261,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             if (!string.IsNullOrEmpty(newTimeZone))
             {
                 var newIndexGAgent =
-                    GrainFactory.GetGrain<IPushSubscriberIndexGAgent>(DailyPushConstants.TimezoneToGuid(newTimeZone));
+                    await GetPushSubscriberIndexAgentAsync(DailyPushConstants.TimezoneToGuid(newTimeZone));
                 await newIndexGAgent.InitializeAsync(newTimeZone);
                 await newIndexGAgent.AddUserToTimezoneAsync(State.UserId);
                 Logger.LogDebug($"Added user {State.UserId} to timezone index: {newTimeZone}");

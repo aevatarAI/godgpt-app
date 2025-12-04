@@ -750,3 +750,123 @@ protected override async Task OnActivateAsync()
 | FreeTrialCodeFactoryGAgent | 无 | ✅ |
 | UserInfoCollectionGAgent | 无 | ✅ |
 | UserQuotaGAgent | 已清理数据迁移代码 | ✅ |
+| GlobalJwtProviderGAgent | 无 | ✅ |
+| FirebaseTokenProviderGAgent | State方法移至Agent | ✅ |
+| DailyContentGAgent | 完整Event Sourcing迁移 | ✅ |
+| DailyPushCoordinatorGAgent | 暂停：依赖Orleans Reminders | ⏸️ |
+
+---
+
+## 🔵 Event Sourcing 迁移规则
+
+### Rule 1: RaiseEvent 模式
+
+```csharp
+// ❌ 错误 - 不存在 RaiseEventAsync
+await RaiseEventAsync(new SomeEvent { ... });
+
+// ✅ 正确 - 分两步
+RaiseEvent(new SomeEvent { ... });  // 同步，暂存事件
+await ConfirmEventsAsync();          // 异步，持久化
+```
+
+### Rule 2: State 方法迁移
+
+旧 State 类的方法必须移到 Agent 类，因为 Protobuf 不支持方法。
+
+```csharp
+// ❌ 旧代码 - State 有方法
+public class MyState : StateBase
+{
+    public bool IsValid() => !string.IsNullOrEmpty(Token);
+    public void MarkUsed(string id) { UsedIds.Add(id); }
+}
+
+// ✅ 新代码 - 方法移到 Agent
+public class MyAgent : GAgentBase<MyState>
+{
+    private bool IsTokenValid() => !string.IsNullOrEmpty(State.Token);
+    private void MarkUsed(string id) { /* 修改 State */ }
+}
+```
+
+### Rule 3: Proto/C# 复杂类型转换
+
+当有嵌套类型时，创建转换方法：
+
+```csharp
+// Agent 中添加转换方法
+private MyDtoProto ConvertToProto(MyDto dto)
+{
+    return new MyDtoProto { Field1 = dto.Field1, ... };
+}
+
+private MyDto ConvertFromProto(MyDtoProto proto)
+{
+    return new MyDto { Field1 = proto.Field1, ... };
+}
+```
+
+### Rule 4: Protobuf Map 字段特殊处理
+
+| C# 类型 | Protobuf 类型 | 注意 |
+|--------|--------------|------|
+| `Dictionary<Guid, string>` | `map<string, string>` | Guid→string |
+| `Dictionary<string, HashSet<string>>` | `map<string, string>` | HashSet→逗号分隔 |
+| `Dictionary<string, List<string>>` | `map<string, string>` | List→逗号分隔 |
+
+```csharp
+// 读取时
+var idSet = State.UsageHistory[key].Split(',').ToHashSet();
+
+// 写入时
+State.UsageHistory[key] = string.Join(",", idSet);
+```
+
+### Rule 5: Timestamp 处理
+
+```csharp
+// 读取 - 需要 ToDateTime()
+var lastRefresh = State.LastRefresh?.ToDateTime() ?? DateTime.MinValue;
+
+// 写入 - 需要 Timestamp.FromDateTime + ToUniversalTime
+State.LastRefresh = Timestamp.FromDateTime(DateTime.UtcNow);
+```
+
+---
+
+## 🟢 级联依赖更新规则
+
+当迁移一个 Agent 时，必须同时更新所有调用方：
+
+### Step 1: 调用方注入 IGAgentFactory
+
+```csharp
+private readonly IGAgentFactory _agentFactory;
+
+public CallerAgent(Guid id, IGAgentFactory agentFactory) : base(id)
+{
+    _agentFactory = agentFactory;
+}
+```
+
+### Step 2: 添加 Helper 方法
+
+```csharp
+private async Task<MigratedAgent> GetMigratedAgentAsync(Guid id)
+{
+    var agent = _agentFactory.CreateGAgent<MigratedAgent>(id);
+    await agent.ActivateAsync();
+    return agent;
+}
+```
+
+### Step 3: 替换调用
+
+```csharp
+// ❌ 旧代码
+var agent = GrainFactory.GetGrain<IMigratedAgent>(id);
+
+// ✅ 新代码
+var agent = await GetMigratedAgentAsync(id);
+```

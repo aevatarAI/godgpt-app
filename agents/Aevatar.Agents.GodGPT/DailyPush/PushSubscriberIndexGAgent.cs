@@ -1,19 +1,22 @@
-using Aevatar.Core;
-using Aevatar.Core.Abstractions;
-using GodGPT.GAgents.DailyPush.SEvents;
+using Aevatar.Agents.Core;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
-using Orleans.Providers;
+
+// Protobuf types aliases
+using IndexStateProto = Aevatar.Agents.GodGPT.Protos.DailyPush.PushSubscriberIndexStateProto;
+using InitializeTimezoneIndexEvent = Aevatar.Agents.GodGPT.Protos.DailyPush.InitializeTimezoneIndexEvent;
+using AddUserToTimezoneEvent = Aevatar.Agents.GodGPT.Protos.DailyPush.AddUserToTimezoneEvent;
+using RemoveUserFromTimezoneEvent = Aevatar.Agents.GodGPT.Protos.DailyPush.RemoveUserFromTimezoneEvent;
+using BatchUpdateUsersEvent = Aevatar.Agents.GodGPT.Protos.DailyPush.BatchUpdateUsersEvent;
+using TimezoneUpdateRequestProto = Aevatar.Agents.GodGPT.Protos.DailyPush.TimezoneUpdateRequestProto;
 
 namespace GodGPT.GAgents.DailyPush;
 
 /// <summary>
 /// Timezone user index GAgent implementation
 /// </summary>
-[StorageProvider(ProviderName = "PubSubStore")]
-[LogConsistencyProvider(ProviderName = "LogStorage")]
-[GAgent(nameof(PushSubscriberIndexGAgent))]
-public class PushSubscriberIndexGAgent : GAgentBase<PushSubscriberIndexState, DailyPushLogEvent>,
-    IPushSubscriberIndexGAgent
+public class PushSubscriberIndexGAgent : GAgentBase<IndexStateProto>, IPushSubscriberIndexGAgent
 {
     private readonly ILogger<PushSubscriberIndexGAgent> _logger;
 
@@ -27,39 +30,45 @@ public class PushSubscriberIndexGAgent : GAgentBase<PushSubscriberIndexState, Da
         return Task.FromResult("Timezone user index management");
     }
 
-    protected override async Task OnGAgentActivateAsync(CancellationToken cancellationToken)
+    protected override async Task OnActivateAsync(CancellationToken cancellationToken)
     {
+        await base.OnActivateAsync(cancellationToken);
         _logger.LogInformation("PushSubscriberIndexGAgent activated");
     }
 
-    protected override void GAgentTransitionState(PushSubscriberIndexState state,
-        StateLogEventBase<DailyPushLogEvent> @event)
+    protected override void TransitionState(IndexStateProto state, IMessage @event)
     {
         switch (@event)
         {
-            case InitializeTimezoneIndexEventLog initEvent:
+            case InitializeTimezoneIndexEvent initEvent:
                 state.TimeZoneId = initEvent.TimeZoneId;
                 state.LastUpdated = initEvent.InitTime;
                 break;
 
-            case AddUserToTimezoneEventLog addEvent:
-                state.ActiveUsers.Add(addEvent.UserId);
+            case AddUserToTimezoneEvent addEvent:
+                if (!state.ActiveUsers.Contains(addEvent.UserId))
+                {
+                    state.ActiveUsers.Add(addEvent.UserId);
+                }
                 state.ActiveUserCount = state.ActiveUsers.Count;
                 state.LastUpdated = addEvent.UpdateTime;
                 break;
 
-            case RemoveUserFromTimezoneEventLog removeEvent:
+            case RemoveUserFromTimezoneEvent removeEvent:
                 state.ActiveUsers.Remove(removeEvent.UserId);
                 state.ActiveUserCount = state.ActiveUsers.Count;
                 state.LastUpdated = removeEvent.UpdateTime;
                 break;
 
-            case BatchUpdateUsersEventLog batchEvent:
+            case BatchUpdateUsersEvent batchEvent:
                 foreach (var update in batchEvent.Updates)
                 {
                     if (update.IsAdd)
                     {
-                        state.ActiveUsers.Add(update.UserId);
+                        if (!state.ActiveUsers.Contains(update.UserId))
+                        {
+                            state.ActiveUsers.Add(update.UserId);
+                        }
                     }
                     else
                     {
@@ -72,55 +81,57 @@ public class PushSubscriberIndexGAgent : GAgentBase<PushSubscriberIndexState, Da
                 break;
 
             default:
-                _logger.LogDebug($"Unhandled event type: {@event.GetType().Name}");
+                _logger.LogDebug("Unhandled event type: {EventType}", @event.GetType().Name);
                 break;
         }
     }
 
     public async Task InitializeAsync(string timeZoneId)
     {
-        RaiseEvent(new InitializeTimezoneIndexEventLog
+        RaiseEvent(new InitializeTimezoneIndexEvent
         {
             TimeZoneId = timeZoneId,
-            InitTime = DateTime.UtcNow
+            InitTime = Timestamp.FromDateTime(DateTime.UtcNow)
         });
 
-        await ConfirmEvents();
-        _logger.LogInformation($"Initialized timezone index for: {timeZoneId}");
+        await ConfirmEventsAsync();
+        _logger.LogInformation("Initialized timezone index for: {TimeZoneId}", timeZoneId);
     }
 
     public async Task AddUserToTimezoneAsync(Guid userId)
     {
-        RaiseEvent(new AddUserToTimezoneEventLog
+        RaiseEvent(new AddUserToTimezoneEvent
         {
-            UserId = userId,
-            TimeZoneId = State.TimeZoneId
+            UserId = userId.ToString(),
+            TimeZoneId = State.TimeZoneId,
+            UpdateTime = Timestamp.FromDateTime(DateTime.UtcNow)
         });
 
-        await ConfirmEvents();
-        _logger.LogInformation($"Added user {userId} to timezone {State.TimeZoneId}");
+        await ConfirmEventsAsync();
+        _logger.LogInformation("Added user {UserId} to timezone {TimeZone}", userId, State.TimeZoneId);
     }
 
     public async Task RemoveUserFromTimezoneAsync(Guid userId)
     {
-        RaiseEvent(new RemoveUserFromTimezoneEventLog
+        RaiseEvent(new RemoveUserFromTimezoneEvent
         {
-            UserId = userId,
-            TimeZoneId = State.TimeZoneId
+            UserId = userId.ToString(),
+            TimeZoneId = State.TimeZoneId,
+            UpdateTime = Timestamp.FromDateTime(DateTime.UtcNow)
         });
 
-        await ConfirmEvents();
-        _logger.LogInformation($"Removed user {userId} from timezone {State.TimeZoneId}");
+        await ConfirmEventsAsync();
+        _logger.LogInformation("Removed user {UserId} from timezone {TimeZone}", userId, State.TimeZoneId);
     }
 
     public async Task<List<Guid>> GetActiveUsersAsync()
     {
-        return State.ActiveUsers.ToList();
+        return State.ActiveUsers.Select(s => Guid.Parse(s)).ToList();
     }
 
     public async Task<List<Guid>> GetActiveUsersInTimezoneAsync(int skip, int take)
     {
-        return State.ActiveUsers.Skip(skip).Take(take).ToList();
+        return State.ActiveUsers.Skip(skip).Take(take).Select(s => Guid.Parse(s)).ToList();
     }
 
     public async Task<int> GetActiveUserCountAsync()
@@ -151,22 +162,22 @@ public class PushSubscriberIndexGAgent : GAgentBase<PushSubscriberIndexState, Da
         // Current approach: Passive cleanup via natural user activity
         // - Users are added when they register/update devices
         // - Cleanup happens naturally when users update their timezone or device status
-        // - HashSet prevents duplicates automatically
+        // - repeated field prevents duplicates checked in TransitionState
 
-        RaiseEvent(new InitializeTimezoneIndexEventLog
+        RaiseEvent(new InitializeTimezoneIndexEvent
         {
             TimeZoneId = State.TimeZoneId,
-            InitTime = DateTime.UtcNow
+            InitTime = Timestamp.FromDateTime(DateTime.UtcNow)
         });
 
-        await ConfirmEvents();
+        await ConfirmEventsAsync();
         _logger.LogInformation("📊 Timezone index status: {TimeZone} has {UserCount} active users", 
             State.TimeZoneId, currentCount);
     }
 
     public async Task<bool> HasActiveDeviceInTimezoneAsync(Guid userId)
     {
-        return State.ActiveUsers.Contains(userId);
+        return State.ActiveUsers.Contains(userId.ToString());
     }
 
     public async Task BatchUpdateUsersAsync(List<TimezoneUpdateRequest> updates)
@@ -174,15 +185,27 @@ public class PushSubscriberIndexGAgent : GAgentBase<PushSubscriberIndexState, Da
         var validUpdates = updates.Where(u => !string.IsNullOrEmpty(u.TargetTimezone)).ToList();
         if (validUpdates.Count > 0)
         {
-            RaiseEvent(new BatchUpdateUsersEventLog
+            var batchEvent = new BatchUpdateUsersEvent
             {
-                Updates = validUpdates,
-                UpdatedCount = validUpdates.Count
-            });
-
-            await ConfirmEvents();
+                UpdatedCount = validUpdates.Count,
+                UpdateTime = Timestamp.FromDateTime(DateTime.UtcNow)
+            };
+            
+            foreach (var update in validUpdates)
+            {
+                batchEvent.Updates.Add(new TimezoneUpdateRequestProto
+                {
+                    UserId = update.UserId.ToString(),
+                    SourceTimezone = update.SourceTimezone,
+                    TargetTimezone = update.TargetTimezone,
+                    IsAdd = update.IsAdd
+                });
+            }
+            
+            RaiseEvent(batchEvent);
+            await ConfirmEventsAsync();
         }
 
-        _logger.LogInformation($"Batch updated {validUpdates.Count} users in timezone {State.TimeZoneId}");
+        _logger.LogInformation("Batch updated {Count} users in timezone {TimeZone}", validUpdates.Count, State.TimeZoneId);
     }
 }
