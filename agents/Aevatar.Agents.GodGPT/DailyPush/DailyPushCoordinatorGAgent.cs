@@ -21,6 +21,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
 {
     private readonly ILogger<DailyPushCoordinatorGAgent> _logger;
     private readonly IGrainFactory _grainFactory;
+    private readonly Aevatar.Agents.Abstractions.IGAgentFactory _agentFactory;
     private readonly IOptionsMonitor<DailyPushOptions> _options;
     private string _timeZoneId = "";
 
@@ -34,11 +35,23 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
     public DailyPushCoordinatorGAgent(
         ILogger<DailyPushCoordinatorGAgent> logger,
         IGrainFactory grainFactory,
+        Aevatar.Agents.Abstractions.IGAgentFactory agentFactory,
         IOptionsMonitor<DailyPushOptions> options)
     {
         _logger = logger;
         _grainFactory = grainFactory;
+        _agentFactory = agentFactory;
         _options = options;
+    }
+    
+    /// <summary>
+    /// Get DailyContentGAgent via IGAgentFactory (new framework)
+    /// </summary>
+    private async Task<DailyContentGAgent> GetDailyContentAgentAsync()
+    {
+        var agent = _agentFactory.CreateGAgent<DailyContentGAgent>(DailyPushConstants.CONTENT_GAGENT_ID);
+        await agent.ActivateAsync();
+        return agent;
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -116,7 +129,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
         {
             // Try to get timezone from GUID mapping
             var grainGuid = this.GetPrimaryKey();
-            var inferredTimezone = await DailyPushConstants.GetTimezoneFromGuidAsync(grainGuid, _grainFactory);
+            var inferredTimezone = await DailyPushConstants.GetTimezoneFromGuidAsync(grainGuid, _agentFactory);
 
             if (!string.IsNullOrEmpty(inferredTimezone))
             {
@@ -189,7 +202,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
         }
 
         // Register timezone mapping for reverse lookup
-        await DailyPushConstants.RegisterTimezoneMapping(timeZoneId, _grainFactory);
+        await DailyPushConstants.RegisterTimezoneMapping(timeZoneId, _agentFactory);
 
         // ✅ Use event sourcing for state initialization
         RaiseEvent(new InitializeCoordinatorEventLog
@@ -293,7 +306,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
         try
         {
             // Get daily content selection
-            var contentGAgent = _grainFactory.GetGrain<IDailyContentGAgent>(DailyPushConstants.CONTENT_GAGENT_ID);
+            var contentGAgent = await GetDailyContentAgentAsync();
             var dailyContents = await contentGAgent.GetSmartSelectedContentsAsync(
                 DailyPushConstants.DAILY_CONTENT_COUNT, targetDate);
 
@@ -381,7 +394,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
         try
         {
             // Get same content as morning push
-            var contentGAgent = _grainFactory.GetGrain<IDailyContentGAgent>(DailyPushConstants.CONTENT_GAGENT_ID);
+            var contentGAgent = await GetDailyContentAgentAsync();
             var dailyContents = await contentGAgent.GetSmartSelectedContentsAsync(
                 DailyPushConstants.DAILY_CONTENT_COUNT, targetDate);
 

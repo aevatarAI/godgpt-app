@@ -1,4 +1,4 @@
-using Aevatar.Core.Abstractions;
+using Orleans;
 
 // DailyPush types are in same namespace
 
@@ -7,7 +7,7 @@ namespace GodGPT.GAgents.DailyPush;
 /// <summary>
 /// Daily content selection and management GAgent
 /// </summary>
-public interface IDailyContentGAgent : IGAgent, IGrainWithGuidKey
+public interface IDailyContentGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
     /// <summary>
     /// Get smart-selected contents for specific date (with deduplication)

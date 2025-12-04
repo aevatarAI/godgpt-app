@@ -90,6 +90,16 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
         await agent.ActivateAsync();
         return agent;
     }
+    
+    /// <summary>
+    /// Get DailyContentGAgent via IGAgentFactory (new framework)
+    /// </summary>
+    private async Task<DailyContentGAgent> GetDailyContentAgentAsync()
+    {
+        var agent = _agentFactory.CreateGAgent<DailyContentGAgent>(DailyPushConstants.CONTENT_GAGENT_ID);
+        await agent.ActivateAsync();
+        return agent;
+    }
 
     public override Task<string> GetDescriptionAsync()
     {
@@ -2282,7 +2292,7 @@ public class ChatGAgentManager : GAgentBase<ChatManagerGAgentState, ChatManageEv
             Logger.LogInformation("Starting complete timezone ecosystem initialization for {TimeZone}", newTimeZone);
 
             // Step 1: Initialize DailyContentGAgent timezone mapping (global content service)
-            var contentGAgent = GrainFactory.GetGrain<IDailyContentGAgent>(DailyPushConstants.CONTENT_GAGENT_ID);
+            var contentGAgent = await GetDailyContentAgentAsync();
             await contentGAgent.RegisterTimezoneGuidMappingAsync(DailyPushConstants.TimezoneToGuid(newTimeZone),
                 newTimeZone);
             Logger.LogDebug("DailyContentGAgent timezone mapping registered for {TimeZone}", newTimeZone);

@@ -1,0 +1,95 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.dailypush;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.DailyPush";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Nested DTOs
+// =============================================================================
+
+message LocalizedContentDataProto {
+  string title = 1;
+  string content = 2;
+}
+
+message DailyNotificationContentProto {
+  string id = 1;
+  map<string, LocalizedContentDataProto> localized_contents = 2;
+  bool is_active = 3;
+}
+
+// =============================================================================
+// DailyContentState
+// =============================================================================
+
+message DailyContentState {
+  // All available content for daily push
+  map<string, DailyNotificationContentProto> contents = 1;
+  
+  // Content usage history by date (key: yyyy-MM-dd, value: comma-separated content IDs)
+  map<string, string> daily_usage_history = 2;
+  
+  // Last content refresh timestamp
+  google.protobuf.Timestamp last_refresh = 3;
+  
+  // Last selection timestamp
+  google.protobuf.Timestamp last_selection = 4;
+  
+  // Total selection count
+  int32 selection_count = 5;
+  
+  // Timezone GUID to timezone ID mapping for reverse lookup
+  map<string, string> timezone_guid_mappings = 6;
+  
+  // Daily selected content cache (key: yyyy-MM-dd, value: comma-separated content IDs)
+  map<string, string> daily_selected_content_cache = 7;
+}
+
+// =============================================================================
+// DailyContent Events
+// =============================================================================
+
+message AddContentEvent {
+  DailyNotificationContentProto content = 1;
+  google.protobuf.Timestamp update_time = 2;
+}
+
+message UpdateContentEvent {
+  string content_id = 1;
+  DailyNotificationContentProto content = 2;
+  google.protobuf.Timestamp update_time = 3;
+}
+
+message RemoveContentEvent {
+  string content_id = 1;
+  google.protobuf.Timestamp update_time = 2;
+}
+
+message ContentSelectionEvent {
+  google.protobuf.Timestamp selection_date = 1;
+  repeated string selected_content_ids = 2;
+  int32 count = 3;
+}
+
+message UpdateDailyContentCacheEvent {
+  string date_key = 1;
+  repeated string selected_content_ids = 2;
+}
+
+message UpdateTimezoneGuidMappingEvent {
+  string timezone_guid = 1;
+  string timezone_id = 2;
+}
+
+message ImportContentsEvent {
+  repeated DailyNotificationContentProto contents = 1;
+  google.protobuf.Timestamp import_time = 2;
+}
+
+message RefreshContentsEvent {
+  google.protobuf.Timestamp refresh_time = 1;
+}
+

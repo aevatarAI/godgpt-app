@@ -61,19 +61,21 @@ public static class DailyPushConstants
     /// <summary>
     /// Register timezone mapping when timezone GAgent is first created
     /// </summary>
-    public static async Task RegisterTimezoneMapping(string timezoneId, IGrainFactory grainFactory)
+    public static async Task RegisterTimezoneMapping(string timezoneId, Aevatar.Agents.Abstractions.IGAgentFactory agentFactory)
     {
         var timezoneGuid = TimezoneToGuid(timezoneId);
-        var contentGAgent = grainFactory.GetGrain<IDailyContentGAgent>(CONTENT_GAGENT_ID);
+        var contentGAgent = agentFactory.CreateGAgent<DailyContentGAgent>(CONTENT_GAGENT_ID);
+        await contentGAgent.ActivateAsync();
         await contentGAgent.RegisterTimezoneGuidMappingAsync(timezoneGuid, timezoneId);
     }
 
     /// <summary>
     /// Get timezone ID from GUID (reverse lookup from DailyContentGAgent)
     /// </summary>
-    public static async Task<string?> GetTimezoneFromGuidAsync(Guid timezoneGuid, IGrainFactory grainFactory)
+    public static async Task<string?> GetTimezoneFromGuidAsync(Guid timezoneGuid, Aevatar.Agents.Abstractions.IGAgentFactory agentFactory)
     {
-        var contentGAgent = grainFactory.GetGrain<IDailyContentGAgent>(CONTENT_GAGENT_ID);
+        var contentGAgent = agentFactory.CreateGAgent<DailyContentGAgent>(CONTENT_GAGENT_ID);
+        await contentGAgent.ActivateAsync();
         return await contentGAgent.GetTimezoneFromGuidAsync(timezoneGuid);
     }
 }
