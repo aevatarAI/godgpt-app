@@ -685,4 +685,68 @@ public class MyGAgent : GAgentBase<MyState>, IMyGAgent
 | ChatManagerGAgent | 🔄 Pending | | |
 | GodChatGAgent | 🔄 Pending | | |
 | UserBillingGAgent | 🔄 Pending | | |
-| UserQuotaGAgent | 🔄 Pending | | |
+
+---
+
+## 🔴 数据迁移策略 (已确认)
+
+### 原则
+
+**不在代码中实现数据迁移桥梁**。新旧系统并行运行，数据迁移通过独立脚本处理。
+
+### 已清理的数据迁移代码
+
+| 文件 | 删除内容 | 原因 |
+|------|----------|------|
+| `ChatManager/UserQuota/UserQuotaGrain.cs` | 整个文件 | 旧 Orleans Grain，数据迁移由脚本处理 |
+| `ChatManager/UserQuota/UserQuotaState.cs` | 整个文件 | 旧 State 定义，已有 Proto |
+| `user_quota.proto` | `is_initialized_from_grain` 字段 | 迁移逻辑字段 |
+| `user_quota.proto` | `InitializeFromGrainEvent` | 迁移事件 |
+| `user_quota.proto` | `MarkInitializedEvent` | 迁移事件 |
+| `UserQuotaGAgent.OnActivateAsync` | 从旧 Grain 读取状态的逻辑 | 迁移逻辑 |
+| `UserQuotaGAgent` | `_clusterClient` 依赖 | 仅用于访问旧 Grain |
+
+### 设计原则
+
+```csharp
+// ❌ 错误 - 在代码中实现数据迁移
+protected override async Task OnActivateAsync()
+{
+    if (!State.IsInitializedFromOldGrain)
+    {
+        var oldGrain = _clusterClient.GetGrain<IOldGrain>(Id);
+        var oldState = await oldGrain.GetStateAsync();
+        // 迁移数据...
+    }
+}
+
+// ✅ 正确 - 干净的新实现，无迁移逻辑
+protected override async Task OnActivateAsync()
+{
+    await base.OnActivateAsync();
+    // 只有初始化逻辑，无迁移
+}
+```
+
+### 迁移脚本负责
+
+1. 读取旧存储中的 State
+2. 转换为新的 Protobuf 格式
+3. 写入新存储
+4. 标记已迁移
+
+---
+
+## 🟡 Review: 已迁移 Agent 清理项
+
+| Agent | 需清理项 | 状态 |
+|-------|----------|------|
+| ConfigurationGAgent | 无 | ✅ |
+| UserStatisticsGAgent | 无 | ✅ |
+| InviteCodeGAgent | 无 | ✅ |
+| InvitationGAgent | 删除未使用的 `_clusterClient` | ✅ |
+| AnonymousUserGAgent | 保留 `_clusterClient` (访问未迁移的 `IGodChat`) | ✅ |
+| UserFeedbackGAgent | 无 | ✅ |
+| FreeTrialCodeFactoryGAgent | 无 | ✅ |
+| UserInfoCollectionGAgent | 无 | ✅ |
+| UserQuotaGAgent | 已清理数据迁移代码 | ✅ |

@@ -11,7 +11,6 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Orleans;
 using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
 using CsRewardTypeEnum = Aevatar.Application.Grains.Common.Constants.RewardTypeEnum;
 using CsMembershipLevel = Aevatar.Application.Grains.Common.Constants.MembershipLevel;
@@ -22,12 +21,10 @@ namespace Aevatar.Application.Grains.Invitation;
 public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
 {
     private readonly DateTime DefaultIssueAt = new DateTime(2025, 7, 8, 0, 0, 0, DateTimeKind.Utc);
-    private readonly IClusterClient _clusterClient;
     private readonly IGAgentFactory _agentFactory;
 
-    public InvitationGAgent(Guid id, IClusterClient clusterClient, IGAgentFactory agentFactory) : base(id)
+    public InvitationGAgent(Guid id, IGAgentFactory agentFactory) : base(id)
     {
-        _clusterClient = clusterClient;
         _agentFactory = agentFactory;
     }
 
