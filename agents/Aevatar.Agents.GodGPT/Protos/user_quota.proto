@@ -63,19 +63,18 @@ message FreeTrialInfoProto {
 // =============================================================================
 
 message UserQuotaState {
-    string user_id = 1;                                        // [Id(0)]
-    int32 credits = 2;                                         // [Id(1)]
-    bool has_initial_credits = 3;                              // [Id(2)]
-    bool has_shown_initial_credits_toast = 4;                  // [Id(3)]
-    SubscriptionInfoProto subscription = 5;                    // [Id(4)]
-    map<string, RateLimitInfoProto> rate_limits = 6;           // [Id(5)]
-    SubscriptionInfoProto ultimate_subscription = 7;           // [Id(6)]
-    google.protobuf.Timestamp created_at = 8;                  // [Id(7)]
-    bool can_receive_invite_reward = 9;                        // [Id(8)]
-    bool is_initialized_from_grain = 10;                       // [Id(9)]
-    DailyImageConversationInfoProto daily_image_conversation = 11;  // [Id(10)]
-    optional FreeTrialInfoProto free_trial_info = 12;          // [Id(11)]
-    repeated string one_time_transaction_ids = 13;             // [Id(12)]
+    string user_id = 1;
+    int32 credits = 2;
+    bool has_initial_credits = 3;
+    bool has_shown_initial_credits_toast = 4;
+    SubscriptionInfoProto subscription = 5;
+    map<string, RateLimitInfoProto> rate_limits = 6;
+    SubscriptionInfoProto ultimate_subscription = 7;
+    google.protobuf.Timestamp created_at = 8;
+    bool can_receive_invite_reward = 9;
+    DailyImageConversationInfoProto daily_image_conversation = 10;
+    optional FreeTrialInfoProto free_trial_info = 11;
+    repeated string one_time_transaction_ids = 12;
 }
 
 // =============================================================================
@@ -118,20 +117,6 @@ message UpdateCanReceiveInviteRewardEvent {
 
 message ClearAllQuotaEvent {
     bool can_receive_invite_reward = 1;
-}
-
-message InitializeFromGrainEvent {
-    int32 credits = 1;
-    bool has_initial_credits = 2;
-    bool has_shown_initial_credits_toast = 3;
-    SubscriptionInfoProto subscription = 4;
-    map<string, RateLimitInfoProto> rate_limits = 5;
-    SubscriptionInfoProto ultimate_subscription = 6;
-    google.protobuf.Timestamp created_at = 7;
-    bool can_receive_invite_reward = 8;
-}
-
-message MarkInitializedEvent {
 }
 
 message AddPurchasedCreditsEvent {
