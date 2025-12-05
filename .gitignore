@@ -424,7 +424,7 @@ test-results/
 
 # Mac bundle stuff
 *.dmg
-*.app
+# *.app  # Commented out - conflicts with Aevatar.App project path
 
 # content below from: https://github.com/github/gitignore/blob/main/Global/macOS.gitignore
 # General
