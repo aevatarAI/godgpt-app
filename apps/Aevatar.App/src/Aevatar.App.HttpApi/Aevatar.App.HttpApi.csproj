@@ -16,6 +16,11 @@
   <!-- Aevatar Agent Framework -->
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Abstractions\Aevatar.Agents.Abstractions.csproj" />
+    <ProjectReference Include="..\..\..\..\agents\Aevatar.Agents.GodGPT\Aevatar.Agents.GodGPT.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Orleans.Core" />
   </ItemGroup>
 
   <ItemGroup>

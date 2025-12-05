@@ -10,8 +10,13 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Aevatar.App.Domain.Shared\Aevatar.App.Domain.Shared.csproj" />
+    <ProjectReference Include="..\..\..\..\agents\Aevatar.Agents.GodGPT\Aevatar.Agents.GodGPT.csproj" />
   </ItemGroup>
   
+  <ItemGroup>
+    <PackageReference Include="Orleans.Core" />
+  </ItemGroup>
+    
   <ItemGroup>
     <PackageReference Include="Volo.Abp.PermissionManagement.Application.Contracts" />
     <PackageReference Include="Volo.Abp.FeatureManagement.Application.Contracts" />
