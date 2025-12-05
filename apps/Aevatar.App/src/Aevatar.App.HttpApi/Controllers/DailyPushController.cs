@@ -1,9 +1,10 @@
+using Aevatar.App.HttpApi.Controllers;
 using System;
 using System.Threading.Tasks;
 using Aevatar.Application.Constants;
 using Aevatar.Application.Contracts.DailyPush;
 using Aevatar.Application.Contracts.Services;
-using Aevatar.Extensions;
+using Aevatar.App.HttpApi.Extensions;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;

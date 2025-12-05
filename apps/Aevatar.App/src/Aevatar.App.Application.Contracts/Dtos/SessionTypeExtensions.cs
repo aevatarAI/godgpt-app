@@ -1,6 +1,4 @@
-using System;
-using System.Collections.Generic;
-using Aevatar.Domain.Shared;
+using Aevatar.App.Domain.Shared;
 
 namespace Aevatar.GodGPT.Dtos;
 

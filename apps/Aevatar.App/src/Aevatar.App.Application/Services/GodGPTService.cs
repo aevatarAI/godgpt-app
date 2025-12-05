@@ -3,9 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security;
 using System.Threading.Tasks;
-using Aevatar.Anonymous;
-using Aevatar.Application.Constants;
-using Aevatar.Application.Contracts.Services;
+using Aevatar.Application.Contracts.DailyPush;
 using Aevatar.Application.Grains.Agents.Anonymous;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
@@ -20,31 +18,28 @@ using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
-using Aevatar.Application.Grains.GoogleAuth;
-using Aevatar.Application.Grains.GoogleAuth.Dtos;
 using Aevatar.Application.Grains.Invitation;
-using Aevatar.Application.Grains.Twitter;
-using Aevatar.Application.Grains.Twitter.Dtos;
-using Aevatar.Application.Grains.TwitterInteraction;
-using Aevatar.Application.Grains.TwitterInteraction.Dtos;
 using Aevatar.Application.Grains.UserBilling;
 using Aevatar.Application.Grains.UserQuota;
 using Aevatar.Application.Grains.UserStatistics;
 using Aevatar.Application.Grains.UserStatistics.Dtos;
-using Aevatar.Common.Options;
-using Aevatar.Domain.Shared;
+using Aevatar.App.Domain.Shared;
 using Aevatar.Dtos;
-using Aevatar.GAgents.AI.Common;
+using Aevatar.GAgents.AI.Abstractions;
 using Aevatar.GAgents.AI.Options;
+using Aevatar.Application.Grains.Common.Service;
+using Aevatar.Common.Options;
+using Aevatar.Application.Constants;
 using Aevatar.GodGPT.Dtos;
 using Aevatar.Quantum;
+using Aevatar.Anonymous;
 using GodGPT.GAgents;
 using GodGPT.GAgents.Awakening;
 using GodGPT.GAgents.SpeechChat;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
+using Aevatar.Agents.Abstractions;
 using Orleans;
 using Orleans.Runtime;
 using Stripe;
@@ -100,33 +95,8 @@ public interface IGodGPTService
     Task<bool> CanGuestChatAsync(string clientIp);
     Task<QuantumShareResponseDto> GetShareKeyWordWithAIAsync(Guid sessionId, string? content, string? region, SessionType sessionType, GodGPTChatLanguage language = GodGPTChatLanguage.English);
 
-    Task<TwitterAuthResultDto> TwitterAuthVerifyAsync(Guid currentUserId, TwitterAuthVerifyInput input,GodGPTChatLanguage language = GodGPTChatLanguage.English);
     Task<PagedResultDto<RewardHistoryDto>> GetCreditsHistoryAsync(Guid currentUserId,
         GetCreditsHistoryInput getCreditsHistoryInput);
-    Task<TwitterAuthParamsDto> GetTwitterAuthParamsAsync(Guid currentUserId);
-    
-    // Twitter Monitor Management Methods
-    Task<TwitterOperationResultDto> FetchTweetsManuallyAsync();
-    Task<TwitterOperationResultDto> RefetchTweetsByTimeRangeAsync(long startTimeUtcSecond, long endTimeUtcSecond);
-    Task<TwitterOperationResultDto> StartTweetMonitoringAsync();
-    Task<TwitterOperationResultDto> StopTweetMonitoringAsync();
-    Task<TwitterOperationResultDto> GetTweetMonitoringStatusAsync();
-    
-    // Twitter Reward Management Methods
-    Task<TwitterOperationResultDto> TriggerRewardCalculationAsync(long targetDateUtcSeconds);
-    Task<TwitterOperationResultDto> ClearRewardByDayAsync(long targetDateUtcSeconds);
-    Task<TwitterOperationResultDto> StartRewardCalculationAsync();
-    Task<TwitterOperationResultDto> StopRewardCalculationAsync();
-    
-    /// <summary>
-    /// Get user rewards by user ID (returns dateKey and filtered ManagerUserRewardRecordDto list)
-    /// </summary>
-    Task<Dictionary<string, List<ManagerUserRewardRecordDto>>> GetUserRewardsByUserIdAsync(string userId);
-    
-    /// <summary>
-    /// Get full calculation history list
-    /// </summary>
-    Task<List<ManagerRewardCalculationHistoryDto>> GetCalculationHistoryListAsync();
 
     Task<bool> CheckIsManager(Guid? currentUserId);
     Task<UserProfileDto> SetVoiceLanguageAsync(Guid currentUserId, VoiceLanguageEnum voiceLanguage);
@@ -154,9 +124,6 @@ public interface IGodGPTService
     Task<GetInvitationCodeTypeResponse> GetInvitationCodeTypeAsync(Guid currentUserId, GetInvitationCodeTypeRequest input);
     Task<GenerateCodesResultDto> GenerateFreeTrialCodeAsync(Guid currentUserId, GenerateFreeTrialCodeRequest input);
     Task<BatchInfoDto> GetBatchInfoAsync(string batchId);
-    Task<GoogleAuthResultDto> GoogleAuthVerifyCodeInput(Guid currentUserId, GoogleAuthVerifyCodeInput input);
-    Task<bool> GoogleAuthUnbindAsync(Guid currentUserId);
-    Task<GoogleBindStatusDto> GoogleAuthBindStatusAsync(Guid currentUserId);
 }
 
 [RemoteService(IsEnabled = false)]
@@ -164,19 +131,24 @@ public interface IGodGPTService
 public class GodGPTService : ApplicationService, IGodGPTService
 {
     private readonly IClusterClient _clusterClient;
+    private readonly IGAgentFactory _agentFactory;
     private readonly ILogger<GodGPTService> _logger;
     private readonly IOptionsMonitor<StripeOptions> _stripeOptions;
     private readonly IOptionsMonitor<ManagerOptions> _managerOptions;
     private readonly ILocalizationService _localizationService;
 
     private readonly StripeClient _stripeClient;
-    private const string PullTaskTargetId = "aevatar-twitter-monitor-PullTaskTargetId";
-    private const string RewardTaskTargetId = "aevatar-twitter-reward-RewardTaskTargetId";
 
-    public GodGPTService(IClusterClient clusterClient, ILogger<GodGPTService> logger, IOptionsMonitor<StripeOptions> stripeOptions,
-        IOptionsMonitor<ManagerOptions> managerOptions, ILocalizationService localizationService)
+    public GodGPTService(
+        IClusterClient clusterClient, 
+        IGAgentFactory agentFactory,
+        ILogger<GodGPTService> logger, 
+        IOptionsMonitor<StripeOptions> stripeOptions,
+        IOptionsMonitor<ManagerOptions> managerOptions, 
+        ILocalizationService localizationService)
     {
         _clusterClient = clusterClient;
+        _agentFactory = agentFactory;
         _logger = logger;
         _stripeOptions = stripeOptions;
         _managerOptions = managerOptions;
@@ -190,7 +162,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<Guid> CreateSessionAsync(Guid userId, string systemLLM, string prompt, string? guider = null,
         DateTime? userLocalTime = null)
     {
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
         return await manager.CreateSessionAsync(systemLLM, prompt, null, guider, userLocalTime);
     }
 
@@ -198,25 +170,25 @@ public class GodGPTService : ApplicationService, IGodGPTService
         string content,
         ExecutionPromptSettings promptSettings = null)
     {
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
         return await manager.ChatWithSessionAsync(sessionId, sysmLLM, content, promptSettings);
     }
 
     public async Task<List<SessionInfoDto>> GetSessionListAsync(Guid userId)
     {
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
         return await manager.GetSessionListAsync();
     }
 
     public async Task<List<ChatMessage>> GetSessionMessageListAsync(Guid userId, Guid sessionId)
     {
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
         return await manager.GetSessionMessageListAsync(sessionId);
     }
 
     public async Task<Aevatar.Quantum.SessionCreationInfoDto?> GetSessionCreationInfoAsync(Guid userId, Guid sessionId)
     {
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
         var grainsResult = await manager.GetSessionCreationInfoAsync(sessionId);
         
         if (grainsResult != null)
@@ -235,13 +207,13 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
     public async Task<Guid> DeleteSessionAsync(Guid userId, Guid sessionId)
     {
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
         return await manager.DeleteSessionAsync(sessionId);
     }
 
     public async Task<Guid> RenameSessionAsync(Guid userId, Guid sessionId, string title)
     {
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
         return await manager.RenameSessionAsync(sessionId, title);
     }
 
@@ -262,7 +234,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
         try
         {
-            var manager = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
+            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
             return await manager.SearchSessionsAsync(keyword.Trim(), 1000);
         }
         catch (Exception ex)
@@ -276,26 +248,26 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public Task<string> GetSystemPromptAsync()
     {
         var configurationAgent =
-            _clusterClient.GetGrain<IConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
-        return configurationAgent.GetPrompt();
+            _agentFactory.CreateGAgent<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        return Task.FromResult(configurationAgent.GetPrompt());
     }
 
     public Task UpdateSystemPromptAsync(GodGPTConfigurationDto godGptConfigurationDto)
     {
         var configurationAgent =
-            _clusterClient.GetGrain<IConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+            _agentFactory.CreateGAgent<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
         return configurationAgent.UpdateSystemPromptAsync(godGptConfigurationDto.SystemPrompt);
     }
 
     public async Task<UserProfileDto> GetUserProfileAsync(Guid currentUserId)
     {
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(currentUserId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
         return await manager.GetUserProfileAsync();
     }
 
     public async Task<Guid> SetUserProfileAsync(Guid currentUserId, SetUserProfileInput userProfileDto)
     {
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(currentUserId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
         return await manager.SetUserProfileAsync(userProfileDto.Gender, userProfileDto.BirthDate,
             userProfileDto.BirthPlace, userProfileDto.FullName);
     }
@@ -304,13 +276,13 @@ public class GodGPTService : ApplicationService, IGodGPTService
     {
         try
         {
-            var awakeningAgent = _clusterClient.GetGrain<IAwakeningGAgent>(currentUserId);
+            var awakeningAgent = _agentFactory.CreateGAgent<AwakeningGAgent>(currentUserId);
             await awakeningAgent.ResetTodayContentAsync();
         }catch(Exception e)
         {
             _logger.LogError(e,"IAwakeningGAgent ResetTodayContentAsync error currentUserId:"+currentUserId);
         }
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(currentUserId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
         return await manager.ClearAllAsync();
     }
 
@@ -318,7 +290,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
     {
         try
         {
-            var manager = _clusterClient.GetGrain<IChatManagerGAgent>(currentUserId);
+            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
             RequestContext.Set("GodGPTLanguage", language.ToString());
             var shareId = await manager.GenerateChatShareContentAsync(request.SessionId);
             return new CreateShareIdResponse
@@ -350,13 +322,13 @@ public class GodGPTService : ApplicationService, IGodGPTService
         catch (Exception e)
         {
             _logger.LogError(e, "Invalid Share string. {0}", shareString);
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InvalidShare, language);
+            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InvalidShare, (GodGPTLanguage)language);
             throw new UserFriendlyException(localizedMessage);
         }
 
         try
         {
-            var manager = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
+            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
             RequestContext.Set("GodGPTLanguage", language.ToString());
             var shareLinkDto = await manager.GetChatShareContentAsync(sessionId, shareId);
             return shareLinkDto.Messages;
@@ -370,7 +342,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
     public async Task UpdateShowToastAsync(Guid currentUserId)
     {
-        var userQuotaGAgent = _clusterClient.GetGrain<IUserQuotaGAgent>(currentUserId);
+        var userQuotaGAgent = _agentFactory.CreateGAgent<UserQuotaGAgent>(currentUserId);
         //No need to save immediately, can be executed in one step
         userQuotaGAgent.SetShownCreditsToastAsync(true);
     }
@@ -378,7 +350,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<List<StripeProductDto>> GetStripeProductsAsync(Guid currentUserId)
     {
         var userBillingGAgent =
-            _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
         return await userBillingGAgent.GetStripeProductsAsync();
     }
 
@@ -386,7 +358,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         CreateCheckoutSessionInput createCheckoutSessionInput)
     {
         var userBillingGAgent =
-            _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
         var result = await userBillingGAgent.CreateCheckoutSessionAsync(new CreateCheckoutSessionDto
         {
             UserId = currentUserId.ToString(),
@@ -402,21 +374,21 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<List<PaymentSummaryDto>> GetPaymentHistoryAsync(Guid currentUserId, GetPaymentHistoryInput input)
     {
         var userBillingGAgent =
-            _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
         return await userBillingGAgent.GetPaymentHistoryAsync(input.Page, input.PageSize);
     }
 
     public async Task<GetCustomerResponseDto> GetStripeCustomerAsync(Guid currentUserId)
     {
         var userBillingGAgent =
-            _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
         return await userBillingGAgent.GetStripeCustomerAsync(currentUserId.ToString());
     }
 
     public async Task<SubscriptionResponseDto> CreateSubscriptionAsync(Guid currentUserId, CreateSubscriptionInput input)
     {
         var userBillingGAgent =
-            _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
         return await userBillingGAgent.CreateSubscriptionAsync(new CreateSubscriptionDto
         {
             UserId = currentUserId,
@@ -433,7 +405,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<CancelSubscriptionResponseDto> CancelSubscriptionAsync(Guid currentUserId, CancelSubscriptionInput input)
     {
         var userBillingGAgent =
-            _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
         return await userBillingGAgent.CancelSubscriptionAsync(new CancelSubscriptionDto
         {
             UserId = currentUserId,
@@ -446,14 +418,14 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<List<AppleProductDto>> GetAppleProductsAsync(Guid currentUserId)
     {
         var userBillingGAgent =
-            _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
         return await userBillingGAgent.GetAppleProductsAsync();
     }
 
     public async Task<AppStoreSubscriptionResponseDto> VerifyAppStoreReceiptAsync(Guid currentUserId, VerifyAppStoreReceiptInput input)
     {
         var userBillingGAgent =
-            _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
         return await userBillingGAgent.CreateAppStoreSubscriptionAsync(new CreateAppStoreSubscriptionDto
         {
             UserId = currentUserId.ToString(),
@@ -482,7 +454,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         try
         {
             _logger.LogDebug("[GodGPTService][VerifyGooglePlayTransactionAsync] Getting UserBillingGAgent for userId: {UserId}", currentUserId);
-            var userBillingGAgent = _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            var userBillingGAgent = _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
             
             // Convert to GAgents DTO
             var gagentsDto = new Aevatar.Application.Grains.ChatManager.UserBilling.GooglePlayTransactionVerificationDto
@@ -553,34 +525,34 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<GrainResultDto<int>> UpdateUserCreditsAsync(Guid currentUserId, UpdateUserCreditsInput input)
     {
         var userQuotaGAgent =
-            _clusterClient.GetGrain<IUserQuotaGAgent>(input.UserId);
+            _agentFactory.CreateGAgent<UserQuotaGAgent>(input.UserId);
         return await userQuotaGAgent.UpdateCreditsAsync(currentUserId.ToString(), input.Credits);
     }
 
     public async Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateUserSubscriptionAsync(Guid currentUserId, UpdateUserSubscriptionsInput input)
     {
         var userQuotaGAgent =
-            _clusterClient.GetGrain<IUserQuotaGAgent>(input.UserId);
+            _agentFactory.CreateGAgent<UserQuotaGAgent>(input.UserId);
         return await userQuotaGAgent.UpdateSubscriptionAsync(currentUserId.ToString(), input.PlanType, input.IsUltimate);
     }
 
     public async Task<bool> HasActiveAppleSubscriptionAsync(Guid currentUserId)
     {
         var userBillingGAgent =
-            _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
         return await userBillingGAgent.HasActiveAppleSubscriptionAsync();
     }
 
     public async Task<ActiveSubscriptionStatusDto> HasActiveSubscriptionAsync(Guid currentUserId)
     {
         var userBillingGAgent =
-            _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
         return await userBillingGAgent.GetActiveSubscriptionStatusAsync();
     }
 
     public async Task<GetInvitationInfoResponse> GetInvitationInfoAsync(Guid currentUserId)
     {
-        var invitationAgent =  _clusterClient.GetGrain<IInvitationGAgent>(currentUserId);
+        var invitationAgent =  _agentFactory.CreateGAgent<InvitationGAgent>(currentUserId);
         var inviteCode = await invitationAgent.GenerateInviteCodeAsync();
         var invitationStatsDto = await invitationAgent.GetInvitationStatsAsync();
         var rewardTierDtos = await invitationAgent.GetRewardTiersAsync();
@@ -602,7 +574,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         var codeType = InvitationCodeHelper.GetCodeType(input.InviteCode) ?? InvitationCodeType.FriendInvitation;
         if (codeType == InvitationCodeType.FriendInvitation)
         {
-            var manager = _clusterClient.GetGrain<IChatManagerGAgent>(currentUserId);
+            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
             var result = await manager.RedeemInviteCodeAsync(input.InviteCode);
             return new RedeemInviteCodeResponse
             {
@@ -623,7 +595,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
             }
             try
             {
-                var userBillingGAgent = _clusterClient.GetGrain<IUserBillingGAgent>(currentUserId);
+                var userBillingGAgent = _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
                 var url = await userBillingGAgent.CreateCheckoutSessionAsync(new CreateCheckoutSessionDto
                 {
                     UserId = currentUserId.ToString(),
@@ -668,7 +640,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<CreateGuestSessionResponseDto> CreateGuestSessionAsync(string clientIp, string? guider = null)
     {
         var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserGrain = _clusterClient.GetGrain<IAnonymousUserGAgent>(grainId);
+        var anonymousUserGrain = _agentFactory.CreateGAgent<AnonymousUserGAgent>(grainId);
         
         // Check if user can still chat
         if (!await anonymousUserGrain.CanChatAsync())
@@ -698,7 +670,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task GuestChatAsync(string clientIp, string content, string chatId)
     {
         var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserGrain = _clusterClient.GetGrain<IAnonymousUserGAgent>(grainId);
+        var anonymousUserGrain = _agentFactory.CreateGAgent<AnonymousUserGAgent>(grainId);
         await anonymousUserGrain.GuestChatAsync(content, chatId);
     }
 
@@ -708,7 +680,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<GuestChatLimitsResponseDto> GetGuestChatLimitsAsync(string clientIp)
     { 
         var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserGrain = _clusterClient.GetGrain<IAnonymousUserGAgent>(grainId);
+        var anonymousUserGrain = _agentFactory.CreateGAgent<AnonymousUserGAgent>(grainId);
         var remaining = await anonymousUserGrain.GetRemainingChatsAsync();
         
         return new GuestChatLimitsResponseDto
@@ -724,20 +696,20 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<bool> CanGuestChatAsync(string clientIp)
     {
         var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserGrain = _clusterClient.GetGrain<IAnonymousUserGAgent>(grainId);
+        var anonymousUserGrain = _agentFactory.CreateGAgent<AnonymousUserGAgent>(grainId);
         return await anonymousUserGrain.CanChatAsync();
     }
 
     public async Task<UserProfileDto> SetVoiceLanguageAsync(Guid currentUserId, VoiceLanguageEnum voiceLanguage)
     {
-        var manager = _clusterClient.GetGrain<IChatManagerGAgent>(currentUserId);
+        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
         await manager.SetVoiceLanguageAsync(voiceLanguage);
         return await manager.GetUserProfileAsync();
     }
 
     public async Task<ExecuteActionResultDto> CanUploadImageAsync(Guid currentUserId,GodGPTChatLanguage language = GodGPTChatLanguage.English)
     {
-        var userQuotaGAgent = _clusterClient.GetGrain<IUserQuotaGAgent>(currentUserId);
+        var userQuotaGAgent = _agentFactory.CreateGAgent<UserQuotaGAgent>(currentUserId);
         RequestContext.Set("GodGPTLanguage", language.ToString());
         return await userQuotaGAgent.CanUploadImageAsync();
     }
@@ -750,7 +722,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         
         try
         {
-            var awakeningAgent = _clusterClient.GetGrain<IAwakeningGAgent>(currentUserId);
+            var awakeningAgent = _agentFactory.CreateGAgent<AwakeningGAgent>(currentUserId);
             var result = await awakeningAgent.GetTodayAwakeningAsync(language, region);
             
             _logger.LogInformation("[GodGPTService][GetTodayAwakeningAsync] Completed for userId: {UserId}, result: {HasResult}",
@@ -790,7 +762,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         {
             // Use a dummy IP to get configuration from AnonymousUserGAgent
             var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId("127.0.0.1"));
-            var configGrain = _clusterClient.GetGrain<IAnonymousUserGAgent>(grainId);
+            var configGrain = _agentFactory.CreateGAgent<AnonymousUserGAgent>(grainId);
             return await configGrain.GetMaxChatCountAsync();
         }
         catch (Exception ex)
@@ -827,17 +799,10 @@ public class GodGPTService : ApplicationService, IGodGPTService
         };
     }
 
-    public async Task<TwitterAuthResultDto> TwitterAuthVerifyAsync(Guid currentUserId, TwitterAuthVerifyInput input,GodGPTChatLanguage language = GodGPTChatLanguage.English)
-    {
-        var twitterAuthGAgent = _clusterClient.GetGrain<ITwitterAuthGAgent>(currentUserId);
-        RequestContext.Set("GodGPTLanguage", language.ToString());
-        return await twitterAuthGAgent.VerifyAuthCodeAsync(input.Platform, input.Code, input.RedirectUri);
-    }
-
     public async Task<PagedResultDto<RewardHistoryDto>> GetCreditsHistoryAsync(Guid currentUserId,
         GetCreditsHistoryInput input)
     {
-        var invitationAgent =  _clusterClient.GetGrain<IInvitationGAgent>(currentUserId);
+        var invitationAgent =  _agentFactory.CreateGAgent<InvitationGAgent>(currentUserId);
         var rewardHistoryDtos = await invitationAgent.GetRewardHistoryAsync(new GetRewardHistoryRequestDto
         {
             PageNo = input.Page,
@@ -846,327 +811,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         return rewardHistoryDtos;
     }
 
-    public async Task<TwitterAuthParamsDto> GetTwitterAuthParamsAsync(Guid currentUserId)
-    {
-        var twitterAuthGAgent = _clusterClient.GetGrain<ITwitterAuthGAgent>(currentUserId);
-        return await twitterAuthGAgent.GetAuthParamsAsync();
-    }
-
-    // Twitter Monitor Management Methods Implementation
-    
-    /// <summary>
-    /// Manually trigger tweets fetching with default configuration
-    /// </summary>
-    /// <returns>Operation result with success status</returns>
-    public async Task<TwitterOperationResultDto> FetchTweetsManuallyAsync()
-    {
-        try
-        {
-            _logger.LogInformation("Starting manual tweet fetch operation");
-            
-            // Initialize Twitter Monitor Grain
-            ITwitterMonitorGrain tweetMonitorGrain = _clusterClient.GetGrain<ITwitterMonitorGrain>(PullTaskTargetId);
-            _logger.LogInformation("Twitter Monitor Grain initialized with target ID: {PullTaskTargetId}", PullTaskTargetId);
-
-            var result = await tweetMonitorGrain.FetchTweetsManuallyAsync();
-            _logger.LogInformation("Manual tweet fetch operation completed with result: {Result}", result);
-            return new TwitterOperationResultDto { IsSuccess = result?.IsSuccess ?? false, ErrorMessage = result?.ErrorMessage };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to fetch tweets manually");
-            return new TwitterOperationResultDto { IsSuccess = false, ErrorMessage = ex.Message };
-        }
-    }
-
-    /// <summary>
-    /// Refetch tweets by specified time range
-    /// </summary>
-    /// <param name="startTimeUtcSecond">Start time as UTC timestamp in seconds</param>
-    /// <param name="endTimeUtcSecond">End time as UTC timestamp in seconds</param>
-    /// <returns>Operation result with success status</returns>
-    public async Task<TwitterOperationResultDto> RefetchTweetsByTimeRangeAsync(long startTimeUtcSecond, long endTimeUtcSecond)
-    {
-        try
-        {
-            _logger.LogInformation("Starting refetch tweets by time range: {StartTime} to {EndTime}", 
-                startTimeUtcSecond, endTimeUtcSecond);
-            
-            var timeRange = new TimeRangeDto
-            {
-                StartTimeUtcSecond = startTimeUtcSecond,
-                EndTimeUtcSecond = endTimeUtcSecond
-            };
-            
-            // Initialize Twitter Monitor Grain
-            ITwitterMonitorGrain tweetMonitorGrain = _clusterClient.GetGrain<ITwitterMonitorGrain>(PullTaskTargetId);
-            _logger.LogInformation("Twitter Monitor Grain initialized with target ID: {PullTaskTargetId}", PullTaskTargetId);
-            
-            var result = await tweetMonitorGrain.RefetchTweetsByTimeRangeAsync(timeRange);
-            _logger.LogInformation("Refetch tweets by time range completed with result: {Result}", result);
-            return new TwitterOperationResultDto { IsSuccess = result?.IsSuccess ?? false, ErrorMessage = result?.ErrorMessage };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to refetch tweets by time range: {StartTime} to {EndTime}", 
-                startTimeUtcSecond, endTimeUtcSecond);
-            return new TwitterOperationResultDto { IsSuccess = false, ErrorMessage = ex.Message };
-        }
-    }
-
-    /// <summary>
-    /// Start automatic tweet monitoring task
-    /// </summary>
-    /// <returns>Operation result with success status</returns>
-    public async Task<TwitterOperationResultDto> StartTweetMonitoringAsync()
-    {
-        try
-        {
-            _logger.LogInformation("Starting tweet monitoring task");
-            // Initialize Twitter Monitor Grain
-            ITwitterMonitorGrain tweetMonitorGrain = _clusterClient.GetGrain<ITwitterMonitorGrain>(PullTaskTargetId);
-            _logger.LogInformation("Twitter Monitor Grain initialized with target ID: {PullTaskTargetId}", PullTaskTargetId);
-            
-            var result = await tweetMonitorGrain.StartMonitoringAsync();
-            _logger.LogInformation("Tweet monitoring task start result: {Result}", result);
-            return new TwitterOperationResultDto { IsSuccess = result?.IsSuccess ?? false, ErrorMessage = result?.ErrorMessage };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to start tweet monitoring task");
-            return new TwitterOperationResultDto { IsSuccess = false, ErrorMessage = ex.Message };
-        }
-    }
-
-    /// <summary>
-    /// Stop automatic tweet monitoring task
-    /// </summary>
-    /// <returns>Operation result with success status</returns>
-    public async Task<TwitterOperationResultDto> StopTweetMonitoringAsync()
-    {
-        try
-        {
-            _logger.LogInformation("Stopping tweet monitoring task");
-            // Initialize Twitter Monitor Grain
-            ITwitterMonitorGrain tweetMonitorGrain = _clusterClient.GetGrain<ITwitterMonitorGrain>(PullTaskTargetId);
-            _logger.LogInformation("Twitter Monitor Grain initialized with target ID: {PullTaskTargetId}", PullTaskTargetId);
-            
-            var result = await tweetMonitorGrain.StopMonitoringAsync();
-            _logger.LogInformation("Tweet monitoring task stop result: {Result}", result);
-            return new TwitterOperationResultDto { IsSuccess = result?.IsSuccess ?? false, ErrorMessage = result?.ErrorMessage };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to stop tweet monitoring task");
-            return new TwitterOperationResultDto { IsSuccess = false, ErrorMessage = ex.Message };
-        }
-    }
-
-    /// <summary>
-    /// Get current status of tweet monitoring task
-    /// </summary>
-    /// <returns>Operation result with success status</returns>
-    public async Task<TwitterOperationResultDto> GetTweetMonitoringStatusAsync()
-    {
-        try
-        {
-            _logger.LogDebug("Getting tweet monitoring task status");
-            // Initialize Twitter Monitor Grain
-            ITwitterMonitorGrain tweetMonitorGrain = _clusterClient.GetGrain<ITwitterMonitorGrain>(PullTaskTargetId);
-            _logger.LogInformation("Twitter Monitor Grain initialized with target ID: {PullTaskTargetId}", PullTaskTargetId);
-            
-            var result = await tweetMonitorGrain.GetMonitoringStatusAsync();
-            _logger.LogDebug("Retrieved tweet monitoring task status result: {Result}", result);
-            return new TwitterOperationResultDto { IsSuccess = result?.IsSuccess ?? false, ErrorMessage = result?.ErrorMessage };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get tweet monitoring task status");
-            return new TwitterOperationResultDto { IsSuccess = false, ErrorMessage = ex.Message };
-        }
-    }
-
-    // Twitter Reward Management Methods Implementation
-    
-    /// <summary>
-    /// Manually trigger reward calculation for specific date
-    /// </summary>
-    /// <param name="targetDateUtcSeconds">Target date as UTC timestamp in seconds</param>
-    /// <returns>Operation result with success status</returns>
-    public async Task<TwitterOperationResultDto> TriggerRewardCalculationAsync(long targetDateUtcSeconds)
-    {
-        try
-        {
-            _logger.LogInformation("Starting manual reward calculation for date: {TargetDate}", targetDateUtcSeconds);
-
-            // Initialize Twitter Reward Grain
-            ITwitterRewardGrain twitterRewardGrain = _clusterClient.GetGrain<ITwitterRewardGrain>(RewardTaskTargetId);
-            _logger.LogInformation("Twitter Reward Grain initialized with target ID: {RewardTaskTargetId}", RewardTaskTargetId);
-            
-            // Convert UTC timestamp in seconds to UTC DateTime and truncate to day precision (ignore time part)
-            var targetDate = DateTimeOffset.FromUnixTimeSeconds(targetDateUtcSeconds).UtcDateTime.Date;
-            _logger.LogDebug("Converted timestamp {TargetDateUtcSeconds} to UTC Date (day precision): {TargetDate}", targetDateUtcSeconds, targetDate);
-            
-            var result = await twitterRewardGrain.TriggerRewardCalculationAsync(targetDate);
-            _logger.LogInformation("Manual reward calculation completed for date: {TargetDate} with result: {Result}", targetDateUtcSeconds, result);
-            return new TwitterOperationResultDto { IsSuccess = result?.IsSuccess ?? false, ErrorMessage = result?.ErrorMessage };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to trigger reward calculation for date: {TargetDate}", targetDateUtcSeconds);
-            return new TwitterOperationResultDto { IsSuccess = false, ErrorMessage = ex.Message };
-        }
-    }
-
-    /// <summary>
-    /// Clear reward records for specific date (for testing purposes)
-    /// </summary>
-    /// <param name="targetDateUtcSeconds">Target date as UTC timestamp in seconds</param>
-    /// <returns>Operation result with success status</returns>
-    public async Task<TwitterOperationResultDto> ClearRewardByDayAsync(long targetDateUtcSeconds)
-    {
-        try
-        {
-            _logger.LogInformation("Starting clear reward records for date: {TargetDate}", targetDateUtcSeconds);
-            // Initialize Twitter Reward Grain
-            ITwitterRewardGrain twitterRewardGrain = _clusterClient.GetGrain<ITwitterRewardGrain>(RewardTaskTargetId);
-            _logger.LogInformation("Twitter Reward Grain initialized with target ID: {RewardTaskTargetId}", RewardTaskTargetId);
-            
-            // Convert UTC timestamp in seconds to UTC DateTime and truncate to day precision (ignore time part)
-            var targetDate = DateTimeOffset.FromUnixTimeSeconds(targetDateUtcSeconds).UtcDateTime.Date;
-            // Convert back to UTC seconds for the day start (00:00:00)
-            var targetDateDayStartUtcSeconds = ((DateTimeOffset)targetDate).ToUnixTimeSeconds();
-            _logger.LogDebug("Converted timestamp {TargetDateUtcSeconds} to UTC Date (day precision): {TargetDate}, day start seconds: {DayStartSeconds}", 
-                targetDateUtcSeconds, targetDate, targetDateDayStartUtcSeconds);
-            
-            var result = await twitterRewardGrain.ClearRewardByDayUtcSecondAsync(targetDateDayStartUtcSeconds);
-            _logger.LogInformation("Clear reward records completed for date: {TargetDate} with result: {Result}", targetDateUtcSeconds, result);
-            return new TwitterOperationResultDto { IsSuccess = result?.IsSuccess ?? false, ErrorMessage = result?.ErrorMessage };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to clear reward records for date: {TargetDate}", targetDateUtcSeconds);
-            return new TwitterOperationResultDto { IsSuccess = false, ErrorMessage = ex.Message };
-        }
-    }
-
-    /// <summary>
-    /// Start automatic reward calculation task
-    /// </summary>
-    /// <returns>Operation result with success status</returns>
-    public async Task<TwitterOperationResultDto> StartRewardCalculationAsync()
-    {
-        try
-        {
-            _logger.LogInformation("Starting reward calculation task");
-            // Initialize Twitter Reward Grain
-            ITwitterRewardGrain twitterRewardGrain = _clusterClient.GetGrain<ITwitterRewardGrain>(RewardTaskTargetId);
-            _logger.LogInformation("Twitter Reward Grain initialized with target ID: {RewardTaskTargetId}", RewardTaskTargetId);
-            var result = await twitterRewardGrain.StartRewardCalculationAsync();
-            _logger.LogInformation("Reward calculation task start result: {Result}", result);
-            return new TwitterOperationResultDto { IsSuccess = result?.IsSuccess ?? false, ErrorMessage = result?.ErrorMessage };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to start reward calculation task");
-            return new TwitterOperationResultDto { IsSuccess = false, ErrorMessage = ex.Message };
-        }
-    }
-
-    /// <summary>
-    /// Stop automatic reward calculation task
-    /// </summary>
-    /// <returns>Operation result with success status</returns>
-    public async Task<TwitterOperationResultDto> StopRewardCalculationAsync()
-    {
-        try
-        {
-            _logger.LogInformation("Stopping reward calculation task");
-            // Initialize Twitter Reward Grain
-            ITwitterRewardGrain twitterRewardGrain = _clusterClient.GetGrain<ITwitterRewardGrain>(RewardTaskTargetId);
-            _logger.LogInformation("Twitter Reward Grain initialized with target ID: {RewardTaskTargetId}", RewardTaskTargetId);
-            var result = await twitterRewardGrain.StopRewardCalculationAsync();
-            _logger.LogInformation("Reward calculation task stop result: {Result}", result);
-            return new TwitterOperationResultDto { IsSuccess = result?.IsSuccess ?? false, ErrorMessage = result?.ErrorMessage };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to stop reward calculation task");
-            return new TwitterOperationResultDto { IsSuccess = false, ErrorMessage = ex.Message };
-        }
-    }
-
-    /// <summary>
-    /// Get user rewards by user ID (returns dateKey and filtered ManagerUserRewardRecordDto list)
-    /// </summary>
-    /// <param name="userId">User ID to retrieve rewards for</param>
-    /// <returns>TwitterApiResultDto containing dictionary of date keys and reward records</returns>
-    public async Task<Dictionary<string, List<ManagerUserRewardRecordDto>>> GetUserRewardsByUserIdAsync(string userId)
-    {
-        try
-        {
-            _logger.LogInformation("Getting user rewards for user ID: {UserId}", userId);
-            
-            // Initialize Twitter Reward Grain
-            ITwitterRewardGrain twitterRewardGrain = _clusterClient.GetGrain<ITwitterRewardGrain>(RewardTaskTargetId);
-            _logger.LogInformation("Twitter Reward Grain initialized with target ID: {RewardTaskTargetId}", RewardTaskTargetId);
-            
-            var result = await twitterRewardGrain.GetUserRewardsByUserIdAsync(userId);
-            _logger.LogInformation("Get user rewards completed for user ID: {UserId} with result: {Result}", userId, result);
-            
-            // Convert UserRewardRecordDto to ManagerUserRewardRecordDto
-            if (result?.Data != null)
-            {
-                var convertedData = new Dictionary<string, List<ManagerUserRewardRecordDto>>();
-                foreach (var kvp in result.Data)
-                {
-                    var convertedRecords = kvp.Value.Select(ConvertToManagerUserRewardRecordDto).ToList();
-                    convertedData[kvp.Key] = convertedRecords;
-                }
-                return convertedData;
-            }
-            
-            return null;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get user rewards for user ID: {UserId}", userId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Get full calculation history list
-    /// </summary>
-    /// <returns>List of ManagerRewardCalculationHistoryDto</returns>
-    public async Task<List<ManagerRewardCalculationHistoryDto>> GetCalculationHistoryListAsync()
-    {
-        try
-        {
-            _logger.LogInformation("Getting calculation history list");
-            
-            // Initialize Twitter Reward Grain
-            ITwitterRewardGrain twitterRewardGrain = _clusterClient.GetGrain<ITwitterRewardGrain>(RewardTaskTargetId);
-            _logger.LogInformation("Twitter Reward Grain initialized with target ID: {RewardTaskTargetId}", RewardTaskTargetId);
-            
-            var result = await twitterRewardGrain.GetCalculationHistoryListAsync();
-            _logger.LogInformation("Get calculation history list completed with {Count} records", result?.Count ?? 0);
-            
-            // Convert RewardCalculationHistoryDto to ManagerRewardCalculationHistoryDto
-            if (result != null)
-            {
-                var convertedRecords = result.Select(ConvertToManagerRewardCalculationHistoryDto).ToList();
-                return convertedRecords;
-            }
-            
-            return new List<ManagerRewardCalculationHistoryDto>();
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to get calculation history list");
-            return new List<ManagerRewardCalculationHistoryDto>();
-        }
-    }
+    // NOTE: Twitter methods removed - feature deprecated
     
     public async Task<bool> ResetAwakeningStateForTestingAsync(Guid userId)
     {
@@ -1174,7 +819,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         
         try
         {
-            var awakeningAgent = _clusterClient.GetGrain<IAwakeningGAgent>(userId);
+            var awakeningAgent = _agentFactory.CreateGAgent<AwakeningGAgent>(userId);
             bool resetSuccess = await awakeningAgent.ResetAwakeningStateForTestingAsync();
             
             _logger.LogInformation("[GodGPTService][ResetAwakeningStateForTestingAsync] Completed for userId: {UserId}, success: {Success}",
@@ -1192,14 +837,14 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<AppRatingRecordDto> RecordAppRatingAsync(Guid currentUserId, RecordAppRatingInput input)
     {
         var grainId = CommonHelper.StringToGuid(input.DeviceId);
-        var userStatisticsGAgent = _clusterClient.GetGrain<IUserStatisticsGAgent>(grainId);
+        var userStatisticsGAgent = _agentFactory.CreateGAgent<UserStatisticsGAgent>(grainId);
         return await userStatisticsGAgent.RecordAppRatingAsync(currentUserId, input.Platform, input.DeviceId);
     }
 
     public async Task<bool> CanUserRateAppAsync(Guid currentUserId, CanUserRateAppInput input)
     {
         var grainId = CommonHelper.StringToGuid(input.DeviceId);
-        var userStatisticsGAgent = _clusterClient.GetGrain<IUserStatisticsGAgent>(grainId);
+        var userStatisticsGAgent = _agentFactory.CreateGAgent<UserStatisticsGAgent>(grainId);
         return await userStatisticsGAgent.CanUserRateAppAsync(input.DeviceId);
     }
 
@@ -1216,7 +861,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         GenerateFreeTrialCodeRequest input)
     {
         var batchId = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var factoryGAgent = _clusterClient.GetGrain<IFreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId));
+        var factoryGAgent = _agentFactory.CreateGAgent<FreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId));
         return await factoryGAgent.GenerateCodesAsync(new GenerateCodesRequestDto
         {
             BatchId = batchId,
@@ -1232,7 +877,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
     public async Task<BatchInfoDto> GetBatchInfoAsync(string batchId)
     {
-        var factoryGAgent = _clusterClient.GetGrain<IFreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(long.Parse(batchId)));
+        var factoryGAgent = _agentFactory.CreateGAgent<FreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(long.Parse(batchId)));
         return await factoryGAgent.GetBatchInfoAsync();
     }
     
@@ -1245,23 +890,6 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
         return _managerOptions.CurrentValue.ManagerIds.Contains(userId);
     }
-    public async Task<GoogleAuthResultDto> GoogleAuthVerifyCodeInput(Guid currentUserId, GoogleAuthVerifyCodeInput input)
-    {
-        var googleAuthGAgent = _clusterClient.GetGrain<IGoogleAuthGAgent>(currentUserId);
-        return await googleAuthGAgent.VerifyAuthCodeAsync(input.Platform, input.Code, input.RedirectUri, input.CodeVerifier);
-    }
-
-    public async Task<bool> GoogleAuthUnbindAsync(Guid currentUserId)
-    {
-        var googleAuthGAgent = _clusterClient.GetGrain<IGoogleAuthGAgent>(currentUserId);
-        return await googleAuthGAgent.UnbindAccountAsync();
-    }
-
-    public async Task<GoogleBindStatusDto> GoogleAuthBindStatusAsync(Guid currentUserId)
-    {
-        var googleAuthGAgent = _clusterClient.GetGrain<IGoogleAuthGAgent>(currentUserId);
-        return await googleAuthGAgent.GetBindStatusAsync();
-    }
 
     public async Task<bool> CheckIsManager(Guid? currentUserId)
     {
@@ -1271,47 +899,6 @@ public class GodGPTService : ApplicationService, IGodGPTService
         }
         
         return _managerOptions.CurrentValue.ManagerIds.Contains(currentUserId.ToString());
-    }
-
-
-    /// <summary>
-    /// Convert UserRewardRecordDto to ManagerUserRewardRecordDto
-    /// </summary>
-    /// <param name="userReward">Source UserRewardRecordDto</param>
-    /// <returns>Converted ManagerUserRewardRecordDto</returns>
-    private static ManagerUserRewardRecordDto ConvertToManagerUserRewardRecordDto(UserRewardRecordDto userReward)
-    {
-        return new ManagerUserRewardRecordDto
-        {
-            UserId = userReward.UserId,
-            TwitterUsername = userReward.UserHandle,
-            RewardAmount = userReward.FinalCredits,
-            RewardDate = userReward.RewardDate ?? DateTime.UnixEpoch.AddSeconds(userReward.RewardDateUtc),
-            RewardReason = $"Tweet rewards: {userReward.TweetCount} tweets, Regular: {userReward.RegularCredits}, Bonus: {userReward.BonusCredits}",
-            TransactionId = userReward.RewardTransactionId,
-            Status = userReward.IsRewardSent ? "Completed" : "Pending"
-        };
-    }
-
-    /// <summary>
-    /// Convert RewardCalculationHistoryDto to ManagerRewardCalculationHistoryDto
-    /// </summary>
-    /// <param name="historyRecord">Source RewardCalculationHistoryDto</param>
-    /// <returns>Converted ManagerRewardCalculationHistoryDto</returns>
-    private static ManagerRewardCalculationHistoryDto ConvertToManagerRewardCalculationHistoryDto(RewardCalculationHistoryDto historyRecord)
-    {
-        return new ManagerRewardCalculationHistoryDto
-        {
-            CalculationDate = historyRecord.CalculationDate,
-            CalculationDateUtc = historyRecord.CalculationDateUtc,
-            IsSuccess = historyRecord.IsSuccess,
-            UsersRewarded = historyRecord.UsersRewarded,
-            TotalCreditsDistributed = historyRecord.TotalCreditsDistributed,
-            ProcessingDuration = historyRecord.ProcessingDuration,
-            ErrorMessage = historyRecord.ErrorMessage,
-            ProcessedTimeRangeStart = historyRecord.ProcessedTimeRangeStart,
-            ProcessedTimeRangeEnd = historyRecord.ProcessedTimeRangeEnd
-        };
     }
 
     private bool TryGetUserIdFromMetadata(IDictionary<string, string> metadata, out string userId)

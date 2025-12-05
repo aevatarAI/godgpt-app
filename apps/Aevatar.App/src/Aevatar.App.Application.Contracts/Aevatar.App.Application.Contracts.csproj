@@ -14,7 +14,11 @@
   </ItemGroup>
   
   <ItemGroup>
-    <PackageReference Include="Orleans.Core" />
+    <PackageReference Include="Microsoft.Orleans.Core" />
+  </ItemGroup>
+  
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
     
   <ItemGroup>

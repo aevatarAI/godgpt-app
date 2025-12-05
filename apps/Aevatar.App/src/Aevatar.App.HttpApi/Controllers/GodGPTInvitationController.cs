@@ -1,3 +1,4 @@
+using Aevatar.App.HttpApi.Controllers;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -9,11 +10,10 @@ using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Application.Grains.Invitation;
-using Aevatar.Application.Grains.Twitter.Dtos;
 using Aevatar.Dtos;
 using Aevatar.GodGPT.Dtos;
 using Aevatar.Service;
-using Aevatar.Extensions;
+using Aevatar.App.HttpApi.Extensions;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -98,26 +98,5 @@ public class GodGPTInvitationController : AevatarController
         return response;
     }
     
-    [HttpGet("twitter/params")]
-    public async Task<TwitterAuthParamsDto> GetTwitterAuthParamsAsync()
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _godGptService.GetTwitterAuthParamsAsync(currentUserId);
-        _logger.LogDebug("[GodGPTInvitationController][GetTwitterAuthParamsAsync] userId: {0}, duration: {1}ms",
-            currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
-        return response;
-    }
-
-    [HttpPost("twitter/verify")]
-    public async Task<TwitterAuthResultDto> TwitterAuthVerifyAsync(TwitterAuthVerifyInput input)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var language = HttpContext.GetGodGPTLanguage();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _godGptService.TwitterAuthVerifyAsync(currentUserId, input, language);
-        _logger.LogDebug("[GodGPTInvitationController][TwitterAuthVerifyAsync] userId: {0}, duration: {1}ms",
-            currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
-        return response;
-    }
+    // NOTE: Twitter endpoints removed - feature deprecated
 }

@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using System.Threading.Tasks;
 using System.Linq;
-using Aevatar.Controllers;
+using Aevatar.App.HttpApi.Controllers;
 using Aevatar.Quantum;
 using Aevatar.Service;
 using Asp.Versioning;

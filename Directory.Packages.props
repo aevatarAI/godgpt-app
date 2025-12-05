@@ -227,5 +227,7 @@
     <PackageVersion Include="Microsoft.Orleans.Reminders" Version="9.2.1" />
     <PackageVersion Include="Microsoft.CognitiveServices.Speech" Version="1.43.0" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.5" />
+    <PackageVersion Include="MaxMind.GeoIP2" Version="5.3.0" />
   </ItemGroup>
 </Project>

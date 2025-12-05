@@ -1,3 +1,4 @@
+using Aevatar.App.HttpApi.Controllers;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -9,7 +10,7 @@ using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.ChatManager.UserBilling;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Options;
-using Aevatar.Extensions;
+using Aevatar.App.HttpApi.Extensions;
 using Aevatar.GodGPT.Dtos;
 using Aevatar.Service;
 using Asp.Versioning;

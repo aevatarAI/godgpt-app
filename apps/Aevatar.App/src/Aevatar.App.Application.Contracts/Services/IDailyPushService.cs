@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Aevatar.App.Domain.Shared;
 
 namespace Aevatar.Application.Contracts.DailyPush;
 
@@ -16,7 +17,7 @@ public interface IDailyPushService
     /// <param name="request">Device registration request</param>
     /// <param name="language">Language from HTTP context</param>
     /// <returns>True if this is a new device registration, false if update</returns>
-    Task<bool> RegisterOrUpdateDeviceAsync(Guid userId, DeviceRequest request, Domain.Shared.GodGPTChatLanguage language);
+    Task<bool> RegisterOrUpdateDeviceAsync(Guid userId, DeviceRequest request, GodGPTChatLanguage language);
     
     /// <summary>
     /// Mark daily push as read for specific device

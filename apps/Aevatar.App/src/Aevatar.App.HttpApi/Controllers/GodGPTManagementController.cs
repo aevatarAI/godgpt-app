@@ -1,3 +1,4 @@
+using Aevatar.App.HttpApi.Controllers;
 using System;
 using System.Diagnostics;
 using System.Security;

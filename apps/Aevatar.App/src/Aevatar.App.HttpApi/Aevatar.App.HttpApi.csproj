@@ -20,7 +20,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Orleans.Core" />
+    <PackageReference Include="Microsoft.Orleans.Core" />
   </ItemGroup>
 
   <ItemGroup>

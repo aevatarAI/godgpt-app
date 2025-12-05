@@ -29,6 +29,18 @@
     <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Abstractions\Aevatar.Agents.Abstractions.csproj" />
     <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Core\Aevatar.Agents.Core.csproj" />
     <ProjectReference Include="..\Aevatar.App.Agents\Aevatar.App.Agents.csproj" />
+    <ProjectReference Include="..\..\..\..\agents\Aevatar.Agents.GodGPT\Aevatar.Agents.GodGPT.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Orleans.Client" />
+  </ItemGroup>
+
+  <!-- Image Processing & GeoIP -->
+  <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp" />
+    <PackageReference Include="MaxMind.GeoIP2" />
+    <PackageReference Include="Volo.Abp.BlobStoring" />
   </ItemGroup>
 
   <!-- Protobuf -->
