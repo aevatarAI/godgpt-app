@@ -286,14 +286,67 @@ agents/Aevatar.Agents.GodGPT/
 
 apps/Aevatar.App/src/
 ├── Aevatar.App.HttpApi/
-│   └── Controllers/
-│       ├── GodGPTController.cs      # NEW: 待迁移
-│       ├── GodGPTPaymentController.cs
-│       └── ...
-└── Aevatar.App.Application/
-    └── Services/
-        └── GodGPTService.cs         # NEW: 待迁移
+│   ├── Controllers/
+│   │   ├── GodGPTController.cs        ✅ 已迁移
+│   │   ├── GodGPTPaymentController.cs ✅ 已迁移
+│   │   ├── GodGPTInvitationController.cs ✅ 已迁移 (移除Twitter)
+│   │   ├── GodGPTConfigController.cs  ✅ 已迁移
+│   │   ├── GodGPTManagementController.cs ✅ 已迁移
+│   │   ├── DailyPushController.cs     ✅ 已迁移
+│   │   └── AevatarController.cs       ✅ 基类
+│   ├── Extensions/
+│   │   ├── HttpContextExtensions.cs   ✅ 已迁移
+│   │   └── SecurityExtensions.cs      ✅ 已迁移
+│   └── Services/
+│       └── SecurityService.cs         ✅ 已迁移
+├── Aevatar.App.Application/
+│   ├── Services/
+│   │   ├── GodGPTService.cs           ✅ 已迁移
+│   │   ├── ThumbnailService.cs        ✅ 完整实现
+│   │   ├── IpLocationService.cs       ✅ 完整实现
+│   │   └── Ipdb/                      ✅ 14个文件
+│   ├── Constants/
+│   │   └── GodGPTExceptionMessageKeys.cs ✅
+│   └── Options/                       ✅ 多个配置类
+├── Aevatar.App.Application.Contracts/
+│   ├── BlobStorings/                  ✅ 已迁移
+│   ├── Quantum/                       ✅ 已迁移
+│   ├── Anonymous/                     ✅ 已迁移
+│   └── Services/                      ✅ 接口定义
+└── Aevatar.App.Domain.Shared/
+    ├── GodGPTChatLanguage.cs          ✅ 已迁移
+    ├── GodGPTAppType.cs               ✅ 已迁移
+    └── Localization/                  ✅ 已迁移
 ```
+
+---
+
+## ✅ API 迁移完成状态
+
+### 已迁移 Controllers (6个)
+- `GodGPTController` - 核心聊天功能
+- `GodGPTPaymentController` - 支付相关
+- `GodGPTInvitationController` - 邀请功能 (已移除 Twitter 方法)
+- `GodGPTConfigController` - 配置接口
+- `GodGPTManagementController` - 管理接口
+- `DailyPushController` - 每日推送
+
+### 已迁移 Services (完整实现)
+- `GodGPTService` - 核心业务逻辑
+- `ThumbnailService` - 图片缩略图处理 (SixLabors.ImageSharp)
+- `IpLocationService` - IP 定位 (MaxMind + ipdb 库)
+- `SecurityService` - 安全验证
+
+### 命名空间更新
+```
+Aevatar.Domain.Shared        → Aevatar.App.Domain.Shared
+Aevatar.Extensions           → Aevatar.App.HttpApi.Extensions
+Aevatar.BlobStorings         → Aevatar.App.Application.Contracts.BlobStorings
+Aevatar.Application.Service  → Aevatar.App.Application.Services
+```
+
+### 保留的老框架依赖
+- `AevatarOptions.StreamNamespace` - 用于 SSE Orleans Stream 订阅
 
 ---
 
@@ -313,8 +366,10 @@ apps/Aevatar.App/src/
 
 ## ✅ 验证清单
 
-- [ ] 所有 Agent 编译通过
-- [ ] 所有 Controller 编译通过
+- [x] 所有 Agent 编译通过 (17个 Agent)
+- [x] 所有 Controller 编译通过 (6个 Controller)
+- [x] 所有 Service 编译通过 (4个完整实现)
+- [x] 整个解决方案编译通过 (0 错误)
 - [ ] Silo 启动成功
 - [ ] API 端点可访问
 - [ ] Event Sourcing 正常持久化
