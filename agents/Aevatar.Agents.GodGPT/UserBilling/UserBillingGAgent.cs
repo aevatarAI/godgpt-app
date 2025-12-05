@@ -1138,7 +1138,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         var subscriptionIds = subscriptionInfoDto.SubscriptionIds ?? new List<string>();
         var invoiceIds = subscriptionInfoDto.InvoiceIds ?? new List<string>();
         var invoiceDetail = paymentSummary.InvoiceDetails.LastOrDefault();
-        if (invoiceDetail != null && invoiceDetail.Status == (int)PaymentStatus.Completed && !invoiceIds.Contains(invoiceDetail.InvoiceId))
+        if (invoiceDetail != null && invoiceDetail.Status == PaymentStatus.Completed && !invoiceIds.Contains(invoiceDetail.InvoiceId))
         {
             _logger.LogDebug("[UserBillingGAgent][HandleStripeWebhookEventAsync] Update for complete invoice {0}, {1}, {2}",
                 userId, paymentSummary.SubscriptionId, invoiceDetail.InvoiceId);
@@ -1222,7 +1222,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             _ = ReportApplePaymentSuccessAsync(detailsDto.UserId, invoiceDetail.InvoiceId, purchaseType, PaymentPlatform.Stripe,
                 productConfig.PriceId, invoiceDetail.Currency ?? string.Empty, amount.Value);
             
-        } else if (invoiceDetail != null && invoiceDetail.Status == (int)PaymentStatus.Cancelled && subscriptionIds.Contains(paymentSummary.SubscriptionId))
+        } else if (invoiceDetail != null && invoiceDetail.Status == PaymentStatus.Cancelled && subscriptionIds.Contains(paymentSummary.SubscriptionId))
         {
             _logger.LogDebug("[UserBillingGAgent][HandleStripeWebhookEventAsync] Cancel User subscription {0}, {1}, {2}",
                 userId, paymentSummary.SubscriptionId, invoiceDetail.InvoiceId);
@@ -1230,7 +1230,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             subscriptionInfoDto.SubscriptionIds = subscriptionIds;
             await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionInfoDto, productConfig.IsUltimate);
         }
-        else if (invoiceDetail != null && invoiceDetail.Status == (int)PaymentStatus.Refunded && invoiceIds.Contains(invoiceDetail.InvoiceId))
+        else if (invoiceDetail != null && invoiceDetail.Status == PaymentStatus.Refunded && invoiceIds.Contains(invoiceDetail.InvoiceId))
         {
             _logger.LogDebug("[UserBillingGAgent][HandleStripeWebhookEventAsync] Refund User subscription {0}, {1}, {2}",
                 userId, paymentSummary.SubscriptionId, invoiceDetail.InvoiceId);
@@ -1383,7 +1383,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         }
 
         // Set completed time if status is Completed
-        if (paymentSummary.Status == (int)PaymentStatus.Completed && !paymentSummary.CompletedAt.HasValue)
+        if (paymentSummary.Status == PaymentStatus.Completed && !paymentSummary.CompletedAt.HasValue)
         {
             paymentSummary.CompletedAt = DateTime.UtcNow;
         }
@@ -1461,7 +1461,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 var membershipLevel = MembershipLevel.Membership_Level_Premium;
                 try
                 {
-                    if (paymentSummary.Platform == (int)PaymentPlatform.AppStore)
+                    if (paymentSummary.Platform == PaymentPlatform.AppStore)
                     {
                         var productConfig = await GetAppleProductConfigAsync(paymentSummary.PriceId);
                         membershipLevel = SubscriptionHelper.GetMembershipLevel(productConfig.IsUltimate);
@@ -1555,7 +1555,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             Math.Min(pageSize, paymentHistories.Count - skip));
 
         // Return paginated results ordered by most recent first
-        return paymentHistories.Where(t => t.Status != (int)PaymentStatus.Processing)
+        return paymentHistories.Where(t => t.Status != PaymentStatus.Processing)
             .OrderByDescending(p => p.CreatedAt)
             .Skip(skip)
             .Take(pageSize)
@@ -1733,7 +1733,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 Currency = paymentDetails.Currency,
                 
             };
-            if (paymentDetails.Status == (int)PaymentStatus.Completed)
+            if (paymentDetails.Status == PaymentStatus.Completed)
             {
                 invoiceDetail.CompletedAt = paymentDetails.CompletedAt ?? DateTime.UtcNow;
                 var (subscriptionStartDate, subscriptionEndDate) =
@@ -1751,7 +1751,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         else
         {
             invoiceDetail.Status = paymentDetails.Status;
-            if (paymentDetails.Status == (int)PaymentStatus.Completed)
+            if (paymentDetails.Status == PaymentStatus.Completed)
             {
                 invoiceDetail.CompletedAt = paymentDetails.CompletedAt ?? DateTime.UtcNow;
                 invoiceDetail.AmountNetTotal = paymentDetails.AmountNetTotal;
@@ -1759,7 +1759,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 invoiceDetail.IsTrial = paymentDetails.IsTrial;
                 invoiceDetail.TrialCode = paymentDetails.TrialCode;
             }
-            if (paymentDetails.Status == (int)PaymentStatus.Completed && invoiceDetail.SubscriptionStartDate == default)
+            if (paymentDetails.Status == PaymentStatus.Completed && invoiceDetail.SubscriptionStartDate == default)
             {
                 var (subscriptionStartDate, subscriptionEndDate) = await CalculateSubscriptionDurationAsync(paymentDetails.UserId, productConfig);
                 invoiceDetail.SubscriptionStartDate = subscriptionStartDate;
@@ -1889,7 +1889,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
     private async Task<ChatManager.UserBilling.PaymentSummary> CreateOrUpdateGooglePlayPaymentSummaryAsync(Guid userId, PaymentVerificationResultDto verificationResult, PurchaseType? purchaseType)
     {
         var purchaseToken = verificationResult.PurchaseToken;
-        var existingPayment = State.PaymentHistory.FromProtoList().FirstOrDefault(p => p.Platform == (int)PaymentPlatform.GooglePlay && p.InvoiceDetails.Any(i => i.PurchaseToken == purchaseToken));
+        var existingPayment = State.PaymentHistory.FromProtoList().FirstOrDefault(p => p.Platform == PaymentPlatform.GooglePlay && p.InvoiceDetails.Any(i => i.PurchaseToken == purchaseToken));
         
         var productConfig = await GetGooglePayProductConfigAsync(verificationResult.ProductId);
 
@@ -2232,7 +2232,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         var currentTransactionId = verificationResult.TransactionId;           // RevenueCat's transaction_id (current transaction)
         
         var existingPayment = State.PaymentHistory.FromProtoList().FirstOrDefault(p => 
-            p.Platform == (int)PaymentPlatform.GooglePlay && 
+            p.Platform == PaymentPlatform.GooglePlay && 
             (p.OrderId == originalTransactionId ||        // OrderId stored as OriginalTransactionId (stable)
              p.SubscriptionId == originalTransactionId || // SubscriptionId stored as OriginalTransactionId (stable)
              p.OrderId == currentTransactionId ||         // Legacy: OrderId stored as current TransactionId
@@ -2380,7 +2380,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         {
             // Check if this purchase token already exists in payment history
             var existingPayment = State.PaymentHistory.FromProtoList().FirstOrDefault(p => 
-                p.Platform == (int)PaymentPlatform.GooglePlay && 
+                p.Platform == PaymentPlatform.GooglePlay && 
                 p.InvoiceDetails.Any(i => i.PurchaseToken == purchaseToken));
 
             if (existingPayment != null)
@@ -2812,7 +2812,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             return;
         }
 
-        if (existingSubscription.Status == (int)PaymentStatus.Cancelled)
+        if (existingSubscription.Status == PaymentStatus.Cancelled)
         {
             _logger.LogWarning("[UserBillingGAgent][HandleSubscriptionCancellationAsync] Subscription is cancelled. userId={0}, otxnId={1}, txnId={2}", 
                 userId.ToString(), signedTransactionInfo.OriginalTransactionId, signedTransactionInfo.TransactionId);
@@ -2954,7 +2954,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             }
 
             // Skip if already refunded
-            if (invoiceDetail.Status == (int)PaymentStatus.Refunded)
+            if (invoiceDetail.Status == PaymentStatus.Refunded)
             {
                 _logger.LogInformation("[UserBillingGAgent][HandleRefundAsync] Invoice {TransactionId} is already refunded", 
                     transactionInfo.TransactionId);
@@ -3008,11 +3008,11 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         
         // Filter payments by Ultimate status
         // For Apple payments, check the product configuration
-        return State.PaymentHistory
+        return State.PaymentHistory.FromProtoList()
             .Where(payment => 
             {
                 // For Apple payments, determine Ultimate status from the product config
-                if (payment.Platform == (int)PaymentPlatform.AppStore && !string.IsNullOrEmpty(payment.PriceId))
+                if (payment.Platform == PaymentPlatform.AppStore && !string.IsNullOrEmpty(payment.PriceId))
                 {
                     var appleProduct = _appleOptions.CurrentValue.Products
                         .FirstOrDefault(p => p.ProductId == payment.PriceId);
@@ -3025,7 +3025,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 }
                 
                 // For other payment platforms (Stripe), determine from metadata or product
-                if (payment.Platform == (int)PaymentPlatform.Stripe && !string.IsNullOrEmpty(payment.PriceId))
+                if (payment.Platform == PaymentPlatform.Stripe && !string.IsNullOrEmpty(payment.PriceId))
                 {
                     var stripeProduct = _stripeOptions.CurrentValue.Products
                         .FirstOrDefault(p => p.PriceId == payment.PriceId);
@@ -3389,7 +3389,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         // Filter payment history by Ultimate status if specified
         var filteredPaymentHistory = isUltimate.HasValue 
             ? GetFilteredPaymentHistoryByUltimate(isUltimate.Value)
-            : State.PaymentHistory;
+            : State.PaymentHistory.FromProtoList();
         
         var maxPlanType = filteredPaymentHistory
             .Where(p =>
@@ -3871,9 +3871,9 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
     public async Task<bool> HasActiveAppleSubscriptionAsync()
     {
         var hasActive = State.PaymentHistory.FromProtoList().Any(payment =>
-            payment.Platform == (int)PaymentPlatform.AppStore &&
+            payment.Platform == PaymentPlatform.AppStore &&
             payment.InvoiceDetails != null && payment.InvoiceDetails.Any() &&
-            payment.InvoiceDetails.All(item => item.Status == (int)PaymentStatus.Completed));
+            payment.InvoiceDetails.All(item => item.Status == PaymentStatus.Completed));
 
         _logger.LogInformation("[UserBillingGAgent][HasActiveAppleSubscriptionAsync] Has active Apple subscription: {HasActive}", hasActive);
         return hasActive;
@@ -3885,7 +3885,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         var now = DateTime.UtcNow;
         
         // Single iteration through payment history for optimal performance
-        foreach (var payment in State.PaymentHistory)
+        foreach (var payment in State.PaymentHistory.FromProtoList())
         {
             // Check if payment has active subscription
             // Active subscription means: has invoice details AND has at least one completed (not cancelled/refunded) and unexpired invoice
@@ -3898,11 +3898,11 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             }
 
             var isActiveSubscription = false;
-            if (payment.Platform == (int)PaymentPlatform.GooglePlay)
+            if (payment.Platform == PaymentPlatform.GooglePlay)
             {
                 foreach (var invoice in payment.InvoiceDetails)
                 {
-                    var isCompleted = invoice.Status == (int)PaymentStatus.Completed;
+                    var isCompleted = invoice.Status == PaymentStatus.Completed;
                     var hasEndDate = invoice.SubscriptionEndDate != null;
                     var isUnexpired = invoice.SubscriptionEndDate > now;
                 
@@ -3915,14 +3915,14 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                         break;
                     }
                 }
-            } else if (payment.Platform == (int)PaymentPlatform.AppStore)
+            } else if (payment.Platform == PaymentPlatform.AppStore)
             {
-                isActiveSubscription = payment.InvoiceDetails.LastOrDefault()?.Status == (int)PaymentStatus.Completed;
+                isActiveSubscription = payment.InvoiceDetails.LastOrDefault()?.Status == PaymentStatus.Completed;
             }
             else
             {
                 // Check if payment has active subscription (same logic as HasActiveAppleSubscriptionAsync)
-                isActiveSubscription = payment.InvoiceDetails.All(item => item.Status != (int)PaymentStatus.Cancelled);
+                isActiveSubscription = payment.InvoiceDetails.All(item => item.Status != PaymentStatus.Cancelled);
             }
             
             if (!isActiveSubscription)
@@ -4488,7 +4488,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         {
             // Search through payment history for matching transaction ID
             // This could be in OrderId, SubscriptionId, or InvoiceId fields depending on how you store RevenueCat data
-            return State.PaymentHistory?.FirstOrDefault(p => 
+            return State.PaymentHistory?.FromProtoList().FirstOrDefault(p => 
                 p.OrderId == transactionId || 
                 p.SubscriptionId == transactionId);
         }
@@ -4616,7 +4616,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
     {
         _logger.LogInformation("[UserBillingGAgent][UpdateGooglePlaySubscriptionStatusAsync] Updating status for purchase token {PurchaseToken} to {NewStatus}. Revoke immediately: {RevokeImmediately}", purchaseToken, newStatus, revokeImmediately);
 
-        var paymentSummary = State.PaymentHistory.FromProtoList().FirstOrDefault(p => p.Platform == (int)PaymentPlatform.GooglePlay && p.InvoiceDetails.Any(i => i.PurchaseToken == purchaseToken));
+        var paymentSummary = State.PaymentHistory.FromProtoList().FirstOrDefault(p => p.Platform == PaymentPlatform.GooglePlay && p.InvoiceDetails.Any(i => i.PurchaseToken == purchaseToken));
     
         if (paymentSummary == null)
         {
@@ -4690,8 +4690,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             eventType == RevenueCatWebhookEventTypes.RENEWAL)
         {
             // For creation events: check if InvoiceDetail with same TransactionId already exists
-            var existingInvoice = State.PaymentHistory?.FirstOrDefault(p => 
-                p.Platform == (int)PaymentPlatform.GooglePlay && 
+            var existingInvoice = State.PaymentHistory?.FromProtoList().FirstOrDefault(p => 
+                p.Platform == PaymentPlatform.GooglePlay && 
                 p.InvoiceDetails.Any(i => i.InvoiceId == verificationResult.TransactionId));
             
             if (existingInvoice != null)
@@ -4810,7 +4810,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         try
         {
             // Debug: Log current payment history
-            var googlePlayPayments = State.PaymentHistory?.Where(p => p.Platform == (int)PaymentPlatform.GooglePlay).ToList() ?? new List<PaymentSummary>();
+            var googlePlayPayments = State.PaymentHistory?.FromProtoList().Where(p => p.Platform == PaymentPlatform.GooglePlay).ToList() ?? new List<PaymentSummary>();
             _logger.LogInformation("[UserBillingGAgent][ProcessRevenueCatCancellationAsync] Found {Count} Google Play payments in history", googlePlayPayments.Count);
             
             foreach (var payment in googlePlayPayments)
@@ -4831,8 +4831,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             var originalTransactionId = verificationResult.OriginalTransactionId; // RevenueCat's original_transaction_id (stable subscription identifier)
             var currentTransactionId = verificationResult.TransactionId;           // RevenueCat's transaction_id (current transaction)
             
-            var paymentSummary = State.PaymentHistory?.FirstOrDefault(p => 
-                p.Platform == (int)PaymentPlatform.GooglePlay && 
+            var paymentSummary = State.PaymentHistory?.FromProtoList().FirstOrDefault(p => 
+                p.Platform == PaymentPlatform.GooglePlay && 
                 (p.OrderId == originalTransactionId ||        // OrderId stored as OriginalTransactionId (stable)
                  p.SubscriptionId == originalTransactionId || // SubscriptionId stored as OriginalTransactionId (stable)
                  p.OrderId == currentTransactionId ||         // Legacy: OrderId stored as current TransactionId
@@ -5002,8 +5002,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             var originalTransactionId = verificationResult.OriginalTransactionId; // RevenueCat's original_transaction_id (stable subscription identifier)
             var currentTransactionId = verificationResult.TransactionId;           // RevenueCat's transaction_id (current transaction)
             
-            var existingPayment = State.PaymentHistory?.FirstOrDefault(p => 
-                p.Platform == (int)PaymentPlatform.GooglePlay && 
+            var existingPayment = State.PaymentHistory?.FromProtoList().FirstOrDefault(p => 
+                p.Platform == PaymentPlatform.GooglePlay && 
                 (p.OrderId == originalTransactionId ||        // OrderId stored as OriginalTransactionId (stable)
                  p.SubscriptionId == originalTransactionId || // SubscriptionId stored as OriginalTransactionId (stable)
                  p.OrderId == currentTransactionId ||         // Legacy: OrderId stored as current TransactionId
@@ -5072,7 +5072,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             // Save the updated payment summary
             RaiseEvent(new UpdatePaymentEvent
             {
-                PaymentId = existingPayment.PaymentGrainId,
+                PaymentId = existingPayment.PaymentGrainId.ToString(),
                 PaymentSummary = existingPayment.ToProto()
             });
             await ConfirmEventsAsync();
@@ -5161,8 +5161,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             var originalTransactionId = verificationResult.OriginalTransactionId; // RevenueCat's original_transaction_id (stable subscription identifier)
             var currentTransactionId = verificationResult.TransactionId;           // RevenueCat's transaction_id (current transaction)
             
-            var paymentSummary = State.PaymentHistory?.FirstOrDefault(p => 
-                p.Platform == (int)PaymentPlatform.GooglePlay && 
+            var paymentSummary = State.PaymentHistory?.FromProtoList().FirstOrDefault(p => 
+                p.Platform == PaymentPlatform.GooglePlay && 
                 (p.OrderId == originalTransactionId ||        // OrderId stored as OriginalTransactionId (stable)
                  p.SubscriptionId == originalTransactionId || // SubscriptionId stored as OriginalTransactionId (stable) 
                  p.OrderId == currentTransactionId ||         // Legacy: OrderId stored as current TransactionId
@@ -5186,7 +5186,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             }
 
             // Skip if already refunded
-            if (invoiceDetail.Status == (int)PaymentStatus.Refunded)
+            if (invoiceDetail.Status == PaymentStatus.Refunded)
             {
                 _logger.LogInformation("[UserBillingGAgent][ProcessRevenueCatRefundAsync] Invoice {TransactionId} is already refunded", 
                     verificationResult.TransactionId);
@@ -5238,8 +5238,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         try
         {
             // Find payment record using OriginalTransactionId
-            var paymentSummary = State.PaymentHistory?.FirstOrDefault(p => 
-                p.Platform == (int)PaymentPlatform.GooglePlay && 
+            var paymentSummary = State.PaymentHistory?.FromProtoList().FirstOrDefault(p => 
+                p.Platform == PaymentPlatform.GooglePlay && 
                 (p.OrderId == verificationResult.PurchaseToken || 
                  p.SubscriptionId == verificationResult.PurchaseToken ||
                  p.InvoiceDetails.Any(i => i.PurchaseToken == verificationResult.PurchaseToken)));
@@ -5252,7 +5252,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             }
 
             // Skip if already cancelled
-            if (paymentSummary.Status == (int)PaymentStatus.Cancelled)
+            if (paymentSummary.Status == PaymentStatus.Cancelled)
             {
                 _logger.LogInformation("[UserBillingGAgent][ProcessRevenueCatExpirationAsync] Subscription is already cancelled. UserId: {UserId}, Status: {Status}", 
                     userId, paymentSummary.Status);
