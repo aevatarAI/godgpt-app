@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.protos.userbilling;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.UserBilling";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/wrappers.proto";
+
+// =============================================================================
+// State
+// =============================================================================
+
+message UserBillingStateProto {
+  string user_id = 1;
+  bool is_initialized_from_grain = 2;
+  string customer_id = 3;
+  repeated PaymentSummaryProto payment_history = 4;
+  int32 total_payments = 5;
+  int32 refunded_payments = 6;
+  optional google.protobuf.Timestamp last_clear_time = 7;
+}
+
+// =============================================================================
+// Nested Types
+// =============================================================================
+
+message PaymentSummaryProto {
+  string payment_grain_id = 1;   // Guid as string
+  string order_id = 2;
+  int32 plan_type = 3;           // PlanType enum
+  double amount = 4;             // decimal as double
+  string currency = 5;
+  google.protobuf.Timestamp created_at = 6;
+  optional google.protobuf.Timestamp completed_at = 7;
+  int32 status = 8;              // PaymentStatus enum
+  int32 payment_type = 9;        // PaymentType enum (obsolete but kept)
+  int32 method = 10;             // PaymentMethod enum (obsolete but kept)
+  int32 platform = 11;           // PaymentPlatform enum
+  bool is_subscription_renewal = 12;  // obsolete but kept
+  string subscription_id = 13;
+  google.protobuf.Timestamp subscription_start_date = 14;
+  google.protobuf.Timestamp subscription_end_date = 15;
+  string session_id = 16;        // obsolete but kept
+  string user_id = 17;           // Guid as string
+  string price_id = 18;
+  repeated UserBillingInvoiceDetailProto invoice_details = 19;
+  string app_store_environment = 20;
+  string membership_level = 21;
+  optional double amount_net_total = 22;  // decimal? as optional double
+}
+
+message UserBillingInvoiceDetailProto {
+  string invoice_id = 1;
+  google.protobuf.Timestamp created_at = 2;
+  google.protobuf.Timestamp completed_at = 3;
+  int32 status = 4;              // PaymentStatus enum
+  google.protobuf.Timestamp subscription_start_date = 5;
+  google.protobuf.Timestamp subscription_end_date = 6;
+  string price_id = 7;
+  string membership_level = 8;
+  optional double amount = 9;
+  int32 plan_type = 10;          // PlanType enum
+  string purchase_token = 11;
+  optional string currency = 12;
+  optional double amount_net_total = 13;
+  repeated DiscountDetailsProto discounts = 14;
+  bool is_trial = 15;
+  string trial_code = 16;
+}
+
+message DiscountDetailsProto {
+  string discount_id = 1;
+  string coupon_id = 2;
+  string coupon_name = 3;
+  optional int64 amount_off = 4;
+  optional double percent_off = 5;
+  string promotion_code_id = 6;
+  string promotion_code = 7;
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+message AddPaymentEvent {
+  PaymentSummaryProto payment_summary = 1;
+}
+
+message UpdatePaymentEvent {
+  string payment_id = 1;         // Guid as string
+  PaymentSummaryProto payment_summary = 2;
+}
+
+message UpdatePaymentStatusEvent {
+  string payment_id = 1;         // Guid as string
+  int32 new_status = 2;          // PaymentStatus enum
+}
+
+message ClearAllBillingEvent {
+  google.protobuf.Timestamp clear_time = 1;
+}
+
+message UpdateExistingSubscriptionEvent {
+  string subscription_id = 1;
+  PaymentSummaryProto existing_subscription = 2;
+}
+
+message UpdateCustomerIdEvent {
+  string customer_id = 1;
+}
+
+message UpdatePaymentBySubscriptionIdEvent {
+  string subscription_id = 1;
+  PaymentSummaryProto payment_summary = 2;
+}
+
+message RemovePaymentHistoryEvent {
+  repeated PaymentSummaryProto records_to_remove = 1;
+}
+
+message InitializeFromGrainEvent {
+  string customer_id = 1;
+  repeated PaymentSummaryProto payment_history = 2;
+  int32 total_payments = 3;
+  int32 refunded_payments = 4;
+}
+
+message MarkInitializedEvent {
+}
+
