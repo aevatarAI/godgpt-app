@@ -65,7 +65,7 @@ try
     // Initialize AI with configured LLM provider
     // Note: Ensure "DeepSeek" or your preferred provider is configured in appsettings.secrets.json
     await agent.InitializeAsync(
-        "deepseek", 
+        AevatarAgentsConstants.DefaultProviderName, 
         config =>
         {
             config.Model = "deepseek-chat";

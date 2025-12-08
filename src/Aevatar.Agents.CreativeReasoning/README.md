@@ -6,24 +6,24 @@ Based on the research paper: [Universe of Thoughts: Enabling Creative Reasoning 
 
 ## Overview
 
-This module implements **C-UoT (Combinational UoT)** - a creative reasoning framework that generates novel solutions by combining thoughts from analogous problems in different domains.
+This module implements **three levels of creative reasoning**:
 
-### C-UoT Six-Step Process
+| Mode | Creativity Level | Description |
+|------|-----------------|-------------|
+| **C-UoT** | Incremental | Combine existing thoughts from analogous problems |
+| **E-UoT** | Exploratory | Discover outside thoughts beyond known solutions |
+| **T-UoT** | Transformative | Challenge rules and hidden assumptions |
 
-1. **Analogical Retrieval & Solution Harvesting**: Find structurally similar problems from diverse domains
-2. **Decompose Each Solution into Thoughts**: Break solutions into atomic, recombinable thought units
-3. **Choose Host & Substitution Sites**: Select the best base solution and identify modification points
-4. **Far-then-Analogical Donor Selection**: Select donor thoughts prioritizing semantic distance for novelty
-5. **Substitute to Synthesize New Combinations**: Create novel candidate solutions
-6. **Evaluate and Rank**: Three-dimensional evaluation (Feasibility, Utility, Novelty)
+### When to Use Which Mode?
 
-### Evaluation Dimensions
-
-| Dimension | Role | Description |
-|-----------|------|-------------|
-| **Feasibility** | Hard Constraint | Can this be implemented? (Must pass threshold) |
-| **Utility** | Soft Metric | How effective is this solution? |
-| **Novelty** | Soft Metric | How different from existing solutions? |
+```
+Problem Type                    → Recommended Mode
+─────────────────────────────────────────────────
+Optimize existing approach      → C-UoT
+Need fresh perspectives         → E-UoT  
+"Impossible" constraints        → T-UoT
+Disruptive innovation needed    → T-UoT
+```
 
 ## Quick Start
 
@@ -31,99 +31,251 @@ This module implements **C-UoT (Combinational UoT)** - a creative reasoning fram
 // Register services
 services.AddUoTCreativeReasoning();
 
-// Execute creative reasoning
 var executor = serviceProvider.GetRequiredService<IUoTExecutor>();
 
+// C-UoT: Combinational (default)
 var result = await executor.ExecuteAsync(
-    problem: "How can a traditional bookstore regain growth in the e-commerce era?",
-    options: new UoTOptions
+    "Design a traffic management system for a single-lane bridge",
+    new UoTOptions
     {
+        Mode = UoTMode.Combinational,
         ProviderName = "openai-gpt4",
-        DomainHint = "retail, business strategy",
-        MaxAnalogies = 5,
-        MaxCandidates = 10,
-        FeasibilityThreshold = 0.6f,
-        UtilityWeight = 0.5f,
-        NoveltyWeight = 0.5f,
-        OnProgress = progress => Console.WriteLine($"[{progress.Phase}] {progress.Message}")
+        DomainHint = "transportation, distributed systems"
     });
 
-if (result.Success)
+// E-UoT: Exploratory
+var result = await executor.ExecuteAsync(
+    "Create innovative features for a fitness app",
+    new UoTOptions
+    {
+        Mode = UoTMode.Exploratory,
+        ProviderName = "openai-gpt4",
+        MaxOutsideThoughts = 15,
+        ExplorationDirections = 4
+    });
+
+// T-UoT: Transformative (with specialized result)
+var tuotResult = await executor.ExecuteTransformativeAsync(
+    "How can traditional bookstores compete with e-commerce?",
+    new UoTOptions
+    {
+        Mode = UoTMode.Transformative,
+        ProviderName = "openai-gpt4",
+        MaxRuleSets = 3,
+        MinRadicality = 0.6f
+    });
+
+// T-UoT reveals hidden assumptions
+foreach (var assumption in tuotResult.Trace.HiddenAssumptions)
 {
-    Console.WriteLine($"Best Solution (Score: {result.BestSolution.Score.Composite:F2}):");
-    Console.WriteLine(result.BestSolution.Content);
+    Console.WriteLine($"Hidden assumption: {assumption.Content}");
 }
 ```
+
+## C-UoT: Combinational Creative Reasoning
+
+**Six-step process:**
+
+1. **Analogical Retrieval**: Find similar problems from diverse domains
+2. **Decompose into Thoughts**: Break solutions into atomic units
+3. **Select Host**: Choose best base solution
+4. **Select Donors**: Far-then-Analogical selection for novelty
+5. **Synthesize**: Combine host + donor thoughts
+6. **Evaluate**: Feasibility (gate) → Utility + Novelty
+
+```
+Problem → Find Analogies → Decompose → Select Host → Select Donors → Synthesize → Evaluate
+            ↓                ↓              ↓              ↓             ↓           ↓
+    [Different domains] [Atomic thoughts] [Best base] [Novel donors] [New combo]  [Score]
+```
+
+## E-UoT: Exploratory Creative Reasoning
+
+**Extends C-UoT with Step E:**
+
+```
+C-UoT Steps 1-2 → Step E: Explore Outside Thoughts → C-UoT Steps 3-6
+                         ↓
+            ┌────────────────────────────┐
+            │ 1. Identify exploration    │
+            │    directions              │
+            │ 2. Discover outside        │
+            │    thoughts                │
+            │ 3. Evaluate novelty +      │
+            │    relevance               │
+            └────────────────────────────┘
+```
+
+**Key insight**: Don't just recombine existing thoughts—actively explore the universe for new conceptual primitives.
+
+## T-UoT: Transformative Creative Reasoning
+
+**The most profound form of creativity:**
+
+```
+Step 1: Expose Rules           → Explicit constraints + HIDDEN ASSUMPTIONS
+             ↓
+Step 2: Mutate Rules           → Create alternative rule sets
+             ↓
+Step 3: Explore Rule Spaces    → Discover previously impossible solutions
+             ↓
+Step 4: Evaluate               → Feasibility + Utility + Novelty + Radicality
+```
+
+**Philosophy**: Hidden assumptions are invisible cages. True innovation requires:
+1. Making assumptions visible
+2. Systematically challenging them
+3. Exploring the resulting new solution spaces
+
+### Rule Mutation Types
+
+| Type | Description | Example |
+|------|-------------|---------|
+| NEGATE | Reverse entirely | "Must be physical" → "Can be virtual" |
+| WEAKEN | Less strict | "24/7 availability" → "Peak hours only" |
+| GENERALIZE | Broaden scope | "Books only" → "Any media" |
+| SPECIALIZE | Narrow focus | "All users" → "Power users only" |
+| REMOVE | Eliminate rule | Remove profitability constraint |
+| COMBINE | Merge rules | Combine customer segments |
 
 ## Architecture
 
 ```
-UoTCoordinatorGAgent
-    │
-    ├── Step 1: Analogical Retrieval (IAnalogyStrategy)
-    │   └── Find problems from different domains with structural similarity
-    │
-    ├── Step 2: Thought Decomposition (IThoughtDecompositionStrategy)
-    │   └── Extract atomic thoughts: CORE, COMPONENT, INTERACTION, CONSTRAINT, OUTPUT
-    │
-    ├── Step 3: Host Selection (IHostSelectionStrategy)
-    │   └── Choose best base solution and substitution sites
-    │
-    ├── Step 4: Donor Selection (IDonorSelectionStrategy)
-    │   └── Far-then-Analogical: prioritize distant donors for novelty
-    │
-    ├── Step 5: Synthesis (ISynthesisStrategy)
-    │   └── Combine host + donor thoughts into new solutions
-    │
-    └── Step 6: Evaluation (IEvaluationStrategy)
-        └── Score: Feasibility (gate) × (Utility + Novelty)
+┌─────────────────────────────────────────────────────────────┐
+│                      UoTExecutor                             │
+│    (Unified entry point, routes by UoTOptions.Mode)          │
+└─────────────────────────────────────────────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┐
+         ▼                    ▼                    ▼
+┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
+│ UoTCoordinator  │  │ EUoTCoordinator │  │ TUoTCoordinator │
+│    GAgent       │  │    GAgent       │  │    GAgent       │
+│   (C-UoT)       │  │   (E-UoT)       │  │   (T-UoT)       │
+└─────────────────┘  └─────────────────┘  └─────────────────┘
+         │                    │                    │
+         ▼                    ▼                    ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Strategies (Pluggable)                  │
+│ - IAnalogyStrategy           - IExploratoryStrategy         │
+│ - IThoughtDecompositionStrategy  - IRuleMutationStrategy    │
+│ - IHostSelectionStrategy     - IDonorSelectionStrategy      │
+│ - ISynthesisStrategy         - IEvaluationStrategy          │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## Strategies
+## Evaluation Dimensions
 
-All strategies are pluggable. Default implementations use structured JSON prompts for reliable parsing.
+| Dimension | Role | Description |
+|-----------|------|-------------|
+| **Feasibility** | Hard Constraint | Can this be implemented? (Must pass threshold) |
+| **Utility** | Soft Metric | How effective is this solution? |
+| **Novelty** | Soft Metric | How different from existing solutions? |
+| **Radicality** | T-UoT Only | How transformative is this? |
 
-### Custom Strategies
+**Composite Score**:
+- C-UoT/E-UoT: `Utility × UtilityWeight + Novelty × NoveltyWeight`
+- T-UoT: Adds radicality bonus (20%)
+
+## Configuration Options
+
+### Common Options
 
 ```csharp
-coordinator.SetStrategies(
-    analogyStrategy: new MyCustomAnalogyStrategy(),
-    evaluationStrategy: new DomainSpecificEvaluationStrategy()
-);
+new UoTOptions
+{
+    Mode = UoTMode.Exploratory,      // C/E/T mode
+    ProviderName = "openai-gpt4",    // LLM provider
+    DomainHint = "healthcare, AI",   // Domain context
+    FeasibilityThreshold = 0.6f,     // Hard constraint
+    UtilityWeight = 0.5f,
+    NoveltyWeight = 0.5f,
+    OnProgress = p => Console.WriteLine($"[{p.Phase}] {p.Message}")
+}
+```
+
+### C-UoT Specific
+
+```csharp
+MaxAnalogies = 5,           // Analogous problems to find
+SolutionsPerAnalogy = 3,    // Solutions per analogy
+MaxCandidates = 10,         // Candidates to synthesize
+FarDistanceThreshold = 0.6f // For donor selection
+```
+
+### E-UoT Specific
+
+```csharp
+MaxOutsideThoughts = 10,        // Outside thoughts to discover
+ExplorationDirections = 3,      // Exploration directions
+OutsideThoughtRelevance = 0.4f  // Min relevance threshold
+```
+
+### T-UoT Specific
+
+```csharp
+MaxRuleSets = 3,                   // Rule sets to explore
+MutationsPerSet = 3,               // Mutations per set
+MinRadicality = 0.5f,              // Min radicality threshold
+AllowPhysicalRuleViolation = false // Usually false
 ```
 
 ## Example Use Cases
 
-### Business Strategy
+### Business Strategy (T-UoT)
 ```csharp
-var result = await executor.ExecuteAsync(
-    "Design a new revenue model for local newspapers",
-    new UoTOptions { ProviderName = "openai-gpt4", DomainHint = "media, subscription" });
+// Challenge hidden assumptions about retail
+var result = await executor.ExecuteTransformativeAsync(
+    "How can local newspapers survive?",
+    new UoTOptions { Mode = UoTMode.Transformative, MinRadicality = 0.7f });
+
+// Might expose hidden assumption: "Revenue must come from readers"
+// Mutated rule: "Value flows from community connections"
+// Transformative solution: "Community platform with journalism as service"
 ```
 
-### Engineering Design
+### Product Innovation (E-UoT)
 ```csharp
+// Explore outside thoughts for fresh ideas
 var result = await executor.ExecuteAsync(
-    "Design a traffic management system for a single-lane bridge",
-    new UoTOptions { ProviderName = "openai-gpt4", DomainHint = "transportation, distributed systems" });
+    "Design fitness features for senior users",
+    new UoTOptions { Mode = UoTMode.Exploratory, ExplorationDirections = 5 });
+
+// Explores: geriatric medicine, social psychology, game design...
+// Discovers outside thought: "Social accountability from team sports"
+// Novel solution: "Virtual walking buddy with real-time conversation"
 ```
 
-### Product Innovation
+### System Design (C-UoT)
 ```csharp
+// Combine proven patterns from different domains
 var result = await executor.ExecuteAsync(
-    "Create a novel fitness app feature for senior users",
-    new UoTOptions { ProviderName = "openai-gpt4", DomainHint = "health, gamification" });
+    "Design a traffic system for single-lane bridge",
+    new UoTOptions { Mode = UoTMode.Combinational, MaxAnalogies = 7 });
+
+// Finds analogies: network protocols, biological systems, auction mechanisms
+// Combines: TCP flow control + ant colony optimization
 ```
 
-## Future: E-UoT and T-UoT
+## Custom Strategies
 
-This module currently implements **C-UoT**. Future extensions will add:
-
-- **E-UoT (Exploratory)**: Discover new thoughts beyond existing solution space
-- **T-UoT (Transformative)**: Break rules and assumptions for radical innovation
+```csharp
+// Inject custom strategies
+coordinator.SetStrategies(
+    analogyStrategy: new DomainSpecificAnalogyStrategy(),
+    ruleMutationStrategy: new ConservativeRuleMutationStrategy(),
+    evaluationStrategy: new IndustryCompliantEvaluationStrategy()
+);
+```
 
 ## References
 
-- [Universe of Thoughts Paper](https://arxiv.org/html/2511.20471v2)
-- [Margaret Boden's Creativity Types](https://en.wikipedia.org/wiki/Computational_creativity)
+- [Universe of Thoughts Paper (arXiv)](https://arxiv.org/html/2511.20471v2)
+- [Margaret Boden's Three Types of Creativity](https://en.wikipedia.org/wiki/Computational_creativity)
+  - Combinational: Novel combinations of familiar ideas
+  - Exploratory: Exploring structured conceptual spaces
+  - Transformational: Altering the rules of the space itself
 
+## License
+
+MIT License - See repository root for details.

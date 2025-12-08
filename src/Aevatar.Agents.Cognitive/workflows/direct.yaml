@@ -1,0 +1,27 @@
+# ============================================================
+#  Direct 策略 - 最简单的单次 LLM 调用
+# ============================================================
+
+name: direct
+version: "1.0"
+description: 单次 LLM 调用，最简策略
+
+inputs:
+  - name: task
+    type: string
+    required: true
+  - name: system_prompt
+    type: string
+    default: "You are a helpful AI assistant."
+
+steps:
+  - id: respond
+    type: llm_call
+    system: "{{system_prompt}}"
+    prompt: "{{task}}"
+    output: text
+    store: response
+
+output:
+  result: "{{response}}"
+

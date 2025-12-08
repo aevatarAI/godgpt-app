@@ -1,0 +1,17 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROJECT: 简单问答
+#  ID: simple-qa
+#  Strategy: Direct (最简单的策略)
+# ═══════════════════════════════════════════════════════════════════════════
+
+id: simple-qa
+name: 简单问答
+description: 直接向 AI 提问，快速获取回答（1次调用）
+icon: "💬"
+strategy: Direct
+task: |
+  请回答以下问题：什么是人工智能？
+
+# Direct 策略可以完全省略 options，或只设置 systemPrompt
+# options:
+#   systemPrompt: "你是一个专业的 AI 助手"

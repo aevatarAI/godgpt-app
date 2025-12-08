@@ -1,0 +1,18 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROJECT: 论文审稿
+#  ID: paper-review
+#  Strategy: Maker
+# ═══════════════════════════════════════════════════════════════════════════
+
+id: paper-review
+name: 论文审稿
+description: 多 Agent 协作审阅论文，提供修改建议直到达到发表水平
+icon: "📝"
+strategy: Maker
+task: |
+  Review and improve the academic paper for publication quality.
+options:
+  reliability: High
+  maxLlmCalls: 100
+  maxTokens: 500000
+

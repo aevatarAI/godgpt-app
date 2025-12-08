@@ -1,0 +1,21 @@
+# ============================================================
+#  Cognitive DSL v2 示例项目
+#  使用 YAML 定义的工作流，真正的 Actor 并行
+# ============================================================
+
+id: cognitive-demo
+name: v2 DSL 演示
+description: 使用 Cognitive DSL v2 工作流，体验真正的 Actor 并行
+icon: 🚀
+strategy: Cognitive
+task: 设计一个创新的智能家居系统，解决老年人独居安全问题。
+
+options:
+  workflow: maker-v2
+  worker_count: 5
+  consensus_k: 2
+  max_rounds: 10
+  max_depth: 5
+  semantic_similarity: 0.85
+  provider_name: deepseek
+

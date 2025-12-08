@@ -1,0 +1,22 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROJECT: 老年健身·探索
+#  ID: senior-fitness-explore
+#  Strategy: UotExploratory
+# ═══════════════════════════════════════════════════════════════════════════
+
+id: senior-fitness-explore
+name: 老年健身·探索
+description: 探索未知领域，为 60+ 用户发现创新健身功能
+icon: "🔭"
+strategy: UotExploratory
+task: |
+  Design an innovative fitness app feature specifically for users aged 60+ 
+  that encourages regular physical activity while being safe and engaging. 
+  Look for inspiration from unexpected domains.
+options:
+  domainHint: "health, gamification, accessibility, unexpected domains"
+  maxAnalogies: 5
+  maxCandidates: 10
+  maxOutsideThoughts: 15
+  explorationDirections: 4
+

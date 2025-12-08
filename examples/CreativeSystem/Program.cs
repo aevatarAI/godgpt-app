@@ -1,3 +1,4 @@
+using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.AI.Abstractions.Configuration;
 using Aevatar.Agents.AI.MEAI.DependencyInjection;
 using Aevatar.Agents.CreativeReasoning;
@@ -15,10 +16,10 @@ builder.Configuration
 
 builder.Services.Configure<LLMProvidersConfig>(builder.Configuration.GetSection("LLMProviders"));
 
-// Add MassTransit Stream Plugin
+// Add MassTransit Stream Plugin (includes all UoT agents: C/E/T)
 builder.Services.AddMassTransitStreamPlugin(
     builder.Configuration,
-    typeof(Aevatar.Agents.CreativeReasoning.Agents.UoTCoordinatorGAgent).Assembly
+    typeof(Aevatar.Agents.CreativeReasoning.Agents.UoTCoordinatorGAgent).Assembly  // Contains UoT, EUoT, TUoT
 );
 
 // Add Aevatar Local Runtime
@@ -28,7 +29,7 @@ builder.Services.AddAevatarLocalRuntime();
 builder.Services.AddMEAI();
 
 // Add UoT Creative Reasoning (with default provider)
-builder.Services.AddUoTCreativeReasoning("claude");
+builder.Services.AddUoTCreativeReasoning(AevatarAgentsConstants.DefaultProviderName);
 
 // Creative Project service
 builder.Services.AddSingleton<CreativeProjectService>();

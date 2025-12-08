@@ -181,3 +181,34 @@ message TreeNodeState {
     repeated string received_broadcasts = 5;
     repeated string sent_broadcasts = 6;
 }
+
+// ========== Point-to-Point Communication Test Messages ==========
+
+// Direct P2P message
+message DirectMessage {
+    string message_id = 1;
+    string content = 2;
+    string sender_id = 3;
+    google.protobuf.Timestamp sent_at = 4;
+}
+
+// Direct P2P request message
+message DirectRequest {
+    string request_id = 1;
+    string query = 2;
+}
+
+// Direct P2P response message
+message DirectResponse {
+    string request_id = 1;
+    string answer = 2;
+}
+
+// P2P Communication Agent State
+message P2PAgentState {
+    string agent_name = 1;
+    repeated string received_direct_messages = 2;
+    repeated string sent_direct_messages = 3;
+    int32 direct_message_count = 4;
+    int32 broadcast_count = 5;
+}

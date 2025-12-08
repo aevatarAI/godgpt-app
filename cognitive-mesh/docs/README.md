@@ -1,56 +1,263 @@
-# Cognitive Mesh (Aevatar Nexus)
+# Cognitive Mesh
 
-> **目录状态**: 实验性架构设计
-> **最后更新**: 2025-12-01
-> **维护者**: Aevatar Core Team
+> **认知网格** - DSL 驱动的认知架构构建器
+> 
+> **终极愿景**：一个 CognitiveGAgentBase + DSL = 任意认知策略
 
-## 📚 文档索引
+---
 
-本目录包含 **Cognitive Mesh (认知网格)** 的设计规范，这是一个用于定义复杂、可靠且具有创造性的 LLM 推理拓扑的平台。
+## 🎯 核心愿景
 
-| 文件 | 描述 |
-|------|-------------|
-| **[CONCEPT.md](./CONCEPT.md)** | **哲学 (The Philosophy)**。为何 "工作流" 是错误的思维模型，以及 "Cognitive Mesh" 如何实现 *思维宇宙 (Universe of Thoughts)*。 |
-| **[PRD.md](./PRD.md)** | **需求 (The Requirements)**。用户故事、功能规格、用户旅程与服务矩阵。 |
-| **[ARCHITECTURE.md](./ARCHITECTURE.md)** | **蓝图 (The Blueprint)**。将概念映射到 Aevatar Agents、Orleans 和事件溯源的技术实现细节。 |
-| **[DSL.md](./DSL.md)** | **DSL 规范**。最小 Schema、强类型映射、编译与验证流水线、版本化策略。 |
-| **[WORKFLOW_UI.md](./WORKFLOW_UI.md)** | **可视化设计**。Workflow UI 与 DSL 的关系、观察/理解/干预三重职责、交互模式与数据模型。 |
+```
+当前状态                          终极目标
+─────────────────────────────────────────────────────────────────
+每种策略 = 一个 C# 类            每种策略 = 一个 YAML 文件
+   (硬编码 500+ 行)                  (声明式 50 行)
 
-*For English notes, see inline sections inside each document (当前版本以中文为主)。*
-
-## 文档说明
-- **CONCEPT.md**：从现象层、本质层、哲学层三段论拆解"为什么认知网格必须取代传统工作流"，并把 UoT 三大思维模式映射为平台使命。
-- **PRD.md**：定义产品愿景、核心用户画像、交互旅程、服务矩阵以及 Orleans/Aspire 的落地承诺。
-- **ARCHITECTURE.md**：描述 Orleans + Aevatar 体系下的 Agent 拓扑、事件溯源与数据结构，是工程实现的蓝图。
-- **DSL.md**：规定认知网格的指令语言，包括 Schema、强类型映射、编译流水线、版本化与 LLM/DSL 协作策略，是防止系统失控的硬约束。
-- **WORKFLOW_UI.md**：定义 Workflow 可视化层与 DSL 的关系——UI 不是用户画流程图的工具，而是 AI 生成的 DSL 的人类可读投影，支持观察认知过程、理解决策逻辑、适时干预执行。
-
-## 🌳 结构
-
-```text
-cognitive-mesh/
-├── docs/                         # 本目录：概念、PRD、架构、DSL 规范
-├── CognitiveMesh.App/            # 运行在 Actor Runtime 之上的服务骨架
-├── CognitiveMesh.AppHost/        # Aspire Host，负责编排 Orleans / 观察性组件
-├── dsl/
-│   ├── Aevatar.CognitiveMesh.Dsl/        # DSL 编译器库
-│   └── Aevatar.CognitiveMesh.Dsl.Tests/  # DSL 编译器测试
-└── README.md
+改策略 = 改代码 → 编译 → 部署    改策略 = 改 YAML → 热重载
 ```
 
-## ⚙️ 技术评估与改进脉络
-- **DSL 编译瓶颈**：`Cognitive Compiler` 需把自然语言映射到严格的 `MeshDefinition`，建议阶段性收敛语法并附带自测套件，防止 prompt-to-JSON 黑盒化。
-- **状态爆炸与一致性**：UoT 探索模式会让事件流在 Orleans 集群中指数增长，必须以版本戳 + 冲突检测保证 Event Store 与向量检索共享统一真相源。
-- **验证链条的可信度**：Zero-Error Loop 需要可执行断言（Schema 校验、AST 规则、数值约束等）支撑，CriticAgent 不应只依赖 LLM 复核。
-- **数据泥团征兆**：当前 `MeshDefinition` 将目标/拓扑/预算等全塞入单一对象，后续要支持子 Mesh 或复用会非常痛苦，需拆分为细粒度规格对象。
+将不同的 AI 推理策略（CoT、ToT、GoT、UoT、MAKER）统一在同一框架下：
 
-### 下一步建议
-1. **限定 DSL 语法**：定义最小可用的指令集与 Schema，并提供编译器的回归测试。
-2. **状态哨兵**：在事件溯源层实现并发冲突检测，避免分支合并产生幽灵状态。
-3. **增强验证器**：为 CriticAgent 引入可编程判定或外部断言引擎，让“零错误”不只停留在 LLM 互审。
-4. **拆分配置模型**：以 `GoalSpec`、`TopologySpec`、`BudgetSpec` 等对象替代单块配置，降低耦合与序列化复杂度。
+- **统一抽象**：`IReasoningStrategy` 接口统一所有策略
+- **统一执行**：`CognitiveMeshService` 管理项目和运行
+- **统一进度**：`ReasoningProgress` 实时报告各策略状态
+- **统一结果**：`ReasoningResult` 可比较、可分析
+- **DSL 驱动**：`CognitiveGAgentBase` + YAML = 任意策略 (Phase 4)
 
-## 🔗 核心参考
-*   [Universe of Thoughts: Enabling Creative Reasoning with LLMs](https://arxiv.org/html/2511.20471v2)
-*   [Solving a Million-Step LLM Task with Zero Errors](https://arxiv.org/html/2511.09030v1)
+---
 
+## 📁 项目结构
+
+```
+cognitive-mesh/
+├── Aevatar.CognitiveMesh.Abstractions/     # 核心抽象接口
+│   ├── IReasoningStrategy.cs               # 推理策略接口
+│   ├── StrategyKind.cs                     # 策略类型枚举
+│   ├── ReasoningOptions.cs                 # 执行选项
+│   ├── ReasoningProgress.cs                # 进度报告模型
+│   ├── ReasoningResult.cs                  # 结果模型
+│   ├── Content/                            # 内容加载抽象
+│   │   ├── ContentSource.cs
+│   │   ├── LoadedContent.cs
+│   │   └── IContentLoader.cs
+│   └── Tasks/                              # 任务模板抽象
+│       ├── TaskTemplate.cs
+│       └── TaskDefinition.cs
+│
+├── Aevatar.CognitiveMesh/                  # 主服务实现
+│   ├── Program.cs                          # ASP.NET Core 入口
+│   ├── Services/
+│   │   ├── CognitiveMeshService.cs         # 核心服务
+│   │   ├── ProjectStore.cs                 # 项目存储 (YAML)
+│   │   ├── ContentLoader.cs                # 内容加载器
+│   │   └── StrategyRegistry.cs             # 策略注册表
+│   ├── Strategies/
+│   │   ├── DirectStrategy.cs               # Direct 策略
+│   │   ├── MakerStrategy.cs                # MAKER 适配器
+│   │   ├── UoTStrategy.cs                  # C-UoT 适配器
+│   │   ├── EUoTStrategy.cs                 # E-UoT 适配器
+│   │   └── TUoTStrategy.cs                 # T-UoT 适配器
+│   ├── projects/                           # 项目定义 (YAML)
+│   ├── workflows/                          # [未来] DSL 工作流
+│   └── wwwroot/                            # 前端 UI
+│
+└── docs/                                   # 设计文档
+    ├── README.md                           # 本文档
+    ├── ROADMAP.md                          # 渐进式路线图
+    ├── COGNITIVE_AGENT_BASE_DESIGN.md      # 🆕 CognitiveGAgentBase 设计
+    ├── CONTENT_LOADING_DESIGN.md           # 内容加载设计
+    └── IMPLEMENTATION_STATUS.md            # 实现状态
+```
+
+---
+
+## 🚀 快速开始
+
+### 1. 配置 API Key
+
+```bash
+# 创建 appsettings.secrets.json
+cat > cognitive-mesh/Aevatar.CognitiveMesh/appsettings.secrets.json << 'EOF'
+{
+  "LLMProviders": {
+    "Providers": {
+      "deepseek": { "ApiKey": "sk-your-key" }
+    }
+  }
+}
+EOF
+```
+
+### 2. 运行
+
+```bash
+cd cognitive-mesh/Aevatar.CognitiveMesh
+dotnet run
+```
+
+### 3. 打开浏览器
+
+访问 `http://localhost:5000`
+
+---
+
+## 🧠 支持的策略
+
+| 策略 | 类型 | 状态 | 描述 |
+|------|------|------|------|
+| **Direct** | `Direct` | ✅ 可用 | 单次 LLM 调用，最简策略 |
+| **MAKER** | `Maker` | ✅ 可用 | 分解-共识-合成，多 Agent 投票 |
+| **C-UoT** | `UotCombinational` | ✅ 可用 | 类比检索 + 思维合成 |
+| **E-UoT** | `UotExploratory` | ✅ 可用 | 探索域外思想，扩展思维边界 |
+| **T-UoT** | `UotTransformative` | ✅ 可用 | 挑战隐藏假设，颠覆性创新 |
+| **CoT** | `Cot` | 📋 规划中 | 线性推理链 |
+| **ToT** | `Tot` | 📋 规划中 | 分支与剪枝 |
+
+### 策略复杂度光谱
+
+```
+简单 ←────────────────────────────────────────────────→ 复杂
+
+Direct    CoT/ToT    MAKER           UoT (C/E/T)
+ │           │         │                  │
+ 1 call    线性链    递归分解           类比合成
+                    并发投票           规则变异
+```
+
+---
+
+## 🗺️ 演进路线
+
+详见 [ROADMAP.md](./ROADMAP.md)
+
+| 阶段 | 目标 | 状态 |
+|------|------|------|
+| **Phase 1** | 策略抽象层 | ✅ 完成 |
+| **Phase 2** | 统一执行引擎 | ✅ 完成 |
+| **Phase 2.5** | UoT 三重奏 (C/E/T-UoT) | ✅ 完成 |
+| **Phase 3** | 内容加载 + 任务模板 | ✅ 完成 |
+| **Phase 3.5** | **CognitiveGAgentBase** | 📋 设计中 |
+| **Phase 4** | **DSL 引擎 + 热重载** | 📋 计划中 |
+| **Phase 5** | 可视化增强 | 📋 计划中 |
+| **Phase 6** | 高级功能 (断点续传) | 📋 计划中 |
+
+---
+
+## 📐 核心抽象
+
+### IReasoningStrategy
+
+```csharp
+public interface IReasoningStrategy
+{
+    StrategyKind Kind { get; }
+    
+    Task<ReasoningResult> ExecuteAsync(
+        string problem,
+        ReasoningOptions options,
+        IProgress<ReasoningProgress>? progress = null,
+        CancellationToken ct = default);
+    
+    ValidationResult ValidateOptions(ReasoningOptions options);
+}
+```
+
+### ReasoningOptions
+
+```csharp
+// MAKER
+options = ReasoningOptions.ForMaker(
+    reliability: MakerReliability.High,
+    maxLlmCalls: 100
+);
+
+// UoT Combinational
+options = ReasoningOptions.ForUotCombinational(
+    domainHint: "distributed systems",
+    maxAnalogies: 5
+);
+
+// UoT Exploratory
+options = ReasoningOptions.ForUotExploratory(
+    maxOutsideThoughts: 10,
+    explorationDirections: 3
+);
+
+// UoT Transformative
+options = ReasoningOptions.ForUotTransformative(
+    maxRuleSets: 3,
+    minRadicality: 0.5f
+);
+```
+
+---
+
+## 🔌 API Endpoints
+
+| Endpoint | Method | 描述 |
+|----------|--------|------|
+| `/api/strategies` | GET | 列出可用策略 |
+| `/api/projects` | GET | 列出所有项目 |
+| `/api/projects` | POST | 创建新项目 |
+| `/api/projects/{id}` | DELETE | 删除项目 (归档) |
+| `/api/projects/{id}/run` | POST | 启动执行 |
+| `/api/projects/{id}/stop` | POST | 停止执行 |
+| `/api/projects/{id}/status` | GET | 获取运行状态 |
+| `/api/projects/{id}/events` | GET (SSE) | 实时事件流 |
+| `/api/archive` | GET | 列出归档项目 |
+| `/api/archive/{fileName}/restore` | POST | 恢复归档项目 |
+
+---
+
+## 📖 文档索引
+
+| 文档 | 说明 |
+|------|------|
+| [ROADMAP.md](./ROADMAP.md) | 渐进式设计路线图，详细阶段规划 |
+| [COGNITIVE_AGENT_BASE_DESIGN.md](./COGNITIVE_AGENT_BASE_DESIGN.md) | **🆕 CognitiveGAgentBase 设计**：原语、DSL、持久化 |
+| [CONTENT_LOADING_DESIGN.md](./CONTENT_LOADING_DESIGN.md) | 内容加载与任务模板设计 |
+| [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md) | 当前实现状态、已知限制 |
+
+---
+
+## 🎯 终极目标预览
+
+### DSL 定义策略 (Phase 4)
+
+```yaml
+# workflows/maker.yaml
+name: maker
+steps:
+  - id: check_atomic
+    type: llm_call
+    prompt: "Is this atomic? {{task}}"
+    
+  - id: process
+    type: conditional
+    condition: "{{is_atomic}}"
+    if_true:
+      - type: vote
+        k: 2
+        generator: { prompt: "Solve: {{task}}" }
+    if_false:
+      - type: vote
+        generator: { prompt: "Decompose: {{task}}" }
+      - type: fan_out
+        for_each: subtasks
+        step: { type: workflow_call, workflow: maker }
+```
+
+详见 [COGNITIVE_AGENT_BASE_DESIGN.md](./COGNITIVE_AGENT_BASE_DESIGN.md)
+
+---
+
+## 🔗 相关资源
+
+- [MAKER Paper](https://arxiv.org/abs/2411.00332) - 分解-共识-合成理论
+- [Universe of Thoughts](https://arxiv.org/html/2511.20471v2) - 创意推理框架
+- [Aevatar Agent Framework](../../README.md) - 底层 Actor 框架
+
+---
+
+*Last Updated: 2025-12-04*

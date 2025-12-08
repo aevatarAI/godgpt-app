@@ -1,0 +1,175 @@
+# ============================================================
+#  MAKER System v2 - DSL 重新实现
+#  
+#  论文: "Solving a Million-Step LLM Task with Zero Errors"
+#  https://arxiv.org/html/2511.09030v1
+#  
+#  核心算法 (完整实现):
+#  1. 分解任务 (Decomposition) - 将复杂任务分解为子任务
+#  2. 并行生成提案 (Fan-out) - 多 Worker 并行 LLM
+#  3. 投票共识 (Vote) - First-to-ahead-by-K 共识机制
+#  4. Red-Flagging - 内容验证与恢复 (Section 3.3)
+#  5. 递归处理 (Recursive) - 子任务递归执行
+#  6. 合成结果 (Composition) - 聚合子任务结果
+# ============================================================
+
+name: maker-v2
+version: "2.0"
+description: "MAKER System - Distributed parallel LLM with consensus voting"
+
+# ============================================================
+#  输入参数
+# ============================================================
+inputs:
+  - name: task
+    type: string
+    required: true
+    description: "任务描述"
+  
+  - name: context
+    type: object
+    required: false
+    description: "额外上下文信息"
+  
+  - name: k
+    type: int
+    default: 2
+    description: "共识所需票数"
+  
+  - name: max_rounds
+    type: int
+    default: 10
+    description: "最大投票轮数"
+  
+  - name: max_depth
+    type: int
+    default: 10
+    description: "最大递归深度"
+
+# ============================================================
+#  步骤定义
+# ============================================================
+steps:
+  # --------------------------------------------------------
+  #  Step 1: 判断任务是否为原子任务
+  # --------------------------------------------------------
+  - id: check_atomic
+    type: llm_call
+    prompt: |
+      Analyze the following task and determine if it is ATOMIC (can be solved directly)
+      or COMPLEX (needs to be broken down into subtasks).
+      
+      Task: {{task}}
+      {% if context %}
+      Context: {{context | json}}
+      {% endif %}
+      
+      Respond with EXACTLY one of:
+      - ATOMIC: [reason]
+      - COMPLEX: [reason]
+    output: text
+    store: atomic_check
+
+  # --------------------------------------------------------
+  #  Step 2: 条件分支 - 原子任务直接解决，复杂任务分解
+  # --------------------------------------------------------
+  - id: process_task
+    type: conditional
+    condition: "{{atomic_check | contains: 'ATOMIC'}}"
+    
+    # 原子任务：直接投票解决
+    if_true:
+      - id: solve_atomic
+        type: vote
+        generator:
+          type: llm_call
+          prompt: |
+            Solve the following task directly:
+            
+            Task: {{task}}
+            {% if context %}
+            Context: {{context | json}}
+            {% endif %}
+            
+            Provide a complete, well-reasoned solution.
+          output: text
+        k: "{{k}}"
+        max_rounds: "{{max_rounds}}"
+        # Red-Flagging: 论文 Section 3.3 (可插拔配置)
+        red_flag: english
+        store: atomic_solution
+    
+    # 复杂任务：分解 → 递归 → 合成
+    if_false:
+      # Step 2a: 投票决定分解方案
+      - id: decompose
+        type: vote
+        generator:
+          type: llm_call
+          prompt: |
+            Break down the following complex task into 2-5 independent subtasks.
+            
+            Task: {{task}}
+            {% if context %}
+            Context: {{context | json}}
+            {% endif %}
+            
+            Format your response as a JSON array:
+            [
+              {"id": "subtask_1", "description": "..."},
+              {"id": "subtask_2", "description": "..."}
+            ]
+          output: json_array
+        k: "{{k}}"
+        max_rounds: "{{max_rounds}}"
+        # Red-Flagging: 论文 Section 3.3
+        red_flag: english
+        store: subtasks
+      
+      # Step 2b: 并行递归执行子任务 (真正的 Actor 并行)
+      - id: execute_subtasks
+        type: fan_out
+        for_each: subtasks
+        max_concurrency: 5
+        step:
+          type: workflow_call
+          workflow: maker-v2
+          params:
+            task: "{{item.description}}"
+            context: "{{context}}"
+            k: "{{k}}"
+            max_depth: "{{max_depth}}"
+        reduce: collect
+        store: subtask_results
+      
+      # Step 2c: 投票合成最终结果
+      - id: compose
+        type: vote
+        generator:
+          type: llm_call
+          prompt: |
+            Compose the following subtask solutions into a coherent final solution.
+            
+            Original Task: {{task}}
+            
+            Subtask Results:
+            {% for result in subtask_results %}
+            - Subtask {{loop.index}}: {{result}}
+            {% endfor %}
+            
+            Synthesize a comprehensive solution that addresses the original task.
+          output: text
+        k: "{{k}}"
+        max_rounds: "{{max_rounds}}"
+        # Red-Flagging: 论文 Section 3.3
+        red_flag: english
+        store: composed_solution
+
+# ============================================================
+#  输出定义
+# ============================================================
+output:
+  solution: "{{atomic_solution | default: composed_solution}}"
+  is_atomic: "{{atomic_check | contains: 'ATOMIC'}}"
+  subtask_count: "{{subtasks | size | default: 0}}"
+

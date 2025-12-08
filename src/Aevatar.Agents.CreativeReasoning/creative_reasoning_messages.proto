@@ -331,3 +331,323 @@ message UoTProgressEvent {
     google.protobuf.Timestamp timestamp = 5;
 }
 
+// ============================================================
+//  E-UoT (Exploratory UoT) Types
+//  Extends C-UoT with Step E: Exploratory Idea Expansion
+//  Discovers novel "outside thoughts" beyond existing solutions
+// ============================================================
+
+// Outside thought discovered through exploration
+message OutsideThought {
+    string id = 1;
+    string content = 2;
+    string exploration_source = 3;  // Where this thought came from
+    string exploration_method = 4;  // How it was discovered
+    repeated float embedding = 5;
+    float novelty_score = 6;        // How novel compared to existing thoughts
+    float relevance_score = 7;      // How relevant to original problem
+}
+
+message EUoTCoordinatorState {
+    string execution_id = 1;
+    string original_problem = 2;
+    EUoTExecutionPhase phase = 3;
+    
+    // C-UoT inherited data
+    repeated AnalogousProblem analogies = 4;
+    repeated ThoughtUnit all_thoughts = 5;
+    string host_solution_id = 6;
+    repeated int32 substitution_sites = 7;
+    repeated CandidateSolution candidates = 8;
+    CandidateSolution best_solution = 9;
+    
+    // E-UoT specific: outside thoughts discovered
+    repeated OutsideThought outside_thoughts = 10;
+    repeated string exploration_directions = 11;
+    
+    // Telemetry
+    int32 total_llm_calls = 12;
+    int64 total_tokens = 13;
+    google.protobuf.Timestamp started_at = 14;
+    google.protobuf.Timestamp completed_at = 15;
+    
+    // Configuration
+    int32 max_analogies = 16;
+    int32 max_candidates = 17;
+    float feasibility_threshold = 18;
+    int32 max_outside_thoughts = 19;
+}
+
+enum EUoTExecutionPhase {
+    EUOT_PHASE_IDLE = 0;
+    EUOT_PHASE_RETRIEVING_ANALOGIES = 1;
+    EUOT_PHASE_DECOMPOSING_THOUGHTS = 2;
+    EUOT_PHASE_EXPLORING_IDEAS = 3;       // Step E: New exploratory step
+    EUOT_PHASE_SELECTING_HOST = 4;
+    EUOT_PHASE_SELECTING_DONORS = 5;
+    EUOT_PHASE_SYNTHESIZING = 6;
+    EUOT_PHASE_EVALUATING = 7;
+    EUOT_PHASE_COMPLETED = 8;
+    EUOT_PHASE_FAILED = 9;
+}
+
+message EUoTCoordinatorConfig {
+    // C-UoT inherited config
+    int32 max_analogies = 1;
+    int32 solutions_per_analogy = 2;
+    int32 max_candidates = 3;
+    float feasibility_threshold = 4;
+    float semantic_similarity_threshold = 5;
+    float utility_weight = 6;
+    float novelty_weight = 7;
+    float far_distance_threshold = 8;
+    int32 far_donors_count = 9;
+    
+    // E-UoT specific config
+    int32 max_outside_thoughts = 10;         // Max outside thoughts to discover
+    int32 exploration_directions = 11;       // Number of exploration directions
+    float outside_thought_relevance = 12;    // Min relevance threshold
+}
+
+// ============================================================
+//  T-UoT (Transformative UoT) Types
+//  The most profound creative process: changing the rules
+//  Exposes hidden assumptions and mutates rule sets
+// ============================================================
+
+// Rule extracted from problem/solution space
+message Rule {
+    string id = 1;
+    string content = 2;
+    RuleType type = 3;
+    bool is_explicit = 4;         // Explicit vs hidden assumption
+    float constraint_strength = 5; // How constraining is this rule
+    string domain = 6;
+}
+
+enum RuleType {
+    RULE_TYPE_UNKNOWN = 0;
+    RULE_TYPE_PHYSICAL = 1;       // Physical/natural constraints
+    RULE_TYPE_SOCIAL = 2;         // Social/cultural norms
+    RULE_TYPE_ECONOMIC = 3;       // Economic constraints
+    RULE_TYPE_TECHNICAL = 4;      // Technical limitations
+    RULE_TYPE_ASSUMPTION = 5;     // Hidden assumptions
+    RULE_TYPE_CONVENTION = 6;     // Industry conventions
+}
+
+// Mutated rule set representing new solution space
+message MutatedRuleSet {
+    string id = 1;
+    repeated Rule original_rules = 2;
+    repeated RuleMutation mutations = 3;
+    repeated Rule resulting_rules = 4;
+    string mutation_rationale = 5;
+    float radicality_score = 6;   // How radical is this transformation
+}
+
+message RuleMutation {
+    string rule_id = 1;
+    MutationType mutation_type = 2;
+    string original_content = 3;
+    string mutated_content = 4;
+    string mutation_rationale = 5;
+}
+
+enum MutationType {
+    MUTATION_TYPE_UNKNOWN = 0;
+    MUTATION_TYPE_NEGATE = 1;     // Negate the rule entirely
+    MUTATION_TYPE_WEAKEN = 2;     // Make rule less strict
+    MUTATION_TYPE_STRENGTHEN = 3; // Make rule more strict (for constraint)
+    MUTATION_TYPE_GENERALIZE = 4; // Broaden the rule
+    MUTATION_TYPE_SPECIALIZE = 5; // Narrow the rule
+    MUTATION_TYPE_COMBINE = 6;    // Combine with another rule
+    MUTATION_TYPE_REMOVE = 7;     // Remove entirely
+}
+
+// Solution discovered in new rule space
+message TransformativeSolution {
+    string id = 1;
+    string content = 2;
+    MutatedRuleSet rule_set = 3;          // Which rule set enabled this
+    repeated Rule violated_conventions = 4;// Which conventions are violated
+    CreativeScore score = 5;
+    google.protobuf.Timestamp created_at = 6;
+}
+
+message TUoTCoordinatorState {
+    string execution_id = 1;
+    string original_problem = 2;
+    TUoTExecutionPhase phase = 3;
+    
+    // T-UoT specific: rules and mutations
+    repeated Rule exposed_rules = 4;
+    repeated Rule hidden_assumptions = 5;
+    repeated MutatedRuleSet mutated_rule_sets = 6;
+    repeated TransformativeSolution transformative_solutions = 7;
+    TransformativeSolution best_solution = 8;
+    
+    // For reference: also run E-UoT in each rule space
+    repeated OutsideThought outside_thoughts = 9;
+    repeated AnalogousProblem analogies = 10;
+    repeated ThoughtUnit all_thoughts = 11;
+    
+    // Telemetry
+    int32 total_llm_calls = 12;
+    int64 total_tokens = 13;
+    google.protobuf.Timestamp started_at = 14;
+    google.protobuf.Timestamp completed_at = 15;
+    
+    // Configuration
+    int32 max_rule_sets = 16;
+    float feasibility_threshold = 17;
+}
+
+enum TUoTExecutionPhase {
+    TUOT_PHASE_IDLE = 0;
+    TUOT_PHASE_EXPOSING_RULES = 1;        // Step 1: Expose rules including hidden
+    TUOT_PHASE_MUTATING_RULES = 2;        // Step 2: Generate mutated rule sets
+    TUOT_PHASE_EXPLORING_SPACES = 3;      // Step 3: Explore each new rule space
+    TUOT_PHASE_SYNTHESIZING = 4;
+    TUOT_PHASE_EVALUATING = 5;
+    TUOT_PHASE_COMPLETED = 6;
+    TUOT_PHASE_FAILED = 7;
+}
+
+message TUoTCoordinatorConfig {
+    int32 max_rule_sets = 1;              // Max mutated rule sets to explore
+    int32 mutations_per_set = 2;          // Mutations per rule set
+    float min_radicality = 3;             // Min radicality for transformative solutions
+    float feasibility_threshold = 4;
+    float utility_weight = 5;
+    float novelty_weight = 6;
+    bool allow_physical_rule_violation = 7;  // Usually false
+}
+
+// ============================================================
+//  E-UoT Events
+// ============================================================
+
+message StartEUoTRequest {
+    string execution_id = 1;
+    string problem = 2;
+    string domain_hint = 3;
+    string provider_name = 4;
+    
+    // Configuration
+    int32 max_analogies = 5;
+    int32 max_candidates = 6;
+    float feasibility_threshold = 7;
+    int32 max_outside_thoughts = 8;
+    int32 exploration_directions = 9;
+}
+
+message ExploreIdeasRequest {
+    string request_id = 1;
+    string original_problem = 2;
+    repeated ThoughtUnit existing_thoughts = 3;
+    int32 max_outside_thoughts = 4;
+    repeated string suggested_directions = 5;
+}
+
+message IdeasExplored {
+    string request_id = 1;
+    repeated OutsideThought outside_thoughts = 2;
+    repeated string exploration_directions_used = 3;
+    int32 llm_calls = 4;
+    int32 tokens_used = 5;
+}
+
+message EUoTCompleted {
+    string execution_id = 1;
+    bool success = 2;
+    CandidateSolution best_solution = 3;
+    int32 outside_thoughts_discovered = 4;
+    string error = 5;
+    int32 total_llm_calls = 6;
+    int64 total_tokens = 7;
+    int64 duration_ms = 8;
+}
+
+// ============================================================
+//  T-UoT Events
+// ============================================================
+
+message StartTUoTRequest {
+    string execution_id = 1;
+    string problem = 2;
+    string domain_hint = 3;
+    string provider_name = 4;
+    
+    // Configuration
+    int32 max_rule_sets = 5;
+    int32 mutations_per_set = 6;
+    float min_radicality = 7;
+    float feasibility_threshold = 8;
+}
+
+message ExposeRulesRequest {
+    string request_id = 1;
+    string problem = 2;
+    string domain_hint = 3;
+    bool include_hidden_assumptions = 4;
+}
+
+message RulesExposed {
+    string request_id = 1;
+    repeated Rule explicit_rules = 2;
+    repeated Rule hidden_assumptions = 3;
+    int32 llm_calls = 4;
+    int32 tokens_used = 5;
+}
+
+message MutateRulesRequest {
+    string request_id = 1;
+    repeated Rule rules = 2;
+    int32 max_rule_sets = 3;
+    int32 mutations_per_set = 4;
+}
+
+message RulesMutated {
+    string request_id = 1;
+    repeated MutatedRuleSet rule_sets = 2;
+    int32 llm_calls = 3;
+    int32 tokens_used = 4;
+}
+
+message ExploreRuleSpaceRequest {
+    string request_id = 1;
+    string original_problem = 2;
+    MutatedRuleSet rule_set = 3;
+}
+
+message RuleSpaceExplored {
+    string request_id = 1;
+    string rule_set_id = 2;
+    repeated TransformativeSolution solutions = 3;
+    int32 llm_calls = 4;
+    int32 tokens_used = 5;
+}
+
+message TUoTCompleted {
+    string execution_id = 1;
+    bool success = 2;
+    TransformativeSolution best_solution = 3;
+    int32 rule_sets_explored = 4;
+    int32 rules_exposed = 5;
+    int32 assumptions_challenged = 6;
+    string error = 7;
+    int32 total_llm_calls = 8;
+    int64 total_tokens = 9;
+    int64 duration_ms = 10;
+}
+
+// ============================================================
+//  UoT Mode Selection
+// ============================================================
+
+enum UoTMode {
+    UOT_MODE_COMBINATIONAL = 0;   // C-UoT (default)
+    UOT_MODE_EXPLORATORY = 1;     // E-UoT
+    UOT_MODE_TRANSFORMATIVE = 2;  // T-UoT
+}
+

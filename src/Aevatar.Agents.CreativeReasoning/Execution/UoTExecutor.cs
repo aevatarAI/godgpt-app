@@ -10,13 +10,16 @@ using Microsoft.Extensions.Logging;
 namespace Aevatar.Agents.CreativeReasoning.Execution;
 
 // ============================================================
-//  UoT Executor - Agent-based Creative Reasoning Entry Point
-//  Uses IGAgentActorFactory for proper actor lifecycle management
+//  UoT Executor - Unified Entry Point for Creative Reasoning
+//  Supports all three UoT modes:
+//  - C-UoT: Combinational (recombine existing thoughts)
+//  - E-UoT: Exploratory (discover outside thoughts)
+//  - T-UoT: Transformative (challenge rules and assumptions)
 // ============================================================
 
 /// <summary>
 /// Executor for Universe of Thoughts (UoT) creative reasoning.
-/// Uses Aevatar Agent Actor Framework for proper event-driven execution.
+/// Automatically routes to appropriate agent based on mode.
 /// </summary>
 public class UoTExecutor : IUoTExecutor
 {
@@ -31,7 +34,7 @@ public class UoTExecutor : IUoTExecutor
     {
         _actorFactory = actorFactory;
         _logger = logger;
-        _defaultProviderName = defaultProviderName ?? "deepseek";
+        _defaultProviderName = defaultProviderName ?? AevatarAgentsConstants.DefaultProviderName;
     }
 
     /// <inheritdoc />
@@ -43,30 +46,48 @@ public class UoTExecutor : IUoTExecutor
         if (string.IsNullOrWhiteSpace(problem))
             throw new ArgumentException("Problem cannot be empty", nameof(problem));
 
+        return options.Mode switch
+        {
+            Core.UoTMode.Combinational => await ExecuteCUoTAsync(problem, options, ct),
+            Core.UoTMode.Exploratory => await ExecuteEUoTAsync(problem, options, ct),
+            Core.UoTMode.Transformative => ConvertTUoTResult(await ExecuteTUoTAsync(problem, options, ct)),
+            _ => throw new ArgumentOutOfRangeException(nameof(options.Mode))
+        };
+    }
+
+    /// <inheritdoc />
+    public async Task<TUoTResult> ExecuteTransformativeAsync(
+        string problem,
+        UoTOptions options,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(problem))
+            throw new ArgumentException("Problem cannot be empty", nameof(problem));
+
+        return await ExecuteTUoTAsync(problem, options, ct);
+    }
+
+    #region C-UoT Execution
+
+    private async Task<UoTResult> ExecuteCUoTAsync(
+        string problem,
+        UoTOptions options,
+        CancellationToken ct)
+    {
         var providerName = options.ProviderName ?? _defaultProviderName;
         var executionId = Guid.NewGuid();
         var executionIdShort = executionId.ToString("N")[..8];
 
         _logger.LogInformation(
-            "Starting C-UoT execution {ExecutionId} for problem: {Problem}",
+            "Starting C-UoT execution {ExecutionId} for: {Problem}",
             executionIdShort, problem[..Math.Min(50, problem.Length)]);
-
-        IGAgentActor? coordinatorActor = null;
 
         try
         {
-            // Step 1: Create Coordinator Actor via ActorFactory
-            coordinatorActor = await _actorFactory.CreateGAgentActorAsync<UoTCoordinatorGAgent>(executionId, ct);
-            _logger.LogDebug("Created UoT coordinator actor {CoordinatorId}", executionId);
+            var coordinatorActor = await _actorFactory.CreateGAgentActorAsync<UoTCoordinatorGAgent>(executionId, ct);
+            var coordinator = coordinatorActor.GetAgent() as UoTCoordinatorGAgent
+                ?? throw new InvalidOperationException("Failed to get UoTCoordinatorGAgent");
 
-            // Step 2: Get underlying Agent and inject strategies
-            var coordinator = coordinatorActor.GetAgent() as UoTCoordinatorGAgent;
-            if (coordinator == null)
-            {
-                throw new InvalidOperationException("Failed to get UoTCoordinatorGAgent from actor");
-            }
-
-            // Inject strategies and progress callback
             coordinator.SetStrategies(
                 analogyStrategy: new DefaultAnalogyStrategy(),
                 decompositionStrategy: new DefaultThoughtDecompositionStrategy(),
@@ -76,7 +97,6 @@ public class UoTExecutor : IUoTExecutor
                 evaluationStrategy: new DefaultEvaluationStrategy(),
                 progressCallback: options.OnProgress);
 
-            // Step 3: Build and send start request
             var startRequest = new StartCreativeReasoningRequest
             {
                 ExecutionId = executionIdShort,
@@ -90,7 +110,6 @@ public class UoTExecutor : IUoTExecutor
                 NoveltyWeight = options.NoveltyWeight
             };
 
-            // Send event to Actor (triggers EventHandler)
             var envelope = new EventEnvelope
             {
                 Id = Guid.NewGuid().ToString(),
@@ -100,76 +119,310 @@ public class UoTExecutor : IUoTExecutor
             };
             await coordinatorActor.HandleEventAsync(envelope, ct);
 
-            _logger.LogDebug("Sent StartCreativeReasoningRequest to coordinator");
-
-            // Step 4: Poll for completion
-            var maxWaitTime = TimeSpan.FromMinutes(10);
-            var pollInterval = TimeSpan.FromMilliseconds(300);
-            var startTime = DateTime.UtcNow;
-
-            while (DateTime.UtcNow - startTime < maxWaitTime)
-            {
-                ct.ThrowIfCancellationRequested();
-
-                await Task.Delay(pollInterval, ct);
-
-                var phase = coordinator.GetPhase();
-                if (phase == UoTExecutionPhase.UotPhaseCompleted || phase == UoTExecutionPhase.UotPhaseFailed)
-                {
-                    var result = coordinator.GetResult();
-
-                    _logger.LogInformation(
-                        "C-UoT execution {ExecutionId} completed: Success={Success}, Candidates={Count}, LLMCalls={Calls}",
-                        executionIdShort, result.Success, result.AllCandidates.Count, result.Trace.TotalLLMCalls);
-
-                    return result;
-                }
-            }
-
-            // Timeout
-            _logger.LogWarning("C-UoT execution {ExecutionId} timed out", executionIdShort);
-
-            return new UoTResult
-            {
-                Success = false,
-                Error = "Execution timed out",
-                BestSolution = null,
-                AllCandidates = [],
-                Trace = new UoTResultTrace
-                {
-                    ExecutionId = executionIdShort,
-                    OriginalProblem = problem,
-                    TotalLLMCalls = coordinator.GetResult().Trace.TotalLLMCalls,
-                    TotalTokens = coordinator.GetResult().Trace.TotalTokens,
-                    Duration = DateTime.UtcNow - startTime
-                }
-            };
+            return await WaitForCompletion(coordinator, executionIdShort, problem, ct);
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation("C-UoT execution {ExecutionId} was cancelled", executionIdShort);
+            _logger.LogInformation("C-UoT {ExecutionId} cancelled", executionIdShort);
             throw;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "C-UoT execution {ExecutionId} failed", executionIdShort);
-
-            return new UoTResult
-            {
-                Success = false,
-                Error = ex.Message,
-                BestSolution = null,
-                AllCandidates = [],
-                Trace = new UoTResultTrace
-                {
-                    ExecutionId = executionIdShort,
-                    OriginalProblem = problem,
-                    TotalLLMCalls = 0,
-                    TotalTokens = 0,
-                    Duration = TimeSpan.Zero
-                }
-            };
+            _logger.LogError(ex, "C-UoT {ExecutionId} failed", executionIdShort);
+            return CreateErrorResult(executionIdShort, problem, ex.Message);
         }
     }
-}
 
+    private async Task<UoTResult> WaitForCompletion(
+        UoTCoordinatorGAgent coordinator,
+        string executionId,
+        string problem,
+        CancellationToken ct)
+    {
+        var maxWaitTime = TimeSpan.FromMinutes(10);
+        var pollInterval = TimeSpan.FromMilliseconds(300);
+        var startTime = DateTime.UtcNow;
+
+        while (DateTime.UtcNow - startTime < maxWaitTime)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(pollInterval, ct);
+
+            var phase = coordinator.GetPhase();
+            if (phase == UoTExecutionPhase.UotPhaseCompleted || phase == UoTExecutionPhase.UotPhaseFailed)
+            {
+                var result = coordinator.GetResult();
+                _logger.LogInformation("C-UoT {ExecutionId} completed: Success={Success}", 
+                    executionId, result.Success);
+                return result;
+            }
+        }
+
+        return CreateErrorResult(executionId, problem, "Execution timed out");
+    }
+
+    #endregion
+
+    #region E-UoT Execution
+
+    private async Task<UoTResult> ExecuteEUoTAsync(
+        string problem,
+        UoTOptions options,
+        CancellationToken ct)
+    {
+        var providerName = options.ProviderName ?? _defaultProviderName;
+        var executionId = Guid.NewGuid();
+        var executionIdShort = executionId.ToString("N")[..8];
+
+        _logger.LogInformation(
+            "Starting E-UoT execution {ExecutionId} for: {Problem}",
+            executionIdShort, problem[..Math.Min(50, problem.Length)]);
+
+        try
+        {
+            var coordinatorActor = await _actorFactory.CreateGAgentActorAsync<EUoTCoordinatorGAgent>(executionId, ct);
+            var coordinator = coordinatorActor.GetAgent() as EUoTCoordinatorGAgent
+                ?? throw new InvalidOperationException("Failed to get EUoTCoordinatorGAgent");
+
+            coordinator.SetStrategies(
+                analogyStrategy: new DefaultAnalogyStrategy(),
+                decompositionStrategy: new DefaultThoughtDecompositionStrategy(),
+                exploratoryStrategy: new DefaultExploratoryStrategy(),
+                hostSelectionStrategy: new DefaultHostSelectionStrategy(),
+                donorSelectionStrategy: new DefaultDonorSelectionStrategy(),
+                synthesisStrategy: new DefaultSynthesisStrategy(),
+                evaluationStrategy: new DefaultEvaluationStrategy(),
+                progressCallback: options.OnProgress);
+
+            var startRequest = new StartEUoTRequest
+            {
+                ExecutionId = executionIdShort,
+                Problem = problem,
+                DomainHint = options.DomainHint ?? "",
+                ProviderName = providerName,
+                MaxAnalogies = options.MaxAnalogies,
+                MaxCandidates = options.MaxCandidates,
+                FeasibilityThreshold = options.FeasibilityThreshold,
+                MaxOutsideThoughts = options.MaxOutsideThoughts,
+                ExplorationDirections = options.ExplorationDirections
+            };
+
+            var envelope = new EventEnvelope
+            {
+                Id = Guid.NewGuid().ToString(),
+                Timestamp = TimestampHelper.GetUtcNow(),
+                Payload = Any.Pack(startRequest),
+                Direction = EventDirection.Down
+            };
+            await coordinatorActor.HandleEventAsync(envelope, ct);
+
+            return await WaitForEUoTCompletion(coordinator, executionIdShort, problem, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("E-UoT {ExecutionId} cancelled", executionIdShort);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "E-UoT {ExecutionId} failed", executionIdShort);
+            return CreateErrorResult(executionIdShort, problem, ex.Message);
+        }
+    }
+
+    private async Task<UoTResult> WaitForEUoTCompletion(
+        EUoTCoordinatorGAgent coordinator,
+        string executionId,
+        string problem,
+        CancellationToken ct)
+    {
+        var maxWaitTime = TimeSpan.FromMinutes(15);  // Longer for E-UoT
+        var pollInterval = TimeSpan.FromMilliseconds(300);
+        var startTime = DateTime.UtcNow;
+
+        while (DateTime.UtcNow - startTime < maxWaitTime)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(pollInterval, ct);
+
+            var phase = coordinator.GetPhase();
+            if (phase == EUoTExecutionPhase.EuotPhaseCompleted || phase == EUoTExecutionPhase.EuotPhaseFailed)
+            {
+                var result = coordinator.GetResult();
+                _logger.LogInformation("E-UoT {ExecutionId} completed: Success={Success}", 
+                    executionId, result.Success);
+                return result;
+            }
+        }
+
+        return CreateErrorResult(executionId, problem, "Execution timed out");
+    }
+
+    #endregion
+
+    #region T-UoT Execution
+
+    private async Task<TUoTResult> ExecuteTUoTAsync(
+        string problem,
+        UoTOptions options,
+        CancellationToken ct)
+    {
+        var providerName = options.ProviderName ?? _defaultProviderName;
+        var executionId = Guid.NewGuid();
+        var executionIdShort = executionId.ToString("N")[..8];
+
+        _logger.LogInformation(
+            "Starting T-UoT execution {ExecutionId} for: {Problem}",
+            executionIdShort, problem[..Math.Min(50, problem.Length)]);
+
+        try
+        {
+            var coordinatorActor = await _actorFactory.CreateGAgentActorAsync<TUoTCoordinatorGAgent>(executionId, ct);
+            var coordinator = coordinatorActor.GetAgent() as TUoTCoordinatorGAgent
+                ?? throw new InvalidOperationException("Failed to get TUoTCoordinatorGAgent");
+
+            coordinator.SetStrategies(
+                ruleMutationStrategy: new DefaultRuleMutationStrategy(),
+                evaluationStrategy: new DefaultEvaluationStrategy(),
+                progressCallback: options.OnProgress);
+
+            var startRequest = new StartTUoTRequest
+            {
+                ExecutionId = executionIdShort,
+                Problem = problem,
+                DomainHint = options.DomainHint ?? "",
+                ProviderName = providerName,
+                MaxRuleSets = options.MaxRuleSets,
+                MutationsPerSet = options.MutationsPerSet,
+                MinRadicality = options.MinRadicality,
+                FeasibilityThreshold = options.FeasibilityThreshold
+            };
+
+            var envelope = new EventEnvelope
+            {
+                Id = Guid.NewGuid().ToString(),
+                Timestamp = TimestampHelper.GetUtcNow(),
+                Payload = Any.Pack(startRequest),
+                Direction = EventDirection.Down
+            };
+            await coordinatorActor.HandleEventAsync(envelope, ct);
+
+            return await WaitForTUoTCompletion(coordinator, executionIdShort, problem, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            _logger.LogInformation("T-UoT {ExecutionId} cancelled", executionIdShort);
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "T-UoT {ExecutionId} failed", executionIdShort);
+            return CreateTUoTErrorResult(executionIdShort, problem, ex.Message);
+        }
+    }
+
+    private async Task<TUoTResult> WaitForTUoTCompletion(
+        TUoTCoordinatorGAgent coordinator,
+        string executionId,
+        string problem,
+        CancellationToken ct)
+    {
+        var maxWaitTime = TimeSpan.FromMinutes(15);  // Longer for T-UoT
+        var pollInterval = TimeSpan.FromMilliseconds(300);
+        var startTime = DateTime.UtcNow;
+
+        while (DateTime.UtcNow - startTime < maxWaitTime)
+        {
+            ct.ThrowIfCancellationRequested();
+            await Task.Delay(pollInterval, ct);
+
+            var phase = coordinator.GetPhase();
+            if (phase == TUoTExecutionPhase.TuotPhaseCompleted || phase == TUoTExecutionPhase.TuotPhaseFailed)
+            {
+                var result = coordinator.GetResult();
+                _logger.LogInformation("T-UoT {ExecutionId} completed: Success={Success}", 
+                    executionId, result.Success);
+                return result;
+            }
+        }
+
+        return CreateTUoTErrorResult(executionId, problem, "Execution timed out");
+    }
+
+    #endregion
+
+    #region Helpers
+
+    private static UoTResult CreateErrorResult(string executionId, string problem, string error) => new()
+    {
+        Success = false,
+        Error = error,
+        BestSolution = null,
+        AllCandidates = [],
+        Trace = new UoTResultTrace
+        {
+            ExecutionId = executionId,
+            OriginalProblem = problem,
+            TotalLLMCalls = 0,
+            TotalTokens = 0,
+            Duration = TimeSpan.Zero
+        }
+    };
+
+    private static TUoTResult CreateTUoTErrorResult(string executionId, string problem, string error) => new()
+    {
+        Success = false,
+        Error = error,
+        BestSolution = null,
+        AllSolutions = [],
+        Trace = new TUoTResultTrace
+        {
+            ExecutionId = executionId,
+            OriginalProblem = problem,
+            TotalLLMCalls = 0,
+            TotalTokens = 0,
+            Duration = TimeSpan.Zero
+        }
+    };
+
+    private static UoTResult ConvertTUoTResult(TUoTResult tuotResult)
+    {
+        // Convert T-UoT result to UoT result for unified API
+        var candidates = tuotResult.AllSolutions
+            .Select(s => new CandidateSolution
+            {
+                Id = s.Id,
+                Content = s.Content,
+                Score = s.Score
+            })
+            .ToList();
+
+        return new UoTResult
+        {
+            Success = tuotResult.Success,
+            Error = tuotResult.Error,
+            BestSolution = tuotResult.BestSolution != null 
+                ? new CandidateSolution 
+                { 
+                    Id = tuotResult.BestSolution.Id, 
+                    Content = tuotResult.BestSolution.Content,
+                    Score = tuotResult.BestSolution.Score
+                } 
+                : null,
+            AllCandidates = candidates,
+            Trace = new UoTResultTrace
+            {
+                ExecutionId = tuotResult.Trace.ExecutionId,
+                OriginalProblem = tuotResult.Trace.OriginalProblem,
+                AnalogiesExplored = tuotResult.Trace.RulesExposed,  // Rules as "analogies" in trace
+                ThoughtsExtracted = tuotResult.Trace.HiddenAssumptionsFound,
+                CandidatesGenerated = tuotResult.Trace.SolutionsGenerated,
+                TotalLLMCalls = tuotResult.Trace.TotalLLMCalls,
+                TotalTokens = tuotResult.Trace.TotalTokens,
+                Duration = tuotResult.Trace.Duration
+            }
+        };
+    }
+
+    #endregion
+}

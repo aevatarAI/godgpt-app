@@ -9,7 +9,7 @@ public class TranslationAgentDemo : AgentDemoBase
     {
         var actor = await factory.CreateGAgentActorAsync<TranslationAgent>();
         var agent = (TranslationAgent)actor.GetAgent();
-        await agent.InitializeAsync("deepseek");
+        await agent.InitializeAsync(AevatarAgentsConstants.DefaultProviderName);
 
         while (true)
         {

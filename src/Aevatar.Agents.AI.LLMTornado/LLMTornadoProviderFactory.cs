@@ -13,6 +13,7 @@ namespace Aevatar.Agents.AI.LLMTornado;
 /// LlmTornado implementation of LLM Provider Factory.
 /// Supports OpenAI, Anthropic, Google (Gemini), Azure, Groq, Cohere.
 /// Also supports OpenAI-compatible APIs (DeepSeek, Moonshot, etc.) via custom endpoint.
+/// Local deployments: Ollama, vLLM, LocalAI.
 /// </summary>
 public sealed class LLMTornadoProviderFactory : LLMProviderFactoryBase
 {
@@ -29,17 +30,31 @@ public sealed class LLMTornadoProviderFactory : LLMProviderFactoryBase
     public override IAevatarLLMProvider CreateProvider(LLMProviderConfig providerConfig,
         CancellationToken cancellationToken = default)
     {
-        var providerType = ParseProvider(providerConfig.ProviderType);
+        var providerTypeStr = providerConfig.ProviderType?.ToLowerInvariant();
+        var providerType = ParseProvider(providerTypeStr);
         var endpoint = providerConfig.Endpoint;
-        var apiKey = providerConfig.ApiKey ?? throw new ArgumentException("ApiKey is required");
         var model = providerConfig.Model;
+
+        // 本地部署（Ollama, vLLM, LocalAI）不需要 ApiKey
+        var isLocalProvider = providerTypeStr is "ollama" or "vllm" or "localai";
+        var apiKey = providerConfig.ApiKey ??
+                     (isLocalProvider ? "ollama" : throw new ArgumentException("ApiKey is required"));
 
         // Create TornadoApi with correct endpoint handling
         TornadoApi api;
-        
-        if (!string.IsNullOrEmpty(endpoint))
+
+        if (providerTypeStr == "ollama")
         {
-            // Custom endpoint (DeepSeek, Moonshot, vLLM, Ollama, etc.)
+            // Ollama: OpenAI-compatible API，默认端口 11434/v1
+            // Ollama 的 OpenAI 兼容端点是 /v1
+            var ollamaEndpoint = !string.IsNullOrEmpty(endpoint)
+                ? endpoint
+                : AevatarLLMTornadoConstants.OllamaDefaultEndpoint;
+            api = new TornadoApi(new Uri(ollamaEndpoint), apiKey, LLmProviders.OpenAi);
+        }
+        else if (!string.IsNullOrEmpty(endpoint))
+        {
+            // Custom endpoint (DeepSeek, Moonshot, vLLM, LocalAI, etc.)
             // Use the constructor designed for self-hosted / custom providers
             api = new TornadoApi(new Uri(endpoint), apiKey, providerType);
         }
@@ -57,7 +72,7 @@ public sealed class LLMTornadoProviderFactory : LLMProviderFactoryBase
 
     private static LLmProviders ParseProvider(string? providerType)
     {
-        return (providerType?.ToLowerInvariant()) switch
+        return providerType switch
         {
             "openai" => LLmProviders.OpenAi,
             "anthropic" or "claude" => LLmProviders.Anthropic,
@@ -65,7 +80,8 @@ public sealed class LLMTornadoProviderFactory : LLMProviderFactoryBase
             "google" or "gemini" => LLmProviders.Google,
             "cohere" => LLmProviders.Cohere,
             "groq" => LLmProviders.Groq,
-            // OpenAI-compatible APIs use OpenAI protocol
+            "ollama" or "vllm" => LLmProviders.Custom,
+            // OpenAI-compatible APIs
             "deepseek" or "moonshot" or "qwen" or "openai_compatible" => LLmProviders.OpenAi,
             _ => LLmProviders.OpenAi
         };

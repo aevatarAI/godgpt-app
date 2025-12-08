@@ -1,0 +1,19 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROJECT: 书店复兴
+#  ID: bookstore-revival
+#  Strategy: UotCombinational
+# ═══════════════════════════════════════════════════════════════════════════
+
+id: bookstore-revival
+name: 书店复兴
+description: 帮助传统书店在电商时代重获增长
+icon: "📚"
+strategy: UotCombinational
+task: |
+  How can a traditional physical bookstore regain growth and relevance 
+  in the era of e-commerce and digital books?
+options:
+  domainHint: "retail, business strategy, community"
+  maxAnalogies: 5
+  maxCandidates: 10
+

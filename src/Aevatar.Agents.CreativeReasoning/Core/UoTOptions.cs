@@ -1,10 +1,60 @@
 namespace Aevatar.Agents.CreativeReasoning.Core;
 
+// ============================================================
+//  UoT Mode Selection
+// ============================================================
+
+/// <summary>
+/// Universe of Thoughts reasoning modes.
+/// Each mode represents a different level of creative exploration.
+/// </summary>
+public enum UoTMode
+{
+    /// <summary>
+    /// Combinational UoT (C-UoT): Combines existing thoughts from analogous problems.
+    /// Fastest, most practical, good for incremental innovation.
+    /// </summary>
+    Combinational,
+    
+    /// <summary>
+    /// Exploratory UoT (E-UoT): Extends C-UoT with outside thought discovery.
+    /// Medium complexity, explores beyond known solution space.
+    /// </summary>
+    Exploratory,
+    
+    /// <summary>
+    /// Transformative UoT (T-UoT): Challenges rules and hidden assumptions.
+    /// Most radical, highest creativity, may produce disruptive innovations.
+    /// </summary>
+    Transformative
+}
+
+// ============================================================
+//  Shared Options
+// ============================================================
+
 /// <summary>
 /// Configuration options for Universe of Thoughts (UoT) creative reasoning.
+/// Works for C-UoT, E-UoT, and T-UoT with mode-specific fields.
 /// </summary>
 public class UoTOptions
 {
+    /// <summary>UoT reasoning mode (default: Combinational)</summary>
+    public UoTMode Mode { get; set; } = UoTMode.Combinational;
+    
+    /// <summary>LLM provider name (required)</summary>
+    public string ProviderName { get; set; } = string.Empty;
+    
+    /// <summary>Optional domain hint for better analogy/rule retrieval</summary>
+    public string? DomainHint { get; set; }
+    
+    /// <summary>Progress callback</summary>
+    public Action<UoTProgress>? OnProgress { get; set; }
+    
+    // ============================================================
+    //  C-UoT Options (also used by E-UoT)
+    // ============================================================
+    
     /// <summary>Maximum analogous problems to retrieve (default: 5)</summary>
     public int MaxAnalogies { get; set; } = 5;
     
@@ -32,15 +82,39 @@ public class UoTOptions
     /// <summary>Number of far donors to consider (default: 3)</summary>
     public int FarDonorsCount { get; set; } = 3;
     
-    /// <summary>LLM provider name (required)</summary>
-    public string ProviderName { get; set; } = string.Empty;
+    // ============================================================
+    //  E-UoT Specific Options
+    // ============================================================
     
-    /// <summary>Optional domain hint for better analogy retrieval</summary>
-    public string? DomainHint { get; set; }
+    /// <summary>Maximum outside thoughts to discover (E-UoT, default: 10)</summary>
+    public int MaxOutsideThoughts { get; set; } = 10;
     
-    /// <summary>Progress callback</summary>
-    public Action<UoTProgress>? OnProgress { get; set; }
+    /// <summary>Number of exploration directions to pursue (E-UoT, default: 3)</summary>
+    public int ExplorationDirections { get; set; } = 3;
+    
+    /// <summary>Minimum relevance score for outside thoughts (E-UoT, default: 0.4)</summary>
+    public float OutsideThoughtRelevance { get; set; } = 0.4f;
+    
+    // ============================================================
+    //  T-UoT Specific Options
+    // ============================================================
+    
+    /// <summary>Maximum mutated rule sets to explore (T-UoT, default: 3)</summary>
+    public int MaxRuleSets { get; set; } = 3;
+    
+    /// <summary>Number of mutations per rule set (T-UoT, default: 3)</summary>
+    public int MutationsPerSet { get; set; } = 3;
+    
+    /// <summary>Minimum radicality score for solutions (T-UoT, default: 0.5)</summary>
+    public float MinRadicality { get; set; } = 0.5f;
+    
+    /// <summary>Allow violating physical rules (T-UoT, default: false)</summary>
+    public bool AllowPhysicalRuleViolation { get; set; } = false;
 }
+
+// ============================================================
+//  Progress Reporting
+// ============================================================
 
 /// <summary>
 /// Progress information during UoT execution.
@@ -61,6 +135,10 @@ public enum UoTPhase
     Starting,
     RetrievingAnalogies,
     DecomposingThoughts,
+    ExploringIdeas,      // E-UoT specific
+    ExposingRules,       // T-UoT specific
+    MutatingRules,       // T-UoT specific
+    ExploringRuleSpaces, // T-UoT specific
     SelectingHost,
     SelectingDonors,
     Synthesizing,

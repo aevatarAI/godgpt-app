@@ -332,7 +332,7 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         StateProjectorInjector.InjectStateProjector(agent, ServiceProvider);
 
         // Inject EventPublisher (Grain acts as the publisher)
-        AgentEventPublisherInjector.InjectEventPublisher(agent, new GrainEventPublisher(this, _myStream, _logger));
+        AgentEventPublisherInjector.InjectEventPublisher(agent, new GrainEventPublisher(this, _myStream, _logger, GrainFactory));
 
         _logger.LogDebug("Injected dependencies into Agent {AgentId}", agent.Id);
     }
@@ -512,15 +512,18 @@ internal class GrainEventPublisher : IEventPublisher
     private readonly OrleansGAgentGrain _grain;
     private readonly IAsyncStream<byte[]>? _stream;
     private readonly ILogger _logger;
+    private readonly IGrainFactory _grainFactory;
 
     public GrainEventPublisher(
         OrleansGAgentGrain grain, 
         IAsyncStream<byte[]>? stream, 
-        ILogger logger)
+        ILogger logger,
+        IGrainFactory grainFactory)
     {
         _grain = grain;
         _stream = stream;
         _logger = logger;
+        _grainFactory = grainFactory;
     }
 
     public async Task<string> PublishEventAsync<TEvent>(
@@ -559,6 +562,46 @@ internal class GrainEventPublisher : IEventPublisher
             _logger.LogWarning("Stream not available for Grain {GrainId}, event {EventId} not published",
                 grainId, envelope.Id);
         }
+
+        return envelope.Id;
+    }
+
+    public async Task<string> SendToAsync<TEvent>(
+        Guid targetAgentId,
+        TEvent evt,
+        EventDirection onArrivalDirection = EventDirection.Unspecified,
+        CancellationToken ct = default)
+        where TEvent : IMessage
+    {
+        var grainId = _grain.GetPrimaryKeyString();
+
+        // Create EventEnvelope for P2P
+        var envelope = new EventEnvelope
+        {
+            Id = Guid.NewGuid().ToString(),
+            PublisherId = grainId,
+            Payload = Google.Protobuf.WellKnownTypes.Any.Pack(evt),
+            Direction = onArrivalDirection,
+            Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
+            CorrelationId = Guid.NewGuid().ToString(),
+            TargetAgentId = targetAgentId.ToString(),
+            OnArrivalDirection = onArrivalDirection
+        };
+
+        _logger.LogDebug(
+            "Grain {GrainId} sending P2P event {EventId} to {TargetAgentId}, onArrival={OnArrivalDirection}",
+            grainId, envelope.Id, targetAgentId, onArrivalDirection);
+
+        // Serialize envelope
+        using var memStream = new MemoryStream();
+        using var codedOutput = new CodedOutputStream(memStream);
+        envelope.WriteTo(codedOutput);
+        codedOutput.Flush();
+        var envelopeBytes = memStream.ToArray();
+
+        // Direct RPC to target Grain (no stream broadcast)
+        var targetGrain = _grainFactory.GetGrain<IGAgentGrain>(targetAgentId.ToString());
+        await targetGrain.HandleEventAsync(envelopeBytes);
 
         return envelope.Id;
     }

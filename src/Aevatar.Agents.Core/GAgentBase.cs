@@ -250,7 +250,7 @@ public abstract class GAgentBase : IGAgent
     // ============ Event Publishing ============
 
     /// <summary>
-    /// Publish event (delegates to EventPublisher)
+    /// Publish event (delegates to EventPublisher) - Broadcast mode
     /// </summary>
     protected async Task<string> PublishAsync<TEvent>(
         TEvent evt,
@@ -282,6 +282,58 @@ public abstract class GAgentBase : IGAgent
         {
             // Record exception metrics
             AgentMetrics.RecordException(ex.GetType().Name, Id.ToString(), "PublishEvent");
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Point-to-point send - Direct delivery mode.
+    /// Sends directly to specified agent, bypassing hierarchical broadcast.
+    /// </summary>
+    /// <param name="targetAgentId">Target agent ID</param>
+    /// <param name="evt">Event message</param>
+    /// <param name="onArrivalDirection">
+    /// Propagation direction after arrival:
+    /// - Unspecified: Pure P2P, only target processes, no propagation
+    /// - Down: Target processes then broadcasts to all its children
+    /// - Up: Target processes then propagates up to its parent
+    /// - Both: Target processes then propagates in both directions
+    /// </param>
+    /// <param name="ct">Cancellation token</param>
+    /// <typeparam name="TEvent">Event type</typeparam>
+    /// <returns>Event ID</returns>
+    protected async Task<string> SendToAsync<TEvent>(
+        Guid targetAgentId,
+        TEvent evt,
+        EventDirection onArrivalDirection = EventDirection.Unspecified,
+        CancellationToken ct = default)
+        where TEvent : IMessage
+    {
+        if (EventPublisher == null)
+        {
+            throw new InvalidOperationException(
+                "EventPublisher is not set. Make sure the Actor layer has initialized this agent.");
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var eventId = await EventPublisher.SendToAsync(targetAgentId, evt, onArrivalDirection, ct);
+
+            // Record send metrics
+            stopwatch.Stop();
+            AgentMetrics.RecordEventPublished(typeof(TEvent).Name, Id.ToString());
+            AgentMetrics.EventPublishLatency.Record(stopwatch.ElapsedMilliseconds,
+                new KeyValuePair<string, object?>("event.type", typeof(TEvent).Name),
+                new KeyValuePair<string, object?>("agent.id", Id.ToString()),
+                new KeyValuePair<string, object?>("mode", "point-to-point"));
+
+            return eventId;
+        }
+        catch (Exception ex)
+        {
+            // Record exception metrics
+            AgentMetrics.RecordException(ex.GetType().Name, Id.ToString(), "SendToEvent");
             throw;
         }
     }

@@ -162,6 +162,15 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
         return await PublishEventAsync(evt, direction, ct);
     }
 
+    async Task<string> IEventPublisher.SendToAsync<TEvent>(
+        Guid targetAgentId,
+        TEvent evt,
+        EventDirection onArrivalDirection,
+        CancellationToken ct)
+    {
+        return await SendToAsync(targetAgentId, evt, onArrivalDirection, ct);
+    }
+
     // ============ Event Publishing and Routing ============
 
     public virtual async Task<string> PublishEventAsync<TEvent>(
@@ -213,11 +222,68 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
     }
 
     /// <summary>
+    /// Point-to-point send - Direct delivery to specified agent
+    /// </summary>
+    public virtual async Task<string> SendToAsync<TEvent>(
+        Guid targetAgentId,
+        TEvent evt,
+        EventDirection onArrivalDirection = EventDirection.Unspecified,
+        CancellationToken ct = default)
+        where TEvent : IMessage
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        // Create EventEnvelope for point-to-point message
+        var envelope = EventRouter.CreateEventEnvelope(evt, onArrivalDirection);
+        envelope.TargetAgentId = targetAgentId.ToString();
+        envelope.OnArrivalDirection = onArrivalDirection;
+
+        using var scope = LoggingScope.CreateAgentScope(
+            Logger,
+            Id,
+            "SendTo",
+            new Dictionary<string, object>
+            {
+                ["EventId"] = envelope.Id,
+                ["EventType"] = typeof(TEvent).Name,
+                ["TargetAgentId"] = targetAgentId.ToString(),
+                ["OnArrivalDirection"] = onArrivalDirection.ToString()
+            });
+
+        Logger.LogDebug(
+            "Agent {AgentId} sending P2P event {EventId} to {TargetAgentId}, onArrival={OnArrivalDirection}",
+            Id, envelope.Id, targetAgentId, onArrivalDirection);
+
+        try
+        {
+            // Direct send to target actor (no broadcast)
+            await SendEventToActorAsync(targetAgentId, envelope, ct);
+
+            // Record metrics
+            stopwatch.Stop();
+            AgentMetrics.RecordEventPublished(typeof(TEvent).Name, Id.ToString());
+            AgentMetrics.EventPublishLatency.Record(stopwatch.ElapsedMilliseconds,
+                new KeyValuePair<string, object?>("event.type", typeof(TEvent).Name),
+                new KeyValuePair<string, object?>("agent.id", Id.ToString()),
+                new KeyValuePair<string, object?>("mode", "point-to-point"),
+                new KeyValuePair<string, object?>("target", targetAgentId.ToString()));
+
+            return envelope.Id;
+        }
+        catch (Exception ex)
+        {
+            AgentMetrics.RecordException(ex.GetType().Name, Id.ToString(), "ActorSendTo");
+            throw;
+        }
+    }
+
+    /// <summary>
     /// Handle received event (standard flow)
     /// </summary>
     public virtual async Task HandleEventAsync(EventEnvelope envelope, CancellationToken ct = default)
     {
         var eventType = envelope.Payload?.TypeUrl?.Split('/').LastOrDefault() ?? "Unknown";
+        var isPointToPoint = !string.IsNullOrEmpty(envelope.TargetAgentId);
 
         using var scope = LoggingScope.CreateEventHandlingScope(
             Logger,
@@ -226,7 +292,8 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
             eventType,
             envelope.CorrelationId);
 
-        Logger.LogDebug("Agent {AgentId} handling event {EventId}", Id, envelope.Id);
+        Logger.LogDebug("Agent {AgentId} handling event {EventId} (P2P={IsP2P})", 
+            Id, envelope.Id, isPointToPoint);
 
         // Use improved event deduplication mechanism
         if (!await EventDeduplicator.TryRecordEventAsync(envelope.Id))
@@ -261,17 +328,16 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
             stopwatch.Stop();
             AgentMetrics.RecordEventHandled(eventType, Id.ToString(), stopwatch.ElapsedMilliseconds);
 
-            // Determine if propagation should continue
-            // If this is a self-published event (PublisherId == Id), it has already been propagated in RouteEventAsync
-            // If this is a received event (PublisherId != Id), propagation should continue
-            bool isInitialPublisher = envelope.PublisherId == Id.ToString();
-
-            if (!isInitialPublisher)
+            // Handle propagation based on message type
+            if (isPointToPoint)
             {
-                // Received event, continue propagation (recursive propagation)
-                Logger.LogDebug("Agent {AgentId} continuing propagation of event {EventId} from {PublisherId}",
-                    Id, envelope.Id, envelope.PublisherId);
-                await EventRouter.ContinuePropagationAsync(envelope, ct);
+                // Point-to-point message: check OnArrivalDirection
+                await HandlePointToPointPropagationAsync(envelope, ct);
+            }
+            else
+            {
+                // Broadcast message: standard propagation
+                await HandleBroadcastPropagationAsync(envelope, ct);
             }
         }
         catch (Exception ex)
@@ -279,6 +345,53 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
             // Record exception metrics
             AgentMetrics.RecordException(ex.GetType().Name, Id.ToString(), "ActorHandleEvent");
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Handle point-to-point message propagation based on OnArrivalDirection
+    /// </summary>
+    private async Task HandlePointToPointPropagationAsync(EventEnvelope envelope, CancellationToken ct)
+    {
+        // Check OnArrivalDirection to determine post-arrival behavior
+        if (envelope.OnArrivalDirection == EventDirection.Unspecified)
+        {
+            // Pure P2P: no propagation, message stops here
+            Logger.LogDebug("P2P event {EventId} arrived, no further propagation", envelope.Id);
+            return;
+        }
+
+        // Create new envelope for propagation (convert from P2P to broadcast)
+        var propagationEnvelope = envelope.Clone();
+        propagationEnvelope.TargetAgentId = string.Empty; // Clear P2P target
+        propagationEnvelope.Direction = envelope.OnArrivalDirection;
+        propagationEnvelope.OnArrivalDirection = EventDirection.Unspecified;
+        propagationEnvelope.PublisherId = Id.ToString(); // This agent becomes the new publisher
+
+        Logger.LogDebug(
+            "P2P event {EventId} arrived, continuing as broadcast with direction {Direction}",
+            envelope.Id, envelope.OnArrivalDirection);
+
+        // Route as broadcast from this point
+        await EventRouter.RouteEventAsync(propagationEnvelope, ct);
+    }
+
+    /// <summary>
+    /// Handle broadcast message propagation (standard hierarchical flow)
+    /// </summary>
+    private async Task HandleBroadcastPropagationAsync(EventEnvelope envelope, CancellationToken ct)
+    {
+        // Determine if propagation should continue
+        // If this is a self-published event (PublisherId == Id), it has already been propagated in RouteEventAsync
+        // If this is a received event (PublisherId != Id), propagation should continue
+        bool isInitialPublisher = envelope.PublisherId == Id.ToString();
+
+        if (!isInitialPublisher)
+        {
+            // Received event, continue propagation (recursive propagation)
+            Logger.LogDebug("Agent {AgentId} continuing propagation of event {EventId} from {PublisherId}",
+                Id, envelope.Id, envelope.PublisherId);
+            await EventRouter.ContinuePropagationAsync(envelope, ct);
         }
     }
 

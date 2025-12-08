@@ -96,7 +96,7 @@ public class OrleansGAgentActor : IGAgentActor
     }
 
     /// <summary>
-    /// Publish event - Forward to Grain
+    /// Publish event - Forward to Grain (broadcast mode)
     /// </summary>
     public async Task<string> PublishEventAsync<TEvent>(
         TEvent evt, 
@@ -124,6 +124,46 @@ public class OrleansGAgentActor : IGAgentActor
         codedOutput.Flush();
 
         await _grain!.HandleEventAsync(stream.ToArray());
+
+        return envelope.Id;
+    }
+
+    /// <summary>
+    /// Point-to-point send - Direct delivery to target Grain
+    /// </summary>
+    public async Task<string> SendToAsync<TEvent>(
+        Guid targetAgentId,
+        TEvent evt,
+        EventDirection onArrivalDirection = EventDirection.Unspecified,
+        CancellationToken ct = default)
+        where TEvent : IMessage
+    {
+        // Create EventEnvelope for P2P
+        var envelope = new EventEnvelope
+        {
+            Id = Guid.NewGuid().ToString(),
+            PublisherId = _id.ToString(),
+            Payload = Google.Protobuf.WellKnownTypes.Any.Pack(evt),
+            Direction = onArrivalDirection,
+            Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
+            CorrelationId = Guid.NewGuid().ToString(),
+            TargetAgentId = targetAgentId.ToString(),
+            OnArrivalDirection = onArrivalDirection
+        };
+
+        Logger.LogDebug(
+            "Actor {ActorId} sending P2P event {EventId} to {TargetAgentId}, onArrival={OnArrivalDirection}",
+            _id, envelope.Id, targetAgentId, onArrivalDirection);
+
+        // Serialize envelope
+        using var stream = new MemoryStream();
+        using var codedOutput = new CodedOutputStream(stream);
+        envelope.WriteTo(codedOutput);
+        codedOutput.Flush();
+
+        // Direct RPC to target Grain (no broadcast)
+        var targetGrain = _grainFactory.GetGrain<IGAgentGrain>(targetAgentId.ToString());
+        await targetGrain.HandleEventAsync(stream.ToArray());
 
         return envelope.Id;
     }

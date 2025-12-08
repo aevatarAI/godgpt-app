@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workflow Visualizer | Cognitive Mesh</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="workflow.css">
+</head>
+<body class="workflow-page">
+    <!-- ═══════════════════════════════════════════════════════════════════════════
+         HEADER
+         ═══════════════════════════════════════════════════════════════════════════ -->
+    <header class="workflow-header">
+        <div class="header-left">
+            <a href="/" class="back-btn">← Back</a>
+            <h1 class="workflow-title">
+                <span class="title-icon">🔀</span>
+                <span id="wf-name">Workflow</span>
+                <span class="title-version" id="wf-version">v2</span>
+            </h1>
+        </div>
+        <div class="header-center">
+            <div class="run-selector">
+                <label>Project:</label>
+                <select id="project-select">
+                    <option value="">Select project...</option>
+                </select>
+                <label>Run:</label>
+                <select id="run-select">
+                    <option value="">Select run...</option>
+                </select>
+                <button class="btn-connect" onclick="connectToRun()">Connect</button>
+            </div>
+        </div>
+        <div class="header-right">
+            <div class="zoom-controls">
+                <button onclick="zoomGraph(-0.1)" title="Zoom Out">−</button>
+                <span id="zoom-level">100%</span>
+                <button onclick="zoomGraph(0.1)" title="Zoom In">+</button>
+                <button onclick="resetZoom()" title="Reset">⟲</button>
+                <button onclick="fitToScreen()" title="Fit">⊡</button>
+            </div>
+            <div class="layout-controls">
+                <button class="layout-btn active" data-layout="dagre" onclick="setLayout('dagre')">DAG</button>
+                <button class="layout-btn" data-layout="tree" onclick="setLayout('tree')">Tree</button>
+                <button class="layout-btn" data-layout="timeline" onclick="setLayout('timeline')">Timeline</button>
+                <button class="layout-btn reset-btn" onclick="resetNodePositions()" title="Reset positions">↺</button>
+            </div>
+        </div>
+    </header>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════════
+         MAIN CONTENT
+         ═══════════════════════════════════════════════════════════════════════════ -->
+    <main class="workflow-main">
+        <!-- Left Panel: Workflow Structure -->
+        <aside class="sidebar-left">
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>📋 STRUCTURE</h3>
+                    <button class="btn-icon" onclick="toggleStructure()" title="Toggle">▼</button>
+                </div>
+                <div class="panel-content" id="structure-tree">
+                    <div class="loading-placeholder">Loading workflow structure...</div>
+                </div>
+            </div>
+            <div class="panel">
+                <div class="panel-header">
+                    <h3>📊 STATS</h3>
+                </div>
+                <div class="panel-content">
+                    <div class="stat-row">
+                        <span class="stat-label">Status</span>
+                        <span class="stat-value" id="stat-status">-</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Steps</span>
+                        <span class="stat-value"><span id="stat-completed">0</span>/<span id="stat-total">0</span></span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">LLM Calls</span>
+                        <span class="stat-value" id="stat-llm-calls">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Tokens</span>
+                        <span class="stat-value" id="stat-tokens">0</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Duration</span>
+                        <span class="stat-value" id="stat-duration">-</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Center: Graph Canvas -->
+        <div class="graph-container">
+            <div class="graph-canvas" id="graph-canvas">
+                <svg id="graph-svg" width="100%" height="100%">
+                    <!-- 连线层 -->
+                    <g id="edges-layer"></g>
+                    <!-- 节点层 -->
+                    <g id="nodes-layer"></g>
+                </svg>
+                <!-- 悬浮提示 -->
+                <div id="node-tooltip" class="node-tooltip hidden"></div>
+            </div>
+            <!-- 缩略图 -->
+            <div class="minimap" id="minimap">
+                <canvas id="minimap-canvas" width="200" height="150"></canvas>
+                <div class="minimap-viewport" id="minimap-viewport"></div>
+            </div>
+            <!-- 空状态 -->
+            <div class="empty-state" id="empty-state">
+                <div class="empty-icon">🔀</div>
+                <div class="empty-title">No Workflow Running</div>
+                <div class="empty-text">Select a project and run from the dropdowns above, or go back to start a new run.</div>
+                <a href="/" class="btn-primary">← Go to Dashboard</a>
+            </div>
+        </div>
+
+        <!-- Right Panel: Tabs for Detail & Conversation -->
+        <aside class="sidebar-right" id="detail-sidebar">
+            <!-- Tab Header -->
+            <div class="sidebar-tabs">
+                <button class="tab-btn active" data-tab="detail" onclick="switchTab('detail')">
+                    🔲 Node Detail
+                </button>
+                <button class="tab-btn" data-tab="conversation" onclick="switchTab('conversation')">
+                    💬 Conversations
+                </button>
+            </div>
+            
+            <!-- Tab: Node Detail -->
+            <div class="tab-content active" id="tab-detail">
+                <div class="detail-header" id="detail-header">
+                    <span class="detail-title" id="detail-title">Select a Node</span>
+                </div>
+                <div class="panel-content" id="detail-content">
+                    <div class="detail-placeholder">
+                        Click a node in the graph to view details
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Tab: Conversation Stream -->
+            <div class="tab-content" id="tab-conversation">
+                <div class="conversation-stream" id="conversation-stream">
+                    <div class="conversation-empty">
+                        <div class="empty-icon">💬</div>
+                        <div class="empty-text">LLM conversations will appear here as the workflow runs</div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- ═══════════════════════════════════════════════════════════════════════════
+         FOOTER
+         ═══════════════════════════════════════════════════════════════════════════ -->
+    <footer class="workflow-footer">
+        <div class="footer-left">
+            <span class="connection-status" id="connection-status">
+                <span class="status-dot disconnected"></span>
+                Disconnected
+            </span>
+        </div>
+        <div class="footer-center">
+            <div class="legend">
+                <span class="legend-item"><span class="legend-dot pending"></span>Pending</span>
+                <span class="legend-item"><span class="legend-dot running"></span>Running</span>
+                <span class="legend-item"><span class="legend-dot completed"></span>Completed</span>
+                <span class="legend-item"><span class="legend-dot failed"></span>Failed</span>
+            </div>
+        </div>
+        <div class="footer-right">
+            <span id="node-count">0 nodes</span>
+            <span id="edge-count">0 edges</span>
+        </div>
+    </footer>
+
+    <script src="workflow.js"></script>
+</body>
+</html>
+

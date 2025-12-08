@@ -401,7 +401,18 @@ public class PerformanceTests(CoreTestFixture fixture, ITestOutputHelper output)
             where TEvent : IMessage
         {
             await _onPublish(evt, direction);
-            return Guid.NewGuid().ToString(); // Return a mock event ID
+            return Guid.NewGuid().ToString();
+        }
+
+        public async Task<string> SendToAsync<TEvent>(
+            Guid targetAgentId,
+            TEvent evt,
+            EventDirection onArrivalDirection = EventDirection.Unspecified,
+            CancellationToken ct = default)
+            where TEvent : IMessage
+        {
+            await _onPublish(evt, onArrivalDirection);
+            return Guid.NewGuid().ToString();
         }
     }
 }

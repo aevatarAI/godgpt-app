@@ -1,0 +1,22 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROJECT: 书店变革
+#  ID: bookstore-transform
+#  Strategy: UotTransformative
+# ═══════════════════════════════════════════════════════════════════════════
+
+id: bookstore-transform
+name: 书店变革
+description: 挑战关于书店的隐藏假设，探索颠覆性商业模式
+icon: "💥"
+strategy: UotTransformative
+task: |
+  Challenge hidden assumptions about what a bookstore must be. 
+  How can we fundamentally reimagine the concept of a bookstore for the digital age?
+options:
+  domainHint: "retail, business strategy, community, digital transformation"
+  maxAnalogies: 5
+  maxCandidates: 10
+  maxRuleSets: 4
+  mutationsPerSet: 3
+  minRadicality: 0.6
+

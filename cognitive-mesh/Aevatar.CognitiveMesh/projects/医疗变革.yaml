@@ -1,0 +1,22 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROJECT: 医疗变革
+#  ID: healthcare-transform
+#  Strategy: UotTransformative
+# ═══════════════════════════════════════════════════════════════════════════
+
+id: healthcare-transform
+name: 医疗变革
+description: 挑战医疗服务的根本假设，探索未来健康模式
+icon: "🏥"
+strategy: UotTransformative
+task: |
+  Challenge the hidden assumptions about healthcare delivery. 
+  What if health wasn't about treating illness but something fundamentally different?
+options:
+  domainHint: "healthcare, prevention, technology, community health"
+  maxAnalogies: 5
+  maxCandidates: 10
+  maxRuleSets: 3
+  mutationsPerSet: 3
+  minRadicality: 0.65
+

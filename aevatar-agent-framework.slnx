@@ -9,18 +9,23 @@
   </Folder>
   <Folder Name="/apps/">
     <Project Path="apps/Aevatar.AppHost/Aevatar.AppHost.csproj" />
+    <Project Path="apps/CognitiveMesh.AppHost/CognitiveMesh.AppHost.csproj" />
     <Project Path="apps/MakerSystem.AppHost/MakerSystem.AppHost.csproj" />
   </Folder>
   <Folder Name="/cognitive-mesh/">
+    <Project Path="cognitive-mesh/Aevatar.CognitiveMesh.Abstractions/Aevatar.CognitiveMesh.Abstractions.csproj" />
     <Project Path="cognitive-mesh/Aevatar.CognitiveMesh.Dsl/Aevatar.CognitiveMesh.Dsl.csproj" />
-    <Project Path="cognitive-mesh\Aevatar.CognitiveMesh.AppHost\Aevatar.CognitiveMesh.AppHost.csproj" />
-    <Project Path="cognitive-mesh\Aevatar.CognitiveMesh\Aevatar.CognitiveMesh.csproj" />
+    <Project Path="cognitive-mesh/Aevatar.CognitiveMesh/Aevatar.CognitiveMesh.csproj" />
+    <Project Path="cognitive-mesh/Aevatar.PaperReview/Aevatar.PaperReview.csproj" />
     <File Path="cognitive-mesh/README.md" />
   </Folder>
   <Folder Name="/cognitive-mesh/docs/">
+    <File Path="cognitive-mesh\docs\DESIGN_DECISIONS.md" />
     <File Path="cognitive-mesh\docs\DSL.md" />
+    <File Path="cognitive-mesh\docs\IMPLEMENTATION_STATUS.md" />
     <File Path="cognitive-mesh\docs\PRD.md" />
     <File Path="cognitive-mesh\docs\README.md" />
+    <File Path="cognitive-mesh\docs\ROADMAP.md" />
     <File Path="cognitive-mesh\docs\CONCEPT.md" />
     <File Path="cognitive-mesh\docs\ARCHITECTURE.md" />
   </Folder>
@@ -62,6 +67,7 @@
     <Project Path="src\Aevatar.Agents.AI.MEAI\Aevatar.Agents.AI.MEAI.csproj" />
     <Project Path="src\Aevatar.Agents.AI.WithProcessStrategy\Aevatar.Agents.AI.WithProcessStrategy.csproj" />
     <Project Path="src\Aevatar.Agents.AI.WithTool\Aevatar.Agents.AI.WithTool.csproj" />
+    <Project Path="src\Aevatar.Agents.Cognitive\Aevatar.Agents.Cognitive.csproj" Type="Classic C#" />
     <Project Path="src\Aevatar.Agents.Core\Aevatar.Agents.Core.csproj" />
     <Project Path="src\Aevatar.Agents.CreativeReasoning\Aevatar.Agents.CreativeReasoning.csproj" />
     <Project Path="src\Aevatar.Agents.Maker\Aevatar.Agents.Maker.csproj" />
@@ -90,6 +96,7 @@
     <Project Path="test\Aevatar.Agents.TestBase\Aevatar.Agents.TestBase.csproj" />
     <Project Path="test\Aevatar.Agents.Twitter.Tests\Aevatar.Agents.Twitter.Tests.csproj" />
     <Project Path="test\Aevatar.Agents.Workflow.Tests\Aevatar.Agents.Workflow.Tests.csproj" />
+    <Project Path="test\Aevatar.CognitiveMesh.Dsl.Tests\Aevatar.CognitiveMesh.Dsl.Tests.csproj" Type="Classic C#" />
     <File Path="test/README.md" />
     <File Path="test\UnitTestDesign.md" />
   </Folder>

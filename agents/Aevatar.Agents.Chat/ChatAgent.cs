@@ -1,3 +1,4 @@
+using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Attributes;
 using Aevatar.Agents.AI;
 using Aevatar.Agents.AI.Abstractions.Configuration;
@@ -37,7 +38,7 @@ public class ChatAgent : AIGAgentBase<ChatState, ChatConfig>
         SystemPrompt = $"You are a {CustomConfig.Persona}. {CustomConfig.WelcomeMessage}";
         Logger.LogInformation("ChatAgent {AgentId} activated with persona {Persona}", Id, CustomConfig.Persona);
 
-        await InitializeAsync("deepseek", cancellationToken: ct);
+        await InitializeAsync(AevatarAgentsConstants.DefaultProviderName, cancellationToken: ct);
     }
 
     [EventHandler(AllowSelfHandling = true)]

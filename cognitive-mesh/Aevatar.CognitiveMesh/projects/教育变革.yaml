@@ -1,0 +1,22 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROJECT: 教育变革
+#  ID: education-transform
+#  Strategy: UotTransformative
+# ═══════════════════════════════════════════════════════════════════════════
+
+id: education-transform
+name: 教育变革
+description: 挑战传统教育的隐藏假设，重新定义学习
+icon: "🚀"
+strategy: UotTransformative
+task: |
+  Challenge hidden assumptions about education. 
+  What if learning didn't require classrooms, grades, or even teachers in the traditional sense?
+options:
+  domainHint: "education, technology, cognitive science, game design"
+  maxAnalogies: 5
+  maxCandidates: 10
+  maxRuleSets: 3
+  mutationsPerSet: 4
+  minRadicality: 0.7
+

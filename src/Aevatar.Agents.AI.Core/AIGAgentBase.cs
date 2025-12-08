@@ -1,7 +1,9 @@
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.Agents.AI.Abstractions;
 using Aevatar.Agents.AI.Abstractions.Configuration;
 using Aevatar.Agents.AI.Abstractions.Providers;
@@ -647,13 +649,13 @@ public abstract class AIGAgentBase : GAgentBase<AevatarAIAgentState, AevatarAIAg
             TokensUsed = tokensUsed,
             Model = Config.Model,
             Temperature = Config.Temperature,
-            Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)
+            Timestamp = TimestampHelper.GetUtcNow()
         };
 
         // Add AI-specific metadata
         var eventMetadata = metadata ?? new Dictionary<string, string>();
         eventMetadata["ai_model"] = Config.Model;
-        eventMetadata["ai_temperature"] = Config.Temperature.ToString();
+        eventMetadata["ai_temperature"] = Config.Temperature.ToString(CultureInfo.InvariantCulture);
 
         RaiseEvent(aiEvent, eventMetadata);
     }

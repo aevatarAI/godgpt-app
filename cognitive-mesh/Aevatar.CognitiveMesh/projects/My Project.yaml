@@ -1,0 +1,15 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROJECT: My Project
+#  ID: p_59d6535d01
+#  Strategy: Direct
+# ═══════════════════════════════════════════════════════════════════════════
+id: p_59d6535d01
+name: My Project
+description: ''
+icon: ❓
+strategy: Direct
+task: QA task
+options:
+  providerName: deepseek
+taskTemplate: QA
+createdAt: 2025-12-04T03:54:03.1579490Z

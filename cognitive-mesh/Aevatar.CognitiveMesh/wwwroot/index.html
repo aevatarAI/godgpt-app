@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>COGNITIVE MESH</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="layout">
+        <!-- ═══════════════════════════════════════════════════════════
+             SIDEBAR
+             ═══════════════════════════════════════════════════════════ -->
+        <aside class="sidebar">
+            <div class="brand">
+                <span class="brand-icon">◈</span>
+                <div class="brand-text">
+                    <span class="brand-name">COGNITIVE</span>
+                    <span class="brand-sub">MESH</span>
+                </div>
+            </div>
+
+            <!-- Strategy Filter -->
+            <div class="filter-section">
+                <label>STRATEGY</label>
+                <select id="strategy-filter" onchange="filterProjects()">
+                    <option value="all">All Strategies</option>
+                </select>
+            </div>
+
+            <!-- Project List -->
+            <nav id="project-nav" class="nav-list"></nav>
+
+            <!-- New Project Button -->
+            <button id="btn-new-project" class="btn-new" onclick="showCreateModal()">
+                <span>+</span> NEW_PROJECT
+            </button>
+
+            <!-- System Status -->
+            <div class="sys-status">
+                <div class="sys-row">
+                    <span>SYSTEM</span>
+                    <span class="status-dot online"></span>
+                </div>
+                <div class="sys-row">
+                    <span>STRATEGIES</span>
+                    <span id="strategy-count" class="status-text">0</span>
+                </div>
+                <!-- Theme Toggle -->
+                <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+                    <div class="theme-toggle-track">
+                        <div class="theme-toggle-thumb">
+                            <span id="theme-icon">🌙</span>
+                        </div>
+                    </div>
+                    <span class="theme-toggle-label" id="theme-label">DARK</span>
+                </button>
+            </div>
+        </aside>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             MAIN VIEWPORT
+             ═══════════════════════════════════════════════════════════ -->
+        <main class="main-viewport">
+            <!-- Dashboard (visible when project selected) -->
+            <div id="dashboard" class="dashboard hidden">
+                <!-- Header -->
+                <header class="hud-header">
+                    <div class="hud-title-group">
+                        <div class="hud-title-row">
+                            <h1 id="project-name">PROJECT_NAME</h1>
+                            <button id="btn-config" class="btn-config-icon" onclick="showConfigModal()" title="View Config">
+                                ⚙️
+                            </button>
+                        </div>
+                        <div class="hud-meta">
+                            <span id="project-id" class="meta-id">ID: 0000</span>
+                            <span id="project-strategy" class="meta-strategy">MAKER</span>
+                        </div>
+                    </div>
+                    <div class="hud-status-bar">
+                        <span class="status-chip" id="chip-status">IDLE</span>
+                        <span class="status-chip" id="chip-phase">-</span>
+                        <span class="status-chip depth" id="chip-depth">D:0</span>
+                        <span class="status-chip tokens" id="chip-tokens">0 tok</span>
+                        <span class="status-chip calls" id="chip-calls">0 calls</span>
+                    </div>
+                    <div class="hud-controls">
+                        <button id="btn-history" class="btn-secondary" onclick="showProjectDetail()">
+                            <span class="btn-icon">📂</span> HISTORY
+                        </button>
+                        <button id="btn-start" class="btn-action" onclick="startRun()">
+                            <span class="btn-icon">⚡</span> RUN
+                        </button>
+                    </div>
+                </header>
+
+                <!-- Progress Bar -->
+                <div class="progress-container" id="progress-container" style="display:none">
+                    <div class="progress-bar" id="progress-bar"></div>
+                    <span class="progress-label" id="progress-label">0%</span>
+                </div>
+
+                <!-- Workspace -->
+                <div class="workspace">
+                    <!-- Left Panel -->
+                    <div class="panel-col">
+                        <!-- Task Panel (MAKER) / Analogy Panel (UoT) -->
+                        <section class="terminal-window" id="panel-tasks">
+                            <div class="term-header">
+                                <span class="term-title" id="panel-tasks-title">>> STRATEGIC_PLANNING</span>
+                            </div>
+                            <div class="term-body">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th width="80">ID</th>
+                                            <th>DESCRIPTION</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="table-tasks"></tbody>
+                                </table>
+                            </div>
+                        </section>
+
+                        <!-- Consensus Panel (MAKER) / Candidates Panel (UoT) -->
+                        <section class="terminal-window" id="panel-consensus">
+                            <div class="term-header">
+                                <span class="term-title" id="panel-consensus-title">>> CONSENSUS_PROTOCOL</span>
+                                <span class="term-badge" id="consensus-mode">-</span>
+                            </div>
+                            <div class="term-body">
+                                <table class="data-table">
+                                    <thead>
+                                        <tr>
+                                            <th width="100">CLUSTER</th>
+                                            <th width="80">VOTES</th>
+                                            <th>CONTENT</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="table-consensus"></tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
+
+                    <!-- Right Panel -->
+                    <div class="panel-col">
+                        <section class="terminal-window flex-grow">
+                            <div class="term-header tab-header">
+                                <button class="tab-btn active" data-target="view-timeline">SYSTEM_LOG</button>
+                                <button class="tab-btn" data-target="view-workflow">WORKFLOW</button>
+                                <button class="tab-btn" data-target="view-workers">WORKERS</button>
+                                <button class="tab-btn" data-target="view-files">FILES</button>
+                                <button class="tab-btn" data-target="view-result">RESULT</button>
+                            </div>
+                            <div class="term-content-wrapper">
+                                <!-- Timeline View -->
+                                <div id="view-timeline" class="term-view active">
+                                    <ul id="log-stream" class="log-list"></ul>
+                                </div>
+                                <!-- Workflow Visualization View (v2) -->
+                                <div id="view-workflow" class="term-view">
+                                    <div class="workflow-container">
+                                        <div class="workflow-header">
+                                            <span class="workflow-name" id="workflow-name">-</span>
+                                            <span class="workflow-version" id="workflow-version">-</span>
+                                            <div class="workflow-header-actions">
+                                                <button class="btn-mini" onclick="zoomWorkflow(-0.1)" title="Zoom Out">−</button>
+                                                <button class="btn-mini" onclick="zoomWorkflow(0.1)" title="Zoom In">+</button>
+                                                <button class="btn-mini" onclick="resetWorkflowZoom()" title="Reset">⟲</button>
+                                                <button class="btn-mini btn-fullscreen" onclick="openWorkflowPage()" title="Open Full Page Visualizer">⛶</button>
+                                            </div>
+                                        </div>
+                                        <div class="workflow-main">
+                                            <!-- 节点图画布 -->
+                                            <div class="workflow-canvas" id="workflow-canvas">
+                                                <div class="workflow-graph" id="workflow-graph">
+                                                    <div class="workflow-placeholder">
+                                                        <div class="placeholder-icon">🔧</div>
+                                                        <div class="placeholder-text">Select a <strong>Cognitive (v2)</strong> project</div>
+                                                        <div class="placeholder-hint">Click RUN to see workflow visualization</div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                            <!-- 节点详情侧边栏 -->
+                                            <div class="workflow-detail-panel hidden" id="workflow-detail-panel">
+                                                <div class="detail-panel-header">
+                                                    <div class="detail-panel-title">
+                                                        <span class="detail-node-type" id="detail-node-type">llm_call</span>
+                                                        <span class="detail-node-id" id="detail-node-id">step_id</span>
+                                                    </div>
+                                                    <button class="btn-close-panel" onclick="hideNodeDetail()">×</button>
+                                                </div>
+                                                <div class="detail-panel-status">
+                                                    <div class="status-badge" id="detail-status">Running</div>
+                                                    <div class="status-meta">
+                                                        <span id="detail-progress">50%</span>
+                                                        <span id="detail-duration">2.3s</span>
+                                                    </div>
+                                                </div>
+                                                <div class="detail-panel-tabs">
+                                                    <button class="detail-tab active" data-tab="detail-conversation" onclick="switchDetailTab('detail-conversation')">💬 对话</button>
+                                                    <button class="detail-tab" data-tab="detail-stats" onclick="switchDetailTab('detail-stats')">📊 统计</button>
+                                                    <button class="detail-tab" data-tab="detail-output" onclick="switchDetailTab('detail-output')">📤 输出</button>
+                                                </div>
+                                                <!-- 对话历史 Tab -->
+                                                <div class="detail-tab-content active" id="detail-conversation">
+                                                    <div class="conversation-list" id="conversation-list">
+                                                        <div class="conversation-empty">暂无对话记录</div>
+                                                    </div>
+                                                </div>
+                                                <!-- 统计 Tab -->
+                                                <div class="detail-tab-content" id="detail-stats">
+                                                    <div class="stats-grid">
+                                                        <div class="stat-card">
+                                                            <span class="stat-card-label">LLM Calls</span>
+                                                            <span class="stat-card-value" id="detail-llm-calls">0</span>
+                                                        </div>
+                                                        <div class="stat-card">
+                                                            <span class="stat-card-label">Tokens</span>
+                                                            <span class="stat-card-value" id="detail-tokens">0</span>
+                                                        </div>
+                                                        <div class="stat-card">
+                                                            <span class="stat-card-label">投票轮次</span>
+                                                            <span class="stat-card-value" id="detail-vote-round">-</span>
+                                                        </div>
+                                                        <div class="stat-card">
+                                                            <span class="stat-card-label">并行任务</span>
+                                                            <span class="stat-card-value" id="detail-parallel">-</span>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                                <!-- 输出 Tab -->
+                                                <div class="detail-tab-content" id="detail-output">
+                                                    <pre class="output-content" id="detail-output-content">暂无输出</pre>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="workflow-legend">
+                                            <span class="legend-item"><span class="legend-dot pending"></span>Pending</span>
+                                            <span class="legend-item"><span class="legend-dot running"></span>Running</span>
+                                            <span class="legend-item"><span class="legend-dot completed"></span>Completed</span>
+                                            <span class="legend-item"><span class="legend-dot failed"></span>Failed</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Workers View -->
+                                <div id="view-workers" class="term-view">
+                                    <div id="worker-grid" class="worker-grid"></div>
+                                </div>
+                                <!-- Files View -->
+                                <div id="view-files" class="term-view">
+                                    <div class="file-explorer">
+                                        <div class="file-list" id="file-list"></div>
+                                        <div class="file-preview" id="file-preview">
+                                            <div class="preview-placeholder">[ SELECT_FILE ]</div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <!-- Result View -->
+                                <div id="view-result" class="term-view">
+                                    <div id="final-result" class="markdown-content"></div>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ═══════════════════════════════════════════════════════════
+                 PROJECT DETAIL VIEW (History & Files)
+                 ═══════════════════════════════════════════════════════════ -->
+            <div id="project-detail" class="project-detail hidden">
+                <!-- Header -->
+                <header class="detail-header">
+                    <button class="btn-back" onclick="hideProjectDetail()">
+                        <span>←</span> BACK
+                    </button>
+                    <div class="detail-title-group">
+                        <h1 id="detail-project-name">PROJECT_NAME</h1>
+                        <span id="detail-project-strategy" class="meta-strategy">MAKER</span>
+                    </div>
+                </header>
+
+                <!-- Detail Content -->
+                <div class="detail-content">
+                    <!-- Left: Run History -->
+                    <section class="detail-panel runs-panel">
+                        <div class="panel-header">
+                            <h3>📜 RUN_HISTORY</h3>
+                            <span id="runs-count" class="badge">0</span>
+                        </div>
+                        <div class="runs-list" id="runs-list">
+                            <div class="runs-empty">No runs yet. Click RUN to start.</div>
+                        </div>
+                    </section>
+
+                    <!-- Right: Selected Run Details -->
+                    <section class="detail-panel run-detail-panel">
+                        <div class="panel-header">
+                            <h3 id="run-detail-title">📁 RUN_DETAILS</h3>
+                        </div>
+                        
+                        <!-- Run Stats -->
+                        <div class="run-stats" id="run-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">STATUS</span>
+                                <span class="stat-value" id="run-stat-status">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">DURATION</span>
+                                <span class="stat-value" id="run-stat-duration">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">LLM_CALLS</span>
+                                <span class="stat-value" id="run-stat-calls">-</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">TOKENS</span>
+                                <span class="stat-value" id="run-stat-tokens">-</span>
+                            </div>
+                        </div>
+
+                        <!-- Tabs -->
+                        <div class="run-tabs">
+                            <button class="run-tab active" data-tab="run-timeline" onclick="switchRunTab('run-timeline')">TIMELINE</button>
+                            <button class="run-tab" data-tab="run-files" onclick="switchRunTab('run-files')">FILES</button>
+                        </div>
+
+                        <!-- Timeline Tab -->
+                        <div id="run-timeline" class="run-tab-content active">
+                            <ul id="run-timeline-list" class="timeline-list"></ul>
+                        </div>
+
+                        <!-- Files Tab -->
+                        <div id="run-files" class="run-tab-content">
+                            <div class="files-browser">
+                                <div class="files-tree" id="run-files-tree"></div>
+                                <div class="files-content" id="run-files-content">
+                                    <div class="content-placeholder">Select a file to preview</div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+                </div>
+            </div>
+
+            <!-- Empty State (Minimal) -->
+            <div id="empty-state" class="empty-state-minimal">
+                <span class="empty-hint">← Select a project to begin</span>
+            </div>
+        </main>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         CREATE PROJECT MODAL
+         ═══════════════════════════════════════════════════════════ -->
+    <div id="modal-overlay" class="modal-overlay hidden" onclick="hideCreateModal()">
+        <div class="modal-dialog" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <span class="modal-title">>> CREATE_PROJECT</span>
+                <button class="modal-close" onclick="hideCreateModal()">×</button>
+            </div>
+            <div class="modal-body">
+                <!-- Strategy Selection -->
+                <div class="form-group">
+                    <label>STRATEGY</label>
+                    <select id="new-strategy" onchange="updateFormForStrategy()">
+                        <option value="Direct">DIRECT - 直接调用 AI</option>
+                        <option value="Maker">MAKER - Consensus (v1)</option>
+                        <option value="UotCombinational">C-UoT - Combinational (v1)</option>
+                        <option value="UotExploratory">E-UoT - Exploratory (v1)</option>
+                        <option value="UotTransformative">T-UoT - Transformative (v1)</option>
+                        <option value="Cognitive">🚀 COGNITIVE DSL - (v2)</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>NAME</label>
+                        <input type="text" id="new-name" value="My Project" />
+                    </div>
+                    <div class="form-group" style="width:80px">
+                        <label>ICON</label>
+                        <input type="text" id="new-icon" value="🔬" />
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>DESCRIPTION</label>
+                    <input type="text" id="new-description" value="" />
+                </div>
+
+                <!-- ═══════════════════════════════════════════════════════════
+                     CONTENT LOADING (New Feature)
+                     ═══════════════════════════════════════════════════════════ -->
+                <div class="form-section">
+                    <h4>📁 CONTENT SOURCE <span class="optional-tag">optional</span></h4>
+                    
+                    <div class="content-source-tabs">
+                        <button type="button" class="source-tab active" data-source="none" onclick="switchContentSource('none')">None</button>
+                        <button type="button" class="source-tab" data-source="upload" onclick="switchContentSource('upload')">Upload</button>
+                        <button type="button" class="source-tab" data-source="path" onclick="switchContentSource('path')">File Path</button>
+                        <button type="button" class="source-tab" data-source="text" onclick="switchContentSource('text')">Direct Text</button>
+                    </div>
+
+                    <!-- Upload Tab -->
+                    <div id="content-upload" class="content-source-panel hidden">
+                        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
+                            <input type="file" id="file-input" multiple accept=".md,.txt,.markdown" style="display:none" onchange="handleFileSelect(event)" />
+                            <div class="upload-icon">📤</div>
+                            <div class="upload-text">Drop files here or click to upload</div>
+                            <div class="upload-hint">.md, .txt supported</div>
+                        </div>
+                        <div id="uploaded-files" class="uploaded-files"></div>
+                        <input type="hidden" id="upload-id" />
+                    </div>
+
+                    <!-- File Path Tab -->
+                    <div id="content-path" class="content-source-panel hidden">
+                        <div class="form-group">
+                            <label>FILE/FOLDER PATH</label>
+                            <input type="text" id="content-file-path" placeholder="/path/to/file.md or /path/to/folder" />
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group" style="flex:1">
+                                <label>EXTENSIONS</label>
+                                <input type="text" id="content-extensions" value=".md,.txt" placeholder=".md,.txt" />
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label>
+                                    <input type="checkbox" id="content-recursive" /> Recursive
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Direct Text Tab -->
+                    <div id="content-text" class="content-source-panel hidden">
+                        <div class="form-group">
+                            <label>DIRECT CONTENT</label>
+                            <textarea id="content-direct" rows="4" placeholder="Paste content directly here..."></textarea>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>CONTENT DESCRIPTION <span class="optional-tag">optional</span></label>
+                        <input type="text" id="content-description" placeholder="e.g., 这是一篇AI论文" />
+                    </div>
+                </div>
+
+                <!-- ═══════════════════════════════════════════════════════════
+                     TASK TEMPLATE (New Feature)
+                     ═══════════════════════════════════════════════════════════ -->
+                <div class="form-section">
+                    <h4>📋 TASK</h4>
+                    
+                    <div class="form-group">
+                        <label>TASK TEMPLATE</label>
+                        <select id="new-task-template" onchange="updateTaskTemplate()">
+                            <option value="Custom">Custom - 自定义</option>
+                            <option value="Summarize">Summarize - 总结要点</option>
+                            <option value="Analyze">Analyze - 深度分析</option>
+                            <option value="Review">Review - 学术评审</option>
+                            <option value="Critique">Critique - 文学批评</option>
+                            <option value="Rewrite">Rewrite - 改写优化</option>
+                            <option value="Continue">Continue - 续写推演</option>
+                            <option value="Extract">Extract - 信息提取</option>
+                            <option value="Compare">Compare - 对比分析</option>
+                            <option value="QA">QA - 问答</option>
+                            <option value="Translate">Translate - 翻译</option>
+                        </select>
+                    </div>
+
+                    <!-- Custom Task -->
+                    <div id="task-custom" class="task-config">
+                        <div class="form-group">
+                            <label>TASK / PROBLEM</label>
+                            <textarea id="new-task" rows="4" placeholder="Describe the task or problem to solve..."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Template-specific Options -->
+                    <div id="task-qa-options" class="task-config hidden">
+                        <div class="form-group">
+                            <label>QUESTION</label>
+                            <input type="text" id="task-question" placeholder="What question to answer?" />
+                        </div>
+                    </div>
+
+                    <div id="task-translate-options" class="task-config hidden">
+                        <div class="form-group">
+                            <label>TARGET LANGUAGE</label>
+                            <input type="text" id="task-target-lang" value="English" />
+                        </div>
+                    </div>
+
+                    <div id="task-extract-options" class="task-config hidden">
+                        <div class="form-group">
+                            <label>EXTRACTION TARGET</label>
+                            <input type="text" id="task-extract-target" placeholder="e.g., 人物关系, 关键数据" />
+                        </div>
+                    </div>
+
+                    <div id="task-continue-options" class="task-config hidden">
+                        <div class="form-group">
+                            <label>CONTINUATION HINT</label>
+                            <input type="text" id="task-continue-hint" placeholder="e.g., 主角需要面对更大挑战" />
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>CUSTOM INSTRUCTION <span class="optional-tag">additional</span></label>
+                        <textarea id="new-custom-instruction" rows="2" placeholder="Additional instructions for the task..."></textarea>
+                    </div>
+                </div>
+
+                <!-- MAKER Options -->
+                <div id="maker-options" class="strategy-options">
+                    <h4>⚙️ MAKER Configuration</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>RELIABILITY</label>
+                            <select id="new-reliability">
+                                <option value="Low">Low (K=1)</option>
+                                <option value="Medium" selected>Medium (K=2)</option>
+                                <option value="High">High (K=3)</option>
+                                <option value="Critical">Critical (K=4)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>MAX_LLM_CALLS</label>
+                            <input type="number" id="new-max-calls" value="500" min="10" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- UoT Common Options -->
+                <div id="uot-options" class="strategy-options hidden">
+                    <h4>⚙️ UoT Configuration</h4>
+                    <div class="form-group">
+                        <label>DOMAIN_HINT</label>
+                        <input type="text" id="new-domain-hint" placeholder="e.g., transportation, business" />
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>MAX_ANALOGIES</label>
+                            <input type="number" id="new-max-analogies" value="5" min="1" max="10" />
+                        </div>
+                        <div class="form-group">
+                            <label>MAX_CANDIDATES</label>
+                            <input type="number" id="new-max-candidates" value="10" min="1" max="20" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- E-UoT Specific Options -->
+                <div id="euot-options" class="strategy-options hidden">
+                    <h4>🔭 E-UoT Exploratory Options</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>MAX_OUTSIDE_THOUGHTS</label>
+                            <input type="number" id="new-max-outside-thoughts" value="10" min="1" max="20" />
+                        </div>
+                        <div class="form-group">
+                            <label>EXPLORATION_DIRECTIONS</label>
+                            <input type="number" id="new-exploration-directions" value="3" min="1" max="10" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- T-UoT Specific Options -->
+                <div id="tuot-options" class="strategy-options hidden">
+                    <h4>💥 T-UoT Transformative Options</h4>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>MAX_RULE_SETS</label>
+                            <input type="number" id="new-max-rule-sets" value="3" min="1" max="10" />
+                        </div>
+                        <div class="form-group">
+                            <label>MIN_RADICALITY (0-1)</label>
+                            <input type="number" id="new-min-radicality" value="0.5" min="0" max="1" step="0.1" />
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Cognitive DSL Options (v2) -->
+                <div id="cognitive-options" class="strategy-options hidden">
+                    <h4>🚀 COGNITIVE DSL Configuration (v2)</h4>
+                    <div class="form-group">
+                        <label>WORKFLOW</label>
+                        <select id="new-cognitive-workflow">
+                            <option value="direct">direct - 直接对话</option>
+                            <option value="maker-v2" selected>maker-v2 - MAKER 共识 (v2)</option>
+                            <option value="uot-combinational-v2">uot-combinational-v2 - 组合创意 (v2)</option>
+                        </select>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>WORKER_COUNT</label>
+                            <input type="number" id="new-cognitive-workers" value="5" min="1" max="20" />
+                        </div>
+                        <div class="form-group">
+                            <label>CONSENSUS_K</label>
+                            <input type="number" id="new-cognitive-k" value="2" min="1" max="10" />
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>MAX_ROUNDS</label>
+                            <input type="number" id="new-cognitive-max-rounds" value="10" min="1" max="50" />
+                        </div>
+                        <div class="form-group">
+                            <label>MAX_DEPTH (递归)</label>
+                            <input type="number" id="new-cognitive-max-depth" value="10" min="1" max="20" />
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>SEMANTIC_SIMILARITY (0-1, 投票聚类)</label>
+                        <input type="number" id="new-cognitive-similarity" value="0.85" min="0" max="1" step="0.05" />
+                    </div>
+                    <p class="option-hint">💡 v2 版本使用 DSL 工作流定义，Coordinator + Worker 真正 Actor 并行</p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="hideCreateModal()">CANCEL</button>
+                <button class="btn-create" onclick="createProject()">CREATE</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════════════════════
+         CONFIG MODAL
+         ═══════════════════════════════════════════════════════════ -->
+    <div id="config-modal-overlay" class="modal-overlay hidden" onclick="hideConfigModal()">
+        <div class="modal-dialog config-modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <span class="modal-title">>> PROJECT_CONFIG</span>
+                <button class="modal-close" onclick="hideConfigModal()">×</button>
+            </div>
+            <div class="modal-body config-body">
+                <div class="config-section">
+                    <h4>📋 TASK</h4>
+                    <pre id="config-task" class="config-pre"></pre>
+                </div>
+                <div class="config-section">
+                    <h4>⚙️ OPTIONS</h4>
+                    <pre id="config-options" class="config-pre"></pre>
+                </div>
+                <div class="config-section">
+                    <h4>📁 CONTENT</h4>
+                    <pre id="config-content" class="config-pre"></pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="hideConfigModal()">CLOSE</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,23 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  ARCHIVED PROJECT: 远程协作·探索
+#  Archived at: 2025-12-04 11:36:40
+#  Original ID: remote-collaboration-explore
+# ═══════════════════════════════════════════════════════════════════════════
+id: remote-collaboration-explore
+name: 远程协作·探索
+description: 探索新概念解决 Zoom 疲劳问题
+icon: "\U0001F52C"
+strategy: UotExploratory
+task: >
+  Design a new approach to remote team collaboration that solves the problem 
+
+  of 'Zoom fatigue' while maintaining team cohesion and productivity. 
+
+  Explore concepts from diverse fields.
+options:
+  domainHint: workplace, communication, psychology, game design, theater
+  maxAnalogies: 5
+  maxCandidates: 10
+  maxOutsideThoughts: 12
+  explorationDirections: 5
+updatedAt: 2025-12-04T03:36:40.5277360Z

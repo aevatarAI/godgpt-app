@@ -41,6 +41,15 @@ message EventEnvelope {
   int32 min_hop_count = 11;
   string message = 12;
   repeated string publishers = 13;
+
+  // Point-to-point communication fields.
+  // Target agent ID for P2P (only set when using SendToAsync)
+  string target_agent_id = 14;
+  
+  // Propagation direction after P2P message arrives at target:
+  // - Unspecified: Pure P2P, only target processes
+  // - Down/Up/Both: Target processes then continues propagation in this direction
+  EventDirection on_arrival_direction = 15;
 }
 
 message SubAgentAdded {

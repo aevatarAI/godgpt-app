@@ -1,0 +1,359 @@
+syntax = "proto3";
+
+package aevatar.agents.cognitive;
+
+option csharp_namespace = "Aevatar.Agents.Cognitive.Messages";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/duration.proto";
+
+// ============================================================
+//  Workflow Definition (AST)
+// ============================================================
+
+message WorkflowDefinition {
+    string name = 1;
+    string version = 2;
+    string description = 3;
+    repeated InputParameter inputs = 4;
+    repeated StepDefinition steps = 5;
+    map<string, string> output = 6;
+}
+
+message InputParameter {
+    string name = 1;
+    string type = 2;
+    bool required = 3;
+    google.protobuf.Value default_value = 4;
+}
+
+message StepDefinition {
+    string id = 1;
+    string type = 2;
+    map<string, google.protobuf.Value> parameters = 3;
+    string store = 4;
+    string condition = 5;
+    repeated StepDefinition if_true = 6;
+    repeated StepDefinition if_false = 7;
+    StepDefinition generator = 8;
+    StepDefinition step = 9;
+}
+
+// ============================================================
+//  Workflow Run State
+// ============================================================
+
+message WorkflowRunState {
+    string run_id = 1;
+    string workflow_name = 2;
+    string project_id = 3;
+    RunStatus status = 4;
+    
+    string current_step = 5;
+    int32 total_steps = 6;
+    int32 completed_steps = 7;
+    
+    map<string, google.protobuf.Value> inputs = 8;
+    repeated AgentRef agents = 9;
+    repeated Checkpoint checkpoints = 10;
+    RunMetrics metrics = 11;
+    
+    google.protobuf.Timestamp created_at = 12;
+    google.protobuf.Timestamp updated_at = 13;
+    google.protobuf.Timestamp paused_at = 14;
+    
+    ErrorInfo error = 15;
+}
+
+enum RunStatus {
+    RUN_STATUS_UNSPECIFIED = 0;
+    RUN_STATUS_RUNNING = 1;
+    RUN_STATUS_PAUSED = 2;
+    RUN_STATUS_COMPLETED = 3;
+    RUN_STATUS_FAILED = 4;
+    RUN_STATUS_CANCELLED = 5;
+}
+
+message AgentRef {
+    string id = 1;
+    string type = 2;
+    AgentStatus status = 3;
+}
+
+enum AgentStatus {
+    AGENT_STATUS_UNSPECIFIED = 0;
+    AGENT_STATUS_ACTIVE = 1;
+    AGENT_STATUS_IDLE = 2;
+    AGENT_STATUS_TERMINATED = 3;
+}
+
+message Checkpoint {
+    string step_id = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    map<string, google.protobuf.Value> variables = 3;
+}
+
+message RunMetrics {
+    int32 total_llm_calls = 1;
+    int32 prompt_tokens = 2;
+    int32 completion_tokens = 3;
+    int32 total_tokens = 4;
+    google.protobuf.Duration duration = 5;
+}
+
+message ErrorInfo {
+    string step_id = 1;
+    string message = 2;
+    google.protobuf.Timestamp timestamp = 3;
+    int32 retries = 4;
+}
+
+// ============================================================
+//  Step Execution Result
+// ============================================================
+
+message StepResult {
+    string step_id = 1;
+    string type = 2;
+    StepStatus status = 3;
+    
+    google.protobuf.Timestamp started_at = 4;
+    google.protobuf.Timestamp completed_at = 5;
+    google.protobuf.Duration duration = 6;
+    
+    google.protobuf.Value input = 7;
+    google.protobuf.Value output = 8;
+    
+    StepMetrics metrics = 9;
+    VotingTrace voting_trace = 10;
+}
+
+enum StepStatus {
+    STEP_STATUS_UNSPECIFIED = 0;
+    STEP_STATUS_PENDING = 1;
+    STEP_STATUS_RUNNING = 2;
+    STEP_STATUS_COMPLETED = 3;
+    STEP_STATUS_FAILED = 4;
+    STEP_STATUS_SKIPPED = 5;
+}
+
+message StepMetrics {
+    int32 llm_calls = 1;
+    int32 prompt_tokens = 2;
+    int32 completion_tokens = 3;
+    int32 total_tokens = 4;
+}
+
+message VotingTrace {
+    int32 rounds = 1;
+    repeated VoteRecord votes = 2;
+    string winner = 3;
+    int32 consensus_at_round = 4;
+}
+
+message VoteRecord {
+    int32 round = 1;
+    string content = 2;
+    string hash = 3;
+}
+
+// ============================================================
+//  Cognitive Agent State (Base)
+// ============================================================
+
+message CognitiveAgentState {
+    string current_run_id = 1;
+    map<string, google.protobuf.Value> workflow_variables = 2;
+    int32 current_depth = 3;
+    int32 max_depth = 4;
+    
+    int32 total_llm_calls = 5;
+    int32 total_prompt_tokens = 6;
+    int32 total_completion_tokens = 7;
+}
+
+// ============================================================
+//  Coordinator State
+// ============================================================
+
+message CognitiveCoordinatorState {
+    string execution_id = 1;
+    string workflow_name = 2;
+    ExecutionStatus status = 3;
+    string current_phase = 4;
+    string current_step_id = 5;
+    
+    int32 current_depth = 6;
+    int32 max_depth = 7;
+    
+    int32 total_llm_calls = 8;
+    int32 total_tokens_used = 9;
+    int32 active_workers = 10;
+    
+    string error = 11;
+}
+
+enum ExecutionStatus {
+    ES_UNSPECIFIED = 0;
+    ES_PENDING = 1;
+    ES_RUNNING = 2;
+    ES_COMPLETED = 3;
+    ES_FAILED = 4;
+    ES_CANCELLED = 5;
+}
+
+// ============================================================
+//  Worker State
+// ============================================================
+
+message CognitiveWorkerState {
+    string worker_id = 1;
+    WorkerStatus status = 2;
+    string current_step_id = 3;
+    int32 total_steps_completed = 4;
+}
+
+enum WorkerStatus {
+    WS_UNSPECIFIED = 0;
+    WS_IDLE = 1;
+    WS_EXECUTING = 2;
+    WS_ERROR = 3;
+}
+
+// ============================================================
+//  Workflow Progress Events
+// ============================================================
+
+message WorkflowProgressEvent {
+    string run_id = 1;
+    string step_id = 2;
+    string phase = 3;
+    float progress_percent = 4;
+    string message = 5;
+    
+    // Step-specific data
+    VotingProgress voting = 6;
+    FanOutProgress fan_out = 7;
+}
+
+message VotingProgress {
+    int32 round = 1;
+    int32 max_rounds = 2;
+    int32 votes_for_leader = 3;
+    int32 k = 4;
+    string current_leader = 5;
+}
+
+message FanOutProgress {
+    int32 total = 1;
+    int32 completed = 2;
+    int32 failed = 3;
+}
+
+// ============================================================
+//  Coordinator-Worker Communication Events
+// ============================================================
+
+// Coordinator → Worker: 执行步骤请求
+message ExecuteStepRequestEvent {
+    string request_id = 1;
+    string step_id = 2;
+    string step_type = 3;
+    map<string, google.protobuf.Value> parameters = 4;
+    map<string, google.protobuf.Value> variables = 5;
+}
+
+// Worker → Coordinator: 步骤完成事件
+message StepCompletedEventProto {
+    string request_id = 1;
+    string step_id = 2;
+    string worker_id = 3;
+    bool success = 4;
+    string result = 5;
+    string error = 6;
+    int32 tokens_used = 7;
+    int32 llm_calls = 8;
+    int32 duration_ms = 9;
+}
+
+// External → Coordinator: 启动工作流请求
+message StartWorkflowRequestEvent {
+    string workflow_name = 1;
+    map<string, google.protobuf.Value> variables = 2;
+}
+
+// Coordinator → External: 工作流完成事件
+message WorkflowCompletedEventProto {
+    string execution_id = 1;
+    bool success = 2;
+    string result = 3;
+    string error = 4;
+}
+
+// ============================================================
+//  Workflow Visualization Events (for Frontend)
+// ============================================================
+
+// 步骤执行事件 - 用于前端可视化
+message WorkflowStepEvent {
+    string run_id = 1;
+    string workflow_name = 2;
+    string step_id = 3;
+    string step_type = 4;           // llm_call, vote, fan_out, conditional, workflow_call
+    StepStatus status = 5;
+    float progress = 6;             // 0-1
+    string message = 7;
+    google.protobuf.Timestamp timestamp = 8;
+    
+    // 步骤元信息
+    string parent_step_id = 9;      // 嵌套步骤的父 ID
+    int32 depth = 10;               // 递归深度
+    
+    // 投票特定
+    int32 vote_round = 11;
+    int32 vote_max_rounds = 12;
+    int32 vote_k = 13;
+    int32 vote_current_votes = 14;
+    
+    // fan_out 特定
+    int32 parallel_total = 15;
+    int32 parallel_completed = 16;
+    int32 parallel_failed = 17;
+    
+    // 耗时统计
+    int32 duration_ms = 18;
+    int32 llm_calls = 19;
+    int32 tokens_used = 20;
+    
+    // LLM 对话记录 (用于前端可视化)
+    string system_prompt = 21;
+    string user_prompt = 22;
+    string assistant_response = 23;
+    
+    // Red-Flag 信息 (论文 Section 3.3)
+    string red_flag_reason = 24;
+}
+
+// 工作流结构（用于前端渲染图）
+message WorkflowStructure {
+    string name = 1;
+    string version = 2;
+    repeated WorkflowStepNode steps = 3;
+    repeated WorkflowEdge edges = 4;
+}
+
+message WorkflowStepNode {
+    string id = 1;
+    string type = 2;
+    string label = 3;
+    bool is_parallel = 4;
+    bool is_conditional = 5;
+    repeated WorkflowStepNode children = 6;  // 嵌套子步骤
+}
+
+message WorkflowEdge {
+    string from_id = 1;
+    string to_id = 2;
+    string condition = 3;  // 条件分支时的条件描述
+}

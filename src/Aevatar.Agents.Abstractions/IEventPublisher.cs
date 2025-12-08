@@ -3,34 +3,69 @@ using Google.Protobuf;
 namespace Aevatar.Agents.Abstractions;
 
 /// <summary>
-/// 事件发布器接口
-/// Agent 通过此接口发布事件，由 Actor 层实现具体的路由逻辑
+/// Event publisher interface.
+/// Agents publish events through this interface; the Actor layer implements the routing logic.
 /// </summary>
 public interface IEventPublisher
 {
     /// <summary>
-    /// 发布事件
+    /// Publish event (broadcast mode).
+    /// Propagates through hierarchical streams.
     /// </summary>
-    /// <param name="evt">事件消息</param>
-    /// <param name="direction">传播方向（默认 Down）</param>
-    /// <param name="ct">取消令牌</param>
-    /// <typeparam name="TEvent">事件类型</typeparam>
-    /// <returns>事件ID</returns>
+    /// <param name="evt">Event message</param>
+    /// <param name="direction">Propagation direction (default: Down)</param>
+    /// <param name="ct">Cancellation token</param>
+    /// <typeparam name="TEvent">Event type</typeparam>
+    /// <returns>Event ID</returns>
     Task<string> PublishEventAsync<TEvent>(
         TEvent evt,
         EventDirection direction = EventDirection.Down,
         CancellationToken ct = default)
         where TEvent : IMessage;
+
+    /// <summary>
+    /// Point-to-point send (direct delivery mode).
+    /// Sends directly to the specified agent, bypassing hierarchical broadcast.
+    /// </summary>
+    /// <param name="targetAgentId">Target agent ID</param>
+    /// <param name="evt">Event message</param>
+    /// <param name="onArrivalDirection">
+    /// Propagation direction after arrival:
+    /// - Unspecified: Pure P2P, only target processes, no propagation
+    /// - Down: Target processes then broadcasts to all its children
+    /// - Up: Target processes then propagates up to its parent
+    /// - Both: Target processes then propagates in both directions
+    /// </param>
+    /// <param name="ct">Cancellation token</param>
+    /// <typeparam name="TEvent">Event type</typeparam>
+    /// <returns>Event ID</returns>
+    Task<string> SendToAsync<TEvent>(
+        Guid targetAgentId,
+        TEvent evt,
+        EventDirection onArrivalDirection = EventDirection.Unspecified,
+        CancellationToken ct = default)
+        where TEvent : IMessage;
 }
 
 /// <summary>
-/// Not useful but should be injected to agent once its initialization.
+/// Null implementation for scenarios where EventPublisher is not configured.
 /// </summary>
 public sealed class NullEventPublisher : IEventPublisher
 {
-    public static NullEventPublisher Instance { get; } = new NullEventPublisher();
+    public static NullEventPublisher Instance { get; } = new();
 
-    public Task<string> PublishEventAsync<TEvent>(TEvent evt, EventDirection direction = EventDirection.Down,
+    public Task<string> PublishEventAsync<TEvent>(
+        TEvent evt,
+        EventDirection direction = EventDirection.Down,
+        CancellationToken ct = default) where TEvent : IMessage
+    {
+        return Task.FromResult(string.Empty);
+    }
+
+    public Task<string> SendToAsync<TEvent>(
+        Guid targetAgentId,
+        TEvent evt,
+        EventDirection onArrivalDirection = EventDirection.Unspecified,
         CancellationToken ct = default) where TEvent : IMessage
     {
         return Task.FromResult(string.Empty);

@@ -1,0 +1,19 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROJECT: 桥梁交通
+#  ID: bridge-traffic
+#  Strategy: UotCombinational
+# ═══════════════════════════════════════════════════════════════════════════
+
+id: bridge-traffic
+name: 桥梁交通
+description: 设计单车道桥梁的双向交通管理机制
+icon: "🌉"
+strategy: UotCombinational
+task: |
+  Design a mechanism for managing two-way traffic on a single-lane bridge 
+  where vehicles from both directions need to cross safely without collision.
+options:
+  domainHint: "transportation, distributed systems, resource scheduling"
+  maxAnalogies: 5
+  maxCandidates: 10
+
