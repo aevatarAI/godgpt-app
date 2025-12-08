@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using Newtonsoft.Json;
 
-namespace Aevatar.Application.Contracts.Services;
+namespace Aevatar.App.Application.Contracts.Services;
 
 /// <summary>
 /// User feedback query response DTO

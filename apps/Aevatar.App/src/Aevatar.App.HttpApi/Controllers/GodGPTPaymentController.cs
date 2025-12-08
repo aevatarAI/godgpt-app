@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using Aevatar.Application.Constants;
-using Aevatar.Application.Contracts.Services;
+using Aevatar.App.Application.Contracts.Services;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.ChatManager.UserBilling;
 using Aevatar.Application.Grains.Common.Constants;

@@ -4,6 +4,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Net.Http;
 using Aevatar.App.HttpApi.Host.Extensions;
+using Aevatar.Options;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Cors;
@@ -50,6 +51,9 @@ public class AppHttpApiHostModule : AbpModule
         ConfigureAuthentication(context, configuration);
         ConfigureCors(context, configuration);
         ConfigureSwaggerServices(context, configuration);
+        
+        // Configure GodGPT Options
+        context.Services.Configure<GodGPTOptions>(configuration.GetSection("GodGPT"));
         
         // Configure Agent Runtime (Local or Orleans)
         ConfigureAgentRuntime(context, configuration);
@@ -110,23 +114,42 @@ public class AppHttpApiHostModule : AbpModule
 
     private void ConfigureSwaggerServices(ServiceConfigurationContext context, IConfiguration configuration)
     {
-        context.Services.AddAbpSwaggerGenWithOAuth(
-            configuration["AuthServer:Authority"]!,
-            new Dictionary<string, string>
+        context.Services.AddAbpSwaggerGen(options =>
+        {
+            options.SwaggerDoc("v1", new OpenApiInfo
             {
-                { "Aevatar", "App API" }
-            },
-            options =>
+                Title = "App API",
+                Version = "v1"
+            });
+            options.DocInclusionPredicate((docName, description) => true);
+            options.CustomSchemaIds(type => type.FullName);
+            
+            // Add Bearer Token Authentication
+            options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
             {
-                options.SwaggerDoc("v1", new OpenApiInfo
+                Name = "Authorization",
+                Type = SecuritySchemeType.Http,
+                Scheme = "Bearer",
+                BearerFormat = "JWT",
+                In = ParameterLocation.Header,
+                Description = "Enter your Bearer token in the format: {your_token}"
+            });
+            
+            options.AddSecurityRequirement(new OpenApiSecurityRequirement
+            {
                 {
-                    Title = "App API",
-                    Version = "v1"
-                });
-                options.DocInclusionPredicate((docName, description) => true);
-                options.CustomSchemaIds(type => type.FullName);
-            },
-            configuration["AuthServer:SwaggerClientId"]);
+                    new OpenApiSecurityScheme
+                    {
+                        Reference = new OpenApiReference
+                        {
+                            Type = ReferenceType.SecurityScheme,
+                            Id = "Bearer"
+                        }
+                    },
+                    Array.Empty<string>()
+                }
+            });
+        });
     }
 
     public override void OnApplicationInitialization(ApplicationInitializationContext context)
@@ -150,8 +173,6 @@ public class AppHttpApiHostModule : AbpModule
         app.UseAbpSwaggerUI(options =>
         {
             options.SwaggerEndpoint("/swagger/v1/swagger.json", "App API");
-            var configuration = context.ServiceProvider.GetRequiredService<IConfiguration>();
-            options.OAuthClientId(configuration["AuthServer:SwaggerClientId"]);
         });
         app.UseAuditing();
         app.UseAbpSerilogEnrichers();

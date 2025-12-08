@@ -180,6 +180,30 @@ public class OpenIddictDataSeedContributor : IDataSeedContributor, ITransientDep
             );
         }
 
+        // AevatarAuthServer - Public client for password grant (API testing)
+        var aevatarAuthServerClientId = configurationSection["AevatarAuthServer:ClientId"];
+        if (!aevatarAuthServerClientId.IsNullOrWhiteSpace())
+        {
+            var aevatarAuthServerRootUrl = configurationSection["AevatarAuthServer:RootUrl"]?.TrimEnd('/');
+
+            await CreateApplicationAsync(
+                applicationType: OpenIddictConstants.ApplicationTypes.Web,
+                name: aevatarAuthServerClientId!,
+                type: OpenIddictConstants.ClientTypes.Public,
+                consentType: OpenIddictConstants.ConsentTypes.Implicit,
+                displayName: "Aevatar Auth Server Client",
+                secret: null,
+                grantTypes: new List<string> {
+                    OpenIddictConstants.GrantTypes.Password,
+                    OpenIddictConstants.GrantTypes.RefreshToken,
+                    OpenIddictConstants.GrantTypes.ClientCredentials
+                },
+                scopes: commonScopes,
+                redirectUri: aevatarAuthServerRootUrl,
+                postLogoutRedirectUri: aevatarAuthServerRootUrl,
+                clientUri: aevatarAuthServerRootUrl
+            );
+        }
 
     }
 

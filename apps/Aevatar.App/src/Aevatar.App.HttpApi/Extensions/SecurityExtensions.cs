@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Aevatar.Application.Constants;
-using Aevatar.Application.Contracts.Services;
+using Aevatar.App.Application.Contracts.Services;
 using Aevatar.Common;
 using Aevatar.App.Domain.Shared;
 using Aevatar.Services;

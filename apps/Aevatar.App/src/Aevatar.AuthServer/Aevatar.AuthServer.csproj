@@ -41,4 +41,10 @@
     <PackageReference Include="Serilog.Sinks.Async" />
   </ItemGroup>
 
+  <!-- Fix Roslyn/CodeAnalysis version conflict for Razor Runtime Compilation -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" VersionOverride="4.12.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Common" VersionOverride="4.12.0" />
+  </ItemGroup>
+
 </Project>

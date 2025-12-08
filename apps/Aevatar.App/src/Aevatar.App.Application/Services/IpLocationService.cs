@@ -4,6 +4,7 @@ using Aevatar.App.Domain.Shared;
 using Microsoft.Extensions.Logging;
 using ipdb;
 using MaxMind.GeoIP2;
+using Volo.Abp.DependencyInjection;
 using GodGPTAppType = Aevatar.App.Domain.Shared.GodGPTAppType;
 
 namespace Aevatar.App.Application.Services;
@@ -11,17 +12,29 @@ namespace Aevatar.App.Application.Services;
 /// <summary>
 /// IP location
 /// </summary>
-public class IpLocationService : IIpLocationService
+public class IpLocationService : IIpLocationService, ISingletonDependency
 {
     private readonly ILogger<IpLocationService> _logger;
-    private readonly City _cityDb;
-    private readonly DatabaseReader _maxMindReader;
+    private readonly City? _cityDb;
+    private readonly DatabaseReader? _maxMindReader;
+    private readonly bool _isConfigured;
 
     public IpLocationService(ILogger<IpLocationService> logger)
     {
         _logger = logger;
-        var ipdbFilePath = "/app/geoip/ipipfree.ipdb";//"/Users/**/Downloads/ipipfreedb/ipipfree.ipdb";
-        var maxMindFilePath ="/app/geoip/GeoLite2-City.mmdb";// "/Users/**/Downloads/GeoLite2-City_20250819/GeoLite2-City.mmdb";
+        var ipdbFilePath = "/app/geoip/ipipfree.ipdb";
+        var maxMindFilePath = "/app/geoip/GeoLite2-City.mmdb";
+        
+        // Check if files exist before trying to load them
+        if (!System.IO.File.Exists(ipdbFilePath) || !System.IO.File.Exists(maxMindFilePath))
+        {
+            _logger.LogWarning("GeoIP database files not found. IP location service will return default values. " +
+                "IPDB: {IpdbPath} (exists: {IpdbExists}), MaxMind: {MaxMindPath} (exists: {MaxMindExists})",
+                ipdbFilePath, System.IO.File.Exists(ipdbFilePath),
+                maxMindFilePath, System.IO.File.Exists(maxMindFilePath));
+            _isConfigured = false;
+            return;
+        }
         
         try
         {
@@ -33,7 +46,8 @@ public class IpLocationService : IIpLocationService
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load IPDB file: {FilePath}", ipdbFilePath);
-            throw;
+            _isConfigured = false;
+            return;
         }
         
         try
@@ -41,11 +55,12 @@ public class IpLocationService : IIpLocationService
             _logger.LogDebug("Loading MaxMind database file: {FilePath}", maxMindFilePath);
             _maxMindReader = new DatabaseReader(maxMindFilePath);
             _logger.LogDebug("MaxMind database file loaded successfully");
+            _isConfigured = true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load MaxMind database file: {FilePath}", maxMindFilePath);
-            throw;
+            _isConfigured = false;
         }
     }
 
@@ -54,11 +69,15 @@ public class IpLocationService : IIpLocationService
     /// </summary>
     public Task<bool> IsIpInMainlandChinaAsync(string ipAddress)
     {
-       // return true;
         return Task.Run(() =>
         {
             try
             {
+                if (!_isConfigured || _cityDb == null)
+                {
+                    return false;
+                }
+                
                 if (!IsValidIpAddress(ipAddress))
                 {
                     _logger.LogDebug("Invalid IP address format: {IpAddress}", ipAddress);
@@ -109,6 +128,11 @@ public class IpLocationService : IIpLocationService
         {
             try
             {
+                if (!_isConfigured || _cityDb == null)
+                {
+                    return new IpLocationInfo { Country = "unknown" };
+                }
+                
                 if (!IsValidIpAddress(ipAddress))
                 {
                     _logger.LogWarning("Invalid IP address format: {IpAddress}", ipAddress);
@@ -147,6 +171,11 @@ public class IpLocationService : IIpLocationService
         {
             try
             {
+                if (!_isConfigured || _maxMindReader == null)
+                {
+                    return false;
+                }
+                
                 if (!IsValidIpAddress(ipAddress))
                 {
                     _logger.LogDebug("Invalid IP address format: {IpAddress}", ipAddress);
@@ -213,6 +242,11 @@ public class IpLocationService : IIpLocationService
         {
             try
             {
+                if (!_isConfigured || _maxMindReader == null)
+                {
+                    return new IpLocationInfo { Country = "unknown" };
+                }
+                
                 if (!IsValidIpAddress(ipAddress))
                 {
                     _logger.LogWarning("Invalid IP address format: {IpAddress}", ipAddress);

@@ -1,4 +1,5 @@
-﻿using Volo.Abp.PermissionManagement;
+﻿using Aevatar.Application.Grains;
+using Volo.Abp.PermissionManagement;
 using Volo.Abp.SettingManagement;
 using Volo.Abp.Account;
 using Volo.Abp.Identity;
@@ -17,7 +18,8 @@ namespace Aevatar.App;
     typeof(AbpIdentityApplicationModule),
     typeof(AbpAccountApplicationModule),
     typeof(AbpTenantManagementApplicationModule),
-    typeof(AbpSettingManagementApplicationModule)
+    typeof(AbpSettingManagementApplicationModule),
+    typeof(GodGPTGAgentModule)
     )]
 public class AppApplicationModule : AbpModule
 {

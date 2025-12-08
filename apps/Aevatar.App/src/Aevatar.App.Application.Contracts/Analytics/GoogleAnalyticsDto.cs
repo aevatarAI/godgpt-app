@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using Newtonsoft.Json;
 
-namespace Aevatar.Application.Contracts.Analytics;
+namespace Aevatar.App.Application.Contracts.Analytics;
 
 /// <summary>
 /// Google Analytics event tracking request DTO
@@ -189,4 +189,5 @@ public class GoogleAnalyticsBatchEventResponseDto
     /// Error message (if failed)
     /// </summary>
     public string? ErrorMessage { get; set; }
-} 
+}
+

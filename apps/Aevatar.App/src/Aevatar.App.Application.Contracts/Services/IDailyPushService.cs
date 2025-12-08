@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Aevatar.App.Domain.Shared;
 
-namespace Aevatar.Application.Contracts.DailyPush;
+namespace Aevatar.App.Application.Contracts.DailyPush;
 
 /// <summary>
 /// Service interface for daily push notification operations

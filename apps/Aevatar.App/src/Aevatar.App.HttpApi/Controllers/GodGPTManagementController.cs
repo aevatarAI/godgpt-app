@@ -3,7 +3,7 @@ using System;
 using System.Diagnostics;
 using System.Security;
 using System.Threading.Tasks;
-using Aevatar.Application.Contracts.Services;
+using Aevatar.App.Application.Contracts.Services;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Dtos;
 using Aevatar.Options;

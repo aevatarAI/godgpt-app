@@ -3,9 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.Extensions.Logging;
 using Aevatar.App.Domain.Shared;
-namespace Aevatar.Application.Contracts.Services;
+using Aevatar.App.Application.Contracts.Services;
+using Volo.Abp.DependencyInjection;
 
-public class LocalizationService : ILocalizationService
+namespace Aevatar.App.Application.Services;
+
+public class LocalizationService : ILocalizationService, ITransientDependency
 {
     private readonly ILogger<LocalizationService> _logger;
     private readonly Dictionary<string, Dictionary<string, string>> _translations;
@@ -175,15 +178,10 @@ public class LocalizationService : ILocalizationService
                 ["en.WebhookValidatingError"] = "Error validating webhook",
                 ["en.InvalidShare"] = "Invalid Share string",
                 ["en.EmailFrequently"] = "Email sent too frequently. Please try again later.",
-                ["en.InvalidUserName"] = "Username can only contain letters or digits..",
-
-                // Security Verification - English (SecurityVerificationRequired is used as frontend signal, always English)
+                ["en.InvalidUserName"] = "Username can only contain letters or digits.",
                 ["en.SecurityVerificationRequired"] = "Security verification is required. Please complete the verification and try again.",
                 ["en.SecurityVerificationFailed"] = "Security verification failed: {reason}",
                 ["en.RecaptchaVerificationFailed"] = "reCAPTCHA verification failed. Please try again.",
-
-
-
 
                 // Traditional Chinese translations
                 ["zh-tw.Unauthorized"] = "未授權：使用者未通過身份驗證。 ",
@@ -216,14 +214,9 @@ public class LocalizationService : ILocalizationService
                 ["zh-tw.InvalidShare"] = "共亯字串無效",
                 ["zh-tw.EmailFrequently"] = "電子郵件發送過於頻繁，請稍後再試。",
                 ["zh-tw.InvalidUserName"] = "用戶名只能包含字母或數位。",
-
-                // Security Verification - Traditional Chinese
                 ["zh-tw.SecurityVerificationRequired"] = "需要進行安全驗證。 請完成驗證並重試。",
                 ["zh-tw.SecurityVerificationFailed"] = "安全驗證失敗：{reason}",
                 ["zh-tw.RecaptchaVerificationFailed"] = "reCAPTCHA 驗證失敗。請重試。",
-
-
-
 
                 // Spanish translations
                 ["es.Unauthorized"] = "No autorizado: El usuario no está autenticado. ",
@@ -256,13 +249,11 @@ public class LocalizationService : ILocalizationService
                 ["es.InvalidShare"] = "Cadena de compartir inválida",
                 ["es.EmailFrequently"] = "El correo electrónico se envía con demasiada frecuencia. Por favor, intenta de nuevo más tarde.",
                 ["es.InvalidUserName"] = "El nombre de usuario solo puede contener letras o números.",
-
-                // Security Verification - Spanish (SecurityVerificationRequired always uses English as frontend signal)
-                ["es.SecurityVerificationRequired"] = "Se requiere verificación de seguridad.", // Not used - frontend signal
+                ["es.SecurityVerificationRequired"] = "Se requiere verificación de seguridad.",
                 ["es.SecurityVerificationFailed"] = "Falló la verificación de seguridad: {reason}",
                 ["es.RecaptchaVerificationFailed"] = "Falló la verificación de reCAPTCHA. Inténtalo de nuevo.",
                 
-                //zh
+                // Simplified Chinese
                 ["zh.Unauthorized"] = "未授权：用户未通过身份验证。",
                 ["zh.UserNotAuthenticated"] = "未授权：用户未通过身份验证。",
                 ["zh.UnableToRetrieveUserId"] = "未授权：无法获取 UserId。",
@@ -293,30 +284,21 @@ public class LocalizationService : ILocalizationService
                 ["zh.InvalidShare"] = "分享的字符串无效。",
                 ["zh.EmailFrequently"] = "电子邮件发送过于频繁，请稍后再试。",
                 ["zh.InvalidUserName"] = "用户名只能包含字母或数字。",
-
-                // Security Verification - Traditional Chinese
                 ["zh.SecurityVerificationRequired"] = "需要进行安全验证。请完成验证并重试。",
                 ["zh.SecurityVerificationFailed"] = "安全验证失败：{reason}",
                 ["zh.RecaptchaVerificationFailed"] = "reCAPTCHA 验证失败。请重试。"
-
-
-
-
             },
             
             ["validation"] = new Dictionary<string, string>
             {
-                // Add validation messages here if needed
                 ["en.Required"] = "This field is required.",
                 ["zh-tw.Required"] = "此字段为必填项。",
                 ["es.Required"] = "Este campo es requerido.",
                 ["zh.Required"] = "此字段为必填项。"
-
             },
             
             ["emails"] = new Dictionary<string, string>
             {
-                // Email subjects
                 ["en.RegistrationSubject"] = "Registration Verification Code",
                 ["zh.RegistrationSubject"] = "注册验证码",
                 ["zh-tw.RegistrationSubject"] = "註冊驗證碼",
@@ -330,15 +312,14 @@ public class LocalizationService : ILocalizationService
             
             ["messages"] = new Dictionary<string, string>
             {
-                // Add general messages here if needed
                 ["en.Success"] = "Operation completed successfully.",
                 ["zh-tw.Success"] = "操作成功完成。",
                 ["es.Success"] = "Operación completada exitosamente.",
                 ["zh.Success"] = "操作已成功完成。"
-
             }
         };
 
         return translations;
     }
-} 
+}
+

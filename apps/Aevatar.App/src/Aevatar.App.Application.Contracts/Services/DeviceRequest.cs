@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Aevatar.Application.Contracts.DailyPush;
+namespace Aevatar.App.Application.Contracts.DailyPush;
 
 /// <summary>
 /// Request DTO for device registration/update in daily push system

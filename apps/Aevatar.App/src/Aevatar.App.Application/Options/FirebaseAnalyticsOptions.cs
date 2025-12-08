@@ -1,4 +1,4 @@
-namespace Aevatar.Options;
+namespace Aevatar.App.Application.Options;
 
 public class FirebaseAnalyticsOptions
 {

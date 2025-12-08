@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security;
 using System.Threading.Tasks;
-using Aevatar.Application.Contracts.DailyPush;
+using Aevatar.App.Application.Contracts.DailyPush;
 using Aevatar.Application.Grains.Agents.Anonymous;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
@@ -27,7 +27,7 @@ using Aevatar.App.Domain.Shared;
 using Aevatar.Dtos;
 using Aevatar.GAgents.AI.Abstractions;
 using Aevatar.GAgents.AI.Options;
-using Aevatar.Application.Grains.Common.Service;
+using Aevatar.App.Application.Contracts.Services;
 using Aevatar.Common.Options;
 using Aevatar.Application.Constants;
 using Aevatar.GodGPT.Dtos;
@@ -322,7 +322,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         catch (Exception e)
         {
             _logger.LogError(e, "Invalid Share string. {0}", shareString);
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InvalidShare, (GodGPTLanguage)language);
+            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InvalidShare, language);
             throw new UserFriendlyException(localizedMessage);
         }
 

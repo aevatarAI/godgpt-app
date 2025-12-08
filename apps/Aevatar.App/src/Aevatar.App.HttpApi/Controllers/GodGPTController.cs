@@ -5,11 +5,10 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
-using Aevatar.Account;
 using Aevatar.Anonymous;
 using Aevatar.Application.Constants;
-using Aevatar.Application.Contracts.Analytics;
-using Aevatar.Application.Contracts.Services;
+using Aevatar.App.Application.Contracts.Analytics;
+using Aevatar.App.Application.Contracts.Services;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
@@ -55,7 +54,6 @@ public class GodGPTController : AevatarController
     private readonly string _defaultLLM = "OpenAI";
     private readonly string _defaultPrompt = "you are a robot";
     private readonly ILogger<GodGPTController> _logger;
-    private readonly IAccountService _accountService;
     private readonly IBlobContainer _blobContainer;
     private readonly BlobStoringOptions _blobStoringOptions;
     private readonly IThumbnailService _thumbnailService;
@@ -66,15 +64,15 @@ public class GodGPTController : AevatarController
 
 
     public GodGPTController(IGodGPTService godGptService, IClusterClient clusterClient,
-        ILogger<GodGPTController> logger, IAccountService accountService,
+        ILogger<GodGPTController> logger,
         IBlobContainer blobContainer, IOptionsSnapshot<BlobStoringOptions> blobStoringOptions,
-        IThumbnailService thumbnailService, IOptions<GodGPTOptions> godGptOptions, ILocalizationService localizationService,
-        IGoogleAnalyticsService googleAnalyticsService, IIpLocationService ipLocationService)
+        IThumbnailService thumbnailService, IOptions<GodGPTOptions> godGptOptions,
+        ILocalizationService localizationService, IGoogleAnalyticsService googleAnalyticsService,
+        IIpLocationService ipLocationService)
     {
         _godGptService = godGptService;
         _clusterClient = clusterClient;
         _logger = logger;
-        _accountService = accountService;
         _blobContainer = blobContainer;
         _blobStoringOptions = blobStoringOptions.Value;
         _thumbnailService = thumbnailService;
@@ -366,35 +364,10 @@ public class GodGPTController : AevatarController
     /// </summary>
     /// <param name="email">Email address to check</param>
     /// <returns>Registration status in strict JSON structure</returns>
-    [AllowAnonymous]
-    [HttpGet("godgpt/check-email-registered")]
-    public async Task<IActionResult> CheckEmailRegisteredAsync([FromQuery] string email)
-    {
-        var language = HttpContext.GetGodGPTLanguage();
-        if (string.IsNullOrWhiteSpace(email))
-        {
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.EmailIsRequired, language);
-            return BadRequest(new
-            {
-                error = new { code = 1, message = localizedMessage },
-                result = false
-            });
-        }
-        var result = await _accountService.VerifyEmailRegistrationWithTimeAsync(new CheckEmailRegisteredDto { EmailAddress = email });
-        if (result)
-        {
-            return Ok(new { result = true });
-        }
-        else
-        {
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.UserUnRegister, language);
-            return Ok(new
-            {
-                error = new { code = 0, message = localizedMessage },
-                result = false
-            });
-        }
-    }
+    // TODO: Requires IAccountService - disabled for now
+    // [AllowAnonymous]
+    // [HttpGet("godgpt/check-email-registered")]
+    // public async Task<IActionResult> CheckEmailRegisteredAsync([FromQuery] string email) { ... }
 
     #region Guest Chat APIs for Anonymous Users
 
@@ -549,7 +522,7 @@ public class GodGPTController : AevatarController
             {
                 ["MaxSizeBytes"] = _blobStoringOptions.MaxSizeBytes.ToString()
             };
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.FileTooLarge, language,parameters);
+            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.FileTooLarge, language, parameters);
             throw new UserFriendlyException(localizedMessage);
         }
         

@@ -1,6 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 
-namespace Aevatar.Application.Contracts.DailyPush;
+namespace Aevatar.App.Application.Contracts.DailyPush;
 
 /// <summary>
 /// Request DTO for marking daily push as read

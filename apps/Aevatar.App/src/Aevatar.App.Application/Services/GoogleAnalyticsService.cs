@@ -4,14 +4,14 @@ using System.Linq;
 using System.Net.Http;
 using System.Text;
 using System.Threading.Tasks;
-using Aevatar.Application.Contracts.Analytics;
-using Aevatar.Options;
+using Aevatar.App.Application.Contracts.Analytics;
+using Aevatar.App.Application.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 using Volo.Abp.DependencyInjection;
 
-namespace Aevatar.Service;
+namespace Aevatar.App.Application.Services;
 
 /// <summary>
 /// Google Analytics event tracking service interface
@@ -21,22 +21,16 @@ public interface IGoogleAnalyticsService
     /// <summary>
     /// Track event to Google Analytics
     /// </summary>
-    /// <param name="eventRequest">Event request data</param>
-    /// <returns>Tracking result</returns>
     Task<GoogleAnalyticsEventResponseDto> TrackEventAsync(GoogleAnalyticsEventRequestDto eventRequest);
     
     /// <summary>
     /// Track event to Firebase Analytics
     /// </summary>
-    /// <param name="eventRequest">Event request data</param>
-    /// <returns>Tracking result</returns>
     Task<GoogleAnalyticsEventResponseDto> TrackFirebaseEventAsync(GoogleAnalyticsEventRequestDto eventRequest);
     
     /// <summary>
     /// Track multiple events to Firebase Analytics in a single batch request
     /// </summary>
-    /// <param name="batchRequest">Batch event request data</param>
-    /// <returns>Batch tracking result</returns>
     Task<GoogleAnalyticsBatchEventResponseDto> TrackFirebaseBatchEventsAsync(GoogleAnalyticsBatchEventRequestDto batchRequest);
 } 
 
@@ -62,11 +56,6 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
         _logger = logger;
     }
 
-    /// <summary>
-    /// Track event to Google Analytics
-    /// </summary>
-    /// <param name="eventRequest">Event request data</param>
-    /// <returns>Tracking result</returns>
     public async Task<GoogleAnalyticsEventResponseDto> TrackEventAsync(GoogleAnalyticsEventRequestDto eventRequest)
     {
         try
@@ -103,7 +92,6 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
             _logger.LogDebug("[GoogleAnalyticsService][TrackEventAsync] Sending event: {EventName}, ClientId: {ClientId}, URL: {Url}",
                 eventRequest.EventName, eventRequest.ClientId, url);
 
-            // Create HttpClient using IHttpClientFactory with proper lifecycle management
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(_options.TimeoutSeconds);
 
@@ -115,12 +103,7 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
                 _logger.LogDebug("[GoogleAnalyticsService][TrackEventAsync] Event sent successfully: {EventName}",
                     eventRequest.EventName);
 
-                var result = new GoogleAnalyticsEventResponseDto
-                {
-                    Success = true
-                };
-
-                return result;
+                return new GoogleAnalyticsEventResponseDto { Success = true };
             }
             else
             {
@@ -147,9 +130,6 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
         }
     }
 
-    /// <summary>
-    /// Create GA Measurement Protocol payload
-    /// </summary>
     private GAMeasurementProtocolPayload CreateMeasurementProtocolPayload(GoogleAnalyticsEventRequestDto eventRequest)
     {
         var payload = new GAMeasurementProtocolPayload
@@ -181,18 +161,13 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
         return payload;
     }
 
-    /// <summary>
-    /// Track event to Firebase Analytics
-    /// </summary>
-    /// <param name="eventRequest">Event request data</param>
-    /// <returns>Tracking result</returns>
     public async Task<GoogleAnalyticsEventResponseDto> TrackFirebaseEventAsync(GoogleAnalyticsEventRequestDto eventRequest)
     {
         try
         {
             if (!_firebaseOptions.EnableAnalytics)
             {
-                _logger.LogDebug("[GoogleAnalyticsService][TrackFirebaseEventAsync] Firebase Analytics reporting is disabled in configuration");
+                _logger.LogDebug("[GoogleAnalyticsService][TrackFirebaseEventAsync] Firebase Analytics reporting is disabled");
                 return new GoogleAnalyticsEventResponseDto
                 {
                     Success = false,
@@ -222,8 +197,8 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(_firebaseOptions.TimeoutSeconds);
 
-            _logger.LogDebug("[GoogleAnalyticsService][TrackFirebaseEventAsync] Sending event to Firebase: {EventName}, AppInstanceId: {AppInstanceId}, Payload: {Payload}",
-                eventRequest.EventName, payload.AppInstanceId, jsonPayload);
+            _logger.LogDebug("[GoogleAnalyticsService][TrackFirebaseEventAsync] Sending event to Firebase: {EventName}",
+                eventRequest.EventName);
 
             var response = await httpClient.PostAsync(url, content);
 
@@ -232,16 +207,13 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
                 _logger.LogDebug("[GoogleAnalyticsService][TrackFirebaseEventAsync] Firebase Analytics event sent successfully: {EventName}",
                     eventRequest.EventName);
                     
-                return new GoogleAnalyticsEventResponseDto
-                {
-                    Success = true
-                };
+                return new GoogleAnalyticsEventResponseDto { Success = true };
             }
             else
             {
                 var responseContent = await response.Content.ReadAsStringAsync();
-                _logger.LogWarning("[GoogleAnalyticsService][TrackFirebaseEventAsync] Firebase Analytics API returned error: {StatusCode}, Response: {Response}",
-                    response.StatusCode, responseContent);
+                _logger.LogWarning("[GoogleAnalyticsService][TrackFirebaseEventAsync] Firebase Analytics API returned error: {StatusCode}",
+                    response.StatusCode);
                     
                 return new GoogleAnalyticsEventResponseDto
                 {
@@ -252,9 +224,7 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogWarning(ex, "[GoogleAnalyticsService][TrackFirebaseEventAsync] Firebase Analytics API timeout for event: {EventName}",
-                eventRequest.EventName);
-                
+            _logger.LogWarning(ex, "[GoogleAnalyticsService][TrackFirebaseEventAsync] Firebase Analytics API timeout");
             return new GoogleAnalyticsEventResponseDto
             {
                 Success = false,
@@ -263,9 +233,7 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
         }
         catch (HttpRequestException ex)
         {
-            _logger.LogError(ex, "[GoogleAnalyticsService][TrackFirebaseEventAsync] HTTP error sending event to Firebase: {EventName}",
-                eventRequest.EventName);
-                
+            _logger.LogError(ex, "[GoogleAnalyticsService][TrackFirebaseEventAsync] HTTP error sending event to Firebase");
             return new GoogleAnalyticsEventResponseDto
             {
                 Success = false,
@@ -274,9 +242,7 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[GoogleAnalyticsService][TrackFirebaseEventAsync] Unexpected error sending event to Firebase: {EventName}",
-                eventRequest.EventName);
-                
+            _logger.LogError(ex, "[GoogleAnalyticsService][TrackFirebaseEventAsync] Unexpected error sending event to Firebase");
             return new GoogleAnalyticsEventResponseDto
             {
                 Success = false,
@@ -285,15 +251,10 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
         }
     }
 
-    /// <summary>
-    /// Create Firebase Measurement Protocol payload
-    /// </summary>
     private FirebaseMeasurementProtocolPayload CreateFirebaseMeasurementProtocolPayload(GoogleAnalyticsEventRequestDto eventRequest)
     {
         var payload = new FirebaseMeasurementProtocolPayload
         {
-            // Firebase uses app_instance_id instead of client_id
-            // Use UserId if available, otherwise fallback to ClientId
             AppInstanceId = !string.IsNullOrWhiteSpace(eventRequest.AppInstanceId) 
                 ? eventRequest.AppInstanceId
                 : "unknown"
@@ -309,37 +270,24 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
         return payload;
     }
 
-    /// <summary>
-    /// Build request URL
-    /// </summary>
     private string BuildRequestUrl()
     {
         var baseUrl = _options.ApiEndpoint;
         return $"{baseUrl}?measurement_id={_options.MeasurementId}&api_secret={_options.ApiSecret}";
     }
 
-    /// <summary>
-    /// Build Firebase Analytics request URL
-    /// </summary>
     private string BuildFirebaseRequestUrl()
     {
         var baseUrl = _firebaseOptions.ApiEndpoint;
         return $"{baseUrl}?firebase_app_id={_firebaseOptions.FirebaseAppId}&api_secret={_firebaseOptions.ApiSecret}";
     }
 
-    /// <summary>
-    /// Track multiple events to Firebase Analytics in a single batch request (simplified)
-    /// </summary>
-    /// <param name="batchRequest">Batch event request data</param>
-    /// <returns>Batch tracking result</returns>
     public async Task<GoogleAnalyticsBatchEventResponseDto> TrackFirebaseBatchEventsAsync(GoogleAnalyticsBatchEventRequestDto batchRequest)
     {
         try
         {
-            // Validate input
             if (batchRequest.Events == null || !batchRequest.Events.Any())
             {
-                _logger.LogWarning("[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] No events provided in batch request");
                 return new GoogleAnalyticsBatchEventResponseDto
                 {
                     Success = false,
@@ -349,7 +297,6 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
 
             if (string.IsNullOrWhiteSpace(batchRequest.AppInstanceId))
             {
-                _logger.LogWarning("[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] AppInstanceId is required");
                 return new GoogleAnalyticsBatchEventResponseDto
                 {
                     Success = false,
@@ -357,10 +304,8 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
                 };
             }
 
-            // Check Firebase configuration
             if (!_firebaseOptions.EnableBatchAnalytics)
             {
-                _logger.LogDebug("[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] Firebase Analytics reporting is disabled in configuration");
                 return new GoogleAnalyticsBatchEventResponseDto
                 {
                     Success = false,
@@ -370,7 +315,6 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
             
             if (string.IsNullOrWhiteSpace(_firebaseOptions.FirebaseAppId) || string.IsNullOrWhiteSpace(_firebaseOptions.ApiSecret))
             {
-                _logger.LogWarning("[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] Firebase configuration not properly set");
                 return new GoogleAnalyticsBatchEventResponseDto
                 {
                     Success = false,
@@ -378,13 +322,11 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
                 };
             }
 
-            // Create Firebase payload with all events
             var payload = new FirebaseMeasurementProtocolPayload
             {
                 AppInstanceId = batchRequest.AppInstanceId
             };
 
-            // Add all events to the payload
             foreach (var eventDto in batchRequest.Events)
             {
                 var firebaseEvent = new FirebaseEvent
@@ -406,63 +348,33 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
             using var httpClient = _httpClientFactory.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(_firebaseOptions.TimeoutSeconds);
 
-            _logger.LogDebug("[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] Sending {EventCount} events to Firebase for AppInstanceId: {AppInstanceId}, Payload: {Payload}",
-                batchRequest.Events.Count, batchRequest.AppInstanceId, jsonPayload);
-
             var httpResponse = await httpClient.PostAsync(url, content);
 
             if (httpResponse.IsSuccessStatusCode)
             {
-                _logger.LogDebug("[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] Firebase Analytics batch sent successfully for AppInstanceId: {AppInstanceId}",
-                    batchRequest.AppInstanceId);
-                
-                return new GoogleAnalyticsBatchEventResponseDto
-                {
-                    Success = true
-                };
+                return new GoogleAnalyticsBatchEventResponseDto { Success = true };
             }
             else
             {
-                var responseContent = await httpResponse.Content.ReadAsStringAsync();
-                var errorMessage = $"Firebase API error: {httpResponse.StatusCode}";
-                
-                _logger.LogWarning("[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] Firebase Analytics API returned error for AppInstanceId: {AppInstanceId}, Status: {StatusCode}, Response: {Response}",
-                    batchRequest.AppInstanceId, httpResponse.StatusCode, responseContent);
-                
                 return new GoogleAnalyticsBatchEventResponseDto
                 {
                     Success = false,
-                    ErrorMessage = errorMessage
+                    ErrorMessage = $"Firebase API error: {httpResponse.StatusCode}"
                 };
             }
         }
         catch (TaskCanceledException ex) when (ex.InnerException is TimeoutException)
         {
-            _logger.LogWarning(ex, "[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] Firebase Analytics API timeout for AppInstanceId: {AppInstanceId}",
-                batchRequest.AppInstanceId);
-            
+            _logger.LogWarning(ex, "[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] Firebase Analytics API timeout");
             return new GoogleAnalyticsBatchEventResponseDto
             {
                 Success = false,
                 ErrorMessage = "Request timeout"
             };
         }
-        catch (HttpRequestException ex)
-        {
-            _logger.LogError(ex, "[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] HTTP error sending events to Firebase for AppInstanceId: {AppInstanceId}",
-                batchRequest.AppInstanceId);
-            
-            return new GoogleAnalyticsBatchEventResponseDto
-            {
-                Success = false,
-                ErrorMessage = "HTTP request failed"
-            };
-        }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] Unexpected error processing batch events for AppInstanceId: {AppInstanceId}",
-                batchRequest.AppInstanceId);
-            
+            _logger.LogError(ex, "[GoogleAnalyticsService][TrackFirebaseBatchEventsAsync] Unexpected error");
             return new GoogleAnalyticsBatchEventResponseDto
             {
                 Success = false,
@@ -470,4 +382,4 @@ public class GoogleAnalyticsService : IGoogleAnalyticsService, ITransientDepende
             };
         }
     }
-} 
+}

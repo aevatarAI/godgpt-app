@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using Aevatar.App.Domain.Shared;
 
-namespace Aevatar.Application.Contracts.Services;
+namespace Aevatar.App.Application.Contracts.Services;
 
 /// <summary>
 /// Localization service interface for internationalization support
@@ -58,4 +58,4 @@ public interface ILocalizationService
     /// <param name="category">Message category (e.g., "emails", "messages", "exceptions")</param>
     /// <returns>Localized message</returns>
     string GetLocalizedMessage(string key, GodGPTChatLanguage language, string category);
-} 
+}

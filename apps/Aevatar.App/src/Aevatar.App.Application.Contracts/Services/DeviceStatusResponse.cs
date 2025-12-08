@@ -1,4 +1,4 @@
-namespace Aevatar.Application.Contracts.DailyPush;
+namespace Aevatar.App.Application.Contracts.DailyPush;
 
 /// <summary>
 /// Response DTO for device status query
