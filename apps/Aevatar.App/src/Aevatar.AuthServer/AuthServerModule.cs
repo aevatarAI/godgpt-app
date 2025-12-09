@@ -1,18 +1,21 @@
-using System.Threading.Tasks;
 using System;
+using System.IO;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.OpenApi.Models;
+using StackExchange.Redis;
 using Volo.Abp;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite;
 using Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite.Bundling;
 using Volo.Abp.AspNetCore.Serilog;
 using Volo.Abp.Autofac;
+using Volo.Abp.Caching;
 using Volo.Abp.Modularity;
 using Volo.Abp.UI.Navigation;
 using Volo.Abp.UI.Navigation.Urls;
@@ -30,6 +33,7 @@ using OpenIddict.Validation.AspNetCore;
 using Volo.Abp.AspNetCore.Mvc.UI.Bundling;
 using Volo.Abp.Security.Claims;
 using Aevatar.AuthServer.Menus;
+using Aevatar.AuthServer.Grants;
 using Volo.Abp.AspNetCore.Mvc.Localization;
 using Aevatar.App;
 using Aevatar.App.Localization;
@@ -79,6 +83,42 @@ public class AuthServerModule : AbpModule
                 options.SetIssuer(new Uri(configuration["AuthServer:Authority"] 
                     ?? configuration["App:SelfUrl"] 
                     ?? "https://localhost:44320"));
+
+                // Certificate configuration for production
+                var useProductionCert = configuration.GetValue<bool>("OpenIddict:Certificate:UseProductionCertificate");
+                var certPath = configuration["OpenIddict:Certificate:CertificatePath"] ?? "openiddict.pfx";
+                var certPassword = configuration["OpenIddict:Certificate:CertificatePassword"] ?? 
+                                   "00000000-0000-0000-0000-000000000000";
+
+                if (useProductionCert)
+                {
+                    if (File.Exists(certPath))
+                    {
+                        options.AddProductionEncryptionAndSigningCertificate(certPath, certPassword);
+                    }
+                    else
+                    {
+                        throw new FileNotFoundException($"OpenIddict certificate file not found: {certPath}");
+                    }
+                }
+
+                // Disable access token encryption for easier debugging
+                options.DisableAccessTokenEncryption();
+
+                // Configure access token lifetime
+                if (int.TryParse(configuration["ExpirationHour"], out int expirationHour) && expirationHour > 0)
+                {
+                    options.SetAccessTokenLifetime(TimeSpan.FromHours(expirationHour));
+                }
+
+                // Configure refresh token lifetime
+                if (int.TryParse(configuration["RefreshTokenExpirationDays"], out int refreshTokenDays) && refreshTokenDays > 0)
+                {
+                    options.SetRefreshTokenLifetime(TimeSpan.FromDays(refreshTokenDays));
+                }
+
+                // Disable rolling refresh tokens to allow multiple uses
+                options.DisableRollingRefreshTokens();
             });
             
             builder.AddValidation(options =>
@@ -89,10 +129,21 @@ public class AuthServerModule : AbpModule
             });
         });
 
-        // Always use development certificate in development
+        // Register custom grant types for Google/Apple Sign In
+        PreConfigure<OpenIddictServerBuilder>(builder =>
+        {
+            builder.Configure(openIddictServerOptions =>
+            {
+                openIddictServerOptions.GrantTypes.Add(GrantTypeConstants.GOOGLE);
+                openIddictServerOptions.GrantTypes.Add(GrantTypeConstants.APPLE);
+            });
+        });
+
+        // Certificate configuration: use production cert or development cert
+        var useProductionCertificate = configuration.GetValue<bool>("OpenIddict:Certificate:UseProductionCertificate");
         PreConfigure<AbpOpenIddictAspNetCoreOptions>(options =>
         {
-            options.AddDevelopmentEncryptionAndSigningCertificate = true;
+            options.AddDevelopmentEncryptionAndSigningCertificate = !useProductionCertificate;
         });
     }
 
@@ -106,6 +157,14 @@ public class AuthServerModule : AbpModule
         ConfigureVirtualFileSystem();
         ConfigureNavigationServices();
         ConfigureSwaggerServices(context.Services);
+        ConfigureDataProtection(context, configuration);
+        ConfigureGrantHandlers(context, configuration);
+
+        // Configure distributed cache key prefix
+        Configure<AbpDistributedCacheOptions>(options => 
+        { 
+            options.KeyPrefix = "GodGPT:"; 
+        });
 
         Configure<PermissionManagementOptions>(options =>
         {
@@ -116,6 +175,46 @@ public class AuthServerModule : AbpModule
             options.ProviderPolicies["R"] = "AbpIdentity.Roles.ManagePermissions";
             options.ProviderPolicies["C"] = "AbpIdentity.Clients.ManagePermissions";
         });
+
+        context.Services.AddHealthChecks();
+    }
+
+    /// <summary>
+    /// Configure Redis DataProtection for multi-machine token sharing
+    /// </summary>
+    private void ConfigureDataProtection(ServiceConfigurationContext context, IConfiguration configuration)
+    {
+        var redisConnection = configuration["Redis:Configuration"];
+        if (!string.IsNullOrWhiteSpace(redisConnection))
+        {
+            var redis = ConnectionMultiplexer.Connect(redisConnection);
+            context.Services
+                .AddDataProtection()
+                .PersistKeysToStackExchangeRedis(redis, "GodGPT-DataProtection-Keys")
+                .SetApplicationName("GodGPTAuthServer");
+        }
+    }
+
+    /// <summary>
+    /// Configure Google/Apple OAuth grant handlers
+    /// </summary>
+    private void ConfigureGrantHandlers(ServiceConfigurationContext context, IConfiguration configuration)
+    {
+        // Configure Google options
+        context.Services.Configure<GoogleOptions>(configuration.GetSection("Google"));
+        
+        // Configure Apple options
+        context.Services.Configure<AppleOptions>(configuration.GetSection("Apple"));
+
+        // Register grant handlers with OpenIddict
+        context.Services.AddOptions<Volo.Abp.OpenIddict.ExtensionGrantTypes.AbpOpenIddictExtensionGrantsOptions>()
+            .Configure<IServiceProvider>((options, serviceProvider) =>
+            {
+                options.Grants.Add(GrantTypeConstants.GOOGLE,
+                    serviceProvider.GetRequiredService<GoogleGrantHandler>());
+                options.Grants.Add(GrantTypeConstants.APPLE,
+                    serviceProvider.GetRequiredService<AppleGrantHandler>());
+            });
     }
 
     private void ConfigureBundles()

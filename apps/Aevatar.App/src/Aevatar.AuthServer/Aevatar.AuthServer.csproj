@@ -41,6 +41,13 @@
     <PackageReference Include="Serilog.Sinks.Async" />
   </ItemGroup>
 
+  <!-- OAuth / Third-party Authentication -->
+  <ItemGroup>
+    <PackageReference Include="Google.Apis.Auth" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.StackExchangeRedis" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+  </ItemGroup>
+
   <!-- Fix Roslyn/CodeAnalysis version conflict for Razor Runtime Compilation -->
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" VersionOverride="4.12.0" />
