@@ -105,16 +105,16 @@ public class AuthServerModule : AbpModule
                 // Disable access token encryption for easier debugging
                 options.DisableAccessTokenEncryption();
 
-                // Configure access token lifetime
-                if (int.TryParse(configuration["ExpirationHour"], out int expirationHour) && expirationHour > 0)
+                // Configure access token lifetime (in minutes for easier configuration)
+                if (int.TryParse(configuration["AccessTokenExpirationMinutes"], out int accessTokenMinutes) && accessTokenMinutes > 0)
                 {
-                    options.SetAccessTokenLifetime(TimeSpan.FromHours(expirationHour));
+                    options.SetAccessTokenLifetime(TimeSpan.FromMinutes(accessTokenMinutes));
                 }
 
-                // Configure refresh token lifetime
-                if (int.TryParse(configuration["RefreshTokenExpirationDays"], out int refreshTokenDays) && refreshTokenDays > 0)
+                // Configure refresh token lifetime (in minutes)
+                if (int.TryParse(configuration["RefreshTokenExpirationMinutes"], out int refreshTokenMinutes) && refreshTokenMinutes > 0)
                 {
-                    options.SetRefreshTokenLifetime(TimeSpan.FromDays(refreshTokenDays));
+                    options.SetRefreshTokenLifetime(TimeSpan.FromMinutes(refreshTokenMinutes));
                 }
 
                 // Disable rolling refresh tokens to allow multiple uses
