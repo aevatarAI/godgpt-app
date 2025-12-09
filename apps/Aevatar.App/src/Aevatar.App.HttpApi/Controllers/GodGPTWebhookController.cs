@@ -16,9 +16,11 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Primitives;
 using Newtonsoft.Json;
+using Asp.Versioning;
 using Orleans;
 using Stripe;
 using Volo.Abp;
+using Volo.Abp.AspNetCore.Mvc;
 
 namespace Aevatar.Controllers;
 
@@ -26,9 +28,9 @@ namespace Aevatar.Controllers;
 /// Controller for handling payment webhook callbacks from various providers
 /// </summary>
 [RemoteService]
+[ControllerName("GodGPTWebhook")]
 [Route("api/webhooks")]
 [AllowAnonymous]
-[ApiController]
 public class GodGPTWebhookController : AevatarController
 {
     private readonly IClusterClient _clusterClient;
