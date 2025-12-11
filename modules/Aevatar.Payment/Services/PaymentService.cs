@@ -274,9 +274,25 @@ public class PaymentService : IPaymentService
 
     // ========== Private Helper Methods ==========
 
-    private AgentModels.IPaymentIndexGAgent GetIndexAgent(Guid userId)
+    private AgentModels.PaymentIndexGAgent GetIndexAgent(Guid userId)
     {
-        return _agentFactory.CreateGAgent<AgentModels.IPaymentIndexGAgent>(userId);
+        var agent = _agentFactory.CreateGAgent<AgentModels.PaymentIndexGAgent>(userId);
+        agent.ActivateAsync().GetAwaiter().GetResult();
+        return agent;
+    }
+
+    private AgentModels.PaymentRecordGAgent GetRecordAgent(string paymentId)
+    {
+        // Convert paymentId to a stable Guid
+        var guidBytes = new byte[16];
+        var hashBytes = System.Security.Cryptography.MD5.HashData(
+            System.Text.Encoding.UTF8.GetBytes(paymentId));
+        Array.Copy(hashBytes, guidBytes, 16);
+        var agentId = new Guid(guidBytes);
+
+        var agent = _agentFactory.CreateGAgent<AgentModels.PaymentRecordGAgent>(agentId);
+        agent.ActivateAsync().GetAwaiter().GetResult();
+        return agent;
     }
 
     private static string GetPaymentId(PaymentPlatform platform, string subscriptionId)
@@ -302,8 +318,7 @@ public class PaymentService : IPaymentService
             var paymentId = GetPaymentId(platform, result.SubscriptionId!);
             
             // Create payment record agent
-            var recordAgent = _agentFactory.CreateGAgent<AgentModels.IPaymentRecordGAgent>(
-                Guid.Parse(paymentId.GetHashCode().ToString("X8").PadLeft(32, '0')));
+            var recordAgent = GetRecordAgent(paymentId);
 
             await recordAgent.InitializeAsync(new AgentModels.CreatePaymentRequest
             {
@@ -357,8 +372,7 @@ public class PaymentService : IPaymentService
         try
         {
             var paymentId = GetPaymentId(platform, result.SubscriptionId!);
-            var recordAgent = _agentFactory.CreateGAgent<AgentModels.IPaymentRecordGAgent>(
-                Guid.Parse(paymentId.GetHashCode().ToString("X8").PadLeft(32, '0')));
+            var recordAgent = GetRecordAgent(paymentId);
 
             var initialized = await recordAgent.IsInitializedAsync();
             if (!initialized)
@@ -374,7 +388,7 @@ public class PaymentService : IPaymentService
             var eventContext = BuildEventContext(record, platform, paymentId);
 
             // Get index agent for event broadcasting (requires UserId)
-            AgentModels.IPaymentIndexGAgent? indexAgent = null;
+            AgentModels.PaymentIndexGAgent? indexAgent = null;
             if (result.UserId.HasValue)
             {
                 indexAgent = GetIndexAgent(result.UserId.Value);
@@ -545,8 +559,7 @@ public class PaymentService : IPaymentService
     {
         try
         {
-            var recordAgent = _agentFactory.CreateGAgent<AgentModels.IPaymentRecordGAgent>(
-                Guid.Parse(paymentId.GetHashCode().ToString("X8").PadLeft(32, '0')));
+            var recordAgent = GetRecordAgent(paymentId);
             await recordAgent.CancelAsync(reason);
         }
         catch (Exception ex)
