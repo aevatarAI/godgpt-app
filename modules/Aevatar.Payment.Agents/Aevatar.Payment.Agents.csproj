@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Aevatar.Payment.Agents</RootNamespace>
+  </PropertyGroup>
+
+  <!-- ABP Framework -->
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.Core" />
+  </ItemGroup>
+
+  <!-- Agent Framework -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Aevatar.Agents.Abstractions\Aevatar.Agents.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Aevatar.Agents.Core\Aevatar.Agents.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Protobuf -->
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" />
+    <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="Protos\payment_index.proto" GrpcServices="None" />
+    <Protobuf Include="Protos\payment_record.proto" GrpcServices="None" />
+    <Protobuf Include="Protos\payment_events.proto" GrpcServices="None" />
+  </ItemGroup>
+
+</Project>
+

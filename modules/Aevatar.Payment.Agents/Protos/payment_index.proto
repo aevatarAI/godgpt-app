@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package aevatar.payment.agents.protos;
+
+option csharp_namespace = "Aevatar.Payment.Agents.Protos";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// PaymentIndexGAgent State (User Level - Lightweight)
+// =============================================================================
+
+message PaymentIndexStateProto {
+  // User identifier
+  string user_id = 1;
+  
+  // Platform customer IDs (key: platform enum as string, e.g., "0" for Stripe)
+  map<string, string> platform_customers = 2;
+  
+  // Active subscriptions only (typically 1-3, max ~10)
+  repeated ActiveSubscriptionProto active_subscriptions = 3;
+  
+  // Simple counters (fixed size)
+  int32 total_payment_count = 4;
+  int32 active_subscription_count = 5;
+  
+  // Metadata
+  google.protobuf.Timestamp last_updated = 6;
+}
+
+// Active subscription info (minimal fields for display and routing)
+message ActiveSubscriptionProto {
+  string payment_id = 1;              // PaymentRecordGAgent ID
+  string business_type = 2;           // Business type (godgpt/course/api)
+  string business_id = 3;             // Business entity ID
+  int32 platform = 4;                 // PaymentPlatform enum
+  string product_name = 5;            // Display name
+  int64 amount = 6;                   // Amount in smallest unit
+  string currency = 7;                // Currency code
+  google.protobuf.Timestamp period_end = 8;  // Subscription end time
+  google.protobuf.Timestamp created_at = 9;
+}
+
+// =============================================================================
+// PaymentIndexGAgent Events
+// =============================================================================
+
+message PlatformCustomerUpdatedEvent {
+  int32 platform = 1;
+  string customer_id = 2;
+}
+
+message ActiveSubscriptionAddedEvent {
+  ActiveSubscriptionProto subscription = 1;
+}
+
+message ActiveSubscriptionRemovedEvent {
+  string payment_id = 1;
+}
+
+message SubscriptionPeriodEndUpdatedEvent {
+  string payment_id = 1;
+  google.protobuf.Timestamp new_period_end = 2;
+}
+
+message PaymentCountIncrementedEvent {
+  int32 new_count = 1;
+}
+
+message IndexClearedEvent {
+  google.protobuf.Timestamp cleared_at = 1;
+}
+

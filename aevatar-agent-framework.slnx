@@ -55,6 +55,10 @@
     <Project Path="examples\SimpleDemo\SimpleDemo.csproj" />
     <Project Path="examples\StateStoreDemo\StateStoreDemo.csproj" />
   </Folder>
+  <Folder Name="/modules/">
+    <Project Path="modules\Aevatar.Payment\Aevatar.Payment.csproj" />
+    <Project Path="modules\Aevatar.Payment.Agents\Aevatar.Payment.Agents.csproj" />
+  </Folder>
   <Folder Name="/plugins/">
     <Project Path="plugins\Aevatar.Agents.Plugins.CQRS\Aevatar.Agents.Plugins.CQRS.csproj" Type="Classic C#" />
     <Project Path="plugins\Aevatar.Agents.Plugins.MassTransit\Aevatar.Agents.Plugins.MassTransit.csproj" Type="Classic C#" />

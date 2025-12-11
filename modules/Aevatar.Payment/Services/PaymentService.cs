@@ -1,0 +1,591 @@
+using Aevatar.Agents.Abstractions;
+using Aevatar.Payment.Abstractions;
+using Aevatar.Payment.Agents.Protos;
+using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.Logging;
+using AgentModels = Aevatar.Payment.Agents;
+
+namespace Aevatar.Payment.Services;
+
+/// <summary>
+/// Payment service orchestrator - routes requests to appropriate providers.
+/// Uses PaymentIndexGAgent and PaymentRecordGAgent architecture.
+/// Events are broadcast via PaymentIndexGAgent.NotifyXxxAsync (Down to children).
+/// </summary>
+public class PaymentService : IPaymentService
+{
+    private readonly IEnumerable<IPaymentProvider> _providers;
+    private readonly IGAgentFactory _agentFactory;
+    private readonly ILogger<PaymentService> _logger;
+
+    public PaymentService(
+        IEnumerable<IPaymentProvider> providers,
+        IGAgentFactory agentFactory,
+        ILogger<PaymentService> logger)
+    {
+        _providers = providers;
+        _agentFactory = agentFactory;
+        _logger = logger;
+    }
+
+    private IPaymentProvider GetProvider(PaymentPlatform platform)
+    {
+        var provider = _providers.FirstOrDefault(p => p.Platform == platform);
+        if (provider == null)
+        {
+            throw new NotSupportedException($"Payment platform {platform} is not supported");
+        }
+        return provider;
+    }
+
+    // ========== Product Operations ==========
+
+    public async Task<List<ProductDto>> GetProductsAsync(
+        PaymentPlatform platform, CancellationToken ct = default)
+    {
+        var provider = GetProvider(platform);
+        return await provider.GetProductsAsync(ct);
+    }
+
+    // ========== Customer Operations (Stripe) ==========
+
+    public async Task<CustomerSessionResult> GetStripeCustomerAsync(
+        Guid userId, CancellationToken ct = default)
+    {
+        _logger.LogInformation("[PaymentService] Getting Stripe customer for user {UserId}", userId);
+
+        var provider = GetProvider(PaymentPlatform.Stripe);
+        var indexAgent = GetIndexAgent(userId);
+
+        // Check if we already have a customer ID stored
+        var existingCustomerId = await indexAgent.GetPlatformCustomerIdAsync(
+            AgentModels.PaymentPlatform.Stripe);
+
+        string customerId;
+        if (!string.IsNullOrEmpty(existingCustomerId))
+        {
+            customerId = existingCustomerId;
+            _logger.LogDebug("[PaymentService] Using existing customer {CustomerId} for user {UserId}",
+                customerId, userId);
+        }
+        else
+        {
+            // Create new customer
+            var customerResult = await provider.GetOrCreateCustomerAsync(userId, ct);
+            if (!customerResult.Success || string.IsNullOrEmpty(customerResult.CustomerId))
+            {
+                return new CustomerSessionResult
+                {
+                    Success = false,
+                    ErrorMessage = customerResult.ErrorMessage ?? "Failed to create customer"
+                };
+            }
+
+            customerId = customerResult.CustomerId;
+
+            // Store customer ID in index agent
+            await indexAgent.SetPlatformCustomerIdAsync(
+                AgentModels.PaymentPlatform.Stripe, customerId);
+
+            _logger.LogInformation("[PaymentService] Created and stored customer {CustomerId} for user {UserId}",
+                customerId, userId);
+        }
+
+        // Get customer session (EphemeralKey)
+        return await provider.GetCustomerSessionAsync(userId, customerId, ct);
+    }
+
+    public async Task<PaymentSheetResult> CreatePaymentSheetAsync(
+        Guid userId, PaymentSheetRequest request, CancellationToken ct = default)
+    {
+        _logger.LogInformation("[PaymentService] Creating PaymentSheet for user {UserId}", userId);
+
+        var provider = GetProvider(PaymentPlatform.Stripe);
+
+        // Ensure we have a customer ID
+        if (string.IsNullOrEmpty(request.CustomerId))
+        {
+            var customerSession = await GetStripeCustomerAsync(userId, ct);
+            if (!customerSession.Success || string.IsNullOrEmpty(customerSession.CustomerId))
+            {
+                return new PaymentSheetResult
+                {
+                    Success = false,
+                    ErrorMessage = customerSession.ErrorMessage ?? "Failed to get customer"
+                };
+            }
+            request.CustomerId = customerSession.CustomerId;
+        }
+
+        request.UserId = userId;
+        return await provider.CreatePaymentSheetAsync(request, ct);
+    }
+
+    // ========== Subscription Operations ==========
+
+    public async Task<SubscriptionResult> CreateSubscriptionAsync(
+        Guid userId,
+        PaymentPlatform platform,
+        SubscriptionRequest request,
+        CancellationToken ct = default)
+    {
+        _logger.LogInformation(
+            "[PaymentService] Creating subscription for user {UserId} on {Platform}",
+            userId, platform);
+
+        var provider = GetProvider(platform);
+        request.UserId = userId;
+
+        // For Stripe, ensure we have a customer ID if not provided
+        if (platform == PaymentPlatform.Stripe && string.IsNullOrEmpty(request.CustomerId))
+        {
+            var indexAgent = GetIndexAgent(userId);
+            var existingCustomerId = await indexAgent.GetPlatformCustomerIdAsync(
+                AgentModels.PaymentPlatform.Stripe);
+            
+            if (!string.IsNullOrEmpty(existingCustomerId))
+            {
+                request.CustomerId = existingCustomerId;
+            }
+        }
+
+        var result = await provider.CreateSubscriptionAsync(request, ct);
+
+        if (result.Success && !string.IsNullOrEmpty(result.SubscriptionId))
+        {
+            await RecordPaymentAsync(userId, platform, request, result);
+        }
+
+        return result;
+    }
+
+    public async Task<CancellationResult> CancelSubscriptionAsync(
+        Guid userId,
+        PaymentPlatform platform,
+        CancellationRequest request,
+        CancellationToken ct = default)
+    {
+        _logger.LogInformation(
+            "[PaymentService] Cancelling subscription {SubscriptionId} for user {UserId}",
+            request.SubscriptionId, userId);
+
+        var provider = GetProvider(platform);
+        request.UserId = userId;
+
+        var result = await provider.CancelSubscriptionAsync(request, ct);
+
+        if (result.Success)
+        {
+            var paymentId = GetPaymentId(platform, request.SubscriptionId);
+            await CancelPaymentRecordAsync(paymentId, request.Reason);
+        }
+
+        return result;
+    }
+
+    // ========== Verification ==========
+
+    public async Task<VerificationResult> VerifyTransactionAsync(
+        Guid userId,
+        PaymentPlatform platform,
+        VerificationRequest request,
+        CancellationToken ct = default)
+    {
+        _logger.LogInformation(
+            "[PaymentService] Verifying transaction for user {UserId} on {Platform}",
+            userId, platform);
+
+        var provider = GetProvider(platform);
+        request.UserId = userId;
+
+        return await provider.VerifyTransactionAsync(request, ct);
+    }
+
+    // ========== Webhook Processing ==========
+
+    public async Task<WebhookResult> HandleWebhookAsync(
+        PaymentPlatform platform,
+        WebhookRequest request,
+        CancellationToken ct = default)
+    {
+        _logger.LogInformation("[PaymentService] Handling webhook for {Platform}", platform);
+
+        var provider = GetProvider(platform);
+        var result = await provider.HandleWebhookAsync(request, ct);
+
+        if (result.Success && result.ShouldProcess && !string.IsNullOrEmpty(result.SubscriptionId))
+        {
+            await ProcessWebhookResultAsync(platform, result);
+        }
+
+        return result;
+    }
+
+    // ========== Query Operations ==========
+
+    public async Task<UserSubscriptionStatus> GetUserSubscriptionStatusAsync(
+        Guid userId, CancellationToken ct = default)
+    {
+        var indexAgent = GetIndexAgent(userId);
+        var activeSubscriptions = await indexAgent.GetActiveSubscriptionsAsync();
+
+        var status = new UserSubscriptionStatus
+        {
+            HasActiveSubscription = activeSubscriptions.Any(),
+            ActiveSubscriptions = activeSubscriptions.Select(ToDto).ToList()
+        };
+
+        // Set primary subscription info from first active
+        var primary = activeSubscriptions.FirstOrDefault();
+        if (primary != null)
+        {
+            status.CurrentPlan = primary.ProductName;
+            status.Platform = ToApiPlatform(primary.Platform);
+            status.ExpiresAt = primary.PeriodEnd;
+            status.SubscriptionId = primary.PaymentId;
+            status.AutoRenew = primary.PeriodEnd > DateTime.UtcNow;
+        }
+
+        return status;
+    }
+
+    public async Task<List<PaymentHistoryItem>> GetPaymentHistoryAsync(
+        Guid userId, int page = 1, int pageSize = 10, CancellationToken ct = default)
+    {
+        // Note: In full implementation, this should query from CQRS read model (database)
+        var indexAgent = GetIndexAgent(userId);
+        var activeSubs = await indexAgent.GetActiveSubscriptionsAsync();
+
+        return activeSubs
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(s => new PaymentHistoryItem
+            {
+                PaymentId = s.PaymentId,
+                Platform = ToApiPlatform(s.Platform),
+                ProductName = s.ProductName,
+                Amount = s.Amount / 100m,
+                Currency = s.Currency,
+                Status = PaymentStatus.Completed,
+                CreatedAt = s.CreatedAt
+            })
+            .ToList();
+    }
+
+    // ========== Private Helper Methods ==========
+
+    private AgentModels.IPaymentIndexGAgent GetIndexAgent(Guid userId)
+    {
+        return _agentFactory.CreateGAgent<AgentModels.IPaymentIndexGAgent>(userId);
+    }
+
+    private static string GetPaymentId(PaymentPlatform platform, string subscriptionId)
+    {
+        var platformName = platform switch
+        {
+            PaymentPlatform.Stripe => "stripe",
+            PaymentPlatform.AppStore => "appstore",
+            PaymentPlatform.GooglePlay => "googleplay",
+            _ => "unknown"
+        };
+        return $"payment_{platformName}_{subscriptionId}";
+    }
+
+    private async Task RecordPaymentAsync(
+        Guid userId,
+        PaymentPlatform platform,
+        SubscriptionRequest request,
+        SubscriptionResult result)
+    {
+        try
+        {
+            var paymentId = GetPaymentId(platform, result.SubscriptionId!);
+            
+            // Create payment record agent
+            var recordAgent = _agentFactory.CreateGAgent<AgentModels.IPaymentRecordGAgent>(
+                Guid.Parse(paymentId.GetHashCode().ToString("X8").PadLeft(32, '0')));
+
+            await recordAgent.InitializeAsync(new AgentModels.CreatePaymentRequest
+            {
+                UserId = userId.ToString(),
+                Platform = ToAgentPlatform(platform),
+                SubscriptionId = result.SubscriptionId,
+                CustomerId = result.CustomerId,
+                ProductId = request.ProductId,
+                ProductName = request.ProductId,
+                PaymentMode = AgentModels.PaymentMode.Subscription,
+                BusinessType = "godgpt",
+                BusinessId = request.ProductId,
+                PeriodEnd = result.ExpiresAt
+            });
+
+            // Update index agent
+            var indexAgent = GetIndexAgent(userId);
+            if (!string.IsNullOrEmpty(result.CustomerId))
+            {
+                await indexAgent.SetPlatformCustomerIdAsync(
+                    ToAgentPlatform(platform), result.CustomerId);
+            }
+            await indexAgent.AddActiveSubscriptionAsync(new AgentModels.ActiveSubscription
+            {
+                PaymentId = paymentId,
+                BusinessType = "godgpt",
+                BusinessId = request.ProductId,
+                Platform = ToAgentPlatform(platform),
+                ProductName = request.ProductId,
+                Amount = (long)((request.Metadata.TryGetValue("amount", out var amt) 
+                    ? decimal.Parse(amt) : 0) * 100),
+                Currency = "USD",
+                PeriodEnd = result.ExpiresAt ?? DateTime.UtcNow.AddMonths(1),
+                CreatedAt = DateTime.UtcNow
+            });
+            await indexAgent.IncrementPaymentCountAsync();
+
+            _logger.LogInformation(
+                "[PaymentService] Recorded payment {PaymentId} for user {UserId}",
+                paymentId, userId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, 
+                "[PaymentService] Failed to record payment for user {UserId}", userId);
+        }
+    }
+
+    private async Task ProcessWebhookResultAsync(PaymentPlatform platform, WebhookResult result)
+    {
+        try
+        {
+            var paymentId = GetPaymentId(platform, result.SubscriptionId!);
+            var recordAgent = _agentFactory.CreateGAgent<AgentModels.IPaymentRecordGAgent>(
+                Guid.Parse(paymentId.GetHashCode().ToString("X8").PadLeft(32, '0')));
+
+            var initialized = await recordAgent.IsInitializedAsync();
+            if (!initialized)
+            {
+                _logger.LogWarning(
+                    "[PaymentService] Payment record {PaymentId} not found for webhook",
+                    paymentId);
+                return;
+            }
+
+            // Get payment record for event context
+            var record = await recordAgent.GetPaymentRecordAsync();
+            var eventContext = BuildEventContext(record, platform, paymentId);
+
+            // Get index agent for event broadcasting (requires UserId)
+            AgentModels.IPaymentIndexGAgent? indexAgent = null;
+            if (result.UserId.HasValue)
+            {
+                indexAgent = GetIndexAgent(result.UserId.Value);
+            }
+
+            if (result.NewStatus.HasValue)
+            {
+                var agentStatus = ToAgentStatus(result.NewStatus.Value);
+                
+                if (result.NewStatus == PaymentStatus.Completed)
+                {
+                    var isRenewal = result.VerificationResult?.ExpiresDate != null && 
+                                    record?.Status == AgentModels.PaymentStatus.Completed;
+                    
+                    // Process renewal in agent
+                    if (result.VerificationResult?.ExpiresDate != null)
+                    {
+                        await recordAgent.ProcessRenewalAsync(new AgentModels.RenewalInfo
+                        {
+                            ExternalTransactionId = result.TransactionId,
+                            PeriodStart = DateTime.UtcNow,
+                            PeriodEnd = result.VerificationResult.ExpiresDate.Value,
+                            Amount = 0
+                        });
+
+                        if (indexAgent != null)
+                        {
+                            await indexAgent.UpdateSubscriptionPeriodEndAsync(
+                                paymentId, result.VerificationResult.ExpiresDate.Value);
+                        }
+                    }
+
+                    // Build payment completed event
+                    var completedEvent = new PaymentCompletedEvent
+                    {
+                        Context = eventContext,
+                        TransactionId = result.TransactionId ?? string.Empty,
+                        PeriodStart = result.VerificationResult?.ExpiresDate != null
+                            ? Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                            : null,
+                        PeriodEnd = result.VerificationResult?.ExpiresDate != null
+                            ? Timestamp.FromDateTime(result.VerificationResult.ExpiresDate.Value.ToUniversalTime())
+                            : null,
+                        IsRenewal = isRenewal,
+                        CompletedAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                    };
+
+                    // Broadcast to business agents via IndexAgent (user-level stream)
+                    if (indexAgent != null)
+                    {
+                        await indexAgent.NotifyPaymentCompletedAsync(completedEvent);
+                    }
+
+                    // Point-to-point callback to order-level agent (if configured)
+                    await recordAgent.NotifyCallbackAgentAsync(completedEvent);
+                }
+                else if (result.NewStatus == PaymentStatus.Cancelled || 
+                         result.NewStatus == PaymentStatus.Expired)
+                {
+                    // Update agent status (no business event - business layer tracks via period_end)
+                    await recordAgent.UpdateStatusAsync(agentStatus);
+
+                    if (indexAgent != null)
+                    {
+                        await indexAgent.RemoveActiveSubscriptionAsync(paymentId);
+                    }
+                }
+                else if (result.NewStatus == PaymentStatus.Refunded)
+                {
+                    await recordAgent.UpdateStatusAsync(agentStatus);
+
+                    // Build refund completed event
+                    var refundEvent = new RefundCompletedEvent
+                    {
+                        Context = eventContext,
+                        OriginalTransactionId = result.TransactionId ?? string.Empty,
+                        RefundAmount = record?.Amount ?? 0,
+                        Reason = "refund",
+                        RefundType = "full",
+                        RefundedAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                    };
+
+                    if (indexAgent != null)
+                    {
+                        await indexAgent.RemoveActiveSubscriptionAsync(paymentId);
+                        
+                        // Broadcast to business agents via IndexAgent
+                        await indexAgent.NotifyRefundCompletedAsync(refundEvent);
+                    }
+
+                    // Point-to-point callback to order-level agent (if configured)
+                    await recordAgent.NotifyCallbackAgentAsync(refundEvent);
+                }
+                else if (result.NewStatus == PaymentStatus.Failed)
+                {
+                    await recordAgent.UpdateStatusAsync(agentStatus);
+
+                    // Build payment failed event
+                    var failedEvent = new PaymentFailedEvent
+                    {
+                        Context = eventContext,
+                        ErrorCode = "payment_failed",
+                        ErrorMessage = result.VerificationResult?.ErrorMessage ?? "Payment failed",
+                        FailedAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                    };
+
+                    // Broadcast to business agents via IndexAgent
+                    if (indexAgent != null)
+                    {
+                        await indexAgent.NotifyPaymentFailedAsync(failedEvent);
+                    }
+
+                    // Point-to-point callback to order-level agent (if configured)
+                    await recordAgent.NotifyCallbackAgentAsync(failedEvent);
+                }
+                else
+                {
+                    await recordAgent.UpdateStatusAsync(agentStatus);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, 
+                "[PaymentService] Failed to process webhook for subscription {SubscriptionId}",
+                result.SubscriptionId);
+        }
+    }
+
+    private static PaymentEventContext BuildEventContext(
+        AgentModels.PaymentRecord? record,
+        PaymentPlatform platform,
+        string paymentId)
+    {
+        var context = new PaymentEventContext
+        {
+            PaymentId = paymentId,
+            Platform = (int)platform
+        };
+
+        if (record != null)
+        {
+            context.UserId = record.UserId;
+            context.SubscriptionId = record.SubscriptionId;
+            context.CustomerId = record.CustomerId;
+            context.BusinessType = record.BusinessType;
+            context.BusinessId = record.BusinessId;
+            context.Environment = record.Environment;
+            context.ProductId = record.ProductId;
+            context.ProductName = record.ProductName;
+            context.PaymentMode = (int)record.PaymentMode;
+            context.Amount = record.Amount;
+            context.Currency = record.Currency;
+
+            if (record.BusinessMetadata != null)
+            {
+                foreach (var kv in record.BusinessMetadata)
+                {
+                    context.BusinessMetadata[kv.Key] = kv.Value;
+                }
+            }
+        }
+
+        return context;
+    }
+
+    private async Task CancelPaymentRecordAsync(string paymentId, string? reason)
+    {
+        try
+        {
+            var recordAgent = _agentFactory.CreateGAgent<AgentModels.IPaymentRecordGAgent>(
+                Guid.Parse(paymentId.GetHashCode().ToString("X8").PadLeft(32, '0')));
+            await recordAgent.CancelAsync(reason);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, 
+                "[PaymentService] Failed to cancel payment record {PaymentId}", paymentId);
+        }
+    }
+
+    // ========== Type Conversions ==========
+
+    private static AgentModels.PaymentPlatform ToAgentPlatform(PaymentPlatform platform)
+    {
+        return (AgentModels.PaymentPlatform)(int)platform;
+    }
+
+    private static PaymentPlatform ToApiPlatform(AgentModels.PaymentPlatform platform)
+    {
+        return (PaymentPlatform)(int)platform;
+    }
+
+    private static AgentModels.PaymentStatus ToAgentStatus(PaymentStatus status)
+    {
+        return (AgentModels.PaymentStatus)(int)status;
+    }
+
+    private static ActiveSubscriptionDto ToDto(AgentModels.ActiveSubscription sub)
+    {
+        return new ActiveSubscriptionDto
+        {
+            PaymentId = sub.PaymentId,
+            BusinessType = sub.BusinessType,
+            BusinessId = sub.BusinessId,
+            Platform = ToApiPlatform(sub.Platform),
+            ProductName = sub.ProductName,
+            Amount = sub.Amount / 100m,
+            Currency = sub.Currency,
+            PeriodEnd = sub.PeriodEnd,
+            CreatedAt = sub.CreatedAt
+        };
+    }
+}

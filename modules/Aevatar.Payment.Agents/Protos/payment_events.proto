@@ -1,0 +1,113 @@
+syntax = "proto3";
+
+package aevatar.payment.agents.protos;
+
+option csharp_namespace = "Aevatar.Payment.Agents.Protos";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Payment Business Events (Published to External Subscribers)
+// 
+// These are pure payment events - business logic (subscription, quota, trial)
+// should be handled by business layer consumers.
+// =============================================================================
+
+// Context shared by all payment events
+message PaymentEventContext {
+  // Identifiers
+  string user_id = 1;
+  string payment_id = 2;
+  
+  // Business context (for business layer to route handling)
+  string business_type = 3;              // godgpt/course/api
+  string business_id = 4;
+  map<string, string> business_metadata = 5;
+  
+  // Platform info
+  int32 platform = 6;                    // PaymentPlatform enum
+  string environment = 7;                // Production/Sandbox
+  
+  // Product info
+  string product_id = 8;
+  string product_name = 9;
+  int32 payment_mode = 10;               // PaymentMode enum (one_time/subscription)
+  
+  // Amount
+  int64 amount = 11;                     // Amount in smallest unit (cents)
+  string currency = 12;
+  
+  // Platform-specific IDs
+  string subscription_id = 13;           // Platform subscription ID (if subscription mode)
+  string customer_id = 14;               // Platform customer ID
+}
+
+// =============================================================================
+// Pure Payment Events (3 Core Events)
+// =============================================================================
+
+/// <summary>
+/// Published when a payment is successfully completed.
+/// Business layer should handle subscription/quota/course unlock based on business_type.
+/// </summary>
+message PaymentCompletedEvent {
+  PaymentEventContext context = 1;
+  
+  // Transaction details
+  string transaction_id = 2;
+  string invoice_id = 3;
+  
+  // Period info (for recurring payments)
+  optional google.protobuf.Timestamp period_start = 4;
+  optional google.protobuf.Timestamp period_end = 5;
+  
+  // Renewal info
+  bool is_renewal = 6;
+  int32 renewal_count = 7;
+  
+  // Promotion info (passed to business layer)
+  map<string, string> promotion_metadata = 8;
+  
+  // Timestamp
+  google.protobuf.Timestamp completed_at = 9;
+}
+
+/// <summary>
+/// Published when a payment fails.
+/// Business layer may send notifications or handle grace period.
+/// </summary>
+message PaymentFailedEvent {
+  PaymentEventContext context = 1;
+  
+  // Failure details
+  string error_code = 2;
+  string error_message = 3;
+  
+  // Retry info
+  bool is_retryable = 4;
+  int32 attempt_count = 5;
+  
+  // Timestamp
+  google.protobuf.Timestamp failed_at = 6;
+}
+
+/// <summary>
+/// Published when a refund is completed.
+/// Business layer should revoke access/quota based on business_type.
+/// </summary>
+message RefundCompletedEvent {
+  PaymentEventContext context = 1;
+  
+  // Refund details
+  string refund_id = 2;
+  string original_transaction_id = 3;
+  int64 refund_amount = 4;
+  
+  // Refund type
+  string refund_type = 5;                // full/partial
+  string reason = 6;
+  
+  // Timestamp
+  google.protobuf.Timestamp refunded_at = 7;
+}
+

@@ -1,0 +1,157 @@
+syntax = "proto3";
+
+package aevatar.payment.agents.protos;
+
+option csharp_namespace = "Aevatar.Payment.Agents.Protos";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// PaymentRecordGAgent State (Order Level - Complete Data)
+// =============================================================================
+
+message PaymentRecordStateProto {
+  // ========== Identifiers ==========
+  string payment_id = 1;              // Internal payment ID (matches Agent ID)
+  string user_id = 2;                 // User ID (redundant for independent queries)
+  string external_order_id = 3;       // External order ID (business layer generated)
+  string subscription_id = 4;         // Platform subscription ID (subscription mode)
+  
+  // ========== Business Context ==========
+  string business_type = 5;           // Business type (godgpt/course/api)
+  string business_id = 6;             // Business entity ID
+  map<string, string> business_metadata = 7;  // Business metadata
+  
+  // ========== Platform Info ==========
+  int32 platform = 8;                 // PaymentPlatform enum
+  string environment = 9;             // Production/Sandbox
+  string customer_id = 10;            // Platform customer ID
+  
+  // ========== Product Info ==========
+  string product_id = 11;             // Platform product ID
+  string price_id = 12;               // Platform price ID
+  string product_name = 13;           // Product name (display)
+  int32 payment_mode = 14;            // PaymentMode enum
+  
+  // ========== Billing Cycle (Subscription Mode) ==========
+  int32 billing_cycle = 15;           // BillingCycle enum
+  google.protobuf.Timestamp period_start = 16;
+  google.protobuf.Timestamp period_end = 17;
+  
+  // ========== Amount Info ==========
+  int64 amount = 18;                  // Amount in smallest unit (e.g., cents)
+  string currency = 19;               // Currency code
+  optional int64 net_amount = 20;     // Net amount after discounts
+  
+  // ========== Status Info ==========
+  int32 status = 21;                  // PaymentStatus enum
+  google.protobuf.Timestamp created_at = 22;
+  optional google.protobuf.Timestamp completed_at = 23;
+  
+  // ========== Transactions ==========
+  repeated TransactionProto transactions = 24;
+  
+  // ========== Callback ==========
+  string callback_agent_id = 26;      // Agent ID for point-to-point notification
+  
+  // ========== Metadata ==========
+  google.protobuf.Timestamp last_updated = 25;
+}
+
+// =============================================================================
+// Transaction (Invoice Detail - Each Payment Action)
+// =============================================================================
+
+message TransactionProto {
+  // ========== Identifiers ==========
+  string transaction_id = 1;          // Internal transaction ID
+  string external_transaction_id = 2; // Platform transaction ID
+  string invoice_id = 3;              // Invoice ID (if any)
+  string purchase_token = 4;          // Google Play purchase token
+  
+  // ========== Type and Status ==========
+  int32 transaction_type = 5;         // TransactionType enum
+  int32 status = 6;                   // PaymentStatus enum
+  
+  // ========== Amount ==========
+  int64 amount = 7;                   // Amount in smallest unit
+  string currency = 8;
+  optional int64 net_amount = 9;
+  
+  // ========== Period (Subscription Renewal) ==========
+  optional google.protobuf.Timestamp period_start = 10;
+  optional google.protobuf.Timestamp period_end = 11;
+  
+  // ========== Time ==========
+  google.protobuf.Timestamp created_at = 12;
+  optional google.protobuf.Timestamp completed_at = 13;
+  
+  // ========== Promotions ==========
+  repeated PromotionProto promotions = 14;
+  bool is_trial = 15;
+  string trial_code = 16;
+  
+  // ========== Metadata ==========
+  map<string, string> metadata = 17;
+}
+
+// =============================================================================
+// Promotion (Discount Info)
+// =============================================================================
+
+message PromotionProto {
+  string promotion_id = 1;
+  string promotion_type = 2;          // coupon/promo_code/trial/etc
+  string code = 3;                    // Promotion code
+  string name = 4;                    // Display name
+  optional int64 amount_off = 5;      // Amount off (smallest unit)
+  optional int32 percent_off = 6;     // Percent off (0-100)
+  map<string, string> metadata = 7;
+}
+
+// =============================================================================
+// PaymentRecordGAgent Events
+// =============================================================================
+
+message PaymentRecordInitializedEvent {
+  PaymentRecordStateProto record = 1;
+}
+
+message RecordStatusChangedEvent {
+  int32 old_status = 1;
+  int32 new_status = 2;
+  google.protobuf.Timestamp changed_at = 3;
+  string reason = 4;
+}
+
+message RecordPeriodUpdatedEvent {
+  google.protobuf.Timestamp new_period_start = 1;
+  google.protobuf.Timestamp new_period_end = 2;
+}
+
+message RecordCompletedEvent {
+  google.protobuf.Timestamp completed_at = 1;
+}
+
+message TransactionAddedEvent {
+  TransactionProto transaction = 1;
+}
+
+message TransactionStatusChangedEvent {
+  string transaction_id = 1;
+  int32 new_status = 2;
+  google.protobuf.Timestamp changed_at = 3;
+}
+
+message RenewalProcessedEvent {
+  TransactionProto renewal_transaction = 1;
+  google.protobuf.Timestamp new_period_end = 2;
+}
+
+message RefundProcessedEvent {
+  string transaction_id = 1;
+  int64 refund_amount = 2;
+  string reason = 3;
+  google.protobuf.Timestamp refunded_at = 4;
+}
+

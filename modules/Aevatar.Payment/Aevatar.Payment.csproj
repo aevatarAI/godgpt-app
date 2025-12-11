@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Aevatar.Payment</RootNamespace>
+  </PropertyGroup>
+
+  <!-- ABP Framework -->
+  <ItemGroup>
+    <PackageReference Include="Volo.Abp.AspNetCore.Mvc" />
+    <PackageReference Include="Volo.Abp.Autofac" />
+  </ItemGroup>
+
+  <!-- Payment SDKs -->
+  <ItemGroup>
+    <PackageReference Include="Stripe.net" />
+    <PackageReference Include="Google.Apis.AndroidPublisher.v3" />
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
+  </ItemGroup>
+
+  <!-- Agent Framework -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Aevatar.Agents.Abstractions\Aevatar.Agents.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Aevatar.Agents.Core\Aevatar.Agents.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Payment Agents -->
+  <ItemGroup>
+    <ProjectReference Include="..\Aevatar.Payment.Agents\Aevatar.Payment.Agents.csproj" />
+  </ItemGroup>
+
+</Project>
+
