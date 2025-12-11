@@ -21,3 +21,11 @@ message AccountCreated {
     string account_holder = 1;
     double initial_balance = 2;
 }
+
+// 账户摘要（用于 RPC 返回）
+message AccountSummary {
+    string account_holder = 1;
+    double balance = 2;
+    int32 transaction_count = 3;
+    int64 version = 4;
+}

@@ -188,4 +188,6 @@ public class ProtoActorGAgentActor : GAgentActorBase
         AgentMetrics.UpdateActiveActorCount(count);
         Logger.LogDebug("Active actor count: {Count}", count);
     }
+
+    // RPC: Inherited from GAgentActorBase (uses shared RpcInvoker)
 }

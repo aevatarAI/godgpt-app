@@ -11,7 +11,7 @@ namespace EventSourcingDemo;
 /// 支持 EventSourcing 的银行账户 Agent
 /// 使用新的批量提交和纯函数式状态转换模式
 /// </summary>
-public class BankAccountAgent : GAgentBase<BankAccountState>
+public class BankAccountAgent : GAgentBase<BankAccountState>, IBankAccountAgent
 {
     public override Task<string> GetDescriptionAsync()
     {
@@ -196,5 +196,53 @@ public class BankAccountAgent : GAgentBase<BankAccountState>
 
         Logger?.LogInformation("   New state: Balance=${Balance}, Transactions={Count}", state.Balance,
             state.TransactionCount);
+    }
+
+    // ========== RPC Query Methods (Interface Implementation) ==========
+
+    /// <summary>
+    /// Get current account balance
+    /// </summary>
+    public Task<double> GetBalanceAsync()
+    {
+        return Task.FromResult(State.Balance);
+    }
+
+    /// <summary>
+    /// Get account holder name
+    /// </summary>
+    public Task<string> GetAccountHolderAsync()
+    {
+        return Task.FromResult(State.AccountHolder);
+    }
+
+    /// <summary>
+    /// Get transaction count
+    /// </summary>
+    public Task<int> GetTransactionCountAsync()
+    {
+        return Task.FromResult(State.TransactionCount);
+    }
+
+    /// <summary>
+    /// Get current version
+    /// </summary>
+    public Task<long> GetCurrentVersionAsync()
+    {
+        return Task.FromResult(GetCurrentVersion());
+    }
+
+    /// <summary>
+    /// Get account summary
+    /// </summary>
+    public Task<Events.AccountSummary> GetAccountSummaryAsync()
+    {
+        return Task.FromResult(new Events.AccountSummary
+        {
+            AccountHolder = State.AccountHolder,
+            Balance = State.Balance,
+            TransactionCount = State.TransactionCount,
+            Version = GetCurrentVersion()
+        });
     }
 }

@@ -241,4 +241,6 @@ public class LocalGAgentActor : GAgentActorBase
         var count = Interlocked.Decrement(ref _activeActorCount);
         AgentMetrics.UpdateActiveActorCount(count);
     }
+
+    // RPC: Inherited from GAgentActorBase (uses shared RpcInvoker)
 }

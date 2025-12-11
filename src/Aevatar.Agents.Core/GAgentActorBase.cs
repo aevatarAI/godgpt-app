@@ -5,6 +5,7 @@ using Aevatar.Agents.Core.EventRouting;
 using Aevatar.Agents.Core.Helpers;
 using Aevatar.Agents.Core.Internal;
 using Aevatar.Agents.Core.Observability;
+using Aevatar.Agents.Core.Rpc;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -465,4 +466,17 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
     /// Derived classes should override this method to perform specific deactivation logic
     /// </summary>
     protected virtual Task OnDeactivateAsync(CancellationToken ct) => Task.CompletedTask;
+
+    // ============ RPC Method Invocation ============
+
+    /// <summary>
+    /// Invoke RPC method on Agent via Protobuf.
+    /// Default implementation uses shared RpcInvoker.
+    /// </summary>
+    /// <param name="requestBytes">RpcRequest serialized bytes</param>
+    /// <returns>RpcResponse serialized bytes</returns>
+    public virtual Task<byte[]> InvokeRpcAsync(byte[] requestBytes)
+    {
+        return RpcInvoker.InvokeAsync(Agent, requestBytes, Logger);
+    }
 }

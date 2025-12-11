@@ -77,4 +77,11 @@ public interface IGAgentGrain : IGrainWithStringKey
     /// 停用
     /// </summary>
     Task DeactivateAsync();
+
+    /// <summary>
+    /// Protobuf RPC method invocation
+    /// </summary>
+    /// <param name="requestBytes">RpcRequest serialized bytes</param>
+    /// <returns>RpcResponse serialized bytes</returns>
+    Task<byte[]> InvokeRpcAsync(byte[] requestBytes);
 }

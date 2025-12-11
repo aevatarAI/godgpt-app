@@ -1,6 +1,7 @@
 using Aevatar.Agents;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Core;
+using Aevatar.Agents.Rpc;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -257,6 +258,17 @@ public class OrleansGAgentActor : IGAgentActor
             "Agent instance is not available on client side. " +
             "In Orleans mode, Agent runs in Silo (Grain). " +
             "Use Grain RPC methods instead.");
+    }
+
+    /// <summary>
+    /// Invoke RPC method on Agent via Protobuf
+    /// </summary>
+    /// <param name="requestBytes">RpcRequest serialized bytes</param>
+    /// <returns>RpcResponse serialized bytes</returns>
+    public async Task<byte[]> InvokeRpcAsync(byte[] requestBytes)
+    {
+        EnsureGrain();
+        return await _grain!.InvokeRpcAsync(requestBytes);
     }
 
     #endregion

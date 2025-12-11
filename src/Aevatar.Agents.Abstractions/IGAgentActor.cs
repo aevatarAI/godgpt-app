@@ -58,4 +58,13 @@ public interface IGAgentActor : IEventPublisher
     /// Deactivate the Actor.
     /// </summary>
     Task DeactivateAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// Invoke RPC method on Agent via Protobuf.
+    /// For Local runtime, this may directly call the method.
+    /// For Orleans runtime, this calls the Grain RPC method.
+    /// </summary>
+    /// <param name="requestBytes">RpcRequest serialized bytes</param>
+    /// <returns>RpcResponse serialized bytes</returns>
+    Task<byte[]> InvokeRpcAsync(byte[] requestBytes);
 }

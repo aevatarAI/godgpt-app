@@ -3,7 +3,9 @@ using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.CQRS;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.Core.Helpers;
+using Aevatar.Agents.Core.Rpc;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -228,10 +230,10 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         }
     }
 
-    private Type? ResolveAgentType(string agentTypeName)
+    private System.Type? ResolveAgentType(string agentTypeName)
     {
         // Try direct type resolution
-        var type = Type.GetType(agentTypeName);
+        var type = System.Type.GetType(agentTypeName);
         if (type != null) return type;
 
         // Search all loaded assemblies
@@ -256,7 +258,7 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         return null;
     }
 
-    private IGAgent? CreateAgentInstance(Type agentType, Guid agentId)
+    private IGAgent? CreateAgentInstance(System.Type agentType, Guid agentId)
     {
         try
         {
@@ -330,6 +332,12 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
         // Inject StateProjector
         StateProjectorInjector.InjectStateProjector(agent, ServiceProvider);
+
+        // Inject EventStore (only if agent supports EventSourcing)
+        if (AgentEventStoreInjector.HasEventStore(agent))
+        {
+            AgentEventStoreInjector.InjectEventStore(agent, ServiceProvider);
+        }
 
         // Inject EventPublisher (Grain acts as the publisher)
         AgentEventPublisherInjector.InjectEventPublisher(agent, new GrainEventPublisher(this, _myStream, _logger, GrainFactory));
@@ -498,6 +506,21 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
     {
         _logger.LogInformation("Grain {GrainId} deactivate requested", this.GetGrainId());
         return Task.CompletedTask;
+    }
+
+    #endregion
+
+    #region RPC Method Invocation
+
+    /// <summary>
+    /// Protobuf RPC method invocation - delegates to shared RpcInvoker
+    /// </summary>
+    public Task<byte[]> InvokeRpcAsync(byte[] requestBytes)
+    {
+        if (_agent == null)
+            throw new InvalidOperationException("Agent not initialized");
+
+        return RpcInvoker.InvokeAsync(_agent, requestBytes, _logger);
     }
 
     #endregion
