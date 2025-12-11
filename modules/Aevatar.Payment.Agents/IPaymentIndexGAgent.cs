@@ -11,6 +11,9 @@ namespace Aevatar.Payment.Agents;
 /// - Keep extremely lightweight, no historical data storage
 /// - Acts as event hub for business layer (PublishAsync Down to children)
 /// - Business agents register via IGAgentActorManager.LinkParentChildAsync
+/// 
+/// Note: This is NOT an Orleans Grain interface. Agent runs inside OrleansGAgentGrain.
+/// Use IGAgentActorManager to manage Agent lifecycle.
 /// </summary>
 public interface IPaymentIndexGAgent : IGAgent
 {

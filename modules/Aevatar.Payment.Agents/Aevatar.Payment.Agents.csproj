@@ -12,6 +12,11 @@
     <PackageReference Include="Volo.Abp.Core" />
   </ItemGroup>
 
+  <!-- Orleans -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Orleans.Core" />
+  </ItemGroup>
+
   <!-- Agent Framework -->
   <ItemGroup>
     <ProjectReference Include="..\..\src\Aevatar.Agents.Abstractions\Aevatar.Agents.Abstractions.csproj" />

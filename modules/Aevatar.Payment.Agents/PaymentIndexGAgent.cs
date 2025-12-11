@@ -5,24 +5,20 @@ using Aevatar.Payment.Agents.Protos;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Aevatar.Payment.Agents;
 
 /// <summary>
 /// User-level payment index agent - manages active subscriptions and platform customer IDs.
 /// Acts as event hub for business layer - publishes events Down to registered children.
-/// Keeps state extremely lightweight (< 1KB).
+/// Keeps state extremely lightweight.
 /// </summary>
 public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIndexGAgent
 {
-    public ILogger<PaymentIndexGAgent> PaymentLogger { get; set; } = NullLogger<PaymentIndexGAgent>.Instance;
-
-    public PaymentIndexGAgent() { }
-
     public override Task<string> GetDescriptionAsync()
     {
-        return Task.FromResult($"PaymentIndex: {State.ActiveSubscriptionCount} active subscriptions");
+        return Task.FromResult($"Payment Index Agent for user {State.UserId}, " +
+                               $"subscriptions: {State.ActiveSubscriptionCount}");
     }
 
     protected override async Task OnActivateAsync(CancellationToken ct = default)
@@ -39,7 +35,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     public async Task NotifyPaymentCompletedAsync(PaymentCompletedEvent evt)
     {
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentIndexGAgent] Broadcasting PaymentCompleted to children: user={UserId}, payment={PaymentId}",
             Id, evt.Context?.PaymentId);
 
@@ -48,7 +44,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     public async Task NotifyPaymentFailedAsync(PaymentFailedEvent evt)
     {
-        PaymentLogger.LogWarning(
+        Logger.LogWarning(
             "[PaymentIndexGAgent] Broadcasting PaymentFailed to children: user={UserId}, error={ErrorCode}",
             Id, evt.ErrorCode);
 
@@ -57,7 +53,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     public async Task NotifyRefundCompletedAsync(RefundCompletedEvent evt)
     {
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentIndexGAgent] Broadcasting RefundCompleted to children: user={UserId}, refund={RefundId}",
             Id, evt.RefundId);
 
@@ -100,7 +96,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
                 state.TotalPaymentCount = e.NewCount;
                 break;
                 
-            case IndexClearedEvent e:
+            case IndexClearedEvent:
                 state.PlatformCustomers.Clear();
                 state.ActiveSubscriptions.Clear();
                 state.TotalPaymentCount = 0;
@@ -124,7 +120,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     public async Task SetPlatformCustomerIdAsync(PaymentPlatform platform, string customerId)
     {
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentIndexGAgent] Setting {Platform} customer ID for user {UserId}",
             platform, Id);
 
@@ -141,7 +137,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     public async Task AddActiveSubscriptionAsync(ActiveSubscription subscription)
     {
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentIndexGAgent] Adding active subscription {PaymentId} for user {UserId}",
             subscription.PaymentId, Id);
 
@@ -155,7 +151,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     public async Task UpdateSubscriptionPeriodEndAsync(string paymentId, DateTime periodEnd)
     {
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentIndexGAgent] Updating period end for {PaymentId} to {PeriodEnd}",
             paymentId, periodEnd);
 
@@ -170,7 +166,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     public async Task RemoveActiveSubscriptionAsync(string paymentId)
     {
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentIndexGAgent] Removing active subscription {PaymentId} for user {UserId}",
             paymentId, Id);
 
@@ -239,7 +235,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     public async Task ClearAllAsync()
     {
-        PaymentLogger.LogWarning("[PaymentIndexGAgent] Clearing all data for user {UserId}", Id);
+        Logger.LogWarning("[PaymentIndexGAgent] Clearing all data for user {UserId}", Id);
 
         RaiseEvent(new IndexClearedEvent
         {
@@ -283,4 +279,3 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
         };
     }
 }
-

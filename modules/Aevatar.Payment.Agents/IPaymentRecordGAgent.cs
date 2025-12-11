@@ -5,6 +5,9 @@ namespace Aevatar.Payment.Agents;
 /// <summary>
 /// Order-level payment record agent - manages complete lifecycle of a single payment.
 /// ID format: payment_{platform}_{subscriptionId} (for direct webhook routing)
+/// 
+/// Note: This is NOT an Orleans Grain interface. Agent runs inside OrleansGAgentGrain.
+/// Use IGAgentActorManager to manage Agent lifecycle.
 /// </summary>
 public interface IPaymentRecordGAgent : IGAgent
 {
