@@ -14,6 +14,7 @@ namespace Aevatar.Payment.Agents;
 /// 
 /// Note: This is NOT an Orleans Grain interface. Agent runs inside OrleansGAgentGrain.
 /// Use IGAgentActorManager to manage Agent lifecycle.
+/// All RPC-exposed methods use Protobuf types for cross-runtime compatibility.
 /// </summary>
 public interface IPaymentIndexGAgent : IGAgent
 {
@@ -39,8 +40,9 @@ public interface IPaymentIndexGAgent : IGAgent
     
     /// <summary>
     /// Get platform customer ID (e.g., Stripe customer ID)
+    /// Returns empty string if not found (nullable not supported by RPC)
     /// </summary>
-    Task<string?> GetPlatformCustomerIdAsync(PaymentPlatform platform);
+    Task<string> GetPlatformCustomerIdAsync(PaymentPlatform platform);
     
     /// <summary>
     /// Set platform customer ID
@@ -50,9 +52,9 @@ public interface IPaymentIndexGAgent : IGAgent
     // ========== Active Subscription Management ==========
     
     /// <summary>
-    /// Add an active subscription to the index
+    /// Add an active subscription to the index (uses Protobuf type for RPC)
     /// </summary>
-    Task AddActiveSubscriptionAsync(ActiveSubscription subscription);
+    Task AddActiveSubscriptionAsync(ActiveSubscriptionProto subscription);
     
     /// <summary>
     /// Update subscription period end time
@@ -67,14 +69,14 @@ public interface IPaymentIndexGAgent : IGAgent
     // ========== Query (Active Subscriptions Only, Fast) ==========
     
     /// <summary>
-    /// Get all active subscriptions
+    /// Get all active subscriptions (returns Protobuf wrapper for RPC)
     /// </summary>
-    Task<List<ActiveSubscription>> GetActiveSubscriptionsAsync();
+    Task<ActiveSubscriptionListResponse> GetActiveSubscriptionsAsync();
     
     /// <summary>
-    /// Get active subscriptions by business type
+    /// Get active subscriptions by business type (returns Protobuf wrapper for RPC)
     /// </summary>
-    Task<List<ActiveSubscription>> GetActiveSubscriptionsByBusinessAsync(string businessType);
+    Task<ActiveSubscriptionListResponse> GetActiveSubscriptionsByBusinessAsync(string businessType);
     
     /// <summary>
     /// Check if user has any active subscription

@@ -135,7 +135,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     // ========== Active Subscription Management ==========
 
-    public async Task AddActiveSubscriptionAsync(ActiveSubscription subscription)
+    public async Task AddActiveSubscriptionAsync(ActiveSubscriptionProto subscription)
     {
         Logger.LogInformation(
             "[PaymentIndexGAgent] Adding active subscription {PaymentId} for user {UserId}",
@@ -143,7 +143,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
         RaiseEvent(new ActiveSubscriptionAddedEvent
         {
-            Subscription = ToProto(subscription)
+            Subscription = subscription
         });
 
         await ConfirmEventsAsync();
@@ -180,25 +180,25 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     // ========== Query ==========
 
-    public Task<List<ActiveSubscription>> GetActiveSubscriptionsAsync()
+    public Task<ActiveSubscriptionListResponse> GetActiveSubscriptionsAsync()
     {
-        var result = State.ActiveSubscriptions
-            .Where(s => s.PeriodEnd == null || s.PeriodEnd.ToDateTime() > DateTime.UtcNow)
-            .Select(FromProto)
-            .ToList();
-
-        return Task.FromResult(result);
+        var response = new ActiveSubscriptionListResponse();
+        var activeSubscriptions = State.ActiveSubscriptions
+            .Where(s => s.PeriodEnd == null || s.PeriodEnd.ToDateTime() > DateTime.UtcNow);
+        
+        response.Subscriptions.AddRange(activeSubscriptions);
+        return Task.FromResult(response);
     }
 
-    public Task<List<ActiveSubscription>> GetActiveSubscriptionsByBusinessAsync(string businessType)
+    public Task<ActiveSubscriptionListResponse> GetActiveSubscriptionsByBusinessAsync(string businessType)
     {
-        var result = State.ActiveSubscriptions
+        var response = new ActiveSubscriptionListResponse();
+        var activeSubscriptions = State.ActiveSubscriptions
             .Where(s => s.BusinessType == businessType)
-            .Where(s => s.PeriodEnd == null || s.PeriodEnd.ToDateTime() > DateTime.UtcNow)
-            .Select(FromProto)
-            .ToList();
-
-        return Task.FromResult(result);
+            .Where(s => s.PeriodEnd == null || s.PeriodEnd.ToDateTime() > DateTime.UtcNow);
+        
+        response.Subscriptions.AddRange(activeSubscriptions);
+        return Task.FromResult(response);
     }
 
     public Task<bool> HasActiveSubscriptionAsync(string? businessType = null)

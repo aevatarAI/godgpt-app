@@ -1,3 +1,4 @@
+using Aevatar.Payment.Agents.Protos;
 using Shouldly;
 
 namespace Aevatar.Payment.Agents.Tests;
@@ -358,25 +359,25 @@ public class PaymentRecordGAgentTests
 
     #region Helper Methods
 
-    private static CreatePaymentRequest CreateTestRequest(string userId = "user_123")
+    private static CreatePaymentRequestProto CreateTestRequest(string userId = "user_123")
     {
-        return new CreatePaymentRequest
+        var request = new CreatePaymentRequestProto
         {
             UserId = userId,
-            Platform = PaymentPlatform.Stripe,
+            Platform = (int)PaymentPlatform.Stripe,
             SubscriptionId = "sub_123456",
             CustomerId = "cus_123456",
             ProductId = "price_premium",
             ProductName = "Premium Plan",
-            PaymentMode = PaymentMode.Subscription,
-            BillingCycle = BillingCycle.Monthly,
+            PaymentMode = (int)PaymentMode.Subscription,
+            BillingCycle = (int)BillingCycle.Monthly,
             BusinessType = "godgpt",
             BusinessId = "plan_premium",
             Amount = 999,
             Currency = "USD",
-            Environment = "Production",
-            BusinessMetadata = new Dictionary<string, string>()
+            Environment = "Production"
         };
+        return request;
     }
 
     private static Transaction CreateTestTransaction(TransactionType type)

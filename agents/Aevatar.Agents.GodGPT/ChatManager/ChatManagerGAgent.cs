@@ -999,11 +999,12 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
 
         // Get active subscriptions from new PaymentIndexGAgent
         var paymentIndexAgent = await GetPaymentIndexAgentAsync(Id);
-        var activeSubscriptions = await paymentIndexAgent.GetActiveSubscriptionsAsync();
+        var activeSubscriptionsResponse = await paymentIndexAgent.GetActiveSubscriptionsAsync();
+        var subscriptions = activeSubscriptionsResponse.Subscriptions;
 
-        var hasActiveApple = activeSubscriptions.Any(s => s.Platform == NewPaymentPlatform.AppStore);
-        var hasActiveStripe = activeSubscriptions.Any(s => s.Platform == NewPaymentPlatform.Stripe);
-        var hasActiveGooglePlay = activeSubscriptions.Any(s => s.Platform == NewPaymentPlatform.GooglePlay);
+        var hasActiveApple = subscriptions.Any(s => s.Platform == (int)NewPaymentPlatform.AppStore);
+        var hasActiveStripe = subscriptions.Any(s => s.Platform == (int)NewPaymentPlatform.Stripe);
+        var hasActiveGooglePlay = subscriptions.Any(s => s.Platform == (int)NewPaymentPlatform.GooglePlay);
 
         Logger.LogDebug(
             $"[ChatGAgentManager][GetUserProfileAsync] Active subscription status - Apple: {hasActiveApple}, Stripe: {hasActiveStripe}, GooglePlay: {hasActiveGooglePlay}");
@@ -1011,7 +1012,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
 
         // Sync subscription status from PaymentIndexGAgent to UserQuotaGAgent if needed
-        await SyncSubscriptionStatusIfNeeded(paymentIndexAgent, userQuotaGAgent, activeSubscriptions);
+        await SyncSubscriptionStatusIfNeeded(paymentIndexAgent, userQuotaGAgent, subscriptions);
 
         var credits = await userQuotaGAgent.GetCreditsAsync();
         var subscriptionInfo = await userQuotaGAgent.GetAndSetSubscriptionAsync();
@@ -1569,7 +1570,8 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
     /// This ensures all platform subscriptions are properly reflected in user quota
     /// </summary>
     private async Task SyncSubscriptionStatusIfNeeded(PaymentIndexGAgent paymentIndexAgent,
-        IUserQuotaGAgent userQuotaGAgent, List<ActiveSubscription> activeSubscriptions)
+        IUserQuotaGAgent userQuotaGAgent, 
+        Google.Protobuf.Collections.RepeatedField<Aevatar.Payment.Agents.Protos.ActiveSubscriptionProto> activeSubscriptions)
     {
         try
         {
@@ -1595,7 +1597,7 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                     "[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Subscription status mismatch detected. Syncing...");
 
                 // Sync the first active subscription (most recent by CreatedAt)
-                var subscription = activeSubscriptions.OrderByDescending(s => s.CreatedAt).First();
+                var subscription = activeSubscriptions.OrderByDescending(s => s.CreatedAt?.ToDateTime()).First();
 
                 Logger.LogInformation(
                     $"[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Found active subscription {subscription.PaymentId}, syncing to UserQuotaGAgent");
@@ -1611,8 +1613,8 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
                     IsActive = true,
                     PlanType = PlanType.Month, // Default - should be set by business event handlers
                     Status = Aevatar.Application.Grains.Common.Constants.PaymentStatus.Completed,
-                    StartDate = subscription.CreatedAt,
-                    EndDate = subscription.PeriodEnd,
+                    StartDate = subscription.CreatedAt?.ToDateTime() ?? DateTime.UtcNow,
+                    EndDate = subscription.PeriodEnd?.ToDateTime() ?? DateTime.UtcNow.AddMonths(1),
                     SubscriptionIds = new List<string> { subscription.PaymentId },
                     InvoiceIds = new List<string>()
                 };

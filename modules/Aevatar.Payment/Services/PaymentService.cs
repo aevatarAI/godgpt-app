@@ -1,4 +1,5 @@
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Payment.Abstractions;
 using Aevatar.Payment.Agents.Protos;
 using Google.Protobuf.WellKnownTypes;
@@ -15,16 +16,16 @@ namespace Aevatar.Payment.Services;
 public class PaymentService : IPaymentService
 {
     private readonly IEnumerable<IPaymentProvider> _providers;
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<PaymentService> _logger;
 
     public PaymentService(
         IEnumerable<IPaymentProvider> providers,
-        IGAgentFactory agentFactory,
+        IGAgentActorFactory actorFactory,
         ILogger<PaymentService> logger)
     {
         _providers = providers;
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
         _logger = logger;
     }
 
@@ -55,7 +56,7 @@ public class PaymentService : IPaymentService
         _logger.LogInformation("[PaymentService] Getting Stripe customer for user {UserId}", userId);
 
         var provider = GetProvider(PaymentPlatform.Stripe);
-        var indexAgent = GetIndexAgent(userId);
+        var indexAgent = await GetIndexAgentAsync(userId);
 
         // Check if we already have a customer ID stored
         var existingCustomerId = await indexAgent.GetPlatformCustomerIdAsync(
@@ -139,7 +140,7 @@ public class PaymentService : IPaymentService
         // For Stripe, ensure we have a customer ID if not provided
         if (platform == PaymentPlatform.Stripe && string.IsNullOrEmpty(request.CustomerId))
         {
-            var indexAgent = GetIndexAgent(userId);
+            var indexAgent = await GetIndexAgentAsync(userId);
             var existingCustomerId = await indexAgent.GetPlatformCustomerIdAsync(
                 AgentModels.PaymentPlatform.Stripe);
             
@@ -226,24 +227,25 @@ public class PaymentService : IPaymentService
     public async Task<UserSubscriptionStatus> GetUserSubscriptionStatusAsync(
         Guid userId, CancellationToken ct = default)
     {
-        var indexAgent = GetIndexAgent(userId);
-        var activeSubscriptions = await indexAgent.GetActiveSubscriptionsAsync();
+        var indexAgent = await GetIndexAgentAsync(userId);
+        var response = await indexAgent.GetActiveSubscriptionsAsync();
+        var subscriptions = response.Subscriptions;
 
         var status = new UserSubscriptionStatus
         {
-            HasActiveSubscription = activeSubscriptions.Any(),
-            ActiveSubscriptions = activeSubscriptions.Select(ToDto).ToList()
+            HasActiveSubscription = subscriptions.Any(),
+            ActiveSubscriptions = subscriptions.Select(ToDto).ToList()
         };
 
         // Set primary subscription info from first active
-        var primary = activeSubscriptions.FirstOrDefault();
+        var primary = subscriptions.FirstOrDefault();
         if (primary != null)
         {
             status.CurrentPlan = primary.ProductName;
-            status.Platform = ToApiPlatform(primary.Platform);
-            status.ExpiresAt = primary.PeriodEnd;
+            status.Platform = ToApiPlatform((AgentModels.PaymentPlatform)primary.Platform);
+            status.ExpiresAt = primary.PeriodEnd?.ToDateTime() ?? DateTime.MaxValue;
             status.SubscriptionId = primary.PaymentId;
-            status.AutoRenew = primary.PeriodEnd > DateTime.UtcNow;
+            status.AutoRenew = primary.PeriodEnd?.ToDateTime() > DateTime.UtcNow;
         }
 
         return status;
@@ -253,35 +255,34 @@ public class PaymentService : IPaymentService
         Guid userId, int page = 1, int pageSize = 10, CancellationToken ct = default)
     {
         // Note: In full implementation, this should query from CQRS read model (database)
-        var indexAgent = GetIndexAgent(userId);
-        var activeSubs = await indexAgent.GetActiveSubscriptionsAsync();
+        var indexAgent = await GetIndexAgentAsync(userId);
+        var response = await indexAgent.GetActiveSubscriptionsAsync();
 
-        return activeSubs
+        return response.Subscriptions
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .Select(s => new PaymentHistoryItem
             {
                 PaymentId = s.PaymentId,
-                Platform = ToApiPlatform(s.Platform),
+                Platform = ToApiPlatform((AgentModels.PaymentPlatform)s.Platform),
                 ProductName = s.ProductName,
                 Amount = s.Amount / 100m,
                 Currency = s.Currency,
                 Status = PaymentStatus.Completed,
-                CreatedAt = s.CreatedAt
+                CreatedAt = s.CreatedAt?.ToDateTime() ?? DateTime.UtcNow
             })
             .ToList();
     }
 
     // ========== Private Helper Methods ==========
 
-    private AgentModels.IPaymentIndexGAgent GetIndexAgent(Guid userId)
+    private async Task<AgentModels.IPaymentIndexGAgent> GetIndexAgentAsync(Guid userId)
     {
-        var agent = _agentFactory.CreateGAgent<AgentModels.PaymentIndexGAgent>(userId);
-        agent.ActivateAsync().GetAwaiter().GetResult();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<AgentModels.PaymentIndexGAgent>(userId);
+        return actor.As<AgentModels.IPaymentIndexGAgent>();
     }
 
-    private AgentModels.IPaymentRecordGAgent GetRecordAgent(string paymentId)
+    private async Task<AgentModels.IPaymentRecordGAgent> GetRecordAgentAsync(string paymentId)
     {
         // Convert paymentId to a stable Guid
         var guidBytes = new byte[16];
@@ -290,9 +291,8 @@ public class PaymentService : IPaymentService
         Array.Copy(hashBytes, guidBytes, 16);
         var agentId = new Guid(guidBytes);
 
-        var agent = _agentFactory.CreateGAgent<AgentModels.PaymentRecordGAgent>(agentId);
-        agent.ActivateAsync().GetAwaiter().GetResult();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<AgentModels.PaymentRecordGAgent>(agentId);
+        return actor.As<AgentModels.IPaymentRecordGAgent>();
     }
 
     private static string GetPaymentId(PaymentPlatform platform, string subscriptionId)
@@ -318,41 +318,44 @@ public class PaymentService : IPaymentService
             var paymentId = GetPaymentId(platform, result.SubscriptionId!);
             
             // Create payment record agent
-            var recordAgent = GetRecordAgent(paymentId);
+            var recordAgent = await GetRecordAgentAsync(paymentId);
 
-            await recordAgent.InitializeAsync(new AgentModels.CreatePaymentRequest
+            await recordAgent.InitializeAsync(new AgentModels.Protos.CreatePaymentRequestProto
             {
                 UserId = userId.ToString(),
-                Platform = ToAgentPlatform(platform),
-                SubscriptionId = result.SubscriptionId,
-                CustomerId = result.CustomerId,
-                ProductId = request.ProductId,
-                ProductName = request.ProductId,
-                PaymentMode = AgentModels.PaymentMode.Subscription,
+                Platform = (int)ToAgentPlatform(platform),
+                SubscriptionId = result.SubscriptionId ?? string.Empty,
+                CustomerId = result.CustomerId ?? string.Empty,
+                ProductId = request.ProductId ?? string.Empty,
+                ProductName = request.ProductId ?? string.Empty,
+                PaymentMode = (int)AgentModels.PaymentMode.Subscription,
                 BusinessType = "godgpt",
-                BusinessId = request.ProductId,
-                PeriodEnd = result.ExpiresAt
+                BusinessId = request.ProductId ?? string.Empty,
+                PeriodEnd = result.ExpiresAt.HasValue 
+                    ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.ExpiresAt.Value.ToUniversalTime())
+                    : null
             });
 
             // Update index agent
-            var indexAgent = GetIndexAgent(userId);
+            var indexAgent = await GetIndexAgentAsync(userId);
             if (!string.IsNullOrEmpty(result.CustomerId))
             {
                 await indexAgent.SetPlatformCustomerIdAsync(
                     ToAgentPlatform(platform), result.CustomerId);
             }
-            await indexAgent.AddActiveSubscriptionAsync(new AgentModels.ActiveSubscription
+            await indexAgent.AddActiveSubscriptionAsync(new AgentModels.Protos.ActiveSubscriptionProto
             {
                 PaymentId = paymentId,
                 BusinessType = "godgpt",
                 BusinessId = request.ProductId,
-                Platform = ToAgentPlatform(platform),
+                Platform = (int)ToAgentPlatform(platform),
                 ProductName = request.ProductId,
                 Amount = (long)((request.Metadata.TryGetValue("amount", out var amt) 
                     ? decimal.Parse(amt) : 0) * 100),
                 Currency = "USD",
-                PeriodEnd = result.ExpiresAt ?? DateTime.UtcNow.AddMonths(1),
-                CreatedAt = DateTime.UtcNow
+                PeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(
+                    (result.ExpiresAt ?? DateTime.UtcNow.AddMonths(1)).ToUniversalTime()),
+                CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)
             });
             await indexAgent.IncrementPaymentCountAsync();
 
@@ -372,7 +375,7 @@ public class PaymentService : IPaymentService
         try
         {
             var paymentId = GetPaymentId(platform, result.SubscriptionId!);
-            var recordAgent = GetRecordAgent(paymentId);
+            var recordAgent = await GetRecordAgentAsync(paymentId);
 
             var initialized = await recordAgent.IsInitializedAsync();
             if (!initialized)
@@ -391,7 +394,7 @@ public class PaymentService : IPaymentService
             AgentModels.IPaymentIndexGAgent? indexAgent = null;
             if (result.UserId.HasValue)
             {
-                indexAgent = GetIndexAgent(result.UserId.Value);
+                indexAgent = await GetIndexAgentAsync(result.UserId.Value);
             }
 
             if (result.NewStatus.HasValue)
@@ -559,7 +562,7 @@ public class PaymentService : IPaymentService
     {
         try
         {
-            var recordAgent = GetRecordAgent(paymentId);
+            var recordAgent = await GetRecordAgentAsync(paymentId);
             await recordAgent.CancelAsync(reason);
         }
         catch (Exception ex)
@@ -586,19 +589,19 @@ public class PaymentService : IPaymentService
         return (AgentModels.PaymentStatus)(int)status;
     }
 
-    private static ActiveSubscriptionDto ToDto(AgentModels.ActiveSubscription sub)
+    private static ActiveSubscriptionDto ToDto(AgentModels.Protos.ActiveSubscriptionProto sub)
     {
         return new ActiveSubscriptionDto
         {
             PaymentId = sub.PaymentId,
             BusinessType = sub.BusinessType,
             BusinessId = sub.BusinessId,
-            Platform = ToApiPlatform(sub.Platform),
+            Platform = ToApiPlatform((AgentModels.PaymentPlatform)sub.Platform),
             ProductName = sub.ProductName,
             Amount = sub.Amount / 100m,
             Currency = sub.Currency,
-            PeriodEnd = sub.PeriodEnd,
-            CreatedAt = sub.CreatedAt
+            PeriodEnd = sub.PeriodEnd?.ToDateTime() ?? DateTime.MaxValue,
+            CreatedAt = sub.CreatedAt?.ToDateTime() ?? DateTime.UtcNow
         };
     }
 }

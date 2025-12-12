@@ -96,16 +96,17 @@ public class AgentDemoController : AbpControllerBase
                 actor = await _actorManager.CreateAndRegisterAsync<SimpleBusinessAgent>(id);
             }
 
-            // Publish event to Agent (processed in Silo/Grain)
+            // Send event to Agent for processing (in Silo/Grain)
             var evt = new Business.Server.BusinessMessageEvent
             {
                 Message = request.Message,
                 Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)
             };
 
+            // PublishEventAsync now correctly sets empty PublisherId for external calls
             await actor.PublishEventAsync(evt, EventDirection.Down);
 
-            // Get updated description
+            // Get updated description (reflects state changes)
             var description = await actor.GetDescriptionAsync();
 
             _logger.LogInformation("✅ Message sent to agent (processed in Silo)");

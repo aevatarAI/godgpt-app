@@ -71,3 +71,47 @@ message IndexClearedEvent {
   google.protobuf.Timestamp cleared_at = 1;
 }
 
+// =============================================================================
+// RPC Response Types (for cross-runtime communication)
+// =============================================================================
+
+// Wrapper for List<ActiveSubscription> (RPC requires Protobuf types)
+message ActiveSubscriptionListResponse {
+  repeated ActiveSubscriptionProto subscriptions = 1;
+}
+
+// Request type for payment record creation (must be Protobuf for RPC)
+message CreatePaymentRequestProto {
+  // User info
+  string user_id = 1;
+  string external_order_id = 2;
+  
+  // Business context
+  string business_type = 3;
+  string business_id = 4;
+  map<string, string> business_metadata = 5;
+  string callback_agent_id = 6;     // Optional: Guid as string for point-to-point callback
+  
+  // Platform info
+  int32 platform = 7;               // PaymentPlatform enum
+  string environment = 8;           // Production/Sandbox
+  string customer_id = 9;
+  string subscription_id = 10;
+  
+  // Product info
+  string product_id = 11;
+  string price_id = 12;
+  string product_name = 13;
+  int32 payment_mode = 14;          // PaymentMode enum
+  
+  // Billing cycle
+  int32 billing_cycle = 15;         // BillingCycle enum
+  google.protobuf.Timestamp period_start = 16;
+  google.protobuf.Timestamp period_end = 17;
+  
+  // Amount info
+  int64 amount = 18;                // Amount in smallest unit
+  string currency = 19;
+  int64 net_amount = 20;            // Optional: after discounts
+}
+

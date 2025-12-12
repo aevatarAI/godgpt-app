@@ -1,4 +1,5 @@
 using Aevatar.Agents.Abstractions;
+using Aevatar.Payment.Agents.Protos;
 
 namespace Aevatar.Payment.Agents;
 
@@ -8,6 +9,7 @@ namespace Aevatar.Payment.Agents;
 /// 
 /// Note: This is NOT an Orleans Grain interface. Agent runs inside OrleansGAgentGrain.
 /// Use IGAgentActorManager to manage Agent lifecycle.
+/// All RPC-exposed methods use Protobuf types for cross-runtime compatibility.
 /// </summary>
 public interface IPaymentRecordGAgent : IGAgent
 {
@@ -15,8 +17,9 @@ public interface IPaymentRecordGAgent : IGAgent
     
     /// <summary>
     /// Initialize the payment record (called once when creating)
+    /// Uses Protobuf type for RPC compatibility.
     /// </summary>
-    Task InitializeAsync(CreatePaymentRequest request);
+    Task InitializeAsync(CreatePaymentRequestProto request);
     
     /// <summary>
     /// Check if this agent has been initialized

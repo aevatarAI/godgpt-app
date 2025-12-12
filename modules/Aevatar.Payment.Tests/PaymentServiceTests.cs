@@ -16,7 +16,7 @@ public class PaymentServiceTests
 {
     private readonly IPaymentProvider _stripeProvider;
     private readonly IPaymentProvider _appleProvider;
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<PaymentService> _logger;
     private readonly PaymentService _service;
 
@@ -28,12 +28,12 @@ public class PaymentServiceTests
         _appleProvider = Substitute.For<IPaymentProvider>();
         _appleProvider.Platform.Returns(PaymentPlatform.AppStore);
 
-        _agentFactory = Substitute.For<IGAgentFactory>();
+        _actorFactory = Substitute.For<IGAgentActorFactory>();
         _logger = Substitute.For<ILogger<PaymentService>>();
 
         _service = new PaymentService(
             new[] { _stripeProvider, _appleProvider },
-            _agentFactory,
+            _actorFactory,
             _logger);
     }
 

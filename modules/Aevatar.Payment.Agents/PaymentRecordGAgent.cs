@@ -87,7 +87,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     // ========== Initialization ==========
 
-    public async Task InitializeAsync(CreatePaymentRequest request)
+    public async Task InitializeAsync(CreatePaymentRequestProto request)
     {
         if (!string.IsNullOrEmpty(State.PaymentId))
         {
@@ -108,26 +108,26 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             SubscriptionId = request.SubscriptionId ?? string.Empty,
             BusinessType = request.BusinessType,
             BusinessId = request.BusinessId,
-            Platform = (int)request.Platform,
-            Environment = request.Environment,
+            Platform = request.Platform,
+            Environment = request.Environment ?? "Production",
             CustomerId = request.CustomerId ?? string.Empty,
             ProductId = request.ProductId ?? string.Empty,
             PriceId = request.PriceId ?? string.Empty,
-            ProductName = request.ProductName,
-            PaymentMode = (int)request.PaymentMode,
-            BillingCycle = (int)request.BillingCycle,
+            ProductName = request.ProductName ?? string.Empty,
+            PaymentMode = request.PaymentMode,
+            BillingCycle = request.BillingCycle,
             Amount = request.Amount,
-            Currency = request.Currency,
+            Currency = request.Currency ?? "USD",
             Status = (int)PaymentStatus.Pending,
             CreatedAt = Timestamp.FromDateTime(DateTime.UtcNow)
         };
 
-        if (request.NetAmount.HasValue)
-            record.NetAmount = request.NetAmount.Value;
-        if (request.PeriodStart.HasValue)
-            record.PeriodStart = Timestamp.FromDateTime(request.PeriodStart.Value.ToUniversalTime());
-        if (request.PeriodEnd.HasValue)
-            record.PeriodEnd = Timestamp.FromDateTime(request.PeriodEnd.Value.ToUniversalTime());
+        if (request.NetAmount > 0)
+            record.NetAmount = request.NetAmount;
+        if (request.PeriodStart != null)
+            record.PeriodStart = request.PeriodStart;
+        if (request.PeriodEnd != null)
+            record.PeriodEnd = request.PeriodEnd;
 
         foreach (var kv in request.BusinessMetadata)
         {
@@ -135,16 +135,13 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         }
 
         // Set callback agent ID if provided
-        if (request.CallbackAgentId.HasValue)
+        if (!string.IsNullOrEmpty(request.CallbackAgentId))
         {
-            record.CallbackAgentId = request.CallbackAgentId.Value.ToString();
+            record.CallbackAgentId = request.CallbackAgentId;
         }
 
-        // Add initial transaction if provided
-        if (request.InitialTransaction != null)
-        {
-            record.Transactions.Add(ToProto(request.InitialTransaction));
-        }
+        // Note: InitialTransaction is not included in Proto version 
+        // It should be added via AddTransactionAsync after initialization
 
         RaiseEvent(new PaymentRecordInitializedEvent { Record = record });
         await ConfirmEventsAsync();

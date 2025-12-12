@@ -1,3 +1,4 @@
+using Aevatar.Payment.Agents.Protos;
 using Shouldly;
 
 namespace Aevatar.Payment.Agents.Tests;
@@ -73,9 +74,9 @@ public class PaymentIndexGAgentTests
         var subscriptions = await agent.GetActiveSubscriptionsAsync();
 
         // Assert
-        subscriptions.ShouldNotBeEmpty();
-        subscriptions.Count.ShouldBe(1);
-        subscriptions[0].PaymentId.ShouldBe("payment_1");
+        subscriptions.Subscriptions.ShouldNotBeEmpty();
+        subscriptions.Subscriptions.Count.ShouldBe(1);
+        subscriptions.Subscriptions[0].PaymentId.ShouldBe("payment_1");
     }
 
     [Fact(DisplayName = "Should get active subscriptions by business type")]
@@ -92,8 +93,8 @@ public class PaymentIndexGAgentTests
         var courseSubs = await agent.GetActiveSubscriptionsByBusinessAsync("course");
 
         // Assert
-        godgptSubs.Count.ShouldBe(2);
-        courseSubs.Count.ShouldBe(1);
+        godgptSubs.Subscriptions.Count.ShouldBe(2);
+        courseSubs.Subscriptions.Count.ShouldBe(1);
     }
 
     [Fact(DisplayName = "Should remove active subscription")]
@@ -109,8 +110,8 @@ public class PaymentIndexGAgentTests
         var subscriptions = await agent.GetActiveSubscriptionsAsync();
 
         // Assert
-        subscriptions.Count.ShouldBe(1);
-        subscriptions[0].PaymentId.ShouldBe("payment_2");
+        subscriptions.Subscriptions.Count.ShouldBe(1);
+        subscriptions.Subscriptions[0].PaymentId.ShouldBe("payment_2");
     }
 
     [Fact(DisplayName = "Should update subscription period end")]
@@ -128,7 +129,7 @@ public class PaymentIndexGAgentTests
         var subscriptions = await agent.GetActiveSubscriptionsAsync();
 
         // Assert
-        subscriptions[0].PeriodEnd.ShouldBeGreaterThan(initialEnd);
+        subscriptions.Subscriptions[0].PeriodEnd.ToDateTime().ShouldBeGreaterThan(initialEnd);
     }
 
     [Fact(DisplayName = "Should check if user has active subscription")]
@@ -199,7 +200,7 @@ public class PaymentIndexGAgentTests
         var count = await agent.GetTotalPaymentCountAsync();
 
         customerId.ShouldBeNull();
-        subscriptions.ShouldBeEmpty();
+        subscriptions.Subscriptions.ShouldBeEmpty();
         count.ShouldBe(0);
     }
 
@@ -207,22 +208,23 @@ public class PaymentIndexGAgentTests
 
     #region Helper Methods
 
-    private static ActiveSubscription CreateTestSubscription(
+    private static ActiveSubscriptionProto CreateTestSubscription(
         string paymentId, 
         string businessType = "godgpt",
         DateTime? periodEnd = null)
     {
-        return new ActiveSubscription
+        return new ActiveSubscriptionProto
         {
             PaymentId = paymentId,
             BusinessType = businessType,
             BusinessId = "product_123",
-            Platform = PaymentPlatform.Stripe,
+            Platform = (int)PaymentPlatform.Stripe,
             ProductName = "Premium Plan",
             Amount = 999, // $9.99 in cents
             Currency = "USD",
-            PeriodEnd = periodEnd ?? DateTime.UtcNow.AddMonths(1),
-            CreatedAt = DateTime.UtcNow
+            PeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(
+                (periodEnd ?? DateTime.UtcNow.AddMonths(1)).ToUniversalTime()),
+            CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)
         };
     }
 
