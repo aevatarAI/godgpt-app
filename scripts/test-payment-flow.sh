@@ -109,9 +109,28 @@ get_access_token() {
     echo "Token: ${ACCESS_TOKEN:0:50}..."
 }
 
-# Test 1: Get Stripe Products
+# Test 1: Get Stripe Payment Keys
+test_get_keys() {
+    log_step "Test 1: Getting Stripe payment keys..."
+    
+    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/keys" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json")
+    
+    log_response "$response"
+    
+    if echo "$response" | jq -e '.publishableKey' > /dev/null 2>&1; then
+        log_info "Payment keys retrieved successfully ✓"
+        return 0
+    else
+        log_warn "Failed to get payment keys"
+        return 1
+    fi
+}
+
+# Test 2: Get Stripe Products
 test_get_products() {
-    log_step "Test 1: Getting Stripe products..."
+    log_step "Test 2: Getting Stripe products..."
     
     local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/products" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
@@ -128,9 +147,28 @@ test_get_products() {
     fi
 }
 
-# Test 2: Get Customer Info
+# Test 3: Get Apple IAP Products
+test_get_iap_products() {
+    log_step "Test 3: Getting Apple IAP products..."
+    
+    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/iap-products" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json")
+    
+    log_response "$response"
+    
+    if echo "$response" | jq -e '.[]' > /dev/null 2>&1; then
+        log_info "IAP products retrieved successfully ✓"
+        return 0
+    else
+        log_warn "No IAP products found or error occurred"
+        return 1
+    fi
+}
+
+# Test 4: Get Customer Info
 test_get_customer() {
-    log_step "Test 2: Getting Stripe customer..."
+    log_step "Test 4: Getting Stripe customer..."
     
     local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/customer" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
@@ -147,9 +185,9 @@ test_get_customer() {
     fi
 }
 
-# Test 3: Create Checkout Session
+# Test 5: Create Checkout Session
 test_create_checkout_session() {
-    log_step "Test 3: Creating checkout session..."
+    log_step "Test 5: Creating checkout session..."
     
     # First get a price ID from products
     local products=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/products" \
@@ -185,21 +223,42 @@ test_create_checkout_session() {
     fi
 }
 
-# Test 4: Get Subscription Status
-test_get_subscription_status() {
-    log_step "Test 4: Getting subscription status..."
+# Test 6: Create Subscription
+test_create_subscription() {
+    log_step "Test 6: Creating subscription..."
     
-    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/has-active-subscription" \
+    # Get a price ID from products
+    local products=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/products" \
         -H "Authorization: Bearer $ACCESS_TOKEN")
+    
+    local price_id=$(echo "$products" | jq -r '.[0].priceId // empty')
+    
+    if [ -z "$price_id" ]; then
+        price_id="price_test_monthly"
+    fi
+    
+    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/create-subscription" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"priceId\": \"$price_id\",
+            \"devicePlatform\": \"web\"
+        }")
     
     log_response "$response"
     
-    log_info "Subscription status retrieved ✓"
+    if echo "$response" | jq -e '.subscriptionId' > /dev/null 2>&1; then
+        log_info "Subscription created successfully ✓"
+        return 0
+    else
+        log_warn "Subscription creation may have failed"
+        return 1
+    fi
 }
 
-# Test 5: Get Payment History
+# Test 7: Get Payment History
 test_get_payment_history() {
-    log_step "Test 5: Getting payment history..."
+    log_step "Test 7: Getting payment history..."
     
     local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/list" \
         -H "Authorization: Bearer $ACCESS_TOKEN")
@@ -209,9 +268,103 @@ test_get_payment_history() {
     log_info "Payment history retrieved ✓"
 }
 
-# Test 6: New Payment API - Get Products
+# Test 8: Cancel Subscription
+test_cancel_subscription() {
+    log_step "Test 8: Testing cancel subscription..."
+    
+    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/cancel-subscription" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"subscriptionId\": \"sub_test_123\"
+        }")
+    
+    log_response "$response"
+    
+    log_info "Cancel subscription endpoint tested ✓"
+}
+
+# Test 9: Refunded
+test_refunded() {
+    log_step "Test 9: Testing refunded endpoint..."
+    
+    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/refunded" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json")
+    
+    log_response "$response"
+    
+    if [ "$response" == "true" ]; then
+        log_info "Refunded endpoint works ✓"
+        return 0
+    else
+        log_warn "Refunded endpoint may have issues"
+        return 1
+    fi
+}
+
+# Test 10: Verify App Store Receipt
+test_verify_receipt() {
+    log_step "Test 10: Testing App Store verify receipt..."
+    
+    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/verify-receipt" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"productId\": \"weekly6\",
+            \"transactionId\": \"test_transaction_123\",
+            \"receiptData\": \"test_receipt_data\",
+            \"sandboxMode\": true
+        }")
+    
+    log_response "$response"
+    
+    log_info "Verify receipt endpoint tested ✓"
+}
+
+# Test 11: Verify Google Play Transaction
+test_verify_google_play() {
+    log_step "Test 11: Testing Google Play verify transaction..."
+    
+    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/google-play/verify-transaction" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"transactionIdentifier\": \"test_google_transaction_123\"
+        }")
+    
+    log_response "$response"
+    
+    log_info "Google Play verify endpoint tested ✓"
+}
+
+# Test 12: Has Apple Subscription (deprecated)
+test_has_apple_subscription() {
+    log_step "Test 12: Testing has-apple-subscription (deprecated)..."
+    
+    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/has-apple-subscription" \
+        -H "Authorization: Bearer $ACCESS_TOKEN")
+    
+    log_response "$response"
+    
+    log_info "Has Apple subscription endpoint tested ✓"
+}
+
+# Test 13: Has Active Subscription
+test_get_subscription_status() {
+    log_step "Test 13: Getting subscription status..."
+    
+    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/has-active-subscription" \
+        -H "Authorization: Bearer $ACCESS_TOKEN")
+    
+    log_response "$response"
+    
+    log_info "Subscription status retrieved ✓"
+}
+
+# Test 14: New Payment API - Get Products
 test_new_api_products() {
-    log_step "Test 6: Testing new Payment API - Get Products..."
+    log_step "Test 14: Testing new Payment API - Get Products..."
     
     local response=$(curl -k -s -X GET "$API_URL/api/payment/products/0" \
         -H "Authorization: Bearer $ACCESS_TOKEN")
@@ -221,9 +374,9 @@ test_new_api_products() {
     log_info "New API products endpoint tested ✓"
 }
 
-# Test 7: New Payment API - Subscribe
+# Test 15: New Payment API - Subscribe
 test_new_api_subscribe() {
-    log_step "Test 7: Testing new Payment API - Subscribe..."
+    log_step "Test 15: Testing new Payment API - Subscribe..."
     
     local response=$(curl -k -s -X POST "$API_URL/api/payment/subscribe" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
@@ -258,11 +411,19 @@ run_all_tests() {
     local failed=0
     
     log_info "========================================"
-    log_info "Running Payment Flow Tests"
+    log_info "Running Payment Flow Tests (13 endpoints)"
     log_info "========================================"
     echo ""
     
-    # Test: Get Products
+    # Test 1: Get Payment Keys
+    if test_get_keys; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
+    echo ""
+    
+    # Test 2: Get Products
     if test_get_products; then
         ((passed++))
     else
@@ -270,7 +431,15 @@ run_all_tests() {
     fi
     echo ""
     
-    # Test: Get Customer
+    # Test 3: Get IAP Products
+    if test_get_iap_products; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
+    echo ""
+    
+    # Test 4: Get Customer
     if test_get_customer; then
         ((passed++))
     else
@@ -278,7 +447,7 @@ run_all_tests() {
     fi
     echo ""
     
-    # Test: Create Checkout Session
+    # Test 5: Create Checkout Session
     if test_create_checkout_session; then
         ((passed++))
     else
@@ -286,22 +455,58 @@ run_all_tests() {
     fi
     echo ""
     
-    # Test: Get Subscription Status
-    test_get_subscription_status
-    ((passed++))
+    # Test 6: Create Subscription
+    if test_create_subscription; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
     echo ""
     
-    # Test: Get Payment History
+    # Test 7: Get Payment History
     test_get_payment_history
     ((passed++))
     echo ""
     
-    # Test: New API Products
+    # Test 8: Cancel Subscription
+    test_cancel_subscription
+    ((passed++))
+    echo ""
+    
+    # Test 9: Refunded
+    if test_refunded; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
+    echo ""
+    
+    # Test 10: Verify App Store Receipt
+    test_verify_receipt
+    ((passed++))
+    echo ""
+    
+    # Test 11: Verify Google Play
+    test_verify_google_play
+    ((passed++))
+    echo ""
+    
+    # Test 12: Has Apple Subscription (deprecated)
+    test_has_apple_subscription
+    ((passed++))
+    echo ""
+    
+    # Test 13: Get Subscription Status
+    test_get_subscription_status
+    ((passed++))
+    echo ""
+    
+    # Test 14: New API Products
     test_new_api_products
     ((passed++))
     echo ""
     
-    # Test: New API Subscribe
+    # Test 15: New API Subscribe
     test_new_api_subscribe
     ((passed++))
     echo ""
@@ -331,8 +536,14 @@ main() {
     echo ""
     
     case "${1:-all}" in
+        "keys")
+            test_get_keys
+            ;;
         "products")
             test_get_products
+            ;;
+        "iap-products")
+            test_get_iap_products
             ;;
         "customer")
             test_get_customer
@@ -340,11 +551,29 @@ main() {
         "checkout")
             test_create_checkout_session
             ;;
-        "status")
-            test_get_subscription_status
+        "subscription")
+            test_create_subscription
             ;;
         "history")
             test_get_payment_history
+            ;;
+        "cancel")
+            test_cancel_subscription
+            ;;
+        "refund")
+            test_refunded
+            ;;
+        "verify-apple")
+            test_verify_receipt
+            ;;
+        "verify-google")
+            test_verify_google_play
+            ;;
+        "apple-sub")
+            test_has_apple_subscription
+            ;;
+        "status")
+            test_get_subscription_status
             ;;
         "new-api")
             test_new_api_products
