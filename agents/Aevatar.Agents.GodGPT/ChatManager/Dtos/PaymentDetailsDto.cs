@@ -1,4 +1,3 @@
-using Aevatar.Application.Grains.ChatManager.UserBilling.Payment;
 using Aevatar.Application.Grains.Common.Constants;
 
 namespace Aevatar.Application.Grains.ChatManager.Dtos;
@@ -25,9 +24,8 @@ public class PaymentDetailsDto
     [Id(16)] public string InvoiceId { get; set; }
     [Id(17)] public string SessionId { get; set; }
     [Id(18)] public List<PaymentInvoiceDetailDto> InvoiceDetails { get; set; }
-    //Total after discounts and taxes.
     [Id(19)] public decimal? AmountNetTotal { get; set; }
-    [Id(20)] public List<DiscountDetails> Discounts { get; set; }
+    [Id(20)] public List<DiscountDetailsDto> Discounts { get; set; }
     [Id(21)] public bool IsTrial { get; set; }
     [Id(22)] public string TrialCode { get; set; }
     [Id(23)] public string PaymentIntentId { get; set; }
@@ -42,7 +40,19 @@ public class PaymentInvoiceDetailDto
     [Id(3)] public DateTime? CompletedAt { get; set; }
     [Id(4)] public decimal Amount { get; set; }   
     [Id(5)] public decimal? AmountNetTotal { get; set; }
-    [Id(6)] public List<DiscountDetails> Discounts { get; set; }
+    [Id(6)] public List<DiscountDetailsDto> Discounts { get; set; }
     [Id(7)] public bool IsTrial { get; set; }
     [Id(8)] public string TrialCode { get; set; }
+}
+
+/// <summary>
+/// Discount details for payment (local definition after migration)
+/// </summary>
+[GenerateSerializer]
+public class DiscountDetailsDto
+{
+    [Id(0)] public string CouponId { get; set; }
+    [Id(1)] public string DiscountId { get; set; }
+    [Id(2)] public decimal AmountOff { get; set; }
+    [Id(3)] public decimal? PercentOff { get; set; }
 }

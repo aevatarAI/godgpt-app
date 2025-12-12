@@ -16,6 +16,7 @@
         <ProjectReference Include="../../src/Aevatar.Agents.AI.Core/Aevatar.Agents.AI.Core.csproj" />
         <ProjectReference Include="../../src/Aevatar.Agents.Runtime.Orleans/Aevatar.Agents.Runtime.Orleans.csproj" />
         <ProjectReference Include="../Aevatar.Agents.Chat/Aevatar.Agents.Chat.csproj" />
+        <ProjectReference Include="../../modules/Aevatar.Payment.Agents/Aevatar.Payment.Agents.csproj" />
     </ItemGroup>
 
     <!-- NuGet Packages (via CPM) -->
@@ -58,13 +59,6 @@
         <!-- Protobuf -->
         <PackageReference Include="Google.Protobuf" />
         <PackageReference Include="Grpc.Tools" PrivateAssets="All" />
-    </ItemGroup>
-
-    <!-- Certificate Files -->
-    <ItemGroup>
-        <None Include="ChatManager/UserBilling/Certificates/AppleRootCA-G3.cer">
-            <CopyToOutputDirectory>Always</CopyToOutputDirectory>
-        </None>
     </ItemGroup>
 
     <!-- Protobuf Files -->

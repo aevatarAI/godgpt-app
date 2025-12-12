@@ -19,8 +19,9 @@ using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Application.Grains.Invitation;
-using Aevatar.Application.Grains.UserBilling;
 using Aevatar.Application.Grains.UserQuota;
+using Aevatar.Payment.Abstractions;
+using NewPaymentPlatform = Aevatar.Payment.Abstractions.PaymentPlatform;
 using Aevatar.Application.Grains.UserStatistics;
 using Aevatar.Application.Grains.UserStatistics.Dtos;
 using Aevatar.App.Domain.Shared;
@@ -73,19 +74,8 @@ public interface IGodGPTService
     Task<CreateShareIdResponse> GenerateShareContentAsync(Guid currentUserId, CreateShareIdRequest request, GodGPTChatLanguage language = GodGPTChatLanguage.English);
     Task<List<ChatMessage>> GetShareMessageListAsync(string shareString, GodGPTChatLanguage language = GodGPTChatLanguage.English);
     Task UpdateShowToastAsync(Guid currentUserId);
-    Task<List<StripeProductDto>> GetStripeProductsAsync(Guid currentUserId);
-    Task<string> CreateCheckoutSessionAsync(Guid currentUserId, CreateCheckoutSessionInput createCheckoutSessionInput);
-    Task<List<PaymentSummaryDto>> GetPaymentHistoryAsync(Guid currentUserId, GetPaymentHistoryInput input);
-    Task<GetCustomerResponseDto> GetStripeCustomerAsync(Guid currentUserId);
-    Task<SubscriptionResponseDto> CreateSubscriptionAsync(Guid currentUserId, CreateSubscriptionInput input);
-    Task<CancelSubscriptionResponseDto> CancelSubscriptionAsync(Guid currentUserId, CancelSubscriptionInput input);
-    Task<List<AppleProductDto>> GetAppleProductsAsync(Guid currentUserId);
-    Task<AppStoreSubscriptionResponseDto> VerifyAppStoreReceiptAsync(Guid currentUserId, VerifyAppStoreReceiptInput input);
-    Task<PaymentVerificationResponseDto> VerifyGooglePlayTransactionAsync(Guid currentUserId, GooglePlayTransactionVerificationRequestDto input);
     Task<GrainResultDto<int>> UpdateUserCreditsAsync(Guid currentUserId, UpdateUserCreditsInput input);
     Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateUserSubscriptionAsync(Guid currentUserId, UpdateUserSubscriptionsInput input);
-    Task<bool> HasActiveAppleSubscriptionAsync(Guid currentUserId);
-    Task<ActiveSubscriptionStatusDto> HasActiveSubscriptionAsync(Guid currentUserId);
     Task<GetInvitationInfoResponse> GetInvitationInfoAsync(Guid currentUserId);
     Task<RedeemInviteCodeResponse> RedeemInviteCodeAsync(Guid currentUserId,
         RedeemInviteCodeRequest redeemInviteCodeRequest);
@@ -136,8 +126,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
     private readonly IOptionsMonitor<StripeOptions> _stripeOptions;
     private readonly IOptionsMonitor<ManagerOptions> _managerOptions;
     private readonly ILocalizationService _localizationService;
-
-    private readonly StripeClient _stripeClient;
+    private readonly IPaymentService _paymentService;
 
     public GodGPTService(
         IClusterClient clusterClient, 
@@ -145,16 +134,16 @@ public class GodGPTService : ApplicationService, IGodGPTService
         ILogger<GodGPTService> logger, 
         IOptionsMonitor<StripeOptions> stripeOptions,
         IOptionsMonitor<ManagerOptions> managerOptions, 
-        ILocalizationService localizationService)
+        ILocalizationService localizationService,
+        IPaymentService paymentService)
     {
         _clusterClient = clusterClient;
         _agentFactory = agentFactory;
         _logger = logger;
         _stripeOptions = stripeOptions;
         _managerOptions = managerOptions;
-
-        _stripeClient = new StripeClient(_stripeOptions.CurrentValue.SecretKey);
         _localizationService = localizationService;
+        _paymentService = paymentService;
     }
     
     
@@ -347,181 +336,6 @@ public class GodGPTService : ApplicationService, IGodGPTService
         userQuotaGAgent.SetShownCreditsToastAsync(true);
     }
 
-    public async Task<List<StripeProductDto>> GetStripeProductsAsync(Guid currentUserId)
-    {
-        var userBillingGAgent =
-            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-        return await userBillingGAgent.GetStripeProductsAsync();
-    }
-
-    public async Task<string> CreateCheckoutSessionAsync(Guid currentUserId,
-        CreateCheckoutSessionInput createCheckoutSessionInput)
-    {
-        var userBillingGAgent =
-            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-        var result = await userBillingGAgent.CreateCheckoutSessionAsync(new CreateCheckoutSessionDto
-        {
-            UserId = currentUserId.ToString(),
-            PriceId = createCheckoutSessionInput.PriceId,
-            Mode = createCheckoutSessionInput.Mode ?? PaymentMode.SUBSCRIPTION,
-            Quantity = createCheckoutSessionInput.Quantity <= 0 ? 1 : createCheckoutSessionInput.Quantity,
-            UiMode = createCheckoutSessionInput.UiMode ?? StripeUiMode.HOSTED,
-            CancelUrl = createCheckoutSessionInput.CancelUrl
-        });
-        return result;
-    }
-
-    public async Task<List<PaymentSummaryDto>> GetPaymentHistoryAsync(Guid currentUserId, GetPaymentHistoryInput input)
-    {
-        var userBillingGAgent =
-            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-        return await userBillingGAgent.GetPaymentHistoryAsync(input.Page, input.PageSize);
-    }
-
-    public async Task<GetCustomerResponseDto> GetStripeCustomerAsync(Guid currentUserId)
-    {
-        var userBillingGAgent =
-            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-        return await userBillingGAgent.GetStripeCustomerAsync(currentUserId.ToString());
-    }
-
-    public async Task<SubscriptionResponseDto> CreateSubscriptionAsync(Guid currentUserId, CreateSubscriptionInput input)
-    {
-        var userBillingGAgent =
-            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-        return await userBillingGAgent.CreateSubscriptionAsync(new CreateSubscriptionDto
-        {
-            UserId = currentUserId,
-            PriceId = input.PriceId,
-            Quantity = input.Quantity,
-            PaymentMethodId = input.PaymentMethodId,
-            Description = input.Description,
-            Metadata = input.Metadata,
-            TrialPeriodDays = input.TrialPeriodDays,
-            Platform = input.DevicePlatform
-        });
-    }
-
-    public async Task<CancelSubscriptionResponseDto> CancelSubscriptionAsync(Guid currentUserId, CancelSubscriptionInput input)
-    {
-        var userBillingGAgent =
-            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-        return await userBillingGAgent.CancelSubscriptionAsync(new CancelSubscriptionDto
-        {
-            UserId = currentUserId,
-            SubscriptionId = input.SubscriptionId,
-            CancellationReason = string.Empty,
-            CancelAtPeriodEnd = true
-        });
-    }
-
-    public async Task<List<AppleProductDto>> GetAppleProductsAsync(Guid currentUserId)
-    {
-        var userBillingGAgent =
-            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-        return await userBillingGAgent.GetAppleProductsAsync();
-    }
-
-    public async Task<AppStoreSubscriptionResponseDto> VerifyAppStoreReceiptAsync(Guid currentUserId, VerifyAppStoreReceiptInput input)
-    {
-        var userBillingGAgent =
-            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-        return await userBillingGAgent.CreateAppStoreSubscriptionAsync(new CreateAppStoreSubscriptionDto
-        {
-            UserId = currentUserId.ToString(),
-            SandboxMode = input.SandboxMode,
-            TransactionId = input.TransactionId
-        });
-    }
-
-    public async Task<PaymentVerificationResponseDto> VerifyGooglePlayTransactionAsync(Guid currentUserId, GooglePlayTransactionVerificationRequestDto input)
-    {
-        _logger.LogInformation("[GodGPTService][VerifyGooglePlayTransactionAsync] Starting verification for userId: {UserId}, transactionId: {TransactionId}", 
-            currentUserId, input.TransactionIdentifier);
-        
-        // Validate input parameters
-        if (string.IsNullOrWhiteSpace(input.TransactionIdentifier))
-        {
-            _logger.LogWarning("[GodGPTService][VerifyGooglePlayTransactionAsync] Invalid transaction identifier for userId: {UserId}", currentUserId);
-            return new PaymentVerificationResponseDto
-            {
-                IsValid = false,
-                Message = "Invalid transaction identifier",
-                ErrorCode = "INVALID_TRANSACTION_ID"
-            };
-        }
-        
-        try
-        {
-            _logger.LogDebug("[GodGPTService][VerifyGooglePlayTransactionAsync] Getting UserBillingGAgent for userId: {UserId}", currentUserId);
-            var userBillingGAgent = _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-            
-            // Convert to GAgents DTO
-            var gagentsDto = new Aevatar.Application.Grains.ChatManager.UserBilling.GooglePlayTransactionVerificationDto
-            {
-                UserId = currentUserId.ToString(),
-                TransactionIdentifier = input.TransactionIdentifier
-            };
-            
-            _logger.LogDebug("[GodGPTService][VerifyGooglePlayTransactionAsync] Converted DTO for userId: {UserId}, gagentsUserId: {GagentsUserId}", 
-                currentUserId, gagentsDto.UserId);
-            
-            // Call the GodGPT.GAgents interface for Google Play transaction verification
-            _logger.LogDebug("[GodGPTService][VerifyGooglePlayTransactionAsync] Calling UserBillingGAgent.VerifyGooglePlayTransactionAsync for userId: {UserId}", currentUserId);
-            var result = await userBillingGAgent.VerifyGooglePlayTransactionAsync(gagentsDto);
-
-            _logger.LogInformation("[GodGPTService][VerifyGooglePlayTransactionAsync] Verification completed for userId: {UserId}, success: {IsValid}, message: {Message}, errorCode: {ErrorCode}, productId: {ProductId}", 
-                currentUserId, result.IsValid, result.Message, result.ErrorCode, result.ProductId);
-
-            // Convert back to response DTO
-            var response = new PaymentVerificationResponseDto
-            {
-                IsValid = result.IsValid,
-                Message = result.Message ?? string.Empty,
-                OrderId = string.Empty, // OrderId not available in GAgents result, will be set from Transaction
-                ProductId = result.ProductId ?? string.Empty,
-                SubscriptionEndDate = result.SubscriptionEndDate,
-                PurchaseTimeMillis = result.PurchaseTimeMillis ?? 0,
-                ErrorCode = result.ErrorCode ?? string.Empty
-            };
-            
-            _logger.LogDebug("[GodGPTService][VerifyGooglePlayTransactionAsync] Response created for userId: {UserId}, responseValid: {ResponseIsValid}, responseErrorCode: {ResponseErrorCode}", 
-                currentUserId, response.IsValid, response.ErrorCode);
-                
-            return response;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "[GodGPTService][VerifyGooglePlayTransactionAsync] Exception occurred during Google Play transaction verification. UserId: {UserId}, TransactionId: {TransactionId}, ExceptionType: {ExceptionType}, ExceptionMessage: {ExceptionMessage}, StackTrace: {StackTrace}", 
-                currentUserId, input.TransactionIdentifier, ex.GetType().Name, ex.Message, ex.StackTrace);
-            
-            // Log additional details for common exception types
-            if (ex is TimeoutException)
-            {
-                _logger.LogError("[GodGPTService][VerifyGooglePlayTransactionAsync] Timeout exception detected for userId: {UserId} - possible Orleans cluster or network issues", currentUserId);
-            }
-            else if (ex is System.Net.Http.HttpRequestException)
-            {
-                _logger.LogError("[GodGPTService][VerifyGooglePlayTransactionAsync] HTTP request exception detected for userId: {UserId} - possible Google Play API connectivity issues", currentUserId);
-            }
-            else if (ex is Orleans.Runtime.OrleansException)
-            {
-                _logger.LogError("[GodGPTService][VerifyGooglePlayTransactionAsync] Orleans exception detected for userId: {UserId} - possible Orleans cluster issues", currentUserId);
-            }
-            else if (ex is System.Text.Json.JsonException || ex is Newtonsoft.Json.JsonException)
-            {
-                _logger.LogError("[GodGPTService][VerifyGooglePlayTransactionAsync] JSON serialization exception detected for userId: {UserId} - possible data format issues", currentUserId);
-            }
-            
-            return new PaymentVerificationResponseDto
-            {
-                IsValid = false,
-                Message = "Transaction verification failed",
-                ErrorCode = "VERIFICATION_ERROR"
-            };
-        }
-    }
-
     public async Task<GrainResultDto<int>> UpdateUserCreditsAsync(Guid currentUserId, UpdateUserCreditsInput input)
     {
         var userQuotaGAgent =
@@ -534,20 +348,6 @@ public class GodGPTService : ApplicationService, IGodGPTService
         var userQuotaGAgent =
             _agentFactory.CreateGAgent<UserQuotaGAgent>(input.UserId);
         return await userQuotaGAgent.UpdateSubscriptionAsync(currentUserId.ToString(), input.PlanType, input.IsUltimate);
-    }
-
-    public async Task<bool> HasActiveAppleSubscriptionAsync(Guid currentUserId)
-    {
-        var userBillingGAgent =
-            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-        return await userBillingGAgent.HasActiveAppleSubscriptionAsync();
-    }
-
-    public async Task<ActiveSubscriptionStatusDto> HasActiveSubscriptionAsync(Guid currentUserId)
-    {
-        var userBillingGAgent =
-            _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-        return await userBillingGAgent.GetActiveSubscriptionStatusAsync();
     }
 
     public async Task<GetInvitationInfoResponse> GetInvitationInfoAsync(Guid currentUserId)
@@ -595,24 +395,24 @@ public class GodGPTService : ApplicationService, IGodGPTService
             }
             try
             {
-                var userBillingGAgent = _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
-                var url = await userBillingGAgent.CreateCheckoutSessionAsync(new CreateCheckoutSessionDto
-                {
-                    UserId = currentUserId.ToString(),
-                    PriceId = null,
-                    Quantity = 1,
-                    TrialCode = input.InviteCode
-                });
+                // Use PaymentService to create checkout session with trial code
+                var result = await _paymentService.CreateSubscriptionAsync(
+                    currentUserId,
+                    NewPaymentPlatform.Stripe,
+                    new SubscriptionRequest
+                    {
+                        CouponCode = input.InviteCode // TrialCode maps to CouponCode
+                    });
                 return new RedeemInviteCodeResponse
                 {
                     IsValid = true,
                     CodeType = codeType,
-                    URL = url
+                    URL = result.SessionUrl
                 };
             }
             catch (Exception e)
             {
-                _logger.LogError("[GodGPTService][RedeemInviteCodeAsync] {UserId} invalid InviteCode {Code}", 
+                _logger.LogError(e, "[GodGPTService][RedeemInviteCodeAsync] {UserId} invalid InviteCode {Code}", 
                     currentUserId.ToString(), input.InviteCode);
                 return new RedeemInviteCodeResponse
                 {

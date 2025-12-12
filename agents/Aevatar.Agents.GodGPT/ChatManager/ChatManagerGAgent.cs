@@ -19,8 +19,9 @@ using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Observability;
 using Aevatar.Application.Grains.Common.Service;
 using Aevatar.Application.Grains.Invitation;
-using Aevatar.Application.Grains.UserBilling;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Payment.Agents;
+using NewPaymentPlatform = Aevatar.Payment.Agents.PaymentPlatform;
 using Aevatar.Application.Grains.UserInfo;
 using Aevatar.Application.Grains.UserQuota;
 using Aevatar.GAgents.AI.Common;
@@ -930,8 +931,9 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
         await userQuotaGAgent.ClearAllAsync();
 
-        var userBillingGAgent = _clusterClient.GetGrain<IUserBillingGAgent>(Id);
-        await userBillingGAgent.ClearAllAsync();
+        // Clear payment data via new PaymentIndexGAgent
+        var paymentIndexAgent = await GetPaymentIndexAgentAsync(Id);
+        await paymentIndexAgent.ClearAllAsync();
 
         var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(Id);
         await userInfoCollectionGAgent.ClearAllAsync();
@@ -995,19 +997,21 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         var invitationGrain = await GetInvitationAgentAsync(Id);
         await invitationGrain.ProcessScheduledRewardAsync();
 
-        // Sync latest subscription status from UserBillingGAgent before getting user profile
-        // This ensures Google Pay and other platform subscriptions are up-to-date
-        var userBillingGAgent = _clusterClient.GetGrain<IUserBillingGAgent>(Id);
-        var activeSubscriptionStatus = await userBillingGAgent.GetActiveSubscriptionStatusAsync();
+        // Get active subscriptions from new PaymentIndexGAgent
+        var paymentIndexAgent = await GetPaymentIndexAgentAsync(Id);
+        var activeSubscriptions = await paymentIndexAgent.GetActiveSubscriptionsAsync();
+
+        var hasActiveApple = activeSubscriptions.Any(s => s.Platform == NewPaymentPlatform.AppStore);
+        var hasActiveStripe = activeSubscriptions.Any(s => s.Platform == NewPaymentPlatform.Stripe);
+        var hasActiveGooglePlay = activeSubscriptions.Any(s => s.Platform == NewPaymentPlatform.GooglePlay);
 
         Logger.LogDebug(
-            $"[ChatGAgentManager][GetUserProfileAsync] Active subscription status - Apple: {activeSubscriptionStatus.HasActiveAppleSubscription}, Stripe: {activeSubscriptionStatus.HasActiveStripeSubscription}, GooglePlay: {activeSubscriptionStatus.HasActiveGooglePlaySubscription}");
+            $"[ChatGAgentManager][GetUserProfileAsync] Active subscription status - Apple: {hasActiveApple}, Stripe: {hasActiveStripe}, GooglePlay: {hasActiveGooglePlay}");
 
         var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
 
-        // Check if we need to sync subscription status between UserBillingGAgent and UserQuotaGAgent
-        // This is particularly important for Google Pay subscriptions that might not be reflected in UserQuotaGAgent yet
-        await SyncSubscriptionStatusIfNeeded(userBillingGAgent, userQuotaGAgent, activeSubscriptionStatus);
+        // Sync subscription status from PaymentIndexGAgent to UserQuotaGAgent if needed
+        await SyncSubscriptionStatusIfNeeded(paymentIndexAgent, userQuotaGAgent, activeSubscriptions);
 
         var credits = await userQuotaGAgent.GetCreditsAsync();
         var subscriptionInfo = await userQuotaGAgent.GetAndSetSubscriptionAsync();
@@ -1520,6 +1524,13 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         return agent;
     }
 
+    private async Task<PaymentIndexGAgent> GetPaymentIndexAgentAsync(Guid userId)
+    {
+        var agent = _agentFactory.CreateGAgent<PaymentIndexGAgent>(userId);
+        await agent.ActivateAsync();
+        return agent;
+    }
+
     /// <summary>
     /// Get role-specific prompt from configuration based on role name
     /// </summary>
@@ -1554,14 +1565,20 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
     }
 
     /// <summary>
-    /// Sync subscription status between UserBillingGAgent and UserQuotaGAgent if needed
-    /// This ensures Google Pay and other platform subscriptions are properly reflected in user quota
+    /// Sync subscription status from PaymentIndexGAgent to UserQuotaGAgent if needed
+    /// This ensures all platform subscriptions are properly reflected in user quota
     /// </summary>
-    private async Task SyncSubscriptionStatusIfNeeded(IUserBillingGAgent userBillingGAgent,
-        IUserQuotaGAgent userQuotaGAgent, ActiveSubscriptionStatusDto activeSubscriptionStatus)
+    private async Task SyncSubscriptionStatusIfNeeded(PaymentIndexGAgent paymentIndexAgent,
+        IUserQuotaGAgent userQuotaGAgent, List<ActiveSubscription> activeSubscriptions)
     {
         try
         {
+            if (!activeSubscriptions.Any())
+            {
+                Logger.LogDebug("[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] No active subscriptions to sync");
+                return;
+            }
+
             // Get current quota subscription status
             var quotaSubscription = await userQuotaGAgent.GetSubscriptionAsync(false);
             var quotaUltimateSubscription = await userQuotaGAgent.GetSubscriptionAsync(true);
@@ -1569,64 +1586,46 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
             Logger.LogDebug(
                 $"[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Current quota subscription status - Premium: {quotaSubscription.IsActive}, Ultimate: {quotaUltimateSubscription.IsActive}");
 
-            // Check if there's any mismatch between billing and quota status
-            bool needsSync = false;
-
-            // If billing shows active subscriptions but quota doesn't, we need to sync
-            if (activeSubscriptionStatus.HasActiveSubscription && !quotaSubscription.IsActive &&
-                !quotaUltimateSubscription.IsActive)
-            {
-                needsSync = true;
-                Logger.LogInformation(
-                    $"[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Subscription status mismatch detected. Billing shows active subscription but quota shows inactive. Syncing...");
-            }
-
-            // Additional check: If Google Play specifically shows active but neither quota subscription is active
-            if (activeSubscriptionStatus.HasActiveGooglePlaySubscription && !quotaSubscription.IsActive &&
-                !quotaUltimateSubscription.IsActive)
-            {
-                needsSync = true;
-                Logger.LogInformation(
-                    $"[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Google Play subscription detected but not reflected in quota. Syncing...");
-            }
+            // Check if there's any mismatch between payment index and quota status
+            bool needsSync = activeSubscriptions.Any() && !quotaSubscription.IsActive && !quotaUltimateSubscription.IsActive;
 
             if (needsSync)
             {
-                // Get latest payment history to sync subscription status
-                var paymentHistory = await userBillingGAgent.GetPaymentHistoryAsync(1, 10); // Get recent payments
+                Logger.LogInformation(
+                    "[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Subscription status mismatch detected. Syncing...");
 
-                foreach (var payment in paymentHistory.Where(p =>
-                             p.Status == PaymentStatus.Completed && p.Platform == PaymentPlatform.GooglePlay))
+                // Sync the first active subscription (most recent by CreatedAt)
+                var subscription = activeSubscriptions.OrderByDescending(s => s.CreatedAt).First();
+
+                Logger.LogInformation(
+                    $"[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Found active subscription {subscription.PaymentId}, syncing to UserQuotaGAgent");
+
+                // Default to non-ultimate subscription (business logic will determine this via events)
+                // Note: In the new architecture, quota updates should happen via events from PaymentCompletedEvent handlers
+                // This sync is a fallback for edge cases
+                bool isUltimate = false;
+
+                // Create subscription info to sync (use Month as default, actual value set by event handlers)
+                var subscriptionToSync = new SubscriptionInfoDto
                 {
-                    Logger.LogInformation(
-                        $"[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Found Google Play payment {payment.PaymentGrainId} with PlanType {payment.PlanType}, syncing to UserQuotaGAgent");
+                    IsActive = true,
+                    PlanType = PlanType.Month, // Default - should be set by business event handlers
+                    Status = Aevatar.Application.Grains.Common.Constants.PaymentStatus.Completed,
+                    StartDate = subscription.CreatedAt,
+                    EndDate = subscription.PeriodEnd,
+                    SubscriptionIds = new List<string> { subscription.PaymentId },
+                    InvoiceIds = new List<string>()
+                };
 
-                    // Determine if this is ultimate subscription based on membership level
-                    bool isUltimate = payment.MembershipLevel == MembershipLevel.Membership_Level_Ultimate;
-
-                    // Create subscription info to sync
-                    var subscriptionToSync = new SubscriptionInfoDto
-                    {
-                        IsActive = true,
-                        PlanType = payment.PlanType,
-                        Status = payment.Status,
-                        StartDate = payment.SubscriptionStartDate,
-                        EndDate = payment.SubscriptionEndDate,
-                        SubscriptionIds = new List<string> { payment.SubscriptionId },
-                        InvoiceIds = new List<string>()
-                    };
-
-                    await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionToSync, isUltimate);
-                    Logger.LogInformation(
-                        $"[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Successfully synced Google Play subscription to UserQuotaGAgent - Ultimate: {isUltimate}");
-                    break; // Only sync the most recent active subscription
-                }
+                await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionToSync, isUltimate);
+                Logger.LogInformation(
+                    $"[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Successfully synced subscription to UserQuotaGAgent");
             }
         }
         catch (Exception ex)
         {
             Logger.LogError(ex,
-                $"[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Error syncing subscription status");
+                "[ChatGAgentManager][SyncSubscriptionStatusIfNeeded] Error syncing subscription status");
             // Don't throw - this is a best-effort sync operation
         }
     }
