@@ -274,14 +274,14 @@ public class PaymentService : IPaymentService
 
     // ========== Private Helper Methods ==========
 
-    private AgentModels.PaymentIndexGAgent GetIndexAgent(Guid userId)
+    private AgentModels.IPaymentIndexGAgent GetIndexAgent(Guid userId)
     {
         var agent = _agentFactory.CreateGAgent<AgentModels.PaymentIndexGAgent>(userId);
         agent.ActivateAsync().GetAwaiter().GetResult();
         return agent;
     }
 
-    private AgentModels.PaymentRecordGAgent GetRecordAgent(string paymentId)
+    private AgentModels.IPaymentRecordGAgent GetRecordAgent(string paymentId)
     {
         // Convert paymentId to a stable Guid
         var guidBytes = new byte[16];
@@ -388,7 +388,7 @@ public class PaymentService : IPaymentService
             var eventContext = BuildEventContext(record, platform, paymentId);
 
             // Get index agent for event broadcasting (requires UserId)
-            AgentModels.PaymentIndexGAgent? indexAgent = null;
+            AgentModels.IPaymentIndexGAgent? indexAgent = null;
             if (result.UserId.HasValue)
             {
                 indexAgent = GetIndexAgent(result.UserId.Value);
