@@ -1,7 +1,9 @@
 using Aevatar.Payment.Abstractions;
+using Aevatar.Payment.Options;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Volo.Abp;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Users;
@@ -20,15 +22,18 @@ public class PaymentController : AbpControllerBase
     private readonly IPaymentService _paymentService;
     private readonly ILogger<PaymentController> _logger;
     private readonly ICurrentUser _currentUser;
+    private readonly StripeOptions _stripeOptions;
 
     public PaymentController(
         IPaymentService paymentService,
         ILogger<PaymentController> logger,
-        ICurrentUser currentUser)
+        ICurrentUser currentUser,
+        IOptions<StripeOptions> stripeOptions)
     {
         _paymentService = paymentService;
         _logger = logger;
         _currentUser = currentUser;
+        _stripeOptions = stripeOptions.Value;
     }
 
     /// <summary>
@@ -115,6 +120,29 @@ public class PaymentController : AbpControllerBase
         var userId = _currentUser.Id ?? throw new UnauthorizedAccessException();
         var history = await _paymentService.GetPaymentHistoryAsync(userId, page, pageSize);
         return Ok(history);
+    }
+
+    /// <summary>
+    /// Get Stripe customer info with ephemeral key (for mobile SDK)
+    /// </summary>
+    [HttpGet("customer")]
+    public async Task<ActionResult<CustomerSessionResult>> GetCustomerAsync()
+    {
+        var userId = _currentUser.Id ?? throw new UnauthorizedAccessException();
+        
+        _logger.LogInformation("[PaymentController] Getting customer for user {UserId}", userId);
+
+        var result = await _paymentService.GetStripeCustomerAsync(userId);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Get Stripe publishable key
+    /// </summary>
+    [HttpGet("keys")]
+    public ActionResult<object> GetKeys()
+    {
+        return Ok(new { publishableKey = _stripeOptions.PublishableKey ?? "" });
     }
 
     /// <summary>
