@@ -1,6 +1,7 @@
 using Aevatar.Payment.Abstractions;
 using Aevatar.Payment.Options;
 using Microsoft.AspNetCore.Authorization;
+using StripeOptions = Aevatar.Payment.Providers.StripeOptions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;

@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package aevatar.payment.agents.protos;
+
+option csharp_namespace = "Aevatar.Payment.Agents.Protos";
+
+import "google/protobuf/timestamp.proto";
+
+// State for PaymentAnalyticsGAgent
+// Tracks reporting status for a single transaction
+message PaymentAnalyticsStateProto {
+  string transaction_id = 1;
+  string user_id = 2;
+  int32 platform = 3;  // PaymentPlatform enum
+  bool purchase_reported = 4;
+  bool refund_reported = 5;
+  google.protobuf.Timestamp last_report_attempt = 6;
+  int32 retry_count = 7;
+  string last_error = 8;
+}
+
+// Event: Purchase reported successfully
+message PurchaseReportedEvent {
+  string transaction_id = 1;
+  google.protobuf.Timestamp reported_at = 2;
+}
+
+// Event: Refund reported successfully
+message RefundReportedEvent {
+  string transaction_id = 1;
+  google.protobuf.Timestamp reported_at = 2;
+}
+
+// Event: Report failed
+message ReportFailedEvent {
+  string transaction_id = 1;
+  string event_type = 2;  // "purchase" or "refund"
+  string error_message = 3;
+  int32 retry_count = 4;
+  google.protobuf.Timestamp failed_at = 5;
+}
+

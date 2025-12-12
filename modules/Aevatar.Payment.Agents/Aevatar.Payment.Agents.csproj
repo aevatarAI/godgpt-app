@@ -33,7 +33,9 @@
     <Protobuf Include="Protos\payment_index.proto" GrpcServices="None" />
     <Protobuf Include="Protos\payment_record.proto" GrpcServices="None" />
     <Protobuf Include="Protos\payment_events.proto" GrpcServices="None" />
+    <Protobuf Include="Protos\payment_analytics.proto" GrpcServices="None" />
   </ItemGroup>
+
 
 </Project>
 

@@ -1,4 +1,7 @@
 using Aevatar.Payment.Abstractions;
+using Aevatar.Payment.Agents;
+using Aevatar.Payment.Analytics;
+using Aevatar.Payment.Options;
 using Aevatar.Payment.Providers;
 using Aevatar.Payment.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,9 +14,7 @@ namespace Aevatar.Payment;
 /// <summary>
 /// ABP Module for Payment functionality.
 /// Provides payment processing with Stripe, Apple Pay, and Google Play.
-/// 
-/// Note: IPaymentEventPublisher must be registered by the consuming application.
-/// This keeps the Payment module decoupled from specific event bus implementations.
+/// Includes GA4 analytics reporting via event-driven architecture.
 /// </summary>
 [DependsOn(
     typeof(AbpAspNetCoreMvcModule),
@@ -32,10 +33,13 @@ public class PaymentModule : AbpModule
             configuration.GetSection(ApplePayOptions.SectionName));
         context.Services.Configure<GooglePlayOptions>(
             configuration.GetSection(GooglePlayOptions.SectionName));
+        context.Services.Configure<GA4Options>(
+            configuration.GetSection(GA4Options.SectionName));
 
         // Register HttpClient factories
         context.Services.AddHttpClient("ApplePay");
         context.Services.AddHttpClient("GooglePlay");
+        context.Services.AddHttpClient<IPaymentAnalyticsService, GA4AnalyticsService>();
 
         // Register payment providers (Strategy Pattern)
         context.Services.AddScoped<IPaymentProvider, StripeProvider>();
@@ -45,12 +49,8 @@ public class PaymentModule : AbpModule
         // Register payment service
         context.Services.AddScoped<IPaymentService, PaymentService>();
         
-        // Note: IPaymentEventPublisher is NOT registered here.
-        // The consuming application must provide its own implementation.
-        // Example implementations:
-        // - AbpPaymentEventPublisher (using Volo.Abp.EventBus)
-        // - OrleansPaymentEventPublisher (using Orleans Streams)
-        // - MediatRPaymentEventPublisher (using MediatR)
+        // Register analytics service (for PaymentAnalyticsGAgent)
+        context.Services.AddScoped<IPaymentAnalyticsService, GA4AnalyticsService>();
     }
 }
 
