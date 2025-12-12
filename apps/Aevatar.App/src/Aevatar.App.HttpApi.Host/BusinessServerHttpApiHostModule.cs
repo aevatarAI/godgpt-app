@@ -14,6 +14,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.OpenApi.Models;
 using Aevatar.App.MongoDB;
+using Aevatar.Payment;
 using Volo.Abp;
 using Volo.Abp.AspNetCore.Authentication.JwtBearer;
 using Volo.Abp.AspNetCore.Mvc;
@@ -29,6 +30,7 @@ namespace Aevatar.App.HttpApi.Host;
     typeof(AppHttpApiModule),
     typeof(AppApplicationModule),
     typeof(AppMongoDbModule),
+    typeof(PaymentModule),
     typeof(AbpAspNetCoreAuthenticationJwtBearerModule),
     typeof(AbpAutofacModule),
     typeof(AbpAspNetCoreSerilogModule),

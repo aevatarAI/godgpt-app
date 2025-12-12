@@ -47,6 +47,12 @@
     <ProjectReference Include="..\..\..\..\plugins\Aevatar.Agents.Plugins.CQRS\Aevatar.Agents.Plugins.CQRS.csproj" />
   </ItemGroup>
   
+  <!-- Payment Module -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\modules\Aevatar.Payment\Aevatar.Payment.csproj" />
+    <ProjectReference Include="..\..\..\..\modules\Aevatar.Payment.Agents\Aevatar.Payment.Agents.csproj" />
+  </ItemGroup>
+  
   <!-- Orleans (for Orleans runtime option) -->
   <ItemGroup>
     <PackageReference Include="Microsoft.Orleans.Client" />
