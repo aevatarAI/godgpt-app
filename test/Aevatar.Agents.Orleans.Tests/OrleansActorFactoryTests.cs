@@ -217,12 +217,13 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         var agentId = Guid.NewGuid();
         var actor = await factory.CreateGAgentActorAsync<OrleansRpcTestAgent>(agentId);
 
-        // Act - Use RPC extension methods
-        await actor.InvokeRpcAsync("SetMessageAsync", "Hello Orleans RPC!");
-        await actor.InvokeRpcAsync("IncrementAsync", 42);
+        // Act - Use type-safe proxy
+        var proxy = actor.As<IOrleansRpcTestAgent>();
+        await proxy.SetMessageAsync("Hello Orleans RPC!");
+        await proxy.IncrementAsync(42);
 
-        var message = await actor.InvokeRpcAsync<string>("GetMessageAsync");
-        var count = await actor.InvokeRpcAsync<int>("GetCountAsync");
+        var message = await proxy.GetMessageAsync();
+        var count = await proxy.GetCountAsync();
 
         // Assert
         Assert.Equal("Hello Orleans RPC!", message);
@@ -237,12 +238,13 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         var agentId = Guid.NewGuid();
         var actor = await factory.CreateGAgentActorAsync<OrleansRpcTestAgent>(agentId);
 
-        // Act - Multiple increments
-        await actor.InvokeRpcAsync("IncrementAsync", 10);
-        await actor.InvokeRpcAsync("IncrementAsync", 20);
-        await actor.InvokeRpcAsync("IncrementAsync", 30);
+        // Act - Multiple increments via proxy
+        var proxy = actor.As<IOrleansRpcTestAgent>();
+        await proxy.IncrementAsync(10);
+        await proxy.IncrementAsync(20);
+        await proxy.IncrementAsync(30);
 
-        var finalCount = await actor.InvokeRpcAsync<int>("GetCountAsync");
+        var finalCount = await proxy.GetCountAsync();
 
         // Assert
         Assert.Equal(60, finalCount);
@@ -256,11 +258,11 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         var agentId = Guid.NewGuid();
         var actor = await factory.CreateGAgentActorAsync<OrleansRpcTestAgent>(agentId);
 
-        // Act & Assert - Non-existent method should throw
+        // Act & Assert - Non-existent method should throw (using dynamic API)
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => actor.InvokeRpcAsync("SomeNonExistentMethod"));
+            () => actor.InvokeAsync("SomeNonExistentMethod"));
 
-        Assert.Contains("RPC call failed", exception.Message);
+        Assert.Contains("RPC call", exception.Message);
     }
 
     [Fact]
@@ -271,15 +273,16 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         var agentId = Guid.NewGuid();
         var actor = await factory.CreateGAgentActorAsync<OrleansRpcTestAgent>(agentId);
 
-        // Act - Concurrent RPC calls
+        // Act - Concurrent RPC calls via proxy
+        var proxy = actor.As<IOrleansRpcTestAgent>();
         var tasks = new List<Task>();
         for (int i = 0; i < 10; i++)
         {
-            tasks.Add(actor.InvokeRpcAsync("IncrementAsync", 1));
+            tasks.Add(proxy.IncrementAsync(1));
         }
         await Task.WhenAll(tasks);
 
-        var finalCount = await actor.InvokeRpcAsync<int>("GetCountAsync");
+        var finalCount = await proxy.GetCountAsync();
 
         // Assert
         Assert.Equal(10, finalCount);
