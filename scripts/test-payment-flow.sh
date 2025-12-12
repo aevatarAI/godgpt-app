@@ -463,6 +463,105 @@ test_webhook_simulation() {
     log_info "  stripe trigger checkout.session.completed"
 }
 
+# Test 16: GA4 Analytics Service
+test_ga4_analytics() {
+    log_step "Test 16: Testing GA4 Analytics Service..."
+    
+    # Test GA4 Measurement Protocol directly
+    # Configure these values or set as environment variables
+    local measurement_id="${GA4_MEASUREMENT_ID:-G-LMQLPL5Y9D}"
+    local api_secret="${GA4_API_SECRET:-YOUR_GA4_API_SECRET}"
+    local endpoint="https://www.google-analytics.com/mp/collect"
+    local timestamp=$(date +%s)
+    local transaction_id="test_user^Stripe^txn_test_${timestamp}"
+    
+    # Create test payload
+    local payload=$(cat <<EOF
+{
+  "client_id": "${transaction_id}",
+  "events": [
+    {
+      "name": "purchase",
+      "params": {
+        "transaction_id": "${transaction_id}",
+        "value": 19.99,
+        "currency": "USD",
+        "payment_type": "Stripe",
+        "is_renewal": false
+      }
+    }
+  ]
+}
+EOF
+)
+    
+    log_info "Sending test purchase event to GA4..."
+    log_info "Endpoint: ${endpoint}?measurement_id=${measurement_id}&api_secret=***"
+    
+    local http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+        "${endpoint}?measurement_id=${measurement_id}&api_secret=${api_secret}" \
+        -H "Content-Type: application/json" \
+        -d "$payload")
+    
+    log_info "HTTP Code: $http_code"
+    
+    if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+        log_info "GA4 purchase event sent successfully ✓"
+        log_info "Note: Check GA4 DebugView to verify event receipt"
+        return 0
+    else
+        log_warn "GA4 request failed with HTTP $http_code"
+        return 1
+    fi
+}
+
+# Test 17: GA4 Refund Event
+test_ga4_refund() {
+    log_step "Test 17: Testing GA4 Refund Event..."
+    
+    # Configure these values or set as environment variables
+    local measurement_id="${GA4_MEASUREMENT_ID:-G-LMQLPL5Y9D}"
+    local api_secret="${GA4_API_SECRET:-YOUR_GA4_API_SECRET}"
+    local endpoint="https://www.google-analytics.com/mp/collect"
+    local timestamp=$(date +%s)
+    local transaction_id="test_user^Stripe^txn_refund_${timestamp}"
+    
+    local payload=$(cat <<EOF
+{
+  "client_id": "${transaction_id}",
+  "events": [
+    {
+      "name": "refund",
+      "params": {
+        "transaction_id": "${transaction_id}",
+        "value": 9.99,
+        "currency": "USD",
+        "refund_reason": "customer_request"
+      }
+    }
+  ]
+}
+EOF
+)
+    
+    log_info "Sending test refund event to GA4..."
+    
+    local response=$(curl -s -w "\n%{http_code}" -X POST \
+        "${endpoint}?measurement_id=${measurement_id}&api_secret=${api_secret}" \
+        -H "Content-Type: application/json" \
+        -d "$payload")
+    
+    local http_code=$(echo "$response" | tail -n 1)
+    
+    if [ "$http_code" -ge 200 ] && [ "$http_code" -lt 300 ]; then
+        log_info "GA4 refund event sent successfully ✓"
+        return 0
+    else
+        log_warn "GA4 refund request failed with HTTP $http_code"
+        return 1
+    fi
+}
+
 # Run all tests
 run_all_tests() {
     local passed=0
@@ -569,6 +668,22 @@ run_all_tests() {
     ((passed++))
     echo ""
     
+    # Test 16: GA4 Analytics Purchase
+    if test_ga4_analytics; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
+    echo ""
+    
+    # Test 17: GA4 Analytics Refund
+    if test_ga4_refund; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
+    echo ""
+    
     # Webhook simulation info
     test_webhook_simulation
     echo ""
@@ -587,6 +702,17 @@ main() {
     echo ""
     
     check_dependencies
+    
+    # Handle ga4 test separately (no services needed)
+    if [ "${1:-all}" == "ga4" ]; then
+        log_info "Running GA4 Analytics tests (no auth required)..."
+        echo ""
+        test_ga4_analytics
+        echo ""
+        test_ga4_refund
+        exit 0
+    fi
+    
     check_services
     echo ""
     
@@ -636,6 +762,15 @@ main() {
         "new-api")
             test_new_api_products
             test_new_api_subscribe
+            ;;
+        "ga4")
+            # GA4 tests don't need local services
+            log_info "Running GA4 Analytics tests (no auth required)..."
+            echo ""
+            test_ga4_analytics
+            echo ""
+            test_ga4_refund
+            exit 0
             ;;
         "all"|*)
             run_all_tests
