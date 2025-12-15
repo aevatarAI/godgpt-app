@@ -14,6 +14,7 @@ using Microsoft.Extensions.Logging;
 using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
 using CsRewardTypeEnum = Aevatar.Application.Grains.Common.Constants.RewardTypeEnum;
 using CsMembershipLevel = Aevatar.Application.Grains.Common.Constants.MembershipLevel;
+using InvitationProtos = Aevatar.Agents.GodGPT.Protos.Invitation;
 
 namespace Aevatar.Application.Grains.Invitation;
 
@@ -21,11 +22,12 @@ namespace Aevatar.Application.Grains.Invitation;
 public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
 {
     private readonly DateTime DefaultIssueAt = new DateTime(2025, 7, 8, 0, 0, 0, DateTimeKind.Utc);
-    private readonly IGAgentFactory _agentFactory;
 
-    public InvitationGAgent(Guid id, IGAgentFactory agentFactory) : base(id)
+    // Injected by Actor layer for Orleans compatibility
+    public IGAgentActorFactory? ActorFactory { get; set; }
+
+    public InvitationGAgent() : base()
     {
-        _agentFactory = agentFactory;
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -54,10 +56,10 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         return inviteCode;
     }
 
-    public async Task<InvitationStatsDto> GetInvitationStatsAsync()
+    public Task<InvitationStatsProto> GetInvitationStatsAsync()
     {
         // Twitter integration removed - no longer used
-        return new InvitationStatsDto
+        return Task.FromResult(new InvitationStatsProto
         {
             TotalInvites = State.TotalInvites,
             ValidInvites = State.ValidInvites,
@@ -66,13 +68,13 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
             InviteCode = State.CurrentInviteCode,
             TotalCreditsFromX = State.TotalCreditsFromX,
             IsBound = false  // Twitter binding removed
-        };
+        });
     }
 
-    public Task<List<RewardTierDto>> GetRewardTiersAsync()
+    public Task<RewardTierListResponse> GetRewardTiersAsync()
     {
         var currentInvites = State.ValidInvites;
-        var tiers = new List<RewardTierDto>();
+        var response = new RewardTierListResponse();
 
         int currentLevel;
         if (currentInvites == 0)
@@ -104,7 +106,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         {
             int level = startLevel + i;
             int inviteCount = level == 1 ? 1 : 1 + (level - 1) * 3;
-            tiers.Add(new RewardTierDto
+            response.Tiers.Add(new RewardTierProto
             {
                 InviteCount = inviteCount,
                 Credits = level == 1 ? 30 : 100,
@@ -112,24 +114,37 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
             });
         }
 
-        return Task.FromResult(tiers);
+        return Task.FromResult(response);
     }
 
-    public Task<List<RewardHistoryDto>> GetRewardHistoryAsync()
+    public Task<RewardHistoryListResponse> GetRewardHistoryAsync()
     {
-        return Task.FromResult(State.RewardHistory.Select(r => new RewardHistoryDto
+        var response = new RewardHistoryListResponse();
+        response.Items.AddRange(State.RewardHistory.Select(r => new RewardHistoryProto
         {
             InviteeId = r.InviteeId,
             Credits = r.Credits,
-            RewardType = ((CsRewardTypeEnum)r.RewardType).ToString(),
-            IssuedAt = r.IssuedAt?.ToDateTime() ?? DateTime.MinValue,
+            RewardType = r.RewardType.ToString(),
+            IssuedAt = r.IssuedAt ?? Timestamp.FromDateTime(DateTime.MinValue),
             IsScheduled = r.IsScheduled,
-            ScheduledDate = r.ScheduledDate != null ? r.ScheduledDate.ToDateTime() : null,
-            InvoiceId = r.InvoiceId
-        }).ToList());
+            InvoiceId = r.InvoiceId,
+            TweetId = r.TweetId
+        }));
+        
+        foreach (var item in response.Items)
+        {
+            var original = State.RewardHistory.FirstOrDefault(r => r.InviteeId == item.InviteeId && 
+                r.Credits == item.Credits && r.RewardType.ToString() == item.RewardType);
+            if (original?.ScheduledDate != null)
+            {
+                item.ScheduledDate = original.ScheduledDate;
+            }
+        }
+        
+        return Task.FromResult(response);
     }
 
-    public Task<PagedResultDto<RewardHistoryDto>> GetRewardHistoryAsync(GetRewardHistoryRequestDto request)
+    public Task<PagedRewardHistoryResponse> GetRewardHistoryAsync(GetRewardHistoryRequestProto request)
     {
         var query = State.RewardHistory.AsEnumerable();
 
@@ -137,9 +152,9 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         query = query.Where(r => !r.IsScheduled);
 
         // Apply filter
-        if (request.RewardType.HasValue)
+        if (request.HasRewardType)
         {
-            var protoRewardType = (RewardType)request.RewardType.Value;
+            var protoRewardType = (RewardType)request.RewardType;
             query = query.Where(r => r.RewardType == protoRewardType);
         }
 
@@ -152,25 +167,33 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
             .OrderByDescending(r => r.IssuedAt?.ToDateTime() ?? DateTime.MinValue)
             .Skip((request.PageNo - 1) * request.PageSize)
             .Take(request.PageSize)
-            .Select(r => new RewardHistoryDto
+            .Select(r =>
+            {
+                var proto = new RewardHistoryProto
             {
                 InviteeId = r.InviteeId,
                 Credits = r.Credits,
-                RewardType = ((CsRewardTypeEnum)r.RewardType).ToString(),
-                IssuedAt = r.IssuedAt?.ToDateTime() ?? DateTime.MinValue,
+                    RewardType = r.RewardType.ToString(),
+                    IssuedAt = r.IssuedAt ?? Timestamp.FromDateTime(DateTime.MinValue),
                 IsScheduled = r.IsScheduled,
-                ScheduledDate = r.ScheduledDate != null ? r.ScheduledDate.ToDateTime() : null,
                 InvoiceId = r.InvoiceId,
                 TweetId = r.TweetId
+                };
+                if (r.ScheduledDate != null)
+                {
+                    proto.ScheduledDate = r.ScheduledDate;
+                }
+                return proto;
             })
             .ToList();
 
-        return Task.FromResult(new PagedResultDto<RewardHistoryDto>(
-            items,
-            totalCount,
-            request.PageNo,
-            request.PageSize
-        ));
+        return Task.FromResult(new PagedRewardHistoryResponse
+        {
+            Items = { items },
+            TotalCount = totalCount,
+            PageNo = request.PageNo,
+            PageSize = request.PageSize
+        });
     }
 
     public async Task ProcessScheduledRewardAsync()
@@ -242,7 +265,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         await ConfirmEventsAsync();
     }
 
-    public async Task ProcessInviteeSubscriptionAsync(string inviteeId, CsPlanType planType, bool isUltimate,
+    public async Task ProcessInviteeSubscriptionAsync(string inviteeId, int planType, bool isUltimate,
         string invoiceId)
     {
         if (!State.Invitees.TryGetValue(inviteeId, out var invitee) || invitee.HasPaid)
@@ -250,7 +273,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
             return;
         }
 
-        var credits = GetSubscriptionRewardCredits(planType, isUltimate);
+        var credits = GetSubscriptionRewardCredits((CsPlanType)planType, isUltimate);
         if (credits <= 0)
         {
             return;
@@ -270,7 +293,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         await ConfirmEventsAsync();
 
         // For annual plans, schedule the reward for 30 days later
-        if (planType == CsPlanType.Year)
+        if (planType == (int)CsPlanType.Year)
         {
             var addRewardEvent = new AddRewardEvent
             {
@@ -541,17 +564,25 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         return true;
     }
 
-    private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
+    private async Task<IInviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
     {
-        var agent = _agentFactory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
-        await agent.ActivateAsync();
-        return agent;
+        if (ActorFactory == null)
+        {
+            throw new InvalidOperationException("ActorFactory is not injected. Cannot create InviteCodeGAgent.");
+        }
+        
+        var actor = await ActorFactory.CreateGAgentActorAsync<InviteCodeGAgent>(codeGrainId);
+        return actor.As<IInviteCodeGAgent>();
     }
     
-    private async Task<UserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    private async Task<IUserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
     {
-        var agent = _agentFactory.CreateGAgent<UserQuotaGAgent>(userId);
-        await agent.ActivateAsync();
-        return agent;
+        if (ActorFactory == null)
+        {
+            throw new InvalidOperationException("ActorFactory is not injected. Cannot create UserQuotaGAgent.");
+        }
+        
+        var actor = await ActorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId);
+        return actor.As<IUserQuotaGAgent>();
     }
 }

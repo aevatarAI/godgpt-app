@@ -1137,7 +1137,9 @@ public class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerState
         var codeGrainId = CommonHelper.StringToGuid(inviteCode);
         var codeGrain = await GetInviteCodeAgentAsync(codeGrainId);
 
-        var (isValid, inviterId) = await codeGrain.ValidateAndGetInviterAsync();
+        var validateResult = await codeGrain.ValidateAndGetInviterAsync();
+        var isValid = validateResult.IsValid;
+        var inviterId = validateResult.InviterId;
 
         if (!isValid)
         {

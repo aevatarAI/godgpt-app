@@ -25,9 +25,15 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
     {
         await base.OnActivateAsync(ct);
         
+        // Initialize UserId through Event Sourcing if not set
         if (string.IsNullOrEmpty(State.UserId))
         {
-            State.UserId = Id.ToString();
+            RaiseEvent(new PaymentIndexInitializedEvent
+            {
+                UserId = Id.ToString(),
+                InitializedAt = Timestamp.FromDateTime(DateTime.UtcNow)
+            });
+            await ConfirmEventsAsync();
         }
     }
 
@@ -66,6 +72,10 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
     {
         switch (evt)
         {
+            case PaymentIndexInitializedEvent e:
+                state.UserId = e.UserId;
+                break;
+                
             case PlatformCustomerUpdatedEvent e:
                 state.PlatformCustomers[e.Platform.ToString()] = e.CustomerId;
                 break;

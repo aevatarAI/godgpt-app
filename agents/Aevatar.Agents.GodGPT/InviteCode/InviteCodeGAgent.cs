@@ -15,7 +15,7 @@ namespace Aevatar.Application.Grains.Agents.Invitation;
 [GAgent(nameof(InviteCodeGAgent))]
 public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
 {
-    public InviteCodeGAgent(Guid id) : base(id)
+    public InviteCodeGAgent() : base()
     {
     }
 
@@ -42,17 +42,25 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
         return true;
     }
 
-    public async Task<(bool isValid, string inviterId)> ValidateAndGetInviterAsync()
+    public async Task<ValidateInviteCodeResponse> ValidateAndGetInviterAsync()
     {
         if (!State.IsActive || string.IsNullOrEmpty(State.InviterId))
         {
-            return (false, string.Empty);
+            return new ValidateInviteCodeResponse
+            {
+                IsValid = false,
+                InviterId = string.Empty
+            };
         }
 
         RaiseEvent(new IncrementUsageCountEvent());
         await ConfirmEventsAsync();
 
-        return (true, State.InviterId);
+        return new ValidateInviteCodeResponse
+        {
+            IsValid = true,
+            InviterId = State.InviterId
+        };
     }
 
     public Task<bool> IsInitialized()
@@ -71,7 +79,7 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
         await ConfirmEventsAsync();
     }
 
-    public async Task<bool> InitializeFreeTrialCodeAsync(FreeTrialCodeInitDto initDto)
+    public async Task<bool> InitializeFreeTrialCodeAsync(FreeTrialCodeInitProto initDto)
     {
         if (!string.IsNullOrWhiteSpace(State.InviteCode))
         {
@@ -81,20 +89,20 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
         
         RaiseEvent(new InitializeFreeTrialCodeEvent
         {
-            Code = initDto.FreeTrialCode ?? string.Empty,
+            Code = initDto.FreeTrialCode,
             BatchId = initDto.BatchId,
             TrialDays = initDto.TrialDays,
-            ProductId = initDto.ProductId ?? string.Empty,
-            PlanType = (PlanType)initDto.PlanType,
+            ProductId = initDto.ProductId,
+            PlanType = initDto.PlanType,
             IsUltimate = initDto.IsUltimate,
-            StartDate = Timestamp.FromDateTime(initDto.StartDate.ToUniversalTime()),
-            EndDate = Timestamp.FromDateTime(initDto.EndDate.ToUniversalTime()),
-            InviteeId = initDto.InviteeId ?? string.Empty,
+            StartDate = initDto.StartDate,
+            EndDate = initDto.EndDate,
+            InviteeId = initDto.InviteeId,
             CreatedAt = Timestamp.FromDateTime(DateTime.UtcNow),
             IsActive = true,
-            Platform = (PaymentPlatform)initDto.Platform,
-            SessionUrl = initDto.SessionUrl ?? string.Empty,
-            SessionExpiresAt = Timestamp.FromDateTime(initDto.SessionExpiresAt.ToUniversalTime())
+            Platform = initDto.Platform,
+            SessionUrl = initDto.SessionUrl,
+            SessionExpiresAt = initDto.SessionExpiresAt
         });
 
         await ConfirmEventsAsync();
@@ -105,88 +113,89 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
         return true;
     }
 
-    public Task<ValidateCodeResultDto> ValidateAndGetFreeTrialCodeInfoAsync(string inviteeId)
+    public Task<ValidateCodeResultProto> ValidateAndGetFreeTrialCodeInfoAsync(string inviteeId)
     {
         if (string.IsNullOrWhiteSpace(State.InviteCode))
         {
-            return Task.FromResult(new ValidateCodeResultDto
+            return Task.FromResult(new ValidateCodeResultProto
             {
                 IsValid = true,
                 Message = string.Empty,
-                CodeType = CsInvitationCodeType.FreeTrialReward,
-                ActivationInfo = null
+                CodeType = InvitationCodeType.FreeTrialReward
             });
         } 
         
         if (State.CodeType != InvitationCodeType.FreeTrialReward)
         {
-            return Task.FromResult(new ValidateCodeResultDto
+            return Task.FromResult(new ValidateCodeResultProto
             {
                 IsValid = false,
                 Message = "Invalid code type",
-                CodeType = (CsInvitationCodeType)State.CodeType,
-                ActivationInfo = null
+                CodeType = State.CodeType
             });
         }
 
         if (!State.IsActive)
         {
-            return Task.FromResult(new ValidateCodeResultDto
+            return Task.FromResult(new ValidateCodeResultProto
             {
                 IsValid = false,
                 Message = "Code is not active",
-                CodeType = (CsInvitationCodeType)State.CodeType,
-                ActivationInfo = null
+                CodeType = State.CodeType
             });
         }
 
         if (State.InviteeId != inviteeId)
         {
-            return Task.FromResult(new ValidateCodeResultDto
+            return Task.FromResult(new ValidateCodeResultProto
             {
                 IsValid = false,
                 Message = "Code already used by another user",
-                CodeType = (CsInvitationCodeType)State.CodeType,
-                ActivationInfo = null
+                CodeType = State.CodeType
             });
         }
 
         try
         {
-            return Task.FromResult(new ValidateCodeResultDto
-            {
-                IsValid = true,
-                Message = string.Empty,
-                CodeType = (CsInvitationCodeType)State.CodeType,
-                ActivationInfo = new FreeTrialActivationDto
+            var activationInfo = new FreeTrialActivationProto
                 {
-                    CreatedAt = State.CreatedAt?.ToDateTime() ?? DateTime.MinValue,
+                CreatedAt = State.CreatedAt ?? Timestamp.FromDateTime(DateTime.MinValue),
                     IsActive = State.IsActive,
                     UsageCount = State.UsageCount,
                     InviteCode = State.InviteCode,
-                    CodeType = (CsInvitationCodeType)State.CodeType,
+                CodeType = State.CodeType,
                     BatchId = State.BatchId,
                     TrialDays = State.TrialDays,
                     ProductId = State.ProductId,
-                    PlanType = (CsPlanType)State.PlanType,
+                PlanType = State.PlanType,
                     IsUltimate = State.IsUltimate,
-                    Platform = (CsPaymentPlatform)State.Platform,
+                Platform = State.Platform,
                     InviteeId = State.InviteeId,
-                    UsedAt = State.UsedAt?.ToDateTime(),
                     SessionUrl = State.SessionUrl,
-                    SessionExpiresAt = State.SessionExpiresAt?.ToDateTime() ?? DateTime.MinValue
-                }
+                SessionExpiresAt = State.SessionExpiresAt
+            };
+            
+            if (State.UsedAt != null)
+            {
+                activationInfo.UsedAt = State.UsedAt;
+            }
+            
+            return Task.FromResult(new ValidateCodeResultProto
+            {
+                IsValid = true,
+                Message = string.Empty,
+                CodeType = State.CodeType,
+                ActivationInfo = activationInfo
             });
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Error redeeming free trial code for user {UserId}", inviteeId);
-            return Task.FromResult(new ValidateCodeResultDto
+            return Task.FromResult(new ValidateCodeResultProto
             {
                 IsValid = false,
                 Message = "Internal error occurred",
-                CodeType = (CsInvitationCodeType)State.CodeType,
-                ActivationInfo = null
+                CodeType = State.CodeType
             });
         }
     }
@@ -206,23 +215,22 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
         return true;
     }
 
-    public Task<FreeTrialCodeInfoDto?> GetCodeInfoAsync()
+    public Task<FreeTrialCodeInfoProto> GetCodeInfoAsync()
     {
-        if (State.CodeType != InvitationCodeType.FreeTrialReward)
-        {
-            return Task.FromResult<FreeTrialCodeInfoDto?>(null);
-        }
-
-        var codeInfo = new FreeTrialCodeInfoDto
+        var codeInfo = new FreeTrialCodeInfoProto
         {
             BatchId = State.BatchId,
             TrialDays = State.TrialDays,
-            PlanType = (CsPlanType)State.PlanType,
-            IsUltimate = State.IsUltimate,
-            UsedAt = State.UsedAt?.ToDateTime()
+            PlanType = State.PlanType,
+            IsUltimate = State.IsUltimate
         };
+        
+        if (State.CodeType == InvitationCodeType.FreeTrialReward && State.UsedAt != null)
+        {
+            codeInfo.UsedAt = State.UsedAt;
+        }
 
-        return Task.FromResult<FreeTrialCodeInfoDto?>(codeInfo);
+        return Task.FromResult(codeInfo);
     }
 
     #region EventHandlers

@@ -1,4 +1,6 @@
-﻿using Aevatar.Application.Grains;
+﻿using Aevatar.App.Application.Services;
+using Aevatar.Application.Grains;
+using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp.PermissionManagement;
 using Volo.Abp.SettingManagement;
 using Volo.Abp.Account;
@@ -29,5 +31,8 @@ public class AppApplicationModule : AbpModule
         {
             options.AddMaps<AppApplicationModule>();
         });
+        
+        // Register InvitationService
+        context.Services.AddScoped<IInvitationService, InvitationService>();
     }
 }

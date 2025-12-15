@@ -92,3 +92,48 @@ message UpdateFactoryStatusEvent {
     string reason = 2;                                    // [Id(1)]
 }
 
+// =============================================================================
+// RPC Request/Response Types
+// =============================================================================
+
+message GenerateCodesRequestProto {
+    int64 batch_id = 1;
+    string product_id = 2;
+    FactoryPaymentPlatform platform = 3;
+    int32 trial_days = 4;
+    google.protobuf.Timestamp start_time = 5;
+    google.protobuf.Timestamp end_time = 6;
+    int32 quantity = 7;
+    string operator_user_id = 8;  // Guid -> string
+    string description = 9;
+}
+
+message GenerateCodesResultProto {
+    bool success = 1;
+    string message = 2;
+    repeated string codes = 3;
+    int32 generated_count = 4;
+    int32 error_code = 5;  // FreeTrialCodeError enum value
+}
+
+message BatchInfoProto {
+    int64 batch_id = 1;
+    int32 total_generated = 2;
+    int32 used_count = 3;
+    google.protobuf.Timestamp creation_time = 4;
+    google.protobuf.Timestamp last_generation_time = 5;
+    BatchConfig config = 6;
+    FactoryStatus status = 7;
+    repeated string generated_codes = 8;
+    repeated string used_codes = 9;
+}
+
+message MarkCodeUsedRequestProto {
+    string code = 1;
+    string user_id = 2;
+}
+
+message ValidateCodeRequestProto {
+    string code = 1;
+}
+

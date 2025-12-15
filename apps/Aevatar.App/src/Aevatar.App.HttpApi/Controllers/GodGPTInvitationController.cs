@@ -1,3 +1,4 @@
+using Aevatar.App.Application.Services;
 using Aevatar.App.HttpApi.Controllers;
 using System;
 using System.Collections.Generic;
@@ -28,6 +29,10 @@ using Volo.Abp.Security.Claims;
 
 namespace Aevatar.Controllers;
 
+/// <summary>
+/// GodGPT Invitation Controller (Compatibility Layer)
+/// Note: For new implementations, use InvitationController (/api/invitation)
+/// </summary>
 [RemoteService]
 [ControllerName("Invitation")]
 [Route("api/godgpt/invitation")]
@@ -35,12 +40,12 @@ namespace Aevatar.Controllers;
 public class GodGPTInvitationController : AevatarController
 {
     private readonly ILogger<GodGPTPaymentController> _logger;
-    private readonly IGodGPTService _godGptService;
+    private readonly IInvitationService _invitationService;
 
-    public GodGPTInvitationController(ILogger<GodGPTPaymentController> logger, IGodGPTService godGptService)
+    public GodGPTInvitationController(ILogger<GodGPTPaymentController> logger, IInvitationService invitationService)
     {
         _logger = logger;
-        _godGptService = godGptService;
+        _invitationService = invitationService;
     }
     
     [HttpPost("generate-trial-code")]
@@ -48,7 +53,7 @@ public class GodGPTInvitationController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var generateCodesResultDto = await _godGptService.GenerateFreeTrialCodeAsync(currentUserId, input);
+        var generateCodesResultDto = await _invitationService.GenerateFreeTrialCodeAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTInvitationController][GenerateFreeTrialCodeAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return generateCodesResultDto;
@@ -59,7 +64,7 @@ public class GodGPTInvitationController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var invitationInfo = await _godGptService.GetInvitationInfoAsync(currentUserId);
+        var invitationInfo = await _invitationService.GetInvitationInfoAsync(currentUserId);
         _logger.LogDebug("[GodGPTInvitationController][GetInvitationInfoAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return invitationInfo;
@@ -70,7 +75,7 @@ public class GodGPTInvitationController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var invitationInfo = await _godGptService.GetInvitationCodeTypeAsync(currentUserId, input);
+        var invitationInfo = await _invitationService.GetInvitationCodeTypeAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTInvitationController][GetInvitationCodeTypeAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return invitationInfo;
@@ -81,7 +86,7 @@ public class GodGPTInvitationController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _godGptService.RedeemInviteCodeAsync(currentUserId, input);
+        var response = await _invitationService.RedeemInviteCodeAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTInvitationController][RedeemInviteCodeAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return response;
@@ -92,7 +97,7 @@ public class GodGPTInvitationController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _godGptService.GetCreditsHistoryAsync(currentUserId, input);
+        var response = await _invitationService.GetCreditsHistoryAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTInvitationController][GetCreditsHistoryAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return response;

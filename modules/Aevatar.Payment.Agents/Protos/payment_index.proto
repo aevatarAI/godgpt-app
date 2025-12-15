@@ -71,6 +71,11 @@ message IndexClearedEvent {
   google.protobuf.Timestamp cleared_at = 1;
 }
 
+message PaymentIndexInitializedEvent {
+  string user_id = 1;
+  google.protobuf.Timestamp initialized_at = 2;
+}
+
 // =============================================================================
 // RPC Response Types (for cross-runtime communication)
 // =============================================================================

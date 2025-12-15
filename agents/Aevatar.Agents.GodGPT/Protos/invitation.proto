@@ -112,3 +112,62 @@ message MarkRewardIssuedEvent {
     string invoice_id = 2;                            // [Id(1)]
 }
 
+// =============================================================================
+// RPC Request/Response Types (for cross-runtime communication)
+// =============================================================================
+
+// Invitation statistics
+message InvitationStatsProto {
+    int32 total_invites = 1;
+    int32 valid_invites = 2;
+    int32 pending_invites = 3;
+    int32 total_credits_earned = 4;
+    string invite_code = 5;
+    int32 total_credits_from_x = 6;
+    bool is_bound = 7;
+}
+
+// Reward tier
+message RewardTierProto {
+    int32 invite_count = 1;
+    int32 credits = 2;
+    bool is_completed = 3;
+}
+
+// Reward history record
+message RewardHistoryProto {
+    string invitee_id = 1;
+    int32 credits = 2;
+    string reward_type = 3;
+    google.protobuf.Timestamp issued_at = 4;
+    bool is_scheduled = 5;
+    optional google.protobuf.Timestamp scheduled_date = 6;
+    string invoice_id = 7;
+    string tweet_id = 8;
+}
+
+// Request for reward history with pagination
+message GetRewardHistoryRequestProto {
+    int32 page_no = 1;
+    int32 page_size = 2;
+    optional int32 reward_type = 3;  // RewardType enum value (nullable)
+}
+
+// Response wrapper for reward history list
+message RewardHistoryListResponse {
+    repeated RewardHistoryProto items = 1;
+}
+
+// Response wrapper for reward tiers list
+message RewardTierListResponse {
+    repeated RewardTierProto tiers = 1;
+}
+
+// Paged result wrapper
+message PagedRewardHistoryResponse {
+    repeated RewardHistoryProto items = 1;
+    int32 total_count = 2;
+    int32 page_no = 3;
+    int32 page_size = 4;
+}
+

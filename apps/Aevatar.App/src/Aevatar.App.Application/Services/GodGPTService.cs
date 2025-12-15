@@ -19,6 +19,7 @@ using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Application.Grains.Invitation;
+using Aevatar.App.Application.Services;
 using Aevatar.Application.Grains.UserQuota;
 using Aevatar.Payment.Abstractions;
 using NewPaymentPlatform = Aevatar.Payment.Abstractions.PaymentPlatform;
@@ -127,6 +128,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
     private readonly IOptionsMonitor<ManagerOptions> _managerOptions;
     private readonly ILocalizationService _localizationService;
     private readonly IPaymentService _paymentService;
+    private readonly IInvitationService _invitationService;
 
     public GodGPTService(
         IClusterClient clusterClient, 
@@ -135,7 +137,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
         IOptionsMonitor<StripeOptions> stripeOptions,
         IOptionsMonitor<ManagerOptions> managerOptions, 
         ILocalizationService localizationService,
-        IPaymentService paymentService)
+        IPaymentService paymentService,
+        IInvitationService invitationService)
     {
         _clusterClient = clusterClient;
         _agentFactory = agentFactory;
@@ -144,6 +147,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         _managerOptions = managerOptions;
         _localizationService = localizationService;
         _paymentService = paymentService;
+        _invitationService = invitationService;
     }
     
     
@@ -352,20 +356,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
     public async Task<GetInvitationInfoResponse> GetInvitationInfoAsync(Guid currentUserId)
     {
-        var invitationAgent =  _agentFactory.CreateGAgent<InvitationGAgent>(currentUserId);
-        var inviteCode = await invitationAgent.GenerateInviteCodeAsync();
-        var invitationStatsDto = await invitationAgent.GetInvitationStatsAsync();
-        var rewardTierDtos = await invitationAgent.GetRewardTiersAsync();
-        return new GetInvitationInfoResponse
-        {
-            InviteCode = inviteCode,
-            TotalInvites = invitationStatsDto.TotalInvites,
-            ValidInvites = invitationStatsDto.ValidInvites,
-            TotalCreditsEarned = invitationStatsDto.TotalCreditsEarned,
-            RewardTiers = rewardTierDtos,
-            TotalCreditsFromX = invitationStatsDto.TotalCreditsFromX,
-            IsBound = invitationStatsDto.IsBound
-        };
+        // Delegate to InvitationService for consistency
+        return await _invitationService.GetInvitationInfoAsync(currentUserId);
     }
 
     public async Task<RedeemInviteCodeResponse> RedeemInviteCodeAsync(Guid currentUserId,
@@ -602,13 +594,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<PagedResultDto<RewardHistoryDto>> GetCreditsHistoryAsync(Guid currentUserId,
         GetCreditsHistoryInput input)
     {
-        var invitationAgent =  _agentFactory.CreateGAgent<InvitationGAgent>(currentUserId);
-        var rewardHistoryDtos = await invitationAgent.GetRewardHistoryAsync(new GetRewardHistoryRequestDto
-        {
-            PageNo = input.Page,
-            PageSize = input.PageSize
-        });
-        return rewardHistoryDtos;
+        // Delegate to InvitationService for consistency
+        return await _invitationService.GetCreditsHistoryAsync(currentUserId, input);
     }
 
     // NOTE: Twitter methods removed - feature deprecated
@@ -660,25 +647,14 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<GenerateCodesResultDto> GenerateFreeTrialCodeAsync(Guid currentUserId,
         GenerateFreeTrialCodeRequest input)
     {
-        var batchId = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var factoryGAgent = _agentFactory.CreateGAgent<FreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId));
-        return await factoryGAgent.GenerateCodesAsync(new GenerateCodesRequestDto
-        {
-            BatchId = batchId,
-            ProductId = input.ProductId,
-            Platform = input.Platform,
-            TrialDays = input.TrialDays,
-            StartTime = input.StartTime,
-            EndTime = input.EndTime,
-            Quantity = input.Quantity,
-            OperatorUserId = currentUserId
-        });
+        // Delegate to InvitationService for consistency
+        return await _invitationService.GenerateFreeTrialCodeAsync(currentUserId, input);
     }
 
     public async Task<BatchInfoDto> GetBatchInfoAsync(string batchId)
     {
-        var factoryGAgent = _agentFactory.CreateGAgent<FreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(long.Parse(batchId)));
-        return await factoryGAgent.GetBatchInfoAsync();
+        // Delegate to InvitationService for consistency
+        return await _invitationService.GetBatchInfoAsync(batchId);
     }
     
     public async Task<bool> CheckIsManager(string userId)

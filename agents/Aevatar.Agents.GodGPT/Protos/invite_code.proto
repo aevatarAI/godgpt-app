@@ -95,3 +95,65 @@ message MarkCodeAsUsedEvent {
     google.protobuf.Timestamp used_at = 2;
 }
 
+// =============================================================================
+// RPC Request/Response Types (for cross-runtime communication)
+// =============================================================================
+
+// Request for initializing free trial code
+message FreeTrialCodeInitProto {
+    int64 batch_id = 1;
+    int32 trial_days = 2;
+    string product_id = 3;
+    PlanType plan_type = 4;
+    bool is_ultimate = 5;
+    google.protobuf.Timestamp start_date = 6;
+    google.protobuf.Timestamp end_date = 7;
+    string free_trial_code = 8;
+    string invitee_id = 9;
+    PaymentPlatform platform = 10;
+    string session_url = 11;
+    google.protobuf.Timestamp session_expires_at = 12;
+}
+
+// Response for validating code
+message ValidateCodeResultProto {
+    bool is_valid = 1;
+    string message = 2;
+    InvitationCodeType code_type = 3;
+    FreeTrialActivationProto activation_info = 4;
+}
+
+// Free trial activation info
+message FreeTrialActivationProto {
+    google.protobuf.Timestamp created_at = 1;
+    bool is_active = 2;
+    int32 usage_count = 3;
+    string invite_code = 4;
+    InvitationCodeType code_type = 5;
+    int64 batch_id = 6;
+    int32 trial_days = 7;
+    string product_id = 8;
+    PlanType plan_type = 9;
+    bool is_ultimate = 10;
+    PaymentPlatform platform = 11;
+    string invitee_id = 12;
+    optional google.protobuf.Timestamp used_at = 13;
+    string session_url = 14;
+    google.protobuf.Timestamp session_expires_at = 15;
+}
+
+// Free trial code info
+message FreeTrialCodeInfoProto {
+    int64 batch_id = 1;
+    int32 trial_days = 2;
+    PlanType plan_type = 3;
+    bool is_ultimate = 4;
+    optional google.protobuf.Timestamp used_at = 5;
+}
+
+// Response for ValidateAndGetInviterAsync (tuple wrapper)
+message ValidateInviteCodeResponse {
+    bool is_valid = 1;
+    string inviter_id = 2;
+}
+

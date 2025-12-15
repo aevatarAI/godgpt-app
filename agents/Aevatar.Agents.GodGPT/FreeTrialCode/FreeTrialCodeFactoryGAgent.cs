@@ -18,31 +18,32 @@ namespace Aevatar.Application.Grains.FreeTrialCode;
 /// <summary>
 /// Interface for Free Trial Code Factory GAgent - manages batch-based free trial code generation
 /// Each instance manages one batch of codes identified by BatchId
+/// 
+/// Note: This is NOT an Orleans Grain interface. Agent runs inside OrleansGAgentGrain.
+/// Use IGAgentActorManager to manage Agent lifecycle.
+/// All RPC-exposed methods use Protobuf types for cross-runtime compatibility.
 /// </summary>
 public interface IFreeTrialCodeFactoryGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
-    Task<GenerateCodesResultDto> GenerateCodesAsync(GenerateCodesRequestDto request);
-    Task<BatchInfoDto> GetBatchInfoAsync();
-    Task<bool> MarkCodeAsUsedAsync(string code, string userId);
-    Task<bool> ValidateCodeOwnershipAsync(string code);
-    Task<bool> ValidateCodeAvailableAsync(string code);
+    Task<GenerateCodesResultProto> GenerateCodesAsync(GenerateCodesRequestProto request);
+    Task<BatchInfoProto> GetBatchInfoAsync();
+    Task<bool> MarkCodeAsUsedAsync(MarkCodeUsedRequestProto request);
+    Task<bool> ValidateCodeOwnershipAsync(ValidateCodeRequestProto request);
+    Task<bool> ValidateCodeAvailableAsync(ValidateCodeRequestProto request);
 }
 
 [GAgent(nameof(FreeTrialCodeFactoryGAgent))]
 public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>, IFreeTrialCodeFactoryGAgent
 {
-    private readonly IOptionsMonitor<StripeOptions> _stripeOptions;
-    private readonly IOptionsMonitor<CreditsOptions> _creditsOptions;
+    // Dependency injection via properties for Orleans compatibility
+    public IOptionsMonitor<StripeOptions>? StripeOptions { get; set; }
+    public IOptionsMonitor<CreditsOptions>? CreditsOptions { get; set; }
 
     private const int MaxQuantity = 10000;
 
-    public FreeTrialCodeFactoryGAgent(
-        Guid id,
-        IOptionsMonitor<StripeOptions> stripeOptions,
-        IOptionsMonitor<CreditsOptions> creditsOptions) : base(id)
+    // Parameterless constructor required for Orleans activation
+    public FreeTrialCodeFactoryGAgent() : base()
     {
-        _stripeOptions = stripeOptions;
-        _creditsOptions = creditsOptions;
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -50,18 +51,18 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
         return Task.FromResult("Free Trial Code Factory Management GAgent");
     }
 
-    public async Task<GenerateCodesResultDto> GenerateCodesAsync(GenerateCodesRequestDto request)
+    public async Task<GenerateCodesResultProto> GenerateCodesAsync(GenerateCodesRequestProto request)
     {
-        if (!IsUserAuthorizedToGenerateCode(request.OperatorUserId.ToString()))
+        if (!IsUserAuthorizedToGenerateCode(request.OperatorUserId))
         {
             Logger.LogWarning(
                 "[FreeTrialCodeFactoryGAgent][GenerateCodesAsync] Unauthorized attempt to generate codes by user {OperatorUserId}",
                 request.OperatorUserId);
-            return new GenerateCodesResultDto
+            return new GenerateCodesResultProto
             {
                 Success = false,
                 Message = "Unauthorized attempt to generate code",
-                ErrorCode = FreeTrialCodeError.InternalError
+                ErrorCode = (int)FreeTrialCodeError.InternalError
             };
         }
         
@@ -72,11 +73,11 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
             Logger.LogError(
                 "[FreeTrialCodeFactoryGAgent][GenerateCodesAsync] Factory not initialized. OperatorUserId: {OperatorUserId}",
                 request.OperatorUserId);
-            return new GenerateCodesResultDto
+            return new GenerateCodesResultProto
             {
                 Success = false,
                 Message = "Factory not initialized",
-                ErrorCode = FreeTrialCodeError.InternalError
+                ErrorCode = (int)FreeTrialCodeError.InternalError
             };
         }
 
@@ -85,11 +86,11 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
             Logger.LogWarning(
                 "[FreeTrialCodeFactoryGAgent][GenerateCodesAsync] Factory is not active. BatchId: {BatchId}, Status: {Status}, OperatorUserId: {OperatorUserId}",
                 State.BatchId, State.Status, request.OperatorUserId);
-            return new GenerateCodesResultDto
+            return new GenerateCodesResultProto
             {
                 Success = false,
                 Message = $"Factory is not active. Status: {State.Status}",
-                ErrorCode = FreeTrialCodeError.InternalError
+                ErrorCode = (int)FreeTrialCodeError.InternalError
             };
         }
 
@@ -98,11 +99,11 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
             Logger.LogWarning(
                 "[FreeTrialCodeFactoryGAgent][GenerateCodesAsync] Requested quantity exceeds maximum. BatchId: {BatchId}, Requested: {RequestedQuantity}, Max: {MaxQuantity}, OperatorUserId: {OperatorUserId}",
                 State.BatchId, request.Quantity, MaxQuantity, request.OperatorUserId);
-            return new GenerateCodesResultDto
+            return new GenerateCodesResultProto
             {
                 Success = false,
                 Message = $"Quantity cannot exceed batch max quantity: {MaxQuantity}",
-                ErrorCode = FreeTrialCodeError.InternalError
+                ErrorCode = (int)FreeTrialCodeError.InternalError
             };
         }
 
@@ -111,12 +112,12 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
             Logger.LogWarning(
                 "[FreeTrialCodeFactoryGAgent][GenerateCodesAsync] Would exceed batch capacity. BatchId: {BatchId}, Current: {CurrentGenerated}, Requested: {RequestedQuantity}, Max: {MaxQuantity}, OperatorUserId: {OperatorUserId}",
                 State.BatchId, State.TotalCodesGenerated, request.Quantity, MaxQuantity, request.OperatorUserId);
-            return new GenerateCodesResultDto
+            return new GenerateCodesResultProto
             {
                 Success = false,
                 Message =
                     $"Would exceed batch capacity. Current: {State.TotalCodesGenerated}, Requested: {request.Quantity}, Max: {MaxQuantity}",
-                ErrorCode = FreeTrialCodeError.InternalError
+                ErrorCode = (int)FreeTrialCodeError.InternalError
             };
         }
 
@@ -146,30 +147,31 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
                 "[FreeTrialCodeFactoryGAgent][GenerateCodesAsync] Successfully generated codes. BatchId: {BatchId}, Count: {Count}, OperatorUserId: {OperatorUserId}",
                 State.BatchId, codes.Count, request.OperatorUserId);
 
-            return new GenerateCodesResultDto
+            var result = new GenerateCodesResultProto
             {
                 Success = true,
                 Message = "Codes generated successfully",
-                Codes = codes,
                 GeneratedCount = codes.Count,
-                ErrorCode = FreeTrialCodeError.None
+                ErrorCode = (int)FreeTrialCodeError.None
             };
+            result.Codes.AddRange(codes);
+            return result;
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, 
                 "[FreeTrialCodeFactoryGAgent][GenerateCodesAsync] Error generating codes. BatchId: {BatchId}, RequestedQuantity: {RequestedQuantity}, OperatorUserId: {OperatorUserId}",
                 State.BatchId, request.Quantity, request.OperatorUserId);
-            return new GenerateCodesResultDto
+            return new GenerateCodesResultProto
             {
                 Success = false,
                 Message = "Internal error occurred while generating codes",
-                ErrorCode = FreeTrialCodeError.InternalError
+                ErrorCode = (int)FreeTrialCodeError.InternalError
             };
         }
     }
 
-    public async Task<bool> InitializeFactoryAsync(GenerateCodesRequestDto request)
+    private async Task<bool> InitializeFactoryAsync(GenerateCodesRequestProto request)
     {
         if (State.HasBatchId)
         {
@@ -187,16 +189,16 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
             ProductId = stripeProduct.PriceId,
             PlanType = (FactoryPlanType)stripeProduct.PlanType,
             IsUltimate = stripeProduct.IsUltimate,
-            Platform = FactoryPaymentPlatform.Stripe,
-            StartTime = Timestamp.FromDateTime(DateTime.SpecifyKind(request.StartTime, DateTimeKind.Utc)),
-            EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(request.EndTime, DateTimeKind.Utc)),
+            Platform = request.Platform,
+            StartTime = request.StartTime,
+            EndTime = request.EndTime,
             Description = request.Description ?? string.Empty
         };
 
         RaiseEvent(new InitializeFactoryEvent
         {
             BatchId = request.BatchId,
-            OperatorUserId = request.OperatorUserId.ToString(),
+            OperatorUserId = request.OperatorUserId,
             BatchConfig = batchConfig,
             CreationTime = Timestamp.FromDateTime(DateTime.UtcNow),
             Status = FactoryStatus.Active
@@ -211,46 +213,51 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
         return true;
     }
 
-    public Task<BatchInfoDto> GetBatchInfoAsync()
+    public Task<BatchInfoProto> GetBatchInfoAsync()
     {
-        var batchInfo = new BatchInfoDto
+        var batchInfo = new BatchInfoProto
         {
             BatchId = State.HasBatchId ? State.BatchId : 0,
             TotalGenerated = State.TotalCodesGenerated,
             UsedCount = State.UsedCount,
-            CreationTime = State.CreationTime?.ToDateTime() ?? DateTime.MinValue,
-            LastGenerationTime = State.LastGenerationTime?.ToDateTime() ?? DateTime.MinValue,
-            Config = ConvertBatchConfigToDto(State.BatchConfig),
-            Status = (FreeTrialCodeFactoryStatus)State.Status,
-            GeneratedCodes = State.GeneratedCodes.ToList(),
-            UsedCodes = State.UsedCodes.ToList()
+            CreationTime = State.CreationTime ?? Timestamp.FromDateTime(DateTime.MinValue),
+            LastGenerationTime = State.LastGenerationTime ?? Timestamp.FromDateTime(DateTime.MinValue),
+            Status = State.Status
         };
+
+        if (State.BatchConfig != null)
+        {
+            batchInfo.Config = State.BatchConfig;
+        }
+
+        batchInfo.GeneratedCodes.AddRange(State.GeneratedCodes);
+        batchInfo.UsedCodes.AddRange(State.UsedCodes);
 
         return Task.FromResult(batchInfo);
     }
 
-    public async Task<bool> MarkCodeAsUsedAsync(string code, string userId)
+    public async Task<bool> MarkCodeAsUsedAsync(MarkCodeUsedRequestProto request)
     {
-        if (!await ValidateCodeOwnershipAsync(code))
+        if (!await ValidateCodeOwnershipAsync(new ValidateCodeRequestProto { Code = request.Code }))
         {
             Logger.LogWarning(
                 "[FreeTrialCodeFactoryGAgent][MarkCodeAsUsedAsync] Code not found in batch. Code: {Code}, BatchId: {BatchId}, UserId: {UserId}", 
-                code, State.BatchId, userId);
+                request.Code, State.BatchId, request.UserId);
             return false;
         }
 
-        if (State.UsedCodes.Contains(code))
+        if (State.UsedCodes.Contains(request.Code))
         {
             Logger.LogWarning(
                 "[FreeTrialCodeFactoryGAgent][MarkCodeAsUsedAsync] Code already used. Code: {Code}, BatchId: {BatchId}, UserId: {UserId}", 
-                code, State.BatchId, userId);
+                request.Code, State.BatchId, request.UserId);
             return false;
         }
 
         RaiseEvent(new MarkCodeUsedEvent
         {
-            Code = code,
-            UserId = userId,
+            Code = request.Code,
+            UserId = request.UserId,
             UsedAt = Timestamp.FromDateTime(DateTime.UtcNow)
         });
 
@@ -258,65 +265,65 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
 
         Logger.LogInformation(
             "[FreeTrialCodeFactoryGAgent][MarkCodeAsUsedAsync] Code marked as used successfully. Code: {Code}, UserId: {UserId}, BatchId: {BatchId}",
-            code, userId, State.BatchId);
+            request.Code, request.UserId, State.BatchId);
 
         return true;
     }
 
-    public Task<bool> ValidateCodeOwnershipAsync(string code)
+    public Task<bool> ValidateCodeOwnershipAsync(ValidateCodeRequestProto request)
     {
         if (!State.HasBatchId)
         {
             return Task.FromResult(false);
         }
 
-        if (string.IsNullOrEmpty(code)
+        if (string.IsNullOrEmpty(request.Code)
             || State.GeneratedCodes.Count == 0
-            || !InvitationCodeHelper.IsValidFreeTrialCodeFormat(code))
+            || !InvitationCodeHelper.IsValidFreeTrialCodeFormat(request.Code))
         {
             return Task.FromResult(false);
         }
 
         try
         {
-            if (!InvitationCodeHelper.IsCodeFromBatch(code, State.BatchId))
+            if (!InvitationCodeHelper.IsCodeFromBatch(request.Code, State.BatchId))
             {
                 return Task.FromResult(false);
             }
 
-            return Task.FromResult(State.GeneratedCodes.Contains(code));
+            return Task.FromResult(State.GeneratedCodes.Contains(request.Code));
         }
         catch (Exception ex)
         {
             Logger.LogWarning(ex, 
                 "[FreeTrialCodeFactoryGAgent][ValidateCodeOwnershipAsync] Error validating code ownership. Code: {Code}, BatchId: {BatchId}", 
-                code, State.BatchId);
+                request.Code, State.BatchId);
             return Task.FromResult(false);
         }
     }
 
-    public async Task<bool> ValidateCodeAvailableAsync(string code)
+    public async Task<bool> ValidateCodeAvailableAsync(ValidateCodeRequestProto request)
     {
-        if (!await ValidateCodeOwnershipAsync(code))
+        if (!await ValidateCodeOwnershipAsync(request))
         {
             Logger.LogWarning(
                 "[FreeTrialCodeFactoryGAgent][ValidateCodeAvailableAsync] Code not found in batch. Code: {Code}, BatchId: {BatchId}", 
-                code, State.BatchId);
+                request.Code, State.BatchId);
             return false;
         }
 
-        if (State.UsedCodes.Contains(code))
+        if (State.UsedCodes.Contains(request.Code))
         {
             Logger.LogWarning(
                 "[FreeTrialCodeFactoryGAgent][ValidateCodeAvailableAsync] Code already used. Code: {Code}, BatchId: {BatchId}", 
-                code, State.BatchId);
+                request.Code, State.BatchId);
             return false;
         }
 
         if (State.BatchConfig == null)
         {
             Logger.LogWarning("[FreeTrialCodeFactoryGAgent][ValidateCodeAvailableAsync] BatchConfig is null. Code: {Code}, BatchId: {BatchId}", 
-                code, State.BatchId);
+                request.Code, State.BatchId);
             return false;
         }
 
@@ -328,7 +335,7 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
         {
             Logger.LogWarning(
                 "[FreeTrialCodeFactoryGAgent][ValidateCodeAvailableAsync] Code not yet valid. Code: {Code}, BatchId: {BatchId}, Current: {CurrentTime}, Start: {StartTime}",
-                code, State.BatchId, currentTime, startTime);
+                request.Code, State.BatchId, currentTime, startTime);
             return false;
         }
 
@@ -336,13 +343,13 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
         {
             Logger.LogWarning(
                 "[FreeTrialCodeFactoryGAgent][ValidateCodeAvailableAsync] Code has expired. Code: {Code}, BatchId: {BatchId}, Current: {CurrentTime}, End: {EndTime}",
-                code, State.BatchId, currentTime, endTime);
+                request.Code, State.BatchId, currentTime, endTime);
             return false;
         }
 
         Logger.LogDebug(
             "[FreeTrialCodeFactoryGAgent][ValidateCodeAvailableAsync] Code is available for use. Code: {Code}, BatchId: {BatchId}", 
-            code, State.BatchId);
+            request.Code, State.BatchId);
         return true;
     }
 
@@ -371,13 +378,23 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
 
     private bool IsUserAuthorizedToGenerateCode(string operatorUserId)
     {
-        var authorizedUsers = _creditsOptions.CurrentValue.OperatorUserId;
+        if (CreditsOptions == null)
+        {
+            Logger.LogError("[FreeTrialCodeFactoryGAgent] CreditsOptions is not injected");
+            return false;
+        }
+        var authorizedUsers = CreditsOptions.CurrentValue.OperatorUserId;
         return authorizedUsers.Contains(operatorUserId);
     }
 
     private Task<StripeProduct> GetStripeProductConfigAsync(string priceId)
     {
-        var productConfig = _stripeOptions.CurrentValue.Products.FirstOrDefault(p => p.PriceId == priceId);
+        if (StripeOptions == null)
+        {
+            Logger.LogError("[FreeTrialCodeFactoryGAgent] StripeOptions is not injected");
+            throw new InvalidOperationException("StripeOptions is not injected");
+        }
+        var productConfig = StripeOptions.CurrentValue.Products.FirstOrDefault(p => p.PriceId == priceId);
         if (productConfig == null)
         {
             Logger.LogError(

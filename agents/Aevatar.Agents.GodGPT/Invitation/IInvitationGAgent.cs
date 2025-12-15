@@ -1,8 +1,16 @@
+using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.GodGPT.Protos.Invitation;
 using Aevatar.Application.Grains.Common.Constants;
-using Aevatar.Application.Grains.Agents.Invitation;
 
 namespace Aevatar.Application.Grains.Invitation;
 
+/// <summary>
+/// Invitation Agent interface - manages user invitations and rewards.
+/// 
+/// Note: This is NOT an Orleans Grain interface. Agent runs inside OrleansGAgentGrain.
+/// Use IGAgentActorManager to manage Agent lifecycle.
+/// All RPC-exposed methods use Protobuf types for cross-runtime compatibility.
+/// </summary>
 public interface IInvitationGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
     /// <summary>
@@ -11,25 +19,30 @@ public interface IInvitationGAgent : Aevatar.Agents.Abstractions.IGAgent
     Task<string> GenerateInviteCodeAsync();
 
     /// <summary>
-    /// Get invitation statistics for the user
+    /// Get invitation statistics for the user (uses Protobuf type for RPC)
     /// </summary>
-    Task<InvitationStatsDto> GetInvitationStatsAsync();
+    Task<InvitationStatsProto> GetInvitationStatsAsync();
 
     /// <summary>
-    /// Get reward tiers based on current invitation count
+    /// Get reward tiers based on current invitation count (uses Protobuf wrapper for RPC)
     /// </summary>
-    Task<List<RewardTierDto>> GetRewardTiersAsync();
+    Task<RewardTierListResponse> GetRewardTiersAsync();
     
     /// <summary>
-    /// Get reward history for the user with pagination and filtering
+    /// Get reward history for the user (uses Protobuf wrapper for RPC)
     /// </summary>
-    Task<List<RewardHistoryDto>> GetRewardHistoryAsync();
+    Task<RewardHistoryListResponse> GetRewardHistoryAsync();
 
     /// <summary>
-    /// Get reward history for the user with pagination and filtering
+    /// Get reward history for the user with pagination and filtering (uses Protobuf types for RPC)
     /// </summary>
-    Task<PagedResultDto<RewardHistoryDto>> GetRewardHistoryAsync(GetRewardHistoryRequestDto request);
+    Task<PagedRewardHistoryResponse> GetRewardHistoryAsync(GetRewardHistoryRequestProto request);
+
+    /// <summary>
+    /// Process scheduled rewards
+    /// </summary>
     Task ProcessScheduledRewardAsync();
+    
     /// <summary>
     /// Process new user registration with invite code
     /// </summary>
@@ -41,9 +54,9 @@ public interface IInvitationGAgent : Aevatar.Agents.Abstractions.IGAgent
     Task ProcessInviteeChatCompletionAsync(string inviteeId);
 
     /// <summary>
-    /// Process invitee's subscription purchase
+    /// Process invitee's subscription purchase (PlanType converted to int for RPC)
     /// </summary>
-    Task ProcessInviteeSubscriptionAsync(string inviteeId, PlanType planType, bool isUltimate, string invoiceId);
+    Task ProcessInviteeSubscriptionAsync(string inviteeId, int planType, bool isUltimate, string invoiceId);
 
     /// <summary>
     /// Process Twitter reward for the user
