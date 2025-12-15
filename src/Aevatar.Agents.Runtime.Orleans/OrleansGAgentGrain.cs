@@ -552,16 +552,18 @@ internal class GrainEventPublisher : IEventPublisher
     public async Task<string> PublishEventAsync<TEvent>(
         TEvent evt, 
         EventDirection direction = EventDirection.Down, 
-        CancellationToken ct = default) 
+        CancellationToken ct = default,
+        bool isInternalCall = false) 
         where TEvent : IMessage
     {
         var grainId = _grain.GetPrimaryKeyString();
         
         // Create EventEnvelope
+        // GrainEventPublisher is always used for internal Agent calls, so always set PublisherId
         var envelope = new EventEnvelope
         {
             Id = Guid.NewGuid().ToString(),
-            PublisherId = grainId,
+            PublisherId = grainId,  // Always set for internal Grain publishing
             Payload = Google.Protobuf.WellKnownTypes.Any.Pack(evt),
             Direction = direction,
             Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
@@ -593,16 +595,18 @@ internal class GrainEventPublisher : IEventPublisher
         Guid targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool isInternalCall = false)
         where TEvent : IMessage
     {
         var grainId = _grain.GetPrimaryKeyString();
 
         // Create EventEnvelope for P2P
+        // GrainEventPublisher is always used for internal Agent calls
         var envelope = new EventEnvelope
         {
             Id = Guid.NewGuid().ToString(),
-            PublisherId = grainId,
+            PublisherId = grainId,  // Always set for internal Grain publishing
             Payload = Google.Protobuf.WellKnownTypes.Any.Pack(evt),
             Direction = onArrivalDirection,
             Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),

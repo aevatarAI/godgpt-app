@@ -158,32 +158,43 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
     async Task<string> IEventPublisher.PublishEventAsync<TEvent>(
         TEvent evt,
         EventDirection direction,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool isInternalCall)
     {
-        return await PublishEventAsync(evt, direction, ct);
+        return await PublishEventAsync(evt, direction, ct, isInternalCall);
     }
 
     async Task<string> IEventPublisher.SendToAsync<TEvent>(
         Guid targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool isInternalCall)
     {
-        return await SendToAsync(targetAgentId, evt, onArrivalDirection, ct);
+        return await SendToAsync(targetAgentId, evt, onArrivalDirection, ct, isInternalCall);
     }
 
     // ============ Event Publishing and Routing ============
 
+    /// <param name="isInternalCall">If true (Agent internal), keeps PublisherId; if false (external), clears it</param>
     public virtual async Task<string> PublishEventAsync<TEvent>(
         TEvent evt,
         EventDirection direction = EventDirection.Down,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool isInternalCall = false)
         where TEvent : IMessage
     {
         var stopwatch = Stopwatch.StartNew();
 
         // Use EventRouter to create EventEnvelope
         var envelope = EventRouter.CreateEventEnvelope(evt, direction);
+        
+        // External calls: clear PublisherId so Agent can handle the event
+        // Internal calls: keep PublisherId for self-handling check
+        if (!isInternalCall)
+        {
+            envelope.PublisherId = "";
+        }
 
         using var scope = LoggingScope.CreateAgentScope(
             Logger,
@@ -225,11 +236,13 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
     /// <summary>
     /// Point-to-point send - Direct delivery to specified agent
     /// </summary>
+    /// <param name="isInternalCall">If true (Agent internal), keeps PublisherId; if false (external), clears it</param>
     public virtual async Task<string> SendToAsync<TEvent>(
         Guid targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool isInternalCall = false)
         where TEvent : IMessage
     {
         var stopwatch = Stopwatch.StartNew();
@@ -238,6 +251,12 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
         var envelope = EventRouter.CreateEventEnvelope(evt, onArrivalDirection);
         envelope.TargetAgentId = targetAgentId.ToString();
         envelope.OnArrivalDirection = onArrivalDirection;
+        
+        // External calls: clear PublisherId
+        if (!isInternalCall)
+        {
+            envelope.PublisherId = "";
+        }
 
         using var scope = LoggingScope.CreateAgentScope(
             Logger,

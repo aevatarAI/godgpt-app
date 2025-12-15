@@ -397,7 +397,8 @@ public class PerformanceTests(CoreTestFixture fixture, ITestOutputHelper output)
         public async Task<string> PublishEventAsync<TEvent>(
             TEvent evt,
             EventDirection direction = EventDirection.Down,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            bool isInternalCall = false)
             where TEvent : IMessage
         {
             await _onPublish(evt, direction);
@@ -408,7 +409,8 @@ public class PerformanceTests(CoreTestFixture fixture, ITestOutputHelper output)
             Guid targetAgentId,
             TEvent evt,
             EventDirection onArrivalDirection = EventDirection.Unspecified,
-            CancellationToken ct = default)
+            CancellationToken ct = default,
+            bool isInternalCall = false)
             where TEvent : IMessage
         {
             await _onPublish(evt, onArrivalDirection);

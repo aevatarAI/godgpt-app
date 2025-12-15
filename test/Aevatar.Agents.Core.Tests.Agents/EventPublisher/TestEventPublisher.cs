@@ -38,7 +38,11 @@ public class TestEventPublisher : IEventPublisher
     public bool ShouldThrowException { get; set; }
     public string ExceptionMessage { get; set; } = "Test exception";
 
-    public Task<string> PublishEventAsync<TEvent>(TEvent evt, EventDirection direction, CancellationToken ct = default)
+    public Task<string> PublishEventAsync<TEvent>(
+        TEvent evt, 
+        EventDirection direction = EventDirection.Down, 
+        CancellationToken ct = default,
+        bool isInternalCall = false)
         where TEvent : IMessage
     {
         AttemptedPublishCount++;
@@ -65,7 +69,8 @@ public class TestEventPublisher : IEventPublisher
         Guid targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool isInternalCall = false)
         where TEvent : IMessage
     {
         AttemptedSendCount++;

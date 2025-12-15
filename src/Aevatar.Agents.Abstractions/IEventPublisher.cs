@@ -15,12 +15,18 @@ public interface IEventPublisher
     /// <param name="evt">Event message</param>
     /// <param name="direction">Propagation direction (default: Down)</param>
     /// <param name="ct">Cancellation token</param>
+    /// <param name="isInternalCall">
+    /// If true (Agent internal call), keeps PublisherId for self-handling check.
+    /// If false (external call), clears PublisherId so Agent can handle the event.
+    /// Default is false for external API compatibility.
+    /// </param>
     /// <typeparam name="TEvent">Event type</typeparam>
     /// <returns>Event ID</returns>
     Task<string> PublishEventAsync<TEvent>(
         TEvent evt,
         EventDirection direction = EventDirection.Down,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool isInternalCall = false)
         where TEvent : IMessage;
 
     /// <summary>
@@ -37,13 +43,18 @@ public interface IEventPublisher
     /// - Both: Target processes then propagates in both directions
     /// </param>
     /// <param name="ct">Cancellation token</param>
+    /// <param name="isInternalCall">
+    /// If true (Agent internal call), keeps PublisherId for self-handling check.
+    /// If false (external call), clears PublisherId so Agent can handle the event.
+    /// </param>
     /// <typeparam name="TEvent">Event type</typeparam>
     /// <returns>Event ID</returns>
     Task<string> SendToAsync<TEvent>(
         Guid targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool isInternalCall = false)
         where TEvent : IMessage;
 }
 
@@ -57,7 +68,8 @@ public sealed class NullEventPublisher : IEventPublisher
     public Task<string> PublishEventAsync<TEvent>(
         TEvent evt,
         EventDirection direction = EventDirection.Down,
-        CancellationToken ct = default) where TEvent : IMessage
+        CancellationToken ct = default,
+        bool isInternalCall = false) where TEvent : IMessage
     {
         return Task.FromResult(string.Empty);
     }
@@ -66,7 +78,8 @@ public sealed class NullEventPublisher : IEventPublisher
         Guid targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
-        CancellationToken ct = default) where TEvent : IMessage
+        CancellationToken ct = default,
+        bool isInternalCall = false) where TEvent : IMessage
     {
         return Task.FromResult(string.Empty);
     }

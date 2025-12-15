@@ -166,8 +166,8 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
 
         var testEvent = new TestEvent { EventId = "test-up" };
 
-        // Act
-        var eventId = await ((IEventPublisher)actor).PublishEventAsync(testEvent, EventDirection.Up);
+        // Act - isInternalCall: true to simulate Agent internal publishing (preserves PublisherId)
+        var eventId = await ((IEventPublisher)actor).PublishEventAsync(testEvent, EventDirection.Up, default, isInternalCall: true);
 
         // Assert
         eventId.ShouldNotBeNullOrEmpty();
@@ -193,8 +193,8 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
 
         var testEvent = new TestEvent { EventId = "test-down" };
 
-        // Act
-        var eventId = await ((IEventPublisher)actor).PublishEventAsync(testEvent, EventDirection.Down);
+        // Act - isInternalCall: true to simulate Agent internal publishing
+        var eventId = await ((IEventPublisher)actor).PublishEventAsync(testEvent, EventDirection.Down, default, isInternalCall: true);
 
         // Assert
         eventId.ShouldNotBeNullOrEmpty();

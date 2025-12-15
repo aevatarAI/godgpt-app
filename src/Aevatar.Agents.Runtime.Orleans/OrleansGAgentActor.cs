@@ -99,10 +99,12 @@ public class OrleansGAgentActor : IGAgentActor
     /// <summary>
     /// Publish event - Forward to Grain (broadcast mode)
     /// </summary>
+    /// <param name="isInternalCall">If true, keeps PublisherId; if false (default), clears it for external calls</param>
     public async Task<string> PublishEventAsync<TEvent>(
         TEvent evt, 
         EventDirection direction = EventDirection.Down, 
-        CancellationToken ct = default) 
+        CancellationToken ct = default,
+        bool isInternalCall = false) 
         where TEvent : IMessage
     {
         EnsureGrain();
@@ -111,7 +113,9 @@ public class OrleansGAgentActor : IGAgentActor
         var envelope = new EventEnvelope
         {
             Id = Guid.NewGuid().ToString(),
-            PublisherId = _id.ToString(),
+            // External calls: empty PublisherId allows Agent to handle the event
+            // Internal calls: set to actor ID for self-handling check
+            PublisherId = isInternalCall ? _id.ToString() : "",
             Payload = Google.Protobuf.WellKnownTypes.Any.Pack(evt),
             Direction = direction,
             Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
@@ -132,18 +136,20 @@ public class OrleansGAgentActor : IGAgentActor
     /// <summary>
     /// Point-to-point send - Direct delivery to target Grain
     /// </summary>
+    /// <param name="isInternalCall">If true, keeps PublisherId; if false (default), clears it for external calls</param>
     public async Task<string> SendToAsync<TEvent>(
         Guid targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool isInternalCall = false)
         where TEvent : IMessage
     {
         // Create EventEnvelope for P2P
         var envelope = new EventEnvelope
         {
             Id = Guid.NewGuid().ToString(),
-            PublisherId = _id.ToString(),
+            PublisherId = isInternalCall ? _id.ToString() : "",
             Payload = Google.Protobuf.WellKnownTypes.Any.Pack(evt),
             Direction = onArrivalDirection,
             Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
