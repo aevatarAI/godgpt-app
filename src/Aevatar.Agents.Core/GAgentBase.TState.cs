@@ -137,16 +137,30 @@ public abstract class GAgentBase<TState> : GAgentBase, IStateGAgent<TState>
         
         // StateProjector is injected by StateProjectorInjector after agent creation
         
-        // 1. Load State from StateStore if available
-        if (StateStore != null)
-        {
-            await StateStore.SaveAsync(Id, _state, ct);
-        }
-
-        // 2. Replay events from EventStore if available
+        // State initialization strategy:
+        // - If EventStore is configured: Use Event Sourcing (replay events from snapshot)
+        // - Otherwise: Use StateStore for simple state persistence
+        // These two strategies are mutually exclusive to avoid duplication
+        
         if (EventStore != null)
         {
+            // Event Sourcing mode: State is rebuilt from events (includes snapshot loading)
+            // No need for StateStore - EventStore handles all persistence
             await ReplayEventsAsync(ct);
+        }
+        else if (StateStore != null)
+        {
+            // Simple state mode: Load state directly from StateStore
+            // Only load if there's persisted state, otherwise keep current state
+            // (allows subclass to set default values before calling base.OnActivateAsync)
+            using (StateProtectionContext.BeginEventHandlerScope())
+            {
+                var loadedState = await StateStore.LoadAsync(Id, ct);
+                if (loadedState != null)
+                {
+                    _state = loadedState;
+                }
+            }
         }
     }
 
@@ -160,37 +174,48 @@ public abstract class GAgentBase<TState> : GAgentBase, IStateGAgent<TState>
     // ============ Event Handling with State Persistence ============
 
     /// <summary>
-    /// Handle event with automatic state loading and saving
-    /// Extends the base implementation to add state persistence
+    /// Handle event with automatic state loading and saving.
+    /// Uses mutually exclusive persistence strategies:
+    /// - EventStore mode: Events + Snapshots handle all persistence (no StateStore)
+    /// - StateStore mode: Simple state load/save per event
     /// </summary>
     public override async Task HandleEventAsync(EventEnvelope envelope, CancellationToken ct = default)
     {
-        // 1. Load State (if StateStore is configured)
-        if (StateStore != null)
+        // Persistence strategy: EventStore and StateStore are mutually exclusive
+        // to avoid duplicate storage operations
+        var useEventSourcing = EventStore != null;
+        
+        // 1. Load State (only in StateStore mode - EventStore mode uses in-memory state from replay)
+        if (!useEventSourcing && StateStore != null)
         {
-            // Allow state loading without protection during event handling setup
             using (StateProtectionContext.BeginEventHandlerScope())
             {
-                _state = await StateStore.LoadAsync(Id, ct) ?? new TState();
+                // Only load if there's persisted state, otherwise keep current in-memory state
+                var loadedState = await StateStore.LoadAsync(Id, ct);
+                if (loadedState != null)
+                {
+                    _state = loadedState;
+                }
             }
         }
 
         // 2. Call core event handling implementation
         await HandleEventCoreAsync(envelope, ct);
 
-        // 3. Confirm Events (if EventStore is configured)
-        if (EventStore != null)
+        // 3. Persist state changes
+        if (useEventSourcing)
         {
+            // Event Sourcing mode: Persist via events + snapshots
+            // EventStore handles all persistence, no StateStore needed
             await ConfirmEventsAsync(ct);
         }
-
-        // 4. Save State (if StateStore is configured)
-        if (StateStore != null)
+        else if (StateStore != null)
         {
+            // StateStore mode: Direct state persistence
             await StateStore.SaveAsync(Id, _state, ct);
         }
 
-        // 5. State change hook - notify external systems
+        // 4. State change hook - notify external systems (always, for CQRS projection)
         await OnStateChangedAsync(_state, ct);
     }
 
