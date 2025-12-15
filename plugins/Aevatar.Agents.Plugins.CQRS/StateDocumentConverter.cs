@@ -1,8 +1,10 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using System.Text.Json;
 using Aevatar.Agents;
 using Aevatar.Agents.Abstractions.CQRS;
 using Google.Protobuf;
+using Google.Protobuf.Reflection;
 using Microsoft.Extensions.Logging;
 
 namespace Aevatar.Agents.Plugins.CQRS;
@@ -14,11 +16,62 @@ namespace Aevatar.Agents.Plugins.CQRS;
 public class StateDocumentConverter
 {
     private readonly ILogger _logger;
-    private readonly ConcurrentDictionary<string, Type> _typeCache = new();
+    
+    // Type cache: TypeUrl -> Type (more precise than AgentType)
+    private readonly ConcurrentDictionary<string, Type?> _typeCache = new();
+    
+    // Pre-built index of all IMessage types for fast lookup
+    private static readonly Lazy<Dictionary<string, Type>> _messageTypeIndex = new(BuildMessageTypeIndex);
 
     public StateDocumentConverter(ILogger logger)
     {
         _logger = logger;
+    }
+    
+    /// <summary>
+    /// Build index of all IMessage types at startup (once per AppDomain)
+    /// </summary>
+    private static Dictionary<string, Type> BuildMessageTypeIndex()
+    {
+        var index = new Dictionary<string, Type>(StringComparer.OrdinalIgnoreCase);
+        
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            try
+            {
+                foreach (var type in assembly.GetTypes())
+                {
+                    if (!typeof(IMessage).IsAssignableFrom(type) || type.IsAbstract || type.IsInterface)
+                        continue;
+                    
+                    // Get Protobuf descriptor to get the full name
+                    var descriptorProperty = type.GetProperty("Descriptor", 
+                        BindingFlags.Public | BindingFlags.Static);
+                    
+                    if (descriptorProperty?.GetValue(null) is MessageDescriptor descriptor)
+                    {
+                        // Index by Protobuf full name (e.g., "aevatar.payment.PaymentIndexState")
+                        if (!string.IsNullOrEmpty(descriptor.FullName))
+                        {
+                            index[descriptor.FullName] = type;
+                        }
+                    }
+                    
+                    // Also index by C# type name and full name for fallback
+                    index[type.Name] = type;
+                    if (type.FullName != null)
+                    {
+                        index[type.FullName] = type;
+                    }
+                }
+            }
+            catch
+            {
+                // Skip assemblies that can't be loaded
+            }
+        }
+        
+        return index;
     }
 
     /// <summary>
@@ -51,46 +104,54 @@ public class StateDocumentConverter
 
     /// <summary>
     /// Resolve the state type from agent type and state data.
+    /// Uses pre-built type index for O(1) lookup instead of scanning all assemblies.
     /// </summary>
     public Type? ResolveStateType(string agentType, Google.Protobuf.WellKnownTypes.Any? stateData)
     {
         if (stateData == null)
             return null;
 
-        // Try to resolve from cached types
-        if (_typeCache.TryGetValue(agentType, out var cachedType))
-            return cachedType;
-
-        // Try to resolve from Any type URL
         var typeUrl = stateData.TypeUrl;
         if (string.IsNullOrEmpty(typeUrl))
             return null;
 
-        // Format: type.googleapis.com/package.TypeName
-        var typeName = typeUrl.Contains('/')
+        // Use TypeUrl as cache key (more precise than AgentType)
+        if (_typeCache.TryGetValue(typeUrl, out var cachedType))
+            return cachedType;
+
+        // Parse TypeUrl: type.googleapis.com/package.TypeName -> package.TypeName
+        var protobufFullName = typeUrl.Contains('/')
             ? typeUrl.Substring(typeUrl.LastIndexOf('/') + 1)
             : typeUrl;
 
-        // Search all loaded assemblies for the type
-        var type = AppDomain.CurrentDomain.GetAssemblies()
-            .SelectMany(a =>
-            {
-                try { return a.GetTypes(); }
-                catch { return Array.Empty<Type>(); }
-            })
-            .FirstOrDefault(t =>
-                t.FullName == typeName ||
-                t.Name == typeName ||
-                (typeof(IMessage).IsAssignableFrom(t) && t.Name == typeName));
-
-        if (type != null)
+        // Fast O(1) lookup from pre-built index
+        Type? type = null;
+        var index = _messageTypeIndex.Value;
+        
+        // Try exact Protobuf full name match first (most reliable)
+        if (index.TryGetValue(protobufFullName, out type))
         {
-            _typeCache[agentType] = type;
+            _typeCache[typeUrl] = type;
+            return type;
+        }
+        
+        // Try just the type name (after last dot)
+        var simpleTypeName = protobufFullName.Contains('.')
+            ? protobufFullName.Substring(protobufFullName.LastIndexOf('.') + 1)
+            : protobufFullName;
+            
+        if (index.TryGetValue(simpleTypeName, out type))
+        {
+            _typeCache[typeUrl] = type;
             return type;
         }
 
+        // Cache negative result to avoid repeated lookups
+        _typeCache[typeUrl] = null;
+        
         _logger.LogWarning(
-            "Could not resolve state type for {AgentType} from TypeUrl: {TypeUrl}",
+            "Could not resolve state type for {AgentType} from TypeUrl: {TypeUrl}. " +
+            "Ensure the Protobuf type is registered in the application.",
             agentType, typeUrl);
 
         return null;
