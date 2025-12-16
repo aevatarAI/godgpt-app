@@ -85,3 +85,60 @@ message SkippedFeedbackEvent {
     google.protobuf.Timestamp submitted_at = 1;           // [Id(0)]
 }
 
+// =============================================================================
+// RPC Request/Response Types
+// =============================================================================
+
+message SubmitFeedbackRequestProto {
+    string user_id = 1;                                    // Guid -> string
+    string feedback_type = 2;
+    repeated int32 reasons = 3;                           // FeedbackReason enum values
+    string response = 4;
+    bool contact_requested = 5;
+    string email = 6;
+    bool skipped_feedback = 7;
+    optional UserSubscriptionInfoProto subscription = 8;
+}
+
+message UserSubscriptionInfoProto {
+    int32 plan_type = 1;                                  // PlanType enum value
+    bool is_ultimate = 2;
+    google.protobuf.Timestamp start_date = 3;
+    google.protobuf.Timestamp end_date = 4;
+}
+
+message SubmitFeedbackResultProto {
+    bool success = 1;
+    string message = 2;
+    string error_code = 3;
+}
+
+message CheckEligibilityResultProto {
+    bool eligible = 1;
+    optional google.protobuf.Timestamp last_feedback_time = 2;
+    optional google.protobuf.Timestamp next_eligible_time = 3;
+    string message = 4;
+}
+
+message GetFeedbackHistoryRequestProto {
+    int32 page_size = 1;
+    int32 page_index = 2;
+}
+
+message FeedbackHistoryItemProto {
+    string feedback_id = 1;
+    string feedback_type = 2;
+    repeated int32 reasons = 3;                           // FeedbackReason enum values
+    string response = 4;
+    bool contact_requested = 5;
+    string email = 6;
+    google.protobuf.Timestamp submitted_at = 7;
+    optional UserSubscriptionInfoProto subscription = 8;
+}
+
+message GetFeedbackHistoryResultProto {
+    repeated FeedbackHistoryItemProto feedbacks = 1;
+    int32 total_count = 2;
+    bool has_more = 3;
+}
+

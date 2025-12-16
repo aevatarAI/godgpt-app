@@ -10,22 +10,52 @@ using Microsoft.Extensions.Logging;
 
 namespace Aevatar.Application.Grains.UserInfo;
 
+/// <summary>
+/// User Info Collection Agent interface - manages user information collection during onboarding.
+/// 
+/// Note: This is NOT an Orleans Grain interface. Agent runs inside OrleansGAgentGrain.
+/// Use IGAgentActorManager to manage Agent lifecycle.
+/// All RPC-exposed methods use Protobuf types for cross-runtime compatibility.
+/// </summary>
 public interface IUserInfoCollectionGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
-    Task<UserInfoCollectionResponseDto> UpdateUserInfoCollectionAsync(UpdateUserInfoCollectionDto updateDto);
-    Task<UserInfoCollectionDto> GetUserInfoCollectionAsync();
-    Task<UserInfoDisplayDto> GetUserInfoDisplayAsync();
+    /// <summary>
+    /// Update user information collection (uses Protobuf type for RPC)
+    /// </summary>
+    Task<UserInfoCollectionResponseProto> UpdateUserInfoCollectionAsync(UpdateUserInfoCollectionRequestProto request);
+    
+    /// <summary>
+    /// Get user information collection (uses Protobuf type for RPC)
+    /// </summary>
+    Task<UserInfoCollectionProto> GetUserInfoCollectionAsync();
+    
+    /// <summary>
+    /// Get user info display data (uses Protobuf type for RPC)
+    /// </summary>
+    Task<UserInfoDisplayProto> GetUserInfoDisplayAsync();
+    
+    /// <summary>
+    /// Clear all user info collection data
+    /// </summary>
     Task ClearAllAsync();
-    Task<UserInfoOptionsResponseDto> GetUserInfoOptionsAsync();
-    Task<Tuple<string, string>> GenerateUserInfoPromptAsync(DateTime? userLocalTime = null);
+    
+    /// <summary>
+    /// Get user info options (uses Protobuf type for RPC)
+    /// </summary>
+    Task<UserInfoOptionsResponseProto> GetUserInfoOptionsAsync();
+    
+    /// <summary>
+    /// Generate user info prompt for AI (uses Protobuf type for RPC)
+    /// </summary>
+    Task<GenerateUserInfoPromptResponseProto> GenerateUserInfoPromptAsync(GenerateUserInfoPromptRequestProto request);
 }
 
 [GAgent(nameof(UserInfoCollectionGAgent))]
 public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUserInfoCollectionGAgent
 {
-    public UserInfoCollectionGAgent(Guid id) : base(id)
+    // Parameterless constructor required for Orleans activation
+    public UserInfoCollectionGAgent() : base()
     {
-        Logger.LogDebug("[UserInfoCollectionGAgent] Activating agent for user {UserId}", id);
     }
     
     public override Task<string> GetDescriptionAsync()
@@ -46,165 +76,160 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
         }
     }
 
-    public async Task<UserInfoCollectionResponseDto> UpdateUserInfoCollectionAsync(UpdateUserInfoCollectionDto updateDto)
+    public async Task<UserInfoCollectionResponseProto> UpdateUserInfoCollectionAsync(UpdateUserInfoCollectionRequestProto request)
     {
-        Logger.LogInformation("[UserInfoCollectionGAgent][UpdateUserInfoCollectionAsync] Updating user info collection userId:{userId}", Id);
+        Logger.LogInformation("[UserInfoCollectionGAgent][UpdateUserInfoCollectionAsync] Updating user info collection userId:{userId}", request.UserId);
         var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
 
         // Validate required fields if they are being updated
-        if (updateDto.NameInfo != null)
+        if (request.NameInfo != null)
         {
-            if ((updateDto.NameInfo.Gender != 1 && updateDto.NameInfo.Gender != 2) || 
-                string.IsNullOrWhiteSpace(updateDto.NameInfo.FirstName) || 
-                string.IsNullOrWhiteSpace(updateDto.NameInfo.LastName))
+            if ((request.NameInfo.Gender != 1 && request.NameInfo.Gender != 2) || 
+                string.IsNullOrWhiteSpace(request.NameInfo.FirstName) || 
+                string.IsNullOrWhiteSpace(request.NameInfo.LastName))
             {
-                return new UserInfoCollectionResponseDto
+                return new UserInfoCollectionResponseProto
                 {
                     Success = false,
                     Message = "Gender, FirstName, and LastName are required",
-                    Data = ConvertStateToDto()
+                    Data = ConvertStateToProto()
                 };
             }
         }
         
-        if (updateDto.LocationInfo != null)
+        if (request.LocationInfo != null)
         {
-            if (string.IsNullOrWhiteSpace(updateDto.LocationInfo.Country) || 
-                string.IsNullOrWhiteSpace(updateDto.LocationInfo.City))
+            if (string.IsNullOrWhiteSpace(request.LocationInfo.Country) || 
+                string.IsNullOrWhiteSpace(request.LocationInfo.City))
             {
-                return new UserInfoCollectionResponseDto
+                return new UserInfoCollectionResponseProto
                 {
                     Success = false,
                     Message = "Country and City are required",
-                    Data = ConvertStateToDto()
+                    Data = ConvertStateToProto()
                 };
             }
         }
         
-        if (updateDto.BirthDateInfo != null)
+        if (request.BirthDateInfo != null)
         {
-            if (!updateDto.BirthDateInfo.Day.HasValue || !updateDto.BirthDateInfo.Month.HasValue || !updateDto.BirthDateInfo.Year.HasValue)
+            if (!request.BirthDateInfo.HasDay || !request.BirthDateInfo.HasMonth || !request.BirthDateInfo.HasYear)
             {
-                return new UserInfoCollectionResponseDto
+                return new UserInfoCollectionResponseProto
                 {
                     Success = false,
                     Message = "Day, Month, and Year are required",
-                    Data = ConvertStateToDto()
+                    Data = ConvertStateToProto()
                 };
             }
             
-            if (updateDto.BirthDateInfo.Day.Value <= 0 || updateDto.BirthDateInfo.Month.Value <= 0 || updateDto.BirthDateInfo.Year.Value <= 0)
+            if (request.BirthDateInfo.Day <= 0 || request.BirthDateInfo.Month <= 0 || request.BirthDateInfo.Year <= 0)
             {
-                return new UserInfoCollectionResponseDto
+                return new UserInfoCollectionResponseProto
                 {
                     Success = false,
                     Message = "Valid Day, Month, and Year are required",
-                    Data = ConvertStateToDto()
+                    Data = ConvertStateToProto()
                 };
             }
             
-            if (updateDto.BirthDateInfo.Day.Value > 31 || updateDto.BirthDateInfo.Month.Value > 12 || 
-                updateDto.BirthDateInfo.Year.Value < 1900 || updateDto.BirthDateInfo.Year.Value > DateTime.Now.Year)
+            if (request.BirthDateInfo.Day > 31 || request.BirthDateInfo.Month > 12 || 
+                request.BirthDateInfo.Year < 1900 || request.BirthDateInfo.Year > DateTime.Now.Year)
             {
-                return new UserInfoCollectionResponseDto
+                return new UserInfoCollectionResponseProto
                 {
                     Success = false,
                     Message = "Invalid birthDate values",
-                    Data = ConvertStateToDto()
+                    Data = ConvertStateToProto()
                 };
             }
         }
         
-        if (updateDto.BirthTimeInfo != null)
+        if (request.BirthTimeInfo != null)
         {
-            if (updateDto.BirthTimeInfo.Hour.HasValue && (updateDto.BirthTimeInfo.Hour < 0 || updateDto.BirthTimeInfo.Hour > 23))
+            if (request.BirthTimeInfo.HasHour && (request.BirthTimeInfo.Hour < 0 || request.BirthTimeInfo.Hour > 23))
             {
-                return new UserInfoCollectionResponseDto
+                return new UserInfoCollectionResponseProto
                 {
                     Success = false,
                     Message = "Hour must be between 0 and 23",
-                    Data = ConvertStateToDto()
+                    Data = ConvertStateToProto()
                 };
             }
             
-            if (updateDto.BirthTimeInfo.Minute.HasValue && (updateDto.BirthTimeInfo.Minute < 0 || updateDto.BirthTimeInfo.Minute > 59))
+            if (request.BirthTimeInfo.HasMinute && (request.BirthTimeInfo.Minute < 0 || request.BirthTimeInfo.Minute > 59))
             {
-                return new UserInfoCollectionResponseDto
+                return new UserInfoCollectionResponseProto
                 {
                     Success = false,
                     Message = "Minute must be between 0 and 59",
-                    Data = ConvertStateToDto()
+                    Data = ConvertStateToProto()
                 };
             }
         }
         
-        if (updateDto.SeekingInterests != null && updateDto.SeekingInterests.Count == 0)
+        if (request.SeekingInterests.Count == 0)
         {
-            return new UserInfoCollectionResponseDto
+            return new UserInfoCollectionResponseProto
             {
                 Success = false,
                 Message = "At least one seeking interest is required",
-                Data = ConvertStateToDto()
+                Data = ConvertStateToProto()
             };
         }
         
-        if (updateDto.SourceChannels != null && updateDto.SourceChannels.Count == 0)
+        if (request.SourceChannels.Count == 0)
         {
-            return new UserInfoCollectionResponseDto
+            return new UserInfoCollectionResponseProto
             {
                 Success = false,
                 Message = "At least one source channel is required",
-                Data = ConvertStateToDto()
+                Data = ConvertStateToProto()
             };
         }
 
-        if (updateDto.SeekingInterests != null && updateDto.SeekingInterests.Count > 0)
+        // Validate enum values
+        var invalidSeekingInterests = request.SeekingInterests.Where(x => !System.Enum.IsDefined(typeof(SeekingInterestEnum), x)).ToList();
+        if (invalidSeekingInterests.Count > 0)
         {
-            var invalidSeekingInterests = updateDto.SeekingInterests.Where(x => !System.Enum.IsDefined(typeof(SeekingInterestEnum), x)).ToList();
-            if (invalidSeekingInterests.Count > 0)
+            return new UserInfoCollectionResponseProto
             {
-                return new UserInfoCollectionResponseDto
-                {
-                    Success = false,
-                    Message = "Invalid seeking interests",
-                    Data = ConvertStateToDto()
-                };
-            }
+                Success = false,
+                Message = "Invalid seeking interests",
+                Data = ConvertStateToProto()
+            };
         }
         
-        if (updateDto.SourceChannels != null && updateDto.SourceChannels.Count > 0)
+        var invalidSourceChannels = request.SourceChannels.Where(x => !System.Enum.IsDefined(typeof(SourceChannelEnum), x)).ToList();
+        if (invalidSourceChannels.Count > 0)
         {
-            var invalidSourceChannels = updateDto.SourceChannels.Where(x => !System.Enum.IsDefined(typeof(SourceChannelEnum), x)).ToList();
-            if (invalidSourceChannels.Count > 0)
+            return new UserInfoCollectionResponseProto
             {
-                return new UserInfoCollectionResponseDto
-                {
-                    Success = false,
-                    Message = "Invalid source channels",
-                    Data = ConvertStateToDto()
-                };
-            }
+                Success = false,
+                Message = "Invalid source channels",
+                Data = ConvertStateToProto()
+            };
         }
 
         List<int> seekingInterestsCode = null;
         List<string> seekingInterests = null;
         
-        if (updateDto.SeekingInterests != null && updateDto.SeekingInterests.Count > 0)
+        if (request.SeekingInterests.Count > 0)
         {
-            seekingInterestsCode = updateDto.SeekingInterests.Select(x => (int)x).Distinct().OrderBy(x => x).ToList();
-            seekingInterests = updateDto.SeekingInterests
-                .Select(interest => UserInfoLocalizationHelper.GetSeekingInterestText(interest, language))
+            seekingInterestsCode = request.SeekingInterests.Distinct().OrderBy(x => x).ToList();
+            seekingInterests = request.SeekingInterests
+                .Select(interest => UserInfoLocalizationHelper.GetSeekingInterestText((SeekingInterestEnum)interest, language))
                 .ToList();
         }
         
         List<int> sourceChannelsCode = null;
         List<string> sourceChannels = null;
         
-        if (updateDto.SourceChannels != null && updateDto.SourceChannels.Count > 0)
+        if (request.SourceChannels.Count > 0)
         {
-            sourceChannelsCode = updateDto.SourceChannels.Select(x => (int)x).Distinct().OrderBy(x => x).ToList();
-            sourceChannels = updateDto.SourceChannels
-                .Select(channel => UserInfoLocalizationHelper.GetSourceChannelText(channel, language).Item1)
+            sourceChannelsCode = request.SourceChannels.Distinct().OrderBy(x => x).ToList();
+            sourceChannels = request.SourceChannels
+                .Select(channel => UserInfoLocalizationHelper.GetSourceChannelText((SourceChannelEnum)channel, language).Item1)
                 .ToList();
         }
         
@@ -212,26 +237,26 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
         
         var evt = new UpdateUserInfoCollectionEvent
         {
-            UserId = Id.ToString(),
-            FirstName = updateDto.NameInfo?.FirstName ?? string.Empty,
-            LastName = updateDto.NameInfo?.LastName ?? string.Empty,
-            Country = updateDto.LocationInfo?.Country ?? string.Empty,
-            City = updateDto.LocationInfo?.City ?? string.Empty,
+            UserId = request.UserId,
+            FirstName = request.NameInfo != null ? request.NameInfo.FirstName : string.Empty,
+            LastName = request.NameInfo != null ? request.NameInfo.LastName : string.Empty,
+            Country = request.LocationInfo != null ? request.LocationInfo.Country : string.Empty,
+            City = request.LocationInfo != null ? request.LocationInfo.City : string.Empty,
             UpdatedAt = Timestamp.FromDateTime(now)
         };
         
-        if (updateDto.NameInfo?.Gender != null)
-            evt.Gender = updateDto.NameInfo.Gender;
-        if (updateDto.BirthDateInfo?.Day != null)
-            evt.Day = updateDto.BirthDateInfo.Day.Value;
-        if (updateDto.BirthDateInfo?.Month != null)
-            evt.Month = updateDto.BirthDateInfo.Month.Value;
-        if (updateDto.BirthDateInfo?.Year != null)
-            evt.Year = updateDto.BirthDateInfo.Year.Value;
-        if (updateDto.BirthTimeInfo?.Hour != null)
-            evt.Hour = updateDto.BirthTimeInfo.Hour.Value;
-        if (updateDto.BirthTimeInfo?.Minute != null)
-            evt.Minute = updateDto.BirthTimeInfo.Minute.Value;
+        if (request.NameInfo != null && request.NameInfo.Gender != 0)
+            evt.Gender = request.NameInfo.Gender;
+        if (request.BirthDateInfo != null && request.BirthDateInfo.HasDay)
+            evt.Day = request.BirthDateInfo.Day;
+        if (request.BirthDateInfo != null && request.BirthDateInfo.HasMonth)
+            evt.Month = request.BirthDateInfo.Month;
+        if (request.BirthDateInfo != null && request.BirthDateInfo.HasYear)
+            evt.Year = request.BirthDateInfo.Year;
+        if (request.BirthTimeInfo != null && request.BirthTimeInfo.HasHour)
+            evt.Hour = request.BirthTimeInfo.Hour;
+        if (request.BirthTimeInfo != null && request.BirthTimeInfo.HasMinute)
+            evt.Minute = request.BirthTimeInfo.Minute;
         
         if (seekingInterests != null)
             evt.SeekingInterests.AddRange(seekingInterests);
@@ -247,38 +272,38 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
         
         Logger.LogInformation("[UserInfoCollectionGAgent][UpdateUserInfoCollectionAsync] Successfully updated user info collection");
         
-        return new UserInfoCollectionResponseDto
+        return new UserInfoCollectionResponseProto
         {
             Success = true,
             Message = "User info collection updated successfully",
-            Data = ConvertStateToDto()
+            Data = ConvertStateToProto()
         };
     }
 
-    public Task<UserInfoCollectionDto> GetUserInfoCollectionAsync()
+    public Task<UserInfoCollectionProto> GetUserInfoCollectionAsync()
     {
         Logger.LogInformation("[UserInfoCollectionGAgent][GetUserInfoCollectionAsync] Getting user info collection");
         
         if (!State.IsInitialized)
         {
             Logger.LogWarning("[UserInfoCollectionGAgent][GetUserInfoCollectionAsync] User info collection not initialized");
-            return Task.FromResult<UserInfoCollectionDto>(null);
+            return Task.FromResult<UserInfoCollectionProto>(null);
         }
         
-        return Task.FromResult(ConvertStateToDto());
+        return Task.FromResult(ConvertStateToProto());
     }
 
-    public Task<UserInfoDisplayDto> GetUserInfoDisplayAsync()
+    public Task<UserInfoDisplayProto> GetUserInfoDisplayAsync()
     {
         Logger.LogInformation("[UserInfoCollectionGAgent][GetUserInfoDisplayAsync] Getting user info display data");
         
         if (!State.IsInitialized)
         {
             Logger.LogWarning("[UserInfoCollectionGAgent][GetUserInfoDisplayAsync] User info collection not initialized");
-            return Task.FromResult<UserInfoDisplayDto>(null);
+            return Task.FromResult<UserInfoDisplayProto>(null);
         }
         
-        return Task.FromResult(new UserInfoDisplayDto
+        var result = new UserInfoDisplayProto
         {
             FirstName = State.FirstName,
             LastName = State.LastName,
@@ -286,13 +311,19 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
             Day = State.Day,
             Month = State.Month,
             Year = State.Year,
-            Hour = State.HasHour ? State.Hour : null,
-            Minute = State.HasMinute ? State.Minute : null,
             Country = State.Country,
-            City = State.City,
-            SeekingInterests = State.SeekingInterests.ToList(),
-            SourceChannels = State.SourceChannels.ToList()
-        });
+            City = State.City
+        };
+        
+        if (State.HasHour)
+            result.Hour = State.Hour;
+        if (State.HasMinute)
+            result.Minute = State.Minute;
+        
+        result.SeekingInterests.AddRange(State.SeekingInterests);
+        result.SourceChannels.AddRange(State.SourceChannels);
+        
+        return Task.FromResult(result);
     }
 
     public async Task ClearAllAsync()
@@ -305,7 +336,7 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
         Logger.LogInformation("[UserInfoCollectionGAgent][ClearAllAsync] Successfully cleared all user info collection data");
     }
     
-    public Task<UserInfoOptionsResponseDto> GetUserInfoOptionsAsync()
+    public Task<UserInfoOptionsResponseProto> GetUserInfoOptionsAsync()
     {
         Logger.LogDebug("[UserInfoCollectionGAgent][GetUserInfoOptionsAsync] Getting user info options");
         var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
@@ -313,27 +344,52 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
         var seekingInterestOptions = UserInfoLocalizationHelper.GetSeekingInterestEnumOptions(language);
         var sourceChannelOptions = UserInfoLocalizationHelper.GetSourceChannelEnumOptions(language);
         
-        return Task.FromResult(new UserInfoOptionsResponseDto
+        var result = new UserInfoOptionsResponseProto
         {
             Success = true,
-            Message = "Options retrieved successfully",
-            SeekingInterestOptions = seekingInterestOptions,
-            SourceChannelOptions = sourceChannelOptions
-        });
+            Message = "Options retrieved successfully"
+        };
+        
+        foreach (var option in seekingInterestOptions)
+        {
+            result.SeekingInterestOptions.Add(new SeekingInterestOptionProto
+            {
+                Code = option.Code,
+                Text = option.Text
+            });
+        }
+        
+        foreach (var option in sourceChannelOptions)
+        {
+            result.SourceChannelOptions.Add(new SourceChannelOptionProto
+            {
+                Code = option.Code,
+                Text = option.Text,
+                Desc = option.Desc
+            });
+        }
+        
+        return Task.FromResult(result);
     }
 
-    public Task<Tuple<string, string>> GenerateUserInfoPromptAsync(DateTime? userLocalTime = null)
+    public Task<GenerateUserInfoPromptResponseProto> GenerateUserInfoPromptAsync(GenerateUserInfoPromptRequestProto request)
     {
         Logger.LogInformation("[UserInfoCollectionGAgent][GenerateUserInfoPromptAsync] Generating user info prompt");
         
         if (!State.IsInitialized)
         {
             Logger.LogWarning("[UserInfoCollectionGAgent][GenerateUserInfoPromptAsync] User info collection not initialized");
-            return Task.FromResult(new Tuple<string, string>(string.Empty, string.Empty));
+            return Task.FromResult(new GenerateUserInfoPromptResponseProto
+            {
+                FullName = string.Empty,
+                Prompt = string.Empty
+            });
         }
 
         var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
-        var currentTime = userLocalTime ?? DateTime.UtcNow;
+        var currentTime = request.UserLocalTime != null
+            ? request.UserLocalTime.ToDateTime() 
+            : DateTime.UtcNow;
         
         var fullName = $"{State.FirstName} {State.LastName}".Trim();
         if (string.IsNullOrWhiteSpace(fullName))
@@ -395,47 +451,71 @@ User Language: {languageText}";
 
         Logger.LogDebug("[UserInfoCollectionGAgent][GenerateUserInfoPromptAsync] Generated prompt for user {UserId}", State.UserId);
         
-        return Task.FromResult(new Tuple<string, string>(fullName, prompt));
+        return Task.FromResult(new GenerateUserInfoPromptResponseProto
+        {
+            FullName = fullName,
+            Prompt = prompt
+        });
     }
 
-    private UserInfoCollectionDto ConvertStateToDto()
+    private UserInfoCollectionProto ConvertStateToProto()
     {
-        var userId = string.IsNullOrEmpty(State.UserId) ? Guid.Empty : Guid.Parse(State.UserId);
-        
-        return new UserInfoCollectionDto
+        var result = new UserInfoCollectionProto
         {
-            UserId = userId,
-            NameInfo = !string.IsNullOrWhiteSpace(State.FirstName) ? new UserNameInfoDto
+            UserId = State.UserId,
+            IsInitialized = State.IsInitialized,
+            IsCompleted = IsCollectionCompleted()
+        };
+        
+        if (State.CreatedAt != null)
+            result.CreatedAt = State.CreatedAt;
+        if (State.LastUpdated != null)
+            result.UpdatedAt = State.LastUpdated;
+        
+        if (!string.IsNullOrWhiteSpace(State.FirstName))
+        {
+            result.NameInfo = new UserNameInfoProto
             {
                 Gender = State.Gender,
                 FirstName = State.FirstName,
                 LastName = State.LastName
-            } : null,
-            LocationInfo = !string.IsNullOrWhiteSpace(State.Country) ? new UserLocationInfoDto
+            };
+        }
+        
+        if (!string.IsNullOrWhiteSpace(State.Country))
+        {
+            result.LocationInfo = new UserLocationInfoProto
             {
                 Country = State.Country,
                 City = State.City
-            } : null,
-            BirthDateInfo = State.Day > 0 && State.Month > 0 && State.Year > 0 ? new UserBirthDateInfoDto
+            };
+        }
+        
+        if (State.Day > 0 && State.Month > 0 && State.Year > 0)
+        {
+            result.BirthDateInfo = new UserBirthDateInfoProto
             {
                 Day = State.Day,
                 Month = State.Month,
                 Year = State.Year
-            } : null,
-            BirthTimeInfo = State.HasHour || State.HasMinute ? new UserBirthTimeInfoDto
-            {
-                Hour = State.HasHour ? State.Hour : null,
-                Minute = State.HasMinute ? State.Minute : null
-            } : null,
-            SeekingInterests = State.SeekingInterests.ToList(),
-            SourceChannels = State.SourceChannels.ToList(),
-            CreatedAt = State.CreatedAt?.ToDateTime() ?? DateTime.MinValue,
-            UpdatedAt = State.LastUpdated?.ToDateTime() ?? DateTime.MinValue,
-            IsInitialized = State.IsInitialized,
-            SeekingInterestsCode = State.SeekingInterestsCode.ToList(),
-            SourceChannelsCode = State.SourceChannelsCode.ToList(),
-            IsCompleted = IsCollectionCompleted()
-        };
+            };
+        }
+        
+        if (State.HasHour || State.HasMinute)
+        {
+            result.BirthTimeInfo = new UserBirthTimeInfoProto();
+            if (State.HasHour)
+                result.BirthTimeInfo.Hour = State.Hour;
+            if (State.HasMinute)
+                result.BirthTimeInfo.Minute = State.Minute;
+        }
+        
+        result.SeekingInterests.AddRange(State.SeekingInterests);
+        result.SourceChannels.AddRange(State.SourceChannels);
+        result.SeekingInterestsCode.AddRange(State.SeekingInterestsCode);
+        result.SourceChannelsCode.AddRange(State.SourceChannelsCode);
+        
+        return result;
     }
     
     private bool IsCollectionCompleted()

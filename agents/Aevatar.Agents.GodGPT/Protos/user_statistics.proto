@@ -42,3 +42,35 @@ message RecordAppRatingEvent {
     optional string real_user_id = 6;                // [Id(5)] Guid? -> optional string
 }
 
+// =============================================================================
+// RPC Request/Response Types
+// =============================================================================
+
+message RecordAppRatingRequestProto {
+    string user_id = 1;                              // Guid -> string
+    string platform = 2;
+    string device_id = 3;
+}
+
+message AppRatingRecordProto {
+    string platform = 1;
+    string device_id = 2;
+    google.protobuf.Timestamp first_rating_time = 3;
+    google.protobuf.Timestamp last_rating_time = 4;
+    int32 rating_count = 5;
+}
+
+message UserStatisticsProto {
+    string user_id = 1;                              // Guid -> string
+    repeated AppRatingRecordProto app_ratings = 2;
+}
+
+message GetAppRatingRecordsRequestProto {
+    string user_id = 1;                              // Guid -> string
+    optional string device_id = 2;                    // Optional filter
+}
+
+message GetAppRatingRecordsResponseProto {
+    repeated AppRatingRecordProto records = 1;
+}
+

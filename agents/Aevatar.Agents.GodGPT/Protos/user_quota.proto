@@ -137,3 +137,62 @@ message ActivateFreeTrialEvent {
     google.protobuf.Timestamp end_date = 5;
 }
 
+// =============================================================================
+// RPC Request/Response Types
+// =============================================================================
+
+message SetShownCreditsToastRequestProto {
+    string user_id = 1;
+    bool has_shown_initial_credits_toast = 2;
+}
+
+message UpdateCreditsRequestProto {
+    string user_id = 1;
+    string operator_user_id = 2;
+    int32 credits_change = 3;
+}
+
+message UpdateCreditsResponseProto {
+    bool success = 1;
+    string message = 2;
+    int32 data = 3;
+}
+
+message UpdateSubscriptionRequestProto {
+    string user_id = 1;
+    string operator_user_id = 2;
+    int32 plan_type = 3;  // PlanType enum value
+    bool is_ultimate = 4;
+}
+
+message UpdateSubscriptionResponseProto {
+    bool success = 1;
+    string message = 2;
+    repeated SubscriptionInfoProto data = 3;
+}
+
+message CanUploadImageResponseProto {
+    bool success = 1;
+    string message = 2;
+    bool can_upload = 3;
+}
+
+message CreditsInfoProto {
+    bool is_initialized = 1;
+    int32 credits = 2;
+    bool should_show_toast = 3;
+}
+
+message ExecuteActionRequestProto {
+    string user_id = 1;
+    string session_id = 2;
+    string chat_manager_guid = 3;
+    int32 action_type = 4;  // ActionType enum value
+}
+
+message ExecuteActionResultProto {
+    bool success = 1;
+    string message = 2;
+    bool can_execute = 3;
+}
+

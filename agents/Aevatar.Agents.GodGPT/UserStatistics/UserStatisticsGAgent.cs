@@ -11,11 +11,33 @@ using Orleans.Concurrency;
 
 namespace Aevatar.Application.Grains.UserStatistics;
 
+/// <summary>
+/// User Statistics Agent interface - manages user behavior statistics including app ratings.
+/// 
+/// Note: This is NOT an Orleans Grain interface. Agent runs inside OrleansGAgentGrain.
+/// Use IGAgentActorManager to manage Agent lifecycle.
+/// All RPC-exposed methods use Protobuf types for cross-runtime compatibility.
+/// </summary>
 public interface IUserStatisticsGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
-    Task<AppRatingRecordDto> RecordAppRatingAsync(Guid userId, string platform, string deviceId);
-    Task<UserStatisticsDto> GetUserStatisticsAsync();
-    Task<List<AppRatingRecordDto>> GetAppRatingRecordsAsync(string? deviceId = null);
+    /// <summary>
+    /// Record app rating for a user (uses Protobuf type for RPC)
+    /// </summary>
+    Task<AppRatingRecordProto> RecordAppRatingAsync(RecordAppRatingRequestProto request);
+    
+    /// <summary>
+    /// Get user statistics (uses Protobuf type for RPC)
+    /// </summary>
+    Task<UserStatisticsProto> GetUserStatisticsAsync();
+    
+    /// <summary>
+    /// Get app rating records (uses Protobuf type for RPC)
+    /// </summary>
+    Task<GetAppRatingRecordsResponseProto> GetAppRatingRecordsAsync(GetAppRatingRecordsRequestProto request);
+    
+    /// <summary>
+    /// Check if user can rate the app
+    /// </summary>
     Task<bool> CanUserRateAppAsync(string deviceId);
 }
 
@@ -25,11 +47,12 @@ public interface IUserStatisticsGAgent : Aevatar.Agents.Abstractions.IGAgent
 [GAgent(nameof(UserStatisticsGAgent))]
 public class UserStatisticsGAgent : GAgentBase<UserStatisticsState>, IUserStatisticsGAgent
 {
-    private readonly IOptionsMonitor<UserStatisticsOptions> _userStatisticsOptions;
+    // Dependency injection via properties for Orleans compatibility
+    public IOptionsMonitor<UserStatisticsOptions>? UserStatisticsOptions { get; set; }
 
-    public UserStatisticsGAgent(Guid id, IOptionsMonitor<UserStatisticsOptions> userStatisticsOptions) : base(id)
+    // Parameterless constructor required for Orleans activation
+    public UserStatisticsGAgent() : base()
     {
-        _userStatisticsOptions = userStatisticsOptions;
     }
     
     public override Task<string> GetDescriptionAsync()
@@ -43,96 +66,106 @@ public class UserStatisticsGAgent : GAgentBase<UserStatisticsState>, IUserStatis
         await InitializeUserStatisticsAsync();
     }
 
-    public async Task<AppRatingRecordDto> RecordAppRatingAsync(Guid userId, string platform, string deviceId)
+    public async Task<AppRatingRecordProto> RecordAppRatingAsync(RecordAppRatingRequestProto request)
     {
-        if (string.IsNullOrWhiteSpace(deviceId))
+        if (string.IsNullOrWhiteSpace(request.DeviceId))
         {
             Logger.LogWarning("[UserStatisticsGAgent][RecordAppRatingAsync] DeviceId cannot be empty for user: {UserId}", Id);
-            return new AppRatingRecordDto();
+            return new AppRatingRecordProto();
         }
 
         try
         {
-            var isFirstRating = !State.AppRatings.ContainsKey(deviceId);
+            var isFirstRating = !State.AppRatings.ContainsKey(request.DeviceId);
             var ratingTime = DateTime.UtcNow;
 
             Logger.LogDebug("[UserStatisticsGAgent][RecordAppRatingAsync] Recording app rating for user: {UserId}, platform: {Platform}, device: {DeviceID}, isFirstRating: {IsFirstRating}", 
-                Id, platform, deviceId, isFirstRating);
+                Id, request.Platform, request.DeviceId, isFirstRating);
 
             RaiseEvent(new RecordAppRatingEvent
             {
-                Platform = platform,
-                DeviceId = deviceId,
+                Platform = request.Platform,
+                DeviceId = request.DeviceId,
                 RatingTime = Timestamp.FromDateTime(ratingTime),
-                RatingCount = isFirstRating ? 1 : State.AppRatings[deviceId].RatingCount + 1,
+                RatingCount = isFirstRating ? 1 : State.AppRatings[request.DeviceId].RatingCount + 1,
                 IsRealUser = false,
-                RealUserId = userId.ToString()
+                RealUserId = request.UserId
             });
 
             await ConfirmEventsAsync();
 
             Logger.LogDebug("[UserStatisticsGAgent][RecordAppRatingAsync] App rating recorded successfully for user: {UserId}, platform: {Platform}, device: {DeviceID}", 
-                Id, platform, deviceId);
+                Id, request.Platform, request.DeviceId);
 
-            return new AppRatingRecordDto
+            var ratingInfo = State.AppRatings[request.DeviceId];
+            return new AppRatingRecordProto
             {
-                Platform = platform,
-                DeviceId = deviceId,
-                FirstRatingTime = isFirstRating ? ratingTime : State.AppRatings[deviceId].FirstRatingTime.ToDateTime(),
-                LastRatingTime = ratingTime,
-                RatingCount = isFirstRating ? 1 : State.AppRatings[deviceId].RatingCount + 1
+                Platform = request.Platform,
+                DeviceId = request.DeviceId,
+                FirstRatingTime = ratingInfo.FirstRatingTime,
+                LastRatingTime = ratingInfo.LastRatingTime,
+                RatingCount = ratingInfo.RatingCount
             };
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "[UserStatisticsGAgent][RecordAppRatingAsync] Failed to record app rating for user: {UserId}, platform: {Platform}", 
-                Id, platform);
+                Id, request.Platform);
             throw;
         }
     }
 
     /// <summary>
-    /// Get user statistics information
+    /// Get user statistics information (uses Protobuf type for RPC)
     /// </summary>
-    public Task<UserStatisticsDto> GetUserStatisticsAsync()
+    public Task<UserStatisticsProto> GetUserStatisticsAsync()
     {
-        var result = new UserStatisticsDto
+        var result = new UserStatisticsProto
         {
-            UserId = Guid.TryParse(State.UserId, out var uid) ? uid : Guid.Empty,
-            AppRatings = State.AppRatings.Values.Select(rating => new AppRatingRecordDto
+            UserId = State.UserId
+        };
+        
+        foreach (var rating in State.AppRatings.Values)
+        {
+            result.AppRatings.Add(new AppRatingRecordProto
             {
                 Platform = rating.Platform,
                 DeviceId = rating.DeviceId,
-                FirstRatingTime = rating.FirstRatingTime?.ToDateTime() ?? DateTime.MinValue,
-                LastRatingTime = rating.LastRatingTime?.ToDateTime() ?? DateTime.MinValue,
+                FirstRatingTime = rating.FirstRatingTime ?? Timestamp.FromDateTime(DateTime.MinValue),
+                LastRatingTime = rating.LastRatingTime ?? Timestamp.FromDateTime(DateTime.MinValue),
                 RatingCount = rating.RatingCount
-            }).ToList(),
-        };
+            });
+        }
+        
         return Task.FromResult(result);
     }
     
     /// <summary>
-    /// Get app rating records for specific platform or all platforms
+    /// Get app rating records (uses Protobuf type for RPC)
     /// </summary>
-    public Task<List<AppRatingRecordDto>> GetAppRatingRecordsAsync(string? deviceId = null)
+    public Task<GetAppRatingRecordsResponseProto> GetAppRatingRecordsAsync(GetAppRatingRecordsRequestProto request)
     {
         var query = State.AppRatings.Values.AsEnumerable();
         
-        if (!string.IsNullOrWhiteSpace(deviceId))
+        if (!string.IsNullOrWhiteSpace(request.DeviceId))
         {
-            query = query.Where(r => r.DeviceId.Equals(deviceId, StringComparison.OrdinalIgnoreCase));
+            query = query.Where(r => r.DeviceId.Equals(request.DeviceId, StringComparison.OrdinalIgnoreCase));
         }
 
-        var result = query.Select(rating => new AppRatingRecordDto
+        var response = new GetAppRatingRecordsResponseProto();
+        foreach (var rating in query)
         {
-            Platform = rating.Platform,
-            DeviceId = rating.DeviceId,
-            FirstRatingTime = rating.FirstRatingTime?.ToDateTime() ?? DateTime.MinValue,
-            LastRatingTime = rating.LastRatingTime?.ToDateTime() ?? DateTime.MinValue,
-            RatingCount = rating.RatingCount
-        }).ToList();
+            response.Records.Add(new AppRatingRecordProto
+            {
+                Platform = rating.Platform,
+                DeviceId = rating.DeviceId,
+                FirstRatingTime = rating.FirstRatingTime ?? Timestamp.FromDateTime(DateTime.MinValue),
+                LastRatingTime = rating.LastRatingTime ?? Timestamp.FromDateTime(DateTime.MinValue),
+                RatingCount = rating.RatingCount
+            });
+        }
 
-        return Task.FromResult(result);
+        return Task.FromResult(response);
     }
     
     public Task<bool> CanUserRateAppAsync(string deviceId)
@@ -149,7 +182,7 @@ public class UserStatisticsGAgent : GAgentBase<UserStatisticsState>, IUserStatis
             return Task.FromResult(true);
         }
 
-        var ratingIntervalMinutes = _userStatisticsOptions.CurrentValue.RatingIntervalMinutes;
+        var ratingIntervalMinutes = UserStatisticsOptions?.CurrentValue.RatingIntervalMinutes ?? 60;
         var lastRatingTime = ratingInfo.LastRatingTime?.ToDateTime() ?? DateTime.MinValue;
         var minutesSinceLastRating = (DateTime.UtcNow - lastRatingTime).TotalMinutes;
         var canRate = minutesSinceLastRating >= ratingIntervalMinutes;

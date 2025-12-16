@@ -84,3 +84,104 @@ message UpdateFixStateEvent {
     int32 fix_state = 1;                                  // [Id(0)]
 }
 
+// =============================================================================
+// RPC Request/Response Types
+// =============================================================================
+
+message UpdateUserInfoCollectionRequestProto {
+    string user_id = 1;                                   // Guid -> string
+    optional UserNameInfoProto name_info = 2;
+    optional UserLocationInfoProto location_info = 3;
+    optional UserBirthDateInfoProto birth_date_info = 4;
+    optional UserBirthTimeInfoProto birth_time_info = 5;
+    repeated int32 seeking_interests = 6;                 // SeekingInterestEnum values
+    repeated int32 source_channels = 7;                   // SourceChannelEnum values
+}
+
+message UserNameInfoProto {
+    int32 gender = 1;
+    string first_name = 2;
+    string last_name = 3;
+}
+
+message UserLocationInfoProto {
+    string country = 1;
+    string city = 2;
+}
+
+message UserBirthDateInfoProto {
+    optional int32 day = 1;
+    optional int32 month = 2;
+    optional int32 year = 3;
+}
+
+message UserBirthTimeInfoProto {
+    optional int32 hour = 1;
+    optional int32 minute = 2;
+}
+
+message UserInfoCollectionResponseProto {
+    bool success = 1;
+    string message = 2;
+    UserInfoCollectionProto data = 3;
+}
+
+message UserInfoCollectionProto {
+    string user_id = 1;                                   // Guid -> string
+    optional UserNameInfoProto name_info = 2;
+    optional UserLocationInfoProto location_info = 3;
+    optional UserBirthDateInfoProto birth_date_info = 4;
+    optional UserBirthTimeInfoProto birth_time_info = 5;
+    repeated string seeking_interests = 6;
+    repeated string source_channels = 7;
+    google.protobuf.Timestamp created_at = 8;
+    google.protobuf.Timestamp updated_at = 9;
+    bool is_completed = 10;
+    bool is_initialized = 11;
+    repeated int32 seeking_interests_code = 12;
+    repeated int32 source_channels_code = 13;
+}
+
+message UserInfoDisplayProto {
+    string first_name = 1;
+    string last_name = 2;
+    int32 gender = 3;
+    int32 day = 4;
+    int32 month = 5;
+    int32 year = 6;
+    optional int32 hour = 7;
+    optional int32 minute = 8;
+    string country = 9;
+    string city = 10;
+    repeated string seeking_interests = 11;
+    repeated string source_channels = 12;
+}
+
+message UserInfoOptionsResponseProto {
+    bool success = 1;
+    string message = 2;
+    repeated SeekingInterestOptionProto seeking_interest_options = 3;
+    repeated SourceChannelOptionProto source_channel_options = 4;
+}
+
+message SeekingInterestOptionProto {
+    int32 code = 1;
+    string text = 2;
+}
+
+message SourceChannelOptionProto {
+    int32 code = 1;
+    string text = 2;
+    string desc = 3;
+}
+
+message GenerateUserInfoPromptRequestProto {
+    string user_id = 1;                                   // Guid -> string
+    optional google.protobuf.Timestamp user_local_time = 2;
+}
+
+message GenerateUserInfoPromptResponseProto {
+    string full_name = 1;
+    string prompt = 2;
+}
+

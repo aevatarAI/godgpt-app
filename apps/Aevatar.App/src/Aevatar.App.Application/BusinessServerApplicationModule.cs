@@ -1,4 +1,5 @@
 ﻿using Aevatar.App.Application.Services;
+using Aevatar.App.Application.Contracts.Services;
 using Aevatar.Application.Grains;
 using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp.PermissionManagement;
@@ -34,5 +35,17 @@ public class AppApplicationModule : AbpModule
         
         // Register InvitationService
         context.Services.AddScoped<IInvitationService, InvitationService>();
+        
+        // Register UserStatisticsService
+        context.Services.AddScoped<IUserStatisticsService, UserStatisticsService>();
+        
+        // Register UserFeedbackService
+        context.Services.AddScoped<IUserFeedbackService, UserFeedbackService>();
+        
+        // Register UserInfoService
+        context.Services.AddScoped<IUserInfoService, UserInfoService>();
+        
+        // Register UserQuotaService
+        context.Services.AddScoped<IUserQuotaService, UserQuotaService>();
     }
 }

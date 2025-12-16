@@ -22,11 +22,39 @@ using PaymentStatus = Aevatar.Application.Grains.Common.Constants.PaymentStatus;
 
 namespace Aevatar.Application.Grains.UserQuota;
 
+/// <summary>
+/// User Quota Agent interface - manages user credits, subscriptions, and quota limits.
+/// 
+/// Note: This is NOT an Orleans Grain interface. Agent runs inside OrleansGAgentGrain.
+/// Use IGAgentActorManager to manage Agent lifecycle.
+/// All RPC-exposed methods use Protobuf types for cross-runtime compatibility.
+/// </summary>
 public interface IUserQuotaGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
+    /// <summary>
+    /// Set shown credits toast flag (uses Protobuf type for RPC)
+    /// </summary>
+    Task SetShownCreditsToastAsync(SetShownCreditsToastRequestProto request);
+    
+    /// <summary>
+    /// Update user credits (uses Protobuf type for RPC)
+    /// </summary>
+    Task<UpdateCreditsResponseProto> UpdateCreditsAsync(UpdateCreditsRequestProto request);
+    
+    /// <summary>
+    /// Update user subscription (uses Protobuf type for RPC)
+    /// </summary>
+    Task<UpdateSubscriptionResponseProto> UpdateSubscriptionAsync(UpdateSubscriptionRequestProto request);
+    
+    /// <summary>
+    /// Check if user can upload image (uses Protobuf type for RPC)
+    /// </summary>
+    Task<CanUploadImageResponseProto> CanUploadImageAsync();
+    
+    // Note: Other methods remain unchanged for now as they are used internally
+    // They can be migrated later if needed
     Task<bool> InitializeCreditsAsync();
     Task<CreditsInfoDto> GetCreditsAsync();
-    Task SetShownCreditsToastAsync(bool hasShownInitialCreditsToast);
     Task<bool> IsSubscribedAsync(bool ultimate = false);
     Task<SubscriptionInfoDto> GetSubscriptionAsync(bool ultimate = false);
     Task<SubscriptionInfoDto> GetAndSetSubscriptionAsync(bool ultimate = false);
@@ -34,13 +62,10 @@ public interface IUserQuotaGAgent : Aevatar.Agents.Abstractions.IGAgent
     Task CancelSubscriptionAsync();
     Task<ExecuteActionResultDto> ExecuteActionAsync(string sessionId, string chatManagerGuid, ActionType actionType = ActionType.Conversation);
     Task<ExecuteActionResultDto> ExecuteVoiceActionAsync(string sessionId, string chatManagerGuid);
-    Task<ExecuteActionResultDto> CanUploadImageAsync();
     Task ResetRateLimitsAsync(string actionType = "conversation");
     Task ClearAllAsync();
     Task UpdateQuotaAsync(string productId, DateTime expiresDate);
     Task ResetQuotaAsync();
-    Task<GrainResultDto<int>> UpdateCreditsAsync(string operatorUserId, int creditsChange);
-    Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateSubscriptionAsync(string operatorUserId, PlanType planType, bool ultimate = false);
     Task AddCreditsAsync(int credits);
     Task<bool> RedeemInitialRewardAsync(string userId, DateTime dateTime);
     Task<UserQuotaState> GetUserQuotaStateAsync();
@@ -51,19 +76,14 @@ public interface IUserQuotaGAgent : Aevatar.Agents.Abstractions.IGAgent
 [GAgent(nameof(UserQuotaGAgent))]
 public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 {
-    private readonly IOptionsMonitor<CreditsOptions> _creditsOptions;
-    private readonly IOptionsMonitor<RateLimitOptions> _rateLimiterOptions;
-    private readonly ILocalizationService _localizationService;
+    // Dependency injection via properties for Orleans compatibility
+    public IOptionsMonitor<CreditsOptions>? CreditsOptions { get; set; }
+    public IOptionsMonitor<RateLimitOptions>? RateLimiterOptions { get; set; }
+    public ILocalizationService? LocalizationService { get; set; }
 
-    public UserQuotaGAgent(
-        Guid id,
-        IOptionsMonitor<CreditsOptions> creditsOptions,
-        IOptionsMonitor<RateLimitOptions> rateLimiterOptions,
-        ILocalizationService localizationService) : base(id)
+    // Parameterless constructor required for Orleans activation
+    public UserQuotaGAgent() : base()
     {
-        _creditsOptions = creditsOptions;
-        _rateLimiterOptions = rateLimiterOptions;
-        _localizationService = localizationService;
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -78,7 +98,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             return true;
         }
 
-        var initialCredits = _creditsOptions.CurrentValue.InitialCreditsAmount;
+        var initialCredits = CreditsOptions?.CurrentValue.InitialCreditsAmount ?? 0;
 
         RaiseEvent(new InitializeCreditsEvent { InitialCredits = initialCredits });
         await ConfirmEventsAsync();
@@ -108,9 +128,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         return creditsInfoDto;
     }
 
-    public async Task SetShownCreditsToastAsync(bool hasShownInitialCreditsToast)
+    public async Task SetShownCreditsToastAsync(SetShownCreditsToastRequestProto request)
     {
-        RaiseEvent(new SetShownCreditsToastEvent { HasShownInitialCreditsToast = hasShownInitialCreditsToast });
+        RaiseEvent(new SetShownCreditsToastEvent { HasShownInitialCreditsToast = request.HasShownInitialCreditsToast });
         await ConfirmEventsAsync();
     }
 
@@ -264,7 +284,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             
             if (!await IsSubscribedAsync(true) && !await IsSubscribedAsync(false) && dailyInfo.Count > 1)
             {
-                var localizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.DailyUpdateLimit, language);
+                var localizedMessage = LocalizationService != null
+                    ? LocalizationService.GetLocalizedException(ExceptionMessageKeys.DailyUpdateLimit, language)
+                    : "Daily update limit exceeded";
                 return new ExecuteActionResultDto
                 {
                     Code = ExecuteActionStatus.RateLimitExceeded,
@@ -284,11 +306,11 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         return await ExecuteStandardActionAsync(sessionId, chatManagerGuid, ActionType.VoiceConversation);
     }
 
-    public async Task<ExecuteActionResultDto> CanUploadImageAsync()
+    public async Task<CanUploadImageResponseProto> CanUploadImageAsync()
     {
         if (await IsSubscribedAsync(true) || await IsSubscribedAsync(false))
         {
-            return new ExecuteActionResultDto { Success = true };
+            return new CanUploadImageResponseProto { Success = true, CanUpload = true };
         }
 
         var today = DateTime.UtcNow.Date;
@@ -297,22 +319,24 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
         if (lastTime.Date != today)
         {
-            return new ExecuteActionResultDto { Success = true };
+            return new CanUploadImageResponseProto { Success = true, CanUpload = true };
         }
 
         if ((dailyInfo?.Count ?? 0) >= 1)
         {
             var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
-            var localizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.DailyUpdateLimit, language);
-            return new ExecuteActionResultDto
+            var localizedMessage = LocalizationService != null
+                ? LocalizationService.GetLocalizedException(ExceptionMessageKeys.DailyUpdateLimit, language)
+                : "Daily upload limit exceeded";
+            return new CanUploadImageResponseProto
             {
                 Success = false,
-                Code = ExecuteActionStatus.RateLimitExceeded,
-                Message = localizedMessage
+                Message = localizedMessage,
+                CanUpload = false
             };
         }
 
-        return new ExecuteActionResultDto { Success = true };
+        return new CanUploadImageResponseProto { Success = true, CanUpload = true };
     }
 
     private async Task<ExecuteActionResultDto> ExecuteStandardActionAsync(string sessionId, string chatManagerGuid, ActionType actionTypeEnum)
@@ -328,11 +352,11 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
         var isSubscribed = await IsSubscribedAsync(false);
         var maxTokens = isSubscribed
-            ? (isVoiceMessage ? _rateLimiterOptions.CurrentValue.VoiceSubscribedUserMaxRequests : _rateLimiterOptions.CurrentValue.SubscribedUserMaxRequests)
-            : (isVoiceMessage ? _rateLimiterOptions.CurrentValue.VoiceUserMaxRequests : _rateLimiterOptions.CurrentValue.UserMaxRequests);
+            ? (isVoiceMessage ? (RateLimiterOptions?.CurrentValue.VoiceSubscribedUserMaxRequests ?? 0) : (RateLimiterOptions?.CurrentValue.SubscribedUserMaxRequests ?? 0))
+            : (isVoiceMessage ? (RateLimiterOptions?.CurrentValue.VoiceUserMaxRequests ?? 0) : (RateLimiterOptions?.CurrentValue.UserMaxRequests ?? 0));
         var timeWindow = isSubscribed
-            ? (isVoiceMessage ? _rateLimiterOptions.CurrentValue.VoiceSubscribedUserTimeWindowSeconds : _rateLimiterOptions.CurrentValue.SubscribedUserTimeWindowSeconds)
-            : (isVoiceMessage ? _rateLimiterOptions.CurrentValue.VoiceUserTimeWindowSeconds : _rateLimiterOptions.CurrentValue.UserTimeWindowSeconds);
+            ? (isVoiceMessage ? (RateLimiterOptions?.CurrentValue.VoiceSubscribedUserTimeWindowSeconds ?? 0) : (RateLimiterOptions?.CurrentValue.SubscribedUserTimeWindowSeconds ?? 0))
+            : (isVoiceMessage ? (RateLimiterOptions?.CurrentValue.VoiceUserTimeWindowSeconds ?? 0) : (RateLimiterOptions?.CurrentValue.UserTimeWindowSeconds ?? 0));
 
         if (!State.RateLimits.TryGetValue(actionType, out var rateLimitInfo))
         {
@@ -360,7 +384,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
         if (!isSubscribed)
         {
-            var requiredCredits = _creditsOptions.CurrentValue.CreditsPerConversation;
+            var requiredCredits = CreditsOptions?.CurrentValue.CreditsPerConversation ?? 0;
             var credits = (await GetCreditsAsync()).Credits;
             var isAllowed = credits >= requiredCredits;
 
@@ -379,8 +403,12 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         try
         {
             var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
-            var localizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.ChatRateLimit, language);
-            var voiceLocalizedMessage = _localizationService.GetLocalizedException(ExceptionMessageKeys.VoiceChatRateLimit, language);
+            var localizedMessage = LocalizationService != null
+                ? LocalizationService.GetLocalizedException(ExceptionMessageKeys.ChatRateLimit, language)
+                : "Chat rate limit exceeded";
+            var voiceLocalizedMessage = LocalizationService != null
+                ? LocalizationService.GetLocalizedException(ExceptionMessageKeys.VoiceChatRateLimit, language)
+                : "Voice chat rate limit exceeded";
 
             var oldValue = State.RateLimits[actionType].Count;
             if (oldValue <= 0)
@@ -401,7 +429,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         {
             try
             {
-                var newCredits = State.Credits - _creditsOptions.CurrentValue.CreditsPerConversation;
+                var newCredits = State.Credits - (CreditsOptions?.CurrentValue.CreditsPerConversation ?? 0);
                 RaiseEvent(new UpdateCreditsEvent { NewCredits = newCredits });
 
                 if (newCredits == 0)
@@ -494,11 +522,11 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         return PlanType.Month;
     }
 
-    public async Task<GrainResultDto<int>> UpdateCreditsAsync(string operatorUserId, int creditsChange)
+    public async Task<UpdateCreditsResponseProto> UpdateCreditsAsync(UpdateCreditsRequestProto request)
     {
-        if (!IsUserAuthorizedToUpdateCredits(operatorUserId))
+        if (!IsUserAuthorizedToUpdateCredits(request.OperatorUserId))
         {
-            return new GrainResultDto<int>
+            return new UpdateCreditsResponseProto
             {
                 Success = false,
                 Message = "Unauthorized: User does not have permission to update credits",
@@ -506,18 +534,90 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             };
         }
 
-        var newCredits = Math.Max(0, State.Credits + creditsChange);
+        var newCredits = Math.Max(0, State.Credits + request.CreditsChange);
         RaiseEvent(new UpdateCreditsEvent { NewCredits = newCredits });
         await ConfirmEventsAsync();
 
-        return new GrainResultDto<int>
+        return new UpdateCreditsResponseProto
         {
             Success = true,
-            Message = $"Credits successfully updated by {creditsChange}",
+            Message = $"Credits successfully updated by {request.CreditsChange}",
             Data = State.Credits
         };
     }
 
+    public async Task<UpdateSubscriptionResponseProto> UpdateSubscriptionAsync(UpdateSubscriptionRequestProto request)
+    {
+        var planType = (PlanType)request.PlanType;
+        var ultimate = request.IsUltimate;
+        
+        if (!IsUserAuthorizedToUpdateCredits(request.OperatorUserId))
+        {
+            return new UpdateSubscriptionResponseProto
+            {
+                Success = false,
+                Message = "Unauthorized: User does not have permission to update subscription"
+            };
+        }
+
+        var oldSubscriptionInfoDto = await GetSubscriptionAsync(ultimate);
+        if (await IsSubscribedAsync(ultimate))
+        {
+            var subscriptionInfoDto = await GetSubscriptionAsync(ultimate);
+            if (SubscriptionHelper.IsUpgradeOrSameLevel(subscriptionInfoDto.PlanType, planType))
+            {
+                subscriptionInfoDto.PlanType = planType;
+            }
+            subscriptionInfoDto.EndDate = SubscriptionHelper.GetSubscriptionEndDate(planType, subscriptionInfoDto.EndDate);
+            await UpdateSubscriptionAsync(subscriptionInfoDto, ultimate);
+        }
+        else
+        {
+            var startDate = DateTime.UtcNow;
+            var subscriptionInfoDto = new SubscriptionInfoDto
+            {
+                IsActive = true,
+                PlanType = planType,
+                Status = PaymentStatus.Completed,
+                StartDate = startDate,
+                EndDate = SubscriptionHelper.GetSubscriptionEndDate(planType, startDate),
+                SubscriptionIds = null,
+                InvoiceIds = null
+            };
+            await UpdateSubscriptionAsync(subscriptionInfoDto, ultimate);
+        }
+
+        if (ultimate && await IsSubscribedAsync(false))
+        {
+            var premiumSubscription = await GetSubscriptionAsync(false);
+            premiumSubscription.StartDate = SubscriptionHelper.GetSubscriptionEndDate(planType, premiumSubscription.StartDate);
+            premiumSubscription.EndDate = SubscriptionHelper.GetSubscriptionEndDate(planType, premiumSubscription.EndDate);
+            await UpdateSubscriptionAsync(premiumSubscription, false);
+        }
+        await ConfirmEventsAsync();
+
+        var currentSubscriptionInfoDto = await GetSubscriptionAsync(ultimate);
+        var result = new UpdateSubscriptionResponseProto
+        {
+            Success = true,
+            Message = "Subscription updated successfully"
+        };
+        
+        // Add both subscriptions to result
+        var currentProto = MapToProtoSubscriptionFromDto(currentSubscriptionInfoDto);
+        result.Data.Add(currentProto);
+        
+        if (ultimate)
+        {
+            var premiumSubscription = await GetSubscriptionAsync(false);
+            var premiumProto = MapToProtoSubscriptionFromDto(premiumSubscription);
+            result.Data.Add(premiumProto);
+        }
+        
+        return result;
+    }
+    
+    // Keep the old method for backward compatibility (internal use)
     public async Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateSubscriptionAsync(string operatorUserId, PlanType planType, bool ultimate = false)
     {
         if (!IsUserAuthorizedToUpdateCredits(operatorUserId))
@@ -575,7 +675,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
     private bool IsUserAuthorizedToUpdateCredits(string operatorUserId)
     {
-        var authorizedUsers = _creditsOptions.CurrentValue.OperatorUserId;
+        var authorizedUsers = CreditsOptions?.CurrentValue.OperatorUserId ?? new List<string>();
         return authorizedUsers.Contains(operatorUserId);
     }
 

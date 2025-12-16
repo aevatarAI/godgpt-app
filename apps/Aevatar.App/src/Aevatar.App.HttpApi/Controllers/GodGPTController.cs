@@ -14,7 +14,6 @@ using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.ChatManager.Dtos;
-using Aevatar.Application.Grains.ChatManager.UserQuota;
 using Aevatar.Application.Grains.UserStatistics.Dtos;
 using Aevatar.GAgents.AI.Abstractions;
 using Aevatar.App.Application.Contracts.BlobStorings;
@@ -50,6 +49,7 @@ namespace Aevatar.Controllers;
 public class GodGPTController : AevatarController
 {
     private readonly IGodGPTService _godGptService;
+    private readonly IUserQuotaService _userQuotaService;
     private readonly IClusterClient _clusterClient;
     private readonly string _defaultLLM = "OpenAI";
     private readonly string _defaultPrompt = "you are a robot";
@@ -63,7 +63,10 @@ public class GodGPTController : AevatarController
     private readonly IIpLocationService _ipLocationService;
 
 
-    public GodGPTController(IGodGPTService godGptService, IClusterClient clusterClient,
+    public GodGPTController(
+        IGodGPTService godGptService,
+        IUserQuotaService userQuotaService,
+        IClusterClient clusterClient,
         ILogger<GodGPTController> logger,
         IBlobContainer blobContainer, IOptionsSnapshot<BlobStoringOptions> blobStoringOptions,
         IThumbnailService thumbnailService, IOptions<GodGPTOptions> godGptOptions,
@@ -71,6 +74,7 @@ public class GodGPTController : AevatarController
         IIpLocationService ipLocationService)
     {
         _godGptService = godGptService;
+        _userQuotaService = userQuotaService;
         _clusterClient = clusterClient;
         _logger = logger;
         _blobContainer = blobContainer;
@@ -302,39 +306,6 @@ public class GodGPTController : AevatarController
         return deleteUserId;
     }
 
-    [HttpPost("godgpt/account/show-toast")]
-    public async Task<Guid> UpdateShowToastAsync()
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        await _godGptService.UpdateShowToastAsync(currentUserId);
-        _logger.LogDebug("[GodGPTController][UpdateShowToastAsync] userId: {0}, duration: {1}ms",
-            currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
-        return currentUserId;
-    }
-    
-    [HttpPost("godgpt/account/credits")]
-    public async Task<GrainResultDto<int>> UpdateUserCreditsAsync(UpdateUserCreditsInput input)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var resultDto = await _godGptService.UpdateUserCreditsAsync(currentUserId, input);
-        _logger.LogDebug("[GodGPTController][UpdateUserCreditsAsync] userId: {0}, duration: {1}ms",
-            currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
-        return resultDto;
-    }
-    
-    [HttpPost("godgpt/account/subscription")]
-    public async Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateUserSubscriptionAsync(UpdateUserSubscriptionsInput input)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var resultDto = await _godGptService.UpdateUserSubscriptionAsync(currentUserId, input);
-        _logger.LogDebug("[GodGPTController][UpdateUserSubscriptionAsync] userId: {0}, duration: {1}ms",
-            currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
-        return resultDto;
-    }
-
     [HttpPost("godgpt/share")]
     public async Task<CreateShareIdResponse> CreateShareStringAsync(CreateShareIdRequest request)
     {
@@ -493,25 +464,6 @@ public class GodGPTController : AevatarController
         return response;
     }
     
-    [HttpGet("godgpt/can-upload-image")]
-    public async Task<CanUploadImageResponseDto> CanUploadImageAsync()
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var language = HttpContext.GetGodGPTLanguage();
-        var response = await _godGptService.CanUploadImageAsync(currentUserId, language);
-        
-        var result = new CanUploadImageResponseDto
-        {
-            CanUpload = response.Success,
-            Reason = response.Message
-        };
-        
-        _logger.LogDebug($"[GodGPTController][CanUploadImageAsync] userId: {currentUserId}, canUpload: {result.CanUpload}, duration: {stopwatch.ElapsedMilliseconds}ms");
-        
-        return result;
-    }
-
     [HttpPost("godgpt/blob")]
     public async Task<string> SaveAsync([FromForm] SaveBlobInput input)
     {
@@ -529,7 +481,7 @@ public class GodGPTController : AevatarController
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
         
-        var response = await _godGptService.CanUploadImageAsync(currentUserId);
+        var response = await _userQuotaService.CanUploadImageAsync(currentUserId);
         if (!response.Success)
         {
             _logger.LogDebug("[GodGPTController][BlobSaveAsync] Daily upload limit reached");
@@ -733,25 +685,4 @@ public class GodGPTController : AevatarController
         }
     }
     
-    [HttpPost("godgpt/user-statistics/app-rating")]
-    public async Task<AppRatingRecordDto> RecordAppRatingAsync(RecordAppRatingInput input)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _godGptService.RecordAppRatingAsync(currentUserId, input);
-        _logger.LogDebug("[GodGPTController][RecordAppRatingAsync] userId: {0}, duration: {3}ms",
-            currentUserId, stopwatch.ElapsedMilliseconds);
-        return response;
-    }
-    
-    [HttpGet("godgpt/user-statistics/can-rate")]
-    public async Task<bool> CanUserRateAppAsync(CanUserRateAppInput input)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _godGptService.CanUserRateAppAsync(currentUserId, input);
-        _logger.LogDebug("[GodGPTController][CanUserRateAppAsync] userId: {0}, duration: {3}ms",
-            currentUserId, stopwatch.ElapsedMilliseconds);
-        return response;
-    }
 }

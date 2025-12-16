@@ -2270,7 +2270,19 @@ public class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatStateProto, G
         
         var userQuotaGAgent = await GetUserQuotaAgentAsync(Guid.Parse(State.ChatManagerGuid));
         var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(Guid.Parse(State.ChatManagerGuid));
-        (string fullName, string prompt) = await userInfoCollectionGAgent.GenerateUserInfoPromptAsync(userLocalTime);
+        
+        var promptRequest = new Aevatar.Agents.GodGPT.Protos.UserInfoCollection.GenerateUserInfoPromptRequestProto
+        {
+            UserId = State.ChatManagerGuid
+        };
+        if (userLocalTime.HasValue)
+        {
+            promptRequest.UserLocalTime = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.SpecifyKind(userLocalTime.Value, DateTimeKind.Utc));
+        }
+        
+        var promptResult = await userInfoCollectionGAgent.GenerateUserInfoPromptAsync(promptRequest);
+        var fullName = promptResult.FullName;
+        var prompt = promptResult.Prompt;
         var isSubscribed = await userQuotaGAgent.IsSubscribedAsync(true) || await userQuotaGAgent.IsSubscribedAsync(false);
         
         var languageEnglishName = GodGPTLanguageHelper.GetLanguageEnglishName(language);

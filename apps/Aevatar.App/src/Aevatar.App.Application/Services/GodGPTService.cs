@@ -129,6 +129,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
     private readonly ILocalizationService _localizationService;
     private readonly IPaymentService _paymentService;
     private readonly IInvitationService _invitationService;
+    private readonly IUserStatisticsService _userStatisticsService;
+    private readonly IUserQuotaService _userQuotaService;
 
     public GodGPTService(
         IClusterClient clusterClient, 
@@ -138,7 +140,9 @@ public class GodGPTService : ApplicationService, IGodGPTService
         IOptionsMonitor<ManagerOptions> managerOptions, 
         ILocalizationService localizationService,
         IPaymentService paymentService,
-        IInvitationService invitationService)
+        IInvitationService invitationService,
+        IUserStatisticsService userStatisticsService,
+        IUserQuotaService userQuotaService)
     {
         _clusterClient = clusterClient;
         _agentFactory = agentFactory;
@@ -148,6 +152,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
         _localizationService = localizationService;
         _paymentService = paymentService;
         _invitationService = invitationService;
+        _userStatisticsService = userStatisticsService;
+        _userQuotaService = userQuotaService;
     }
     
     
@@ -335,23 +341,17 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
     public async Task UpdateShowToastAsync(Guid currentUserId)
     {
-        var userQuotaGAgent = _agentFactory.CreateGAgent<UserQuotaGAgent>(currentUserId);
-        //No need to save immediately, can be executed in one step
-        userQuotaGAgent.SetShownCreditsToastAsync(true);
+        await _userQuotaService.SetShownCreditsToastAsync(currentUserId, true);
     }
 
     public async Task<GrainResultDto<int>> UpdateUserCreditsAsync(Guid currentUserId, UpdateUserCreditsInput input)
     {
-        var userQuotaGAgent =
-            _agentFactory.CreateGAgent<UserQuotaGAgent>(input.UserId);
-        return await userQuotaGAgent.UpdateCreditsAsync(currentUserId.ToString(), input.Credits);
+        return await _userQuotaService.UpdateUserCreditsAsync(currentUserId, input);
     }
 
     public async Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateUserSubscriptionAsync(Guid currentUserId, UpdateUserSubscriptionsInput input)
     {
-        var userQuotaGAgent =
-            _agentFactory.CreateGAgent<UserQuotaGAgent>(input.UserId);
-        return await userQuotaGAgent.UpdateSubscriptionAsync(currentUserId.ToString(), input.PlanType, input.IsUltimate);
+        return await _userQuotaService.UpdateUserSubscriptionAsync(currentUserId, input);
     }
 
     public async Task<GetInvitationInfoResponse> GetInvitationInfoAsync(Guid currentUserId)
@@ -501,9 +501,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
     public async Task<ExecuteActionResultDto> CanUploadImageAsync(Guid currentUserId,GodGPTChatLanguage language = GodGPTChatLanguage.English)
     {
-        var userQuotaGAgent = _agentFactory.CreateGAgent<UserQuotaGAgent>(currentUserId);
         RequestContext.Set("GodGPTLanguage", language.ToString());
-        return await userQuotaGAgent.CanUploadImageAsync();
+        return await _userQuotaService.CanUploadImageAsync(currentUserId);
     }
 
 
@@ -623,16 +622,14 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
     public async Task<AppRatingRecordDto> RecordAppRatingAsync(Guid currentUserId, RecordAppRatingInput input)
     {
-        var grainId = CommonHelper.StringToGuid(input.DeviceId);
-        var userStatisticsGAgent = _agentFactory.CreateGAgent<UserStatisticsGAgent>(grainId);
-        return await userStatisticsGAgent.RecordAppRatingAsync(currentUserId, input.Platform, input.DeviceId);
+        // Delegate to UserStatisticsService for consistency
+        return await _userStatisticsService.RecordAppRatingAsync(currentUserId, input);
     }
 
     public async Task<bool> CanUserRateAppAsync(Guid currentUserId, CanUserRateAppInput input)
     {
-        var grainId = CommonHelper.StringToGuid(input.DeviceId);
-        var userStatisticsGAgent = _agentFactory.CreateGAgent<UserStatisticsGAgent>(grainId);
-        return await userStatisticsGAgent.CanUserRateAppAsync(input.DeviceId);
+        // Delegate to UserStatisticsService for consistency
+        return await _userStatisticsService.CanUserRateAppAsync(currentUserId, input);
     }
 
     public Task<GetInvitationCodeTypeResponse> GetInvitationCodeTypeAsync(Guid currentUserId, GetInvitationCodeTypeRequest input)
