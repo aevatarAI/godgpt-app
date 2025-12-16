@@ -1,5 +1,6 @@
 using System.Text;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.Invitation;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;

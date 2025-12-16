@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\Aevatar.App.Application\Aevatar.App.Application.csproj" />
+    <ProjectReference Include="..\Aevatar.App.TestBase\Aevatar.App.TestBase.csproj" />
     <ProjectReference Include="..\..\..\..\agents\Aevatar.Agents.GodGPT\Aevatar.Agents.GodGPT.csproj" />
     <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Core\Aevatar.Agents.Core.csproj" />
     <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Abstractions\Aevatar.Agents.Abstractions.csproj" />

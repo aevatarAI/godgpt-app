@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.GodGPT.Protos.Invitation;
 using Aevatar.Agents.GodGPT.Protos.InviteCode;
 using Aevatar.Application.Grains.Agents.ChatManager;
