@@ -112,7 +112,7 @@ test_get_invitation_info() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.rewardTierList' > /dev/null 2>&1; then
+    if echo "$response" | jq -e '.rewardTiers' > /dev/null 2>&1 || echo "$response" | jq -e '.inviteCode' > /dev/null 2>&1; then
         log_info "Invitation info retrieved successfully ✓"
         return 0
     else
@@ -125,7 +125,7 @@ test_get_invitation_info() {
 test_get_code_type() {
     log_step "Test 2: Getting invitation code type..."
     
-    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/invitation/code-type?code=TESTCODE123" \
+    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/invitation/code-type?InviteCode=TESTCODE123" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Content-Type: application/json")
     
@@ -148,13 +148,13 @@ test_redeem_friend_code() {
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Content-Type: application/json" \
         -d '{
-            "code": "TESTFRIEND123",
-            "devicePlatform": "web"
+            "InviteCode": "TESTFRIEND123",
+            "IsWeb": true
         }')
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.isValid' > /dev/null 2>&1; then
+    if echo "$response" | jq -e '.IsValid' > /dev/null 2>&1 || echo "$response" | jq -e '.isValid' > /dev/null 2>&1; then
         log_info "Redeem friend code endpoint tested ✓"
         return 0
     else
@@ -171,13 +171,13 @@ test_redeem_trial_code() {
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Content-Type: application/json" \
         -d '{
-            "code": "FREETRIAL12345",
-            "devicePlatform": "web"
+            "InviteCode": "FREETRIAL12345",
+            "IsWeb": true
         }')
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.isValid' > /dev/null 2>&1; then
+    if echo "$response" | jq -e '.IsValid' > /dev/null 2>&1 || echo "$response" | jq -e '.isValid' > /dev/null 2>&1; then
         log_info "Redeem trial code endpoint tested ✓"
         return 0
     else
@@ -210,14 +210,21 @@ test_generate_trial_code() {
     log_step "Test 6: Generating free trial code..."
     log_warn "Note: This requires manager permissions"
     
+    local start_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local end_time=$(date -u -v+30d +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+30 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
+    
     local response=$(curl -k -s -X POST "$API_URL/api/godgpt/invitation/generate-trial-code" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Content-Type: application/json" \
-        -d '{
-            "batchId": "test_batch_001",
-            "count": 10,
-            "trialDays": 7
-        }')
+        -d "{
+            \"trialDays\": 7,
+            \"productId\": \"price_1RYiPu4KJpMhj2HtScrxZ3XE\",
+            \"platform\": 0,
+            \"startTime\": \"$start_time\",
+            \"endTime\": \"$end_time\",
+            \"description\": \"Test batch\",
+            \"quantity\": 10
+        }")
     
     log_response "$response"
     

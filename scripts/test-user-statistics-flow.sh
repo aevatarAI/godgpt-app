@@ -116,7 +116,7 @@ test_record_app_rating() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.ratingId' > /dev/null 2>&1 || echo "$response" | jq -e '.success' > /dev/null 2>&1; then
+    if echo "$response" | jq -e '.ratingCount' > /dev/null 2>&1 || echo "$response" | jq -e '.ratingId' > /dev/null 2>&1 || echo "$response" | jq -e '.success' > /dev/null 2>&1; then
         log_info "App rating recorded successfully ✓"
         return 0
     else
