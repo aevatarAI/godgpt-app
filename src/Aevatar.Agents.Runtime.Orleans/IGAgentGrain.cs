@@ -5,7 +5,7 @@ using Orleans;
 namespace Aevatar.Agents.Runtime.Orleans;
 
 /// <summary>
-/// Orleans Grain 接口
+/// Orleans Grain 接口（基础接口）
 /// Agent 业务逻辑在 Grain (Silo) 内执行
 /// </summary>
 public interface IGAgentGrain : IGrainWithStringKey
@@ -17,6 +17,7 @@ public interface IGAgentGrain : IGrainWithStringKey
 
     /// <summary>
     /// 初始化 Agent 实例（在 Silo 内创建）
+    /// Agent ID 从 Grain 的 PrimaryKey 获取（Grain ID = Agent ID）
     /// </summary>
     /// <param name="agentTypeName">Agent 类型的程序集限定名</param>
     /// <returns>是否成功初始化</returns>

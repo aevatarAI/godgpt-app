@@ -4,23 +4,27 @@ using Microsoft.Extensions.Logging;
 namespace Aevatar.Agents.Runtime.Orleans.EventSourcing;
 
 /// <summary>
-/// Orleans-based EventStore implementation
-/// - Events: Stored via IEventRepository (decoupled from Orleans)
-/// - Snapshots: Stored via Orleans GrainStorage
-/// - Concurrency: Coordinated by Orleans Grain
+/// Orleans-based EventStore implementation (Simplified)
+/// 
+/// Architecture:
+/// - Events: Stored via IEventRepository directly (no extra Grain RPC)
+/// - Snapshots: Handled by GAgentBase via IStateStore (not in this class)
+/// - Concurrency: Orleans Grain guarantees single-thread execution per Agent
+/// 
+/// Optimization: Removed EventStorageGrain dependency to reduce RPC overhead.
+/// Concurrency is guaranteed by:
+/// 1. OrleansGAgentGrain single-threaded execution per Agent
+/// 2. MongoDB optimistic locking in repository layer (as backup)
 /// </summary>
 public class OrleansEventStore : IEventStore
 {
-    private readonly IGrainFactory _grainFactory;
     private readonly IEventRepository _eventRepository;
     private readonly ILogger<OrleansEventStore> _logger;
 
     public OrleansEventStore(
-        IGrainFactory grainFactory,
         IEventRepository eventRepository,
         ILogger<OrleansEventStore> logger)
     {
-        _grainFactory = grainFactory;
         _eventRepository = eventRepository;
         _logger = logger;
     }
@@ -31,11 +35,39 @@ public class OrleansEventStore : IEventStore
         Guid agentId,
         IEnumerable<AgentStateEvent> events,
         long expectedVersion,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
-        // Use Grain for concurrency control
-        var storageGrain = _grainFactory.GetGrain<IEventStorageGrain>(agentId);
-        return await storageGrain.AppendEventsAsync(events.ToList(), expectedVersion);
+        var eventList = events.ToList();
+        if (eventList.Count == 0)
+        {
+            return expectedVersion;
+        }
+
+        // Optimistic concurrency check (defensive programming, even though Grain guarantees single-thread execution)
+        var currentVersion = await _eventRepository.GetLatestVersionAsync(agentId, agentTypeName, ct);
+        if (currentVersion != expectedVersion)
+        {
+            _logger.LogWarning(
+                "Version conflict for agent {AgentId}: expected {ExpectedVersion}, got {CurrentVersion}",
+                agentId, expectedVersion, currentVersion);
+            throw new InvalidOperationException(
+                $"Concurrency conflict: expected version {expectedVersion}, got {currentVersion}");
+        }
+
+        // Direct repository call - no extra Grain RPC
+        // Concurrency is guaranteed by OrleansGAgentGrain single-threaded execution
+        var newVersion = await _eventRepository.AppendEventsAsync(
+            agentId, 
+            eventList, 
+            agentTypeName, 
+            ct);
+
+        _logger.LogDebug(
+            "Appended {EventCount} events for agent {AgentId} (type: {AgentType}), version: {OldVersion} -> {NewVersion}",
+            eventList.Count, agentId, agentTypeName ?? "unknown", expectedVersion, newVersion);
+
+        return newVersion;
     }
 
     public async Task<IReadOnlyList<AgentStateEvent>> GetEventsAsync(
@@ -43,63 +75,25 @@ public class OrleansEventStore : IEventStore
         long? fromVersion = null,
         long? toVersion = null,
         int? maxCount = null,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
-        // Directly query from repository (no grain needed for reads)
-        return await _eventRepository.GetEventsAsync(agentId, fromVersion, toVersion, maxCount, ct);
+        return await _eventRepository.GetEventsAsync(
+            agentId, 
+            fromVersion, 
+            toVersion, 
+            maxCount, 
+            agentTypeName, 
+            ct);
     }
 
-    public async Task<long> GetLatestVersionAsync(Guid agentId, CancellationToken ct = default)
+    public async Task<long> GetLatestVersionAsync(
+        Guid agentId, 
+        string? agentTypeName = null,
+        CancellationToken ct = default)
     {
-        // Directly query from repository
-        return await _eventRepository.GetLatestVersionAsync(agentId, ct);
+        return await _eventRepository.GetLatestVersionAsync(agentId, agentTypeName, ct);
     }
 
-    // ========== Snapshot Operations ==========
-
-    public async Task SaveSnapshotAsync(Guid agentId, AgentSnapshot snapshot, CancellationToken ct = default)
-    {
-        var storageGrain = _grainFactory.GetGrain<IEventStorageGrain>(agentId);
-        await storageGrain.SaveSnapshotAsync(snapshot);
-    }
-
-    public async Task<AgentSnapshot?> GetLatestSnapshotAsync(Guid agentId, CancellationToken ct = default)
-    {
-        var storageGrain = _grainFactory.GetGrain<IEventStorageGrain>(agentId);
-        return await storageGrain.GetLatestSnapshotAsync();
-    }
-}
-
-/// <summary>
-/// Grain interface for event storage operations
-/// Responsible ONLY for:
-/// - Concurrency control (optimistic locking via version tracking)
-/// - Snapshot management (via Orleans GrainStorage)
-/// 
-/// Event persistence is handled by IEventRepository (decoupled)
-/// </summary>
-public interface IEventStorageGrain : IGrainWithGuidKey
-{
-    Task<long> AppendEventsAsync(List<AgentStateEvent> events, long expectedVersion);
-    Task SaveSnapshotAsync(AgentSnapshot snapshot);
-    Task<AgentSnapshot?> GetLatestSnapshotAsync();
-}
-
-/// <summary>
-/// State for snapshot storage (uses Orleans GrainStorage)
-/// </summary>
-[GenerateSerializer]
-public class SnapshotState
-{
-    /// <summary>
-    /// Latest snapshot stored as serialized Protobuf bytes
-    /// </summary>
-    [Id(0)]
-    public byte[]? Snapshot { get; set; }
-    
-    /// <summary>
-    /// Snapshot version
-    /// </summary>
-    [Id(1)]
-    public long Version { get; set; }
+    // Note: Snapshots are handled by IStateStore<TState> in GAgentBase (per-type collections)
 }

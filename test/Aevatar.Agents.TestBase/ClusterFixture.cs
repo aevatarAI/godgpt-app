@@ -23,7 +23,7 @@ public class ClusterFixture : IDisposable
     public TestCluster Cluster { get; }
 
     // Shared IEventRepository instance for both Silo and Client
-    // This ensures EventStorageGrain (in Silo) and tests (using Client) use the same repository
+    // This ensures OrleansEventStore (in Silo) and tests (using Client) use the same repository
     private readonly InMemoryEventRepository _sharedEventRepository;
 
     // Static dictionary to share repository with configurators (thread-safe)
@@ -100,7 +100,6 @@ public class ClusterFixture : IDisposable
                 .AddMemoryStreams("AevatarAgents") // Used by OrleansGAgentActorFactory and OrleansGAgentGrain
                 // Grain Storage Providers
                 .AddMemoryGrainStorage("PubSubStore") // Required by Orleans Streams for PubSub
-                .AddMemoryGrainStorage("EventStoreStorage") // Used by EventStorageGrain for snapshots
                 .AddMemoryGrainStorage("agentState") // Used by OrleansGAgentGrain for persistent state
                 .AddMemoryGrainStorageAsDefault(); // Default storage for grains without explicit provider name
         }

@@ -10,6 +10,8 @@ namespace Aevatar.Agents.Persistence.MongoDB.Tests;
 /// Tests for MongoDBStateStoreFactory
 /// This file tests the factory pattern and DI integration.
 /// Note: Direct MongoDBStateStore tests are limited because AgentStateDocument is internal.
+/// 
+/// Uses Protobuf-generated test types for byte[] serialization compatibility.
 /// </summary>
 public class MongoDBStateStoreFactoryTests
 {
@@ -61,16 +63,4 @@ public class MongoDBStateStoreFactoryTests
         // Assert
         factory.Should().NotBeNull();
     }
-}
-
-// Test types
-public class StateStoreTestState
-{
-    public string Name { get; set; } = string.Empty;
-    public int Value { get; set; }
-}
-
-public class AnotherTestState
-{
-    public string Id { get; set; } = string.Empty;
 }

@@ -491,3 +491,6 @@ appsettings.secrets.json.bak*
 
 runs/
 output/
+# Script temp files
+scripts/.pids/
+*.pid

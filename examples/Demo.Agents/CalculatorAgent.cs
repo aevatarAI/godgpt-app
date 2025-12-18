@@ -7,9 +7,22 @@ namespace Demo.Agents;
 // CalculatorAgentState 已在 demo_messages.proto 中定义
 
 /// <summary>
+/// Calculator Agent interface for RPC
+/// </summary>
+public interface ICalculatorAgent
+{
+    Task<double> AddAsync(double a, double b, CancellationToken ct = default);
+    Task<double> SubtractAsync(double a, double b, CancellationToken ct = default);
+    Task<double> MultiplyAsync(double a, double b, CancellationToken ct = default);
+    Task<double> DivideAsync(double a, double b, CancellationToken ct = default);
+    double GetLastResult();
+    int GetOperationCount();
+}
+
+/// <summary>
 /// 示例：计算器Agent
 /// </summary>
-public class CalculatorAgent : GAgentBase<CalculatorAgentState>
+public class CalculatorAgent : GAgentBase<CalculatorAgentState>, ICalculatorAgent
 {
     public override Task<string> GetDescriptionAsync()
     {
@@ -69,6 +82,11 @@ public class CalculatorAgent : GAgentBase<CalculatorAgentState>
     /// </summary>
     public double GetLastResult() => State.LastResult;
 
+    /// <summary>
+    /// 获取操作计数
+    /// </summary>
+    public int GetOperationCount() => State.OperationCount;
+
     private async Task RecordOperation(string operation, double result, CancellationToken ct)
     {
         State.LastResult = result;
@@ -77,6 +95,11 @@ public class CalculatorAgent : GAgentBase<CalculatorAgentState>
 
         Console.WriteLine($"[CalculatorAgent] 计算完成: {operation}");
 
-        await Task.CompletedTask;
+        // Persist state to MongoDB (non-EventSourcing mode)
+        if (StateStore != null)
+        {
+            await StateStore.SaveAsync(Id, State, ct);
+            Console.WriteLine($"[CalculatorAgent] State 已持久化");
+        }
     }
 }

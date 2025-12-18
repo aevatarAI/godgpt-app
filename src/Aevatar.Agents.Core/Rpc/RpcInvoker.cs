@@ -15,7 +15,6 @@ namespace Aevatar.Agents.Core.Rpc;
 /// </summary>
 public static class RpcInvoker
 {
-    private static readonly ConcurrentDictionary<(System.Type, string), MethodInfo> MethodCache = new();
 
     /// <summary>
     /// Invoke RPC method on Agent
@@ -34,7 +33,8 @@ public static class RpcInvoker
             if (agent == null)
                 throw new InvalidOperationException("Agent not initialized");
 
-            var method = GetCachedMethod(agent.GetType(), request.MethodName);
+            // Pass argument count to select correct method overload
+            var method = GetCachedMethod(agent.GetType(), request.MethodName, request.Args.Count);
             var args = DeserializeArgs(request.Args, method.GetParameters());
             var result = method.Invoke(agent, args);
 
@@ -66,13 +66,48 @@ public static class RpcInvoker
         return response.ToByteArray();
     }
 
-    private static MethodInfo GetCachedMethod(System.Type agentType, string methodName)
+    private static readonly ConcurrentDictionary<(System.Type, string, int), MethodInfo> MethodCacheWithArgs = new();
+
+    private static MethodInfo GetCachedMethod(System.Type agentType, string methodName, int argCount)
     {
-        return MethodCache.GetOrAdd((agentType, methodName), k =>
+        return MethodCacheWithArgs.GetOrAdd((agentType, methodName, argCount), k =>
         {
-            var method = k.Item1.GetMethod(k.Item2,
-                BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
-                ?? throw new InvalidOperationException($"Method '{k.Item2}' not found on type '{k.Item1.Name}'");
+            // Find all methods with the given name
+            var methods = k.Item1.GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.IgnoreCase)
+                .Where(m => m.Name.Equals(k.Item2, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (methods.Count == 0)
+            {
+                throw new InvalidOperationException($"Method '{k.Item2}' not found on type '{k.Item1.Name}'");
+            }
+
+            // Select method based on argument count
+            MethodInfo? method = null;
+            if (methods.Count == 1)
+            {
+                method = methods[0];
+            }
+            else
+            {
+                // Multiple overloads - find the one matching argument count
+                method = methods.FirstOrDefault(m => m.GetParameters().Length == k.Item3);
+                if (method == null)
+                {
+                    // If no exact match, try to find method with optional parameters
+                    method = methods
+                        .Where(m => m.GetParameters().Count(p => !p.HasDefaultValue) <= k.Item3
+                                    && m.GetParameters().Length >= k.Item3)
+                        .FirstOrDefault();
+                }
+            }
+
+            if (method == null)
+            {
+                throw new InvalidOperationException(
+                    $"Method '{k.Item2}' with {k.Item3} arguments not found on type '{k.Item1.Name}'. " +
+                    $"Available overloads have {string.Join(", ", methods.Select(m => m.GetParameters().Length))} parameters.");
+            }
 
             // Validate method is defined in an interface
             var paramTypes = method.GetParameters().Select(p => p.ParameterType).ToArray();

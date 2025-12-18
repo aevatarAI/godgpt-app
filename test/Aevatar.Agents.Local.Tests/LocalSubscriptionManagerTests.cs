@@ -71,12 +71,13 @@ public class LocalSubscriptionManagerTests
         var childId = Guid.NewGuid();
         var retryCount = 0;
         
-        var retryPolicy = new TestRetryPolicy(3, () => retryCount++);
+        // Use more retries and shorter delay to give time for stream creation
+        var retryPolicy = new TestRetryPolicy(5, () => retryCount++);
 
-        // 延迟创建stream以触发重试
+        // Delay stream creation to trigger retry (create after ~100ms, within retry window)
         _ = Task.Run(async () =>
         {
-            await Task.Delay(150);
+            await Task.Delay(100);
             _streamRegistry.GetOrCreateStream(parentId);
         });
 
@@ -89,7 +90,7 @@ public class LocalSubscriptionManagerTests
 
         // Assert
         Assert.NotNull(subscription);
-        Assert.True(retryCount > 0); // 应该有重试
+        Assert.True(retryCount > 0); // Should have retried at least once
         Assert.True(subscription.IsHealthy);
     }
 

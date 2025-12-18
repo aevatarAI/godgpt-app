@@ -18,23 +18,36 @@ namespace Aevatar.Agents.Runtime.Orleans;
 
 /// <summary>
 /// Orleans Grain 状态存储模型
+/// 包含 Agent 元数据（不含业务状态），由 Orleans GrainStorage 自动持久化
+/// 
+/// Note: 业务状态（Snapshot）现在由 IStateStore&lt;TState&gt; 处理，
+/// 存储在按类型分表的 MongoDB 集合中（agent_states_{StateType}）
 /// </summary>
-[Serializable]
+[GenerateSerializer]
 public class OrleansAgentState
 {
     /// <summary>
     /// Agent 类型名（程序集限定名）
     /// </summary>
+    [Id(0)]
     public string? AgentTypeName { get; set; }
+
+    /// <summary>
+    /// Agent 的唯一标识
+    /// </summary>
+    [Id(1)]
+    public Guid AgentId { get; set; }
 
     /// <summary>
     /// 父节点 ID
     /// </summary>
+    [Id(2)]
     public Guid? ParentId { get; set; }
 
     /// <summary>
     /// 子节点 ID 列表
     /// </summary>
+    [Id(3)]
     public List<Guid> Children { get; set; } = new();
 
     public OrleansAgentState() { }
@@ -92,11 +105,11 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         await InitializeStreamAsync();
 
         // Restore Agent if previously initialized
-        if (!string.IsNullOrEmpty(_grainState.State.AgentTypeName))
+        if (!string.IsNullOrEmpty(_grainState.State.AgentTypeName) && _grainState.State.AgentId != Guid.Empty)
         {
-            _logger.LogInformation("Restoring Agent from persisted state: {AgentType}", 
-                _grainState.State.AgentTypeName);
-            await InitializeAgentInternalAsync(_grainState.State.AgentTypeName);
+            _logger.LogInformation("Restoring Agent from persisted state: {AgentType}, AgentId: {AgentId}", 
+                _grainState.State.AgentTypeName, _grainState.State.AgentId);
+            await InitializeAgentInternalAsync(_grainState.State.AgentTypeName, _grainState.State.AgentId);
         }
 
         await base.OnActivateAsync(cancellationToken);
@@ -164,10 +177,33 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
     public Task<bool> InitializeAgentAsync(string agentTypeName)
     {
-        return InitializeAgentInternalAsync(agentTypeName, persistState: true);
+        // Grain Key format:
+        // - Preferred: "AgentId" (string guid)  ✅ consistent with P2P routing (targetAgentId only)
+        // - Backward compatible: "AgentTypeShortName:AgentId"
+        //
+        // Always extract AgentId from the Grain key for consistency.
+        var grainKey = this.GetPrimaryKeyString();
+        var agentId = ExtractAgentIdFromGrainKey(grainKey);
+        return InitializeAgentInternalAsync(agentTypeName, agentId, persistState: true);
     }
 
-    private async Task<bool> InitializeAgentInternalAsync(string agentTypeName, bool persistState = false)
+    /// <summary>
+    /// Extract Agent ID from Grain Key
+    /// Grain Key format: "AgentTypeShortName:AgentId" or just "AgentId" (for backwards compatibility)
+    /// </summary>
+    private static Guid ExtractAgentIdFromGrainKey(string grainKey)
+    {
+        var colonIndex = grainKey.LastIndexOf(':');
+        if (colonIndex >= 0 && colonIndex < grainKey.Length - 1)
+        {
+            // New format: "AgentType:AgentId"
+            return Guid.Parse(grainKey.Substring(colonIndex + 1));
+        }
+        // Legacy format: just the GUID
+        return Guid.Parse(grainKey);
+    }
+
+    private async Task<bool> InitializeAgentInternalAsync(string agentTypeName, Guid agentId, bool persistState = false)
     {
         if (_isInitialized && _agent != null)
         {
@@ -188,13 +224,6 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
                 return false;
             }
 
-            // Parse Grain ID to Guid
-            if (!Guid.TryParse(this.GetPrimaryKeyString(), out var agentId))
-            {
-                _logger.LogError("Failed to parse Grain ID: {GrainId}", this.GetPrimaryKeyString());
-                return false;
-            }
-
             // Create Agent instance using DI
             _agent = CreateAgentInstance(agentType, agentId);
             if (_agent == null)
@@ -211,10 +240,11 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
             _isInitialized = true;
 
-            // Persist Agent type for recovery
+            // Persist Agent info for recovery
             if (persistState)
             {
                 _grainState.State.AgentTypeName = agentTypeName;
+                _grainState.State.AgentId = agentId;
                 await _grainState.WriteStateAsync();
             }
 
@@ -333,6 +363,10 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         // Inject StateProjector
         StateProjectorInjector.InjectStateProjector(agent, ServiceProvider);
 
+        // Inject StateStore (for snapshots in EventSourcing mode, or simple state persistence)
+        // IMPORTANT: Must inject StateStore BEFORE EventStore, as EventSourcing needs StateStore for snapshots
+        AgentStateStoreInjector.InjectStateStore(agent, ServiceProvider);
+
         // Inject EventStore (only if agent supports EventSourcing)
         if (AgentEventStoreInjector.HasEventStore(agent))
         {
@@ -342,7 +376,32 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         // Inject EventPublisher (Grain acts as the publisher)
         AgentEventPublisherInjector.InjectEventPublisher(agent, new GrainEventPublisher(this, _myStream, _logger, GrainFactory));
 
+        // Inject ActorFactory (for Agents that need to create child Agents)
+        InjectActorFactory(agent);
+
         _logger.LogDebug("Injected dependencies into Agent {AgentId}", agent.Id);
+    }
+
+    private void InjectActorFactory(IGAgent agent)
+    {
+        // Find ActorFactory property via reflection
+        var agentType = agent.GetType();
+        var actorFactoryProperty = agentType.GetProperty("ActorFactory",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+
+        if (actorFactoryProperty == null || !actorFactoryProperty.CanWrite)
+            return;
+
+        // Get IGAgentActorFactory from DI
+        var actorFactory = ServiceProvider.GetService<IGAgentActorFactory>();
+        if (actorFactory == null)
+        {
+            _logger.LogWarning("IGAgentActorFactory not registered in DI, cannot inject into Agent {AgentType}", agentType.Name);
+            return;
+        }
+
+        actorFactoryProperty.SetValue(agent, actorFactory);
+        _logger.LogDebug("Successfully injected ActorFactory into Agent {AgentType}", agentType.Name);
     }
 
     public Task<bool> IsInitializedAsync()
@@ -431,12 +490,16 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
     public Task<Guid> GetIdAsync()
     {
-        var keyString = this.GetPrimaryKeyString();
-        if (Guid.TryParse(keyString, out var guid))
+        var grainKey = this.GetPrimaryKeyString();
+        try
         {
-            return Task.FromResult(guid);
+            return Task.FromResult(ExtractAgentIdFromGrainKey(grainKey));
         }
-        return Task.FromResult(Guid.Empty);
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to parse AgentId from Grain key '{GrainKey}'", grainKey);
+            return Task.FromResult(Guid.Empty);
+        }
     }
 
     public async Task AddChildAsync(Guid childId)
@@ -492,14 +555,11 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
     #region Legacy Methods
 
-    [Obsolete("Use InitializeAgentAsync instead")]
+    [Obsolete("Use InitializeAgentAsync(agentTypeName) instead")]
     public Task ActivateAsync(string? agentTypeName = null, string? stateTypeName = null)
     {
-        if (!string.IsNullOrEmpty(agentTypeName))
-        {
-            return InitializeAgentAsync(agentTypeName);
-        }
-        return Task.CompletedTask;
+        throw new NotSupportedException(
+            "ActivateAsync is obsolete. Use InitializeAgentAsync(agentTypeName) instead.");
     }
 
     public Task DeactivateAsync()
@@ -627,9 +687,26 @@ internal class GrainEventPublisher : IEventPublisher
         var envelopeBytes = memStream.ToArray();
 
         // Direct RPC to target Grain (no stream broadcast)
-        var targetGrain = _grainFactory.GetGrain<IGAgentGrain>(targetAgentId.ToString());
+        var targetGrainId = BuildTargetGrainId(grainId, targetAgentId);
+        var targetGrain = _grainFactory.GetGrain<IGAgentGrain>(targetGrainId);
         await targetGrain.HandleEventAsync(envelopeBytes);
 
         return envelope.Id;
+    }
+
+    private static string BuildTargetGrainId(string currentGrainId, Guid targetAgentId)
+    {
+        // Preferred Grain key format: "{AgentTypeShortName}:{AgentId}"
+        // If current grain uses the typed format, default P2P routing to the same agent type.
+        // Cross-type routing is intentionally not supported by this overload because target type is unknown.
+        var colonIndex = currentGrainId.LastIndexOf(':');
+        if (colonIndex > 0)
+        {
+            var typePrefix = currentGrainId.Substring(0, colonIndex);
+            return $"{typePrefix}:{targetAgentId}";
+        }
+
+        // Backward compatible: untyped grain key format "{AgentId}"
+        return targetAgentId.ToString();
     }
 }

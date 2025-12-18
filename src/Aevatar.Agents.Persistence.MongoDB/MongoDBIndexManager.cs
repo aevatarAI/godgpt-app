@@ -18,11 +18,10 @@ internal static class MongoDBIndexManager
     /// <summary>
     /// Ensure indexes for AgentStateDocument collection
     /// </summary>
-    /// <typeparam name="TState">State type</typeparam>
     /// <param name="collection">MongoDB collection</param>
     /// <param name="ct">Cancellation token</param>
-    public static async Task EnsureStateStoreIndexesAsync<TState>(
-        IMongoCollection<AgentStateDocument<TState>> collection,
+    public static async Task EnsureStateStoreIndexesAsync(
+        IMongoCollection<AgentStateDocument> collection,
         CancellationToken ct = default)
     {
         var collectionKey = GetCollectionKey(collection);
@@ -34,17 +33,17 @@ internal static class MongoDBIndexManager
 
         try
         {
-            var indexKeys = Builders<AgentStateDocument<TState>>.IndexKeys;
+            var indexKeys = Builders<AgentStateDocument>.IndexKeys;
             var indexes = new[]
             {
                 // AgentId is [BsonId] so MongoDB creates _id index automatically
                 // We add UpdatedAt index for TTL cleanup and time-range queries
-                new CreateIndexModel<AgentStateDocument<TState>>(
+                new CreateIndexModel<AgentStateDocument>(
                     indexKeys.Descending(x => x.UpdatedAt),
                     new CreateIndexOptions { Name = "idx_updated_at", Background = true }),
 
                 // Version index for optimistic concurrency queries
-                new CreateIndexModel<AgentStateDocument<TState>>(
+                new CreateIndexModel<AgentStateDocument>(
                     indexKeys.Combine(
                         indexKeys.Ascending(x => x.AgentId),
                         indexKeys.Ascending(x => x.Version)),
@@ -145,8 +144,8 @@ internal static class MongoDBIndexManager
     /// <summary>
     /// Synchronous version for constructor usage (not recommended for hot paths)
     /// </summary>
-    public static void EnsureStateStoreIndexes<TState>(
-        IMongoCollection<AgentStateDocument<TState>> collection)
+    public static void EnsureStateStoreIndexes(
+        IMongoCollection<AgentStateDocument> collection)
     {
         var collectionKey = GetCollectionKey(collection);
         if (!InitializedCollections.TryAdd(collectionKey, true))
@@ -156,14 +155,14 @@ internal static class MongoDBIndexManager
 
         try
         {
-            var indexKeys = Builders<AgentStateDocument<TState>>.IndexKeys;
+            var indexKeys = Builders<AgentStateDocument>.IndexKeys;
             var indexes = new[]
             {
-                new CreateIndexModel<AgentStateDocument<TState>>(
+                new CreateIndexModel<AgentStateDocument>(
                     indexKeys.Descending(x => x.UpdatedAt),
                     new CreateIndexOptions { Name = "idx_updated_at", Background = true }),
 
-                new CreateIndexModel<AgentStateDocument<TState>>(
+                new CreateIndexModel<AgentStateDocument>(
                     indexKeys.Combine(
                         indexKeys.Ascending(x => x.AgentId),
                         indexKeys.Ascending(x => x.Version)),

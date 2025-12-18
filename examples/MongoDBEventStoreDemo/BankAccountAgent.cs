@@ -10,8 +10,9 @@ namespace MongoDBEventStoreDemo;
 /// <summary>
 /// Bank Account Agent with EventSourcing support (MongoDB backend)
 /// Demonstrates EventSourcing V2 API with MongoDB storage
+/// Implements IBankAccountAgent for RPC calls via actor.As&lt;IBankAccountAgent&gt;()
 /// </summary>
-public class BankAccountAgent : GAgentBase<BankAccountState>
+public class BankAccountAgent : GAgentBase<BankAccountState>, IBankAccountAgent
 {
     // No need for ID constructor anymore - framework handles it automatically!
     
@@ -133,6 +134,16 @@ public class BankAccountAgent : GAgentBase<BankAccountState>
         await ConfirmEventsAsync();
         Logger?.LogInformation("Batch transactions completed. New balance: ${Balance}", State.Balance);
     }
+
+    // ========== RPC Methods (for actor.As<IBankAccountAgent>()) ==========
+
+    public Task<double> GetBalanceAsync() => Task.FromResult(State.Balance);
+
+    public Task<string> GetAccountHolderAsync() => Task.FromResult(State.AccountHolder);
+
+    public Task<int> GetTransactionCountAsync() => Task.FromResult(State.TransactionCount);
+
+    public Task<long> GetCurrentVersionAsync() => Task.FromResult(GetCurrentVersion());
 
     // ========== Pure Functional State Transition ==========
 

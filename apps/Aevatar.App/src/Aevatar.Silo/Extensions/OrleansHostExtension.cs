@@ -13,6 +13,7 @@ using Orleans.Streams;
 using Orleans.Streams.Kafka.Config;
 using MongoDB.Driver;
 using Orleans.Providers.MongoDB.Configuration;
+using Orleans.Providers.MongoDB.StorageProviders.Serializers;
 using Confluent.Kafka;
 using Serilog;
 
@@ -98,12 +99,9 @@ public static class OrleansHostExtension
                 options.CollectionPrefix = "StreamStorage";
             });
 
-            // EventStore Storage
-            siloBuilder.AddMongoDBGrainStorage("EventStoreStorage", options => 
-            {
-                options.DatabaseName = databaseName;
-                options.CollectionPrefix = "EventStore";
-            });
+            // Note: EventStoreStorage removed - EventStorageGrain no longer used
+            // Snapshots are now handled by IStateStore<TState> (stored in agent_states_{StateType})
+            // Events are stored via IEventRepository (stored in agent_events_{AgentType})
 
             // 6. Configure Streaming (Orleans Memory Stream for now, Kafka later)
             ConfigureStreaming(siloBuilder, configuration);
@@ -111,10 +109,15 @@ public static class OrleansHostExtension
             // 7. Configure Serializer
             siloBuilder.ConfigureServices(services => 
             {
+                // Orleans internal serializer (for RPC communication)
                 services.AddSerializer(serializerBuilder => 
                 {
                     serializerBuilder.AddProtobufSerializer();
                 });
+                
+                // MongoDB GrainStorage serializer: Use Binary (Orleans serializer) instead of JSON
+                // This enables Protobuf binary storage for Grain State, reducing storage size ~30-50%
+                services.AddSingleton<IGrainStateSerializer, BinaryGrainStateSerializer>();
             });
             
             // 8. Logging & Timeouts

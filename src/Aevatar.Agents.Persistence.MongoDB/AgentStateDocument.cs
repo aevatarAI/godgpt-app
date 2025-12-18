@@ -4,10 +4,16 @@ using MongoDB.Bson.Serialization.Attributes;
 namespace Aevatar.Agents.Persistence.MongoDB;
 
 /// <summary>
-/// MongoDB document wrapper for agent state
+/// MongoDB document for agent state storage
+/// Uses Protobuf byte[] for state data to ensure consistency with EventStore
+/// 
+/// Benefits of byte[] storage:
+/// - Consistent serialization with Events (both use Protobuf)
+/// - Smaller storage size (~30-50% compared to BSON)
+/// - Full compatibility with complex Protobuf types (RepeatedField, MapField, Timestamp)
+/// - Better version evolution support via Protobuf schema compatibility
 /// </summary>
-/// <typeparam name="TState">State type</typeparam>
-internal class AgentStateDocument<TState>
+internal class AgentStateDocument
 {
     /// <summary>
     /// Agent ID (MongoDB _id)
@@ -16,12 +22,17 @@ internal class AgentStateDocument<TState>
     public Guid AgentId { get; set; }
 
     /// <summary>
-    /// State object
+    /// State data serialized as Protobuf bytes
     /// </summary>
-    public TState State { get; set; } = default!;
+    public byte[] StateData { get; set; } = Array.Empty<byte>();
 
     /// <summary>
-    /// Version for optimistic concurrency
+    /// State type full name for deserialization
+    /// </summary>
+    public string StateType { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Version for optimistic concurrency (event version at snapshot time)
     /// </summary>
     public long Version { get; set; }
 

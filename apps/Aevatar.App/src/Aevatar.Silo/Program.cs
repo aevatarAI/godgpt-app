@@ -91,6 +91,9 @@ public class Program
             {
                 services.AddOrleansHealthChecks();
                 
+                // Configure MongoDB BSON serializers (must be first)
+                MongoDBServiceCollectionExtensions.ConfigureBsonSerializers();
+                
                 // MongoDB configuration
                 var mongoConnectionString = context.Configuration.GetConnectionString("MongoDB") 
                     ?? "mongodb://localhost:27017/AevatarBusiness";

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Aevatar.Agents.Orleans.MongoDB;
 using Aevatar.Agents.Runtime.Orleans.EventSourcing;
 using Google.Protobuf;
@@ -43,22 +44,27 @@ public class EventDocument
 /// - Easy cleanup of old events
 /// - Better indexing and performance
 /// 
-/// IMPORTANT: Each agent type should have its own collection for:
-/// - Better query performance (smaller index)
+/// Supports per-agent-type collections for:
+/// - Better query performance (smaller index per type)
 /// - Isolated scaling and optimization
 /// - Business-level separation
 /// </summary>
 public class MongoEventRepository : IEventRepository
 {
-    private readonly IMongoCollection<EventDocument> _collection;
+    private readonly IMongoDatabase _database;
+    private readonly IMongoCollection<EventDocument> _defaultCollection;
+    private readonly ConcurrentDictionary<string, IMongoCollection<EventDocument>> _collectionCache = new();
     private readonly ILogger<MongoEventRepository> _logger;
-    private readonly string _collectionName;
+    private readonly string _defaultCollectionName;
     private readonly MongoEventRepositoryOptions _options;
     private static readonly SemaphoreSlim _globalIndexLock = new(1, 1);
-    private static readonly HashSet<string> _indexedCollections = new();
+    // IMPORTANT: EnsureIndexesAsync can be called concurrently (fire-and-forget from constructors).
+    // Use a concurrent set to avoid HashSet race conditions.
+    private static readonly ConcurrentDictionary<string, byte> _indexedCollections = new();
 
     /// <summary>
     /// Creates a new MongoEventRepository with configuration options
+    /// Supports per-agent-type collections when agentTypeName is provided
     /// </summary>
     public MongoEventRepository(
         IMongoClient mongoClient,
@@ -68,21 +74,21 @@ public class MongoEventRepository : IEventRepository
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         
-        var database = mongoClient.GetDatabase(options.DatabaseName);
-        _collection = database.GetCollection<EventDocument>(options.CollectionName);
-        _collectionName = options.CollectionName;
+        _database = mongoClient.GetDatabase(options.DatabaseName);
+        _defaultCollectionName = options.CollectionName;
+        _defaultCollection = _database.GetCollection<EventDocument>(_defaultCollectionName);
         
         if (_options.EnableDetailedLogging)
         {
             _logger.LogInformation(
-                "MongoEventRepository initialized: Database={Database}, Collection={Collection}, " +
+                "MongoEventRepository initialized: Database={Database}, DefaultCollection={Collection}, " +
                 "MaxPoolSize={MaxPoolSize}, MinPoolSize={MinPoolSize}",
                 options.DatabaseName, options.CollectionName,
                 options.MaxConnectionPoolSize, options.MinConnectionPoolSize);
         }
         
-        // Eagerly ensure indexes on construction (async fire-and-forget)
-        _ = EnsureIndexesAsync();
+        // Eagerly ensure indexes on default collection (async fire-and-forget)
+        _ = EnsureIndexesAsync(_defaultCollection, _defaultCollectionName);
     }
     
     /// <summary>
@@ -102,22 +108,67 @@ public class MongoEventRepository : IEventRepository
               logger)
     {
     }
+    
+    /// <summary>
+    /// Get collection for a specific agent type
+    /// Uses ConcurrentDictionary for thread-safe caching
+    /// </summary>
+    private IMongoCollection<EventDocument> GetCollection(string? agentTypeName)
+    {
+        if (string.IsNullOrEmpty(agentTypeName))
+            return _defaultCollection;
+        
+        // Normalize collection name: extract short type name
+        var shortTypeName = GetShortTypeName(agentTypeName);
+        var collectionName = $"agent_events_{shortTypeName}";
+        
+        return _collectionCache.GetOrAdd(collectionName, name =>
+        {
+            var collection = _database.GetCollection<EventDocument>(name);
+            
+            _logger.LogInformation(
+                "Created new event collection for agent type: {AgentType} -> {CollectionName}",
+                agentTypeName, name);
+            
+            // Ensure indexes for new collection (async fire-and-forget)
+            _ = EnsureIndexesAsync(collection, name);
+            
+            return collection;
+        });
+    }
+    
+    /// <summary>
+    /// Extract short type name from full type name
+    /// e.g., "Aevatar.Payment.Agents.PaymentRecordGAgent" -> "PaymentRecordGAgent"
+    /// </summary>
+    private static string GetShortTypeName(string fullTypeName)
+    {
+        // Handle assembly-qualified names
+        var typeNamePart = fullTypeName.Split(',')[0].Trim();
+        
+        // Get class name only
+        var lastDot = typeNamePart.LastIndexOf('.');
+        return lastDot >= 0 ? typeNamePart[(lastDot + 1)..] : typeNamePart;
+    }
 
     /// <summary>
-    /// Ensure indexes are created eagerly on repository construction
+    /// Ensure indexes are created eagerly for a collection
     /// Uses global lock to ensure each collection is indexed only once across all instances
     /// </summary>
-    private async Task EnsureIndexesAsync(CancellationToken ct = default)
+    private async Task EnsureIndexesAsync(
+        IMongoCollection<EventDocument> collection, 
+        string collectionName, 
+        CancellationToken ct = default)
     {
         // Check if this collection has already been indexed
-        if (_indexedCollections.Contains(_collectionName))
+        if (_indexedCollections.ContainsKey(collectionName))
             return;
 
         await _globalIndexLock.WaitAsync(ct);
         try
         {
             // Double-check after acquiring lock
-            if (_indexedCollections.Contains(_collectionName))
+            if (_indexedCollections.ContainsKey(collectionName))
                 return;
 
             var indexModels = new List<CreateIndexModel<EventDocument>>();
@@ -165,22 +216,22 @@ public class MongoEventRepository : IEventRepository
                 }));
 
             // Batch create all indexes
-            await _collection.Indexes.CreateManyAsync(indexModels, ct);
+            await collection.Indexes.CreateManyAsync(indexModels, ct);
 
-            _indexedCollections.Add(_collectionName);
+            _indexedCollections.TryAdd(collectionName, 0);
             
             _logger.LogInformation(
                 "MongoDB indexes created for collection '{Collection}': agentId+version DESC (UNIQUE), timestamp, eventType",
-                _collectionName);
+                collectionName);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, 
                 "Failed to create indexes for collection '{Collection}' (may already exist)",
-                _collectionName);
+                collectionName);
             
             // Mark as indexed even on failure to avoid retry storms
-            _indexedCollections.Add(_collectionName);
+            _indexedCollections.TryAdd(collectionName, 0);
         }
         finally
         {
@@ -191,10 +242,14 @@ public class MongoEventRepository : IEventRepository
     public async Task<long> AppendEventsAsync(
         Guid agentId,
         IEnumerable<AgentStateEvent> events,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
         var eventsList = events.ToList();
         if (!eventsList.Any()) return 0;
+
+        // Get collection for this agent type
+        var collection = GetCollection(agentTypeName);
 
         // Prepare event documents (events already have version assigned by Grain)
         var eventDocuments = eventsList.Select(evt => new EventDocument
@@ -208,14 +263,14 @@ public class MongoEventRepository : IEventRepository
         }).ToList();
 
         // Batch insert to MongoDB
-        await _collection.InsertManyAsync(eventDocuments, cancellationToken: ct);
+        await collection.InsertManyAsync(eventDocuments, cancellationToken: ct);
 
         // ✅ Optimized: Use last element (versions are sequential)
         var newVersion = eventsList[^1].Version;
         
         _logger.LogDebug(
-            "Appended {Count} events for agent {AgentId}, version range: {First}-{Last}",
-            eventsList.Count, agentId, eventsList[0].Version, newVersion);
+            "Appended {Count} events for agent {AgentId} (type: {AgentType}), version range: {First}-{Last}",
+            eventsList.Count, agentId, agentTypeName ?? "default", eventsList[0].Version, newVersion);
 
         return newVersion;
     }
@@ -225,8 +280,12 @@ public class MongoEventRepository : IEventRepository
         long? fromVersion = null,
         long? toVersion = null,
         int? maxCount = null,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
+        // Get collection for this agent type
+        var collection = GetCollection(agentTypeName);
+        
         // Build MongoDB query
         var filterBuilder = Builders<EventDocument>.Filter;
         var filter = filterBuilder.Eq(e => e.AgentId, agentId);
@@ -239,7 +298,7 @@ public class MongoEventRepository : IEventRepository
 
         // Query MongoDB
         // Note: Index is { agentId: 1, version: -1 }, but MongoDB can scan in reverse for ASC sort
-        var query = _collection
+        var query = collection
             .Find(filter)
             .Sort(Builders<EventDocument>.Sort.Ascending(e => e.Version));
 
@@ -254,18 +313,22 @@ public class MongoEventRepository : IEventRepository
             .ToList();
 
         _logger.LogDebug(
-            "Retrieved {Count} events for agent {AgentId} (version range: {From}-{To})",
-            events.Count, agentId, fromVersion, toVersion);
+            "Retrieved {Count} events for agent {AgentId} (type: {AgentType}, version range: {From}-{To})",
+            events.Count, agentId, agentTypeName ?? "default", fromVersion, toVersion);
 
         return events;
     }
 
     public async Task<long> GetLatestVersionAsync(
         Guid agentId,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
+        // Get collection for this agent type
+        var collection = GetCollection(agentTypeName);
+        
         // ✅ Perfect index usage: { agentId: 1, version: -1 } with DESC sort
-        var latestEvent = await _collection
+        var latestEvent = await collection
             .Find(e => e.AgentId == agentId)
             .SortByDescending(e => e.Version)
             .Limit(1)
@@ -277,18 +340,22 @@ public class MongoEventRepository : IEventRepository
     public async Task DeleteEventsBeforeVersionAsync(
         Guid agentId,
         long version,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
+        // Get collection for this agent type
+        var collection = GetCollection(agentTypeName);
+        
         var filter = Builders<EventDocument>.Filter.And(
             Builders<EventDocument>.Filter.Eq(e => e.AgentId, agentId),
             Builders<EventDocument>.Filter.Lt(e => e.Version, version)
         );
 
-        var result = await _collection.DeleteManyAsync(filter, ct);
+        var result = await collection.DeleteManyAsync(filter, ct);
 
         _logger.LogInformation(
-            "Deleted {Count} old events for agent {AgentId} (before version {Version})",
-            result.DeletedCount, agentId, version);
+            "Deleted {Count} old events for agent {AgentId} (type: {AgentType}, before version {Version})",
+            result.DeletedCount, agentId, agentTypeName ?? "default", version);
     }
 }
 

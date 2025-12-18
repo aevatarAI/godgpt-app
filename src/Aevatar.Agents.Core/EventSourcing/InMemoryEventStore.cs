@@ -8,11 +8,11 @@ namespace Aevatar.Agents.Core.EventSourcing;
 /// <summary>
 /// In-memory event store implementation (for testing and Local runtime)
 /// Thread-safe with optimistic concurrency control
+/// Note: Snapshots are handled by IStateStore<TState> in GAgentBase
 /// </summary>
 public class InMemoryEventStore : IEventStore, IDisposable
 {
     private readonly ConcurrentDictionary<Guid, List<AgentStateEvent>> _events = new();
-    private readonly ConcurrentDictionary<Guid, AgentSnapshot> _snapshots = new();
     private readonly Channel<EventStoreOperation> _operationChannel;
     private readonly Task _processingTask;
     private readonly CancellationTokenSource _cts = new();
@@ -36,8 +36,10 @@ public class InMemoryEventStore : IEventStore, IDisposable
         Guid agentId,
         IEnumerable<AgentStateEvent> events,
         long expectedVersion,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
+        // Note: InMemoryEventStore ignores agentTypeName (single in-memory store)
         var tcs = new TaskCompletionSource<long>(TaskCreationOptions.RunContinuationsAsynchronously);
 
         var operation = new AppendEventsOperation(
@@ -57,8 +59,10 @@ public class InMemoryEventStore : IEventStore, IDisposable
         long? fromVersion = null,
         long? toVersion = null,
         int? maxCount = null,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
+        // Note: InMemoryEventStore ignores agentTypeName (single in-memory store)
         // Read operations are safe to run concurrently with ConcurrentDictionary
         // as long as we accept that we might miss events being currently appended
         if (!_events.TryGetValue(agentId, out var eventList))
@@ -95,8 +99,12 @@ public class InMemoryEventStore : IEventStore, IDisposable
         return Task.FromResult<IReadOnlyList<AgentStateEvent>>(query.ToList());
     }
 
-    public Task<long> GetLatestVersionAsync(Guid agentId, CancellationToken ct = default)
+    public Task<long> GetLatestVersionAsync(
+        Guid agentId, 
+        string? agentTypeName = null,
+        CancellationToken ct = default)
     {
+        // Note: InMemoryEventStore ignores agentTypeName (single in-memory store)
         if (!_events.TryGetValue(agentId, out var eventList))
         {
             return Task.FromResult(0L);
@@ -111,19 +119,7 @@ public class InMemoryEventStore : IEventStore, IDisposable
         }
     }
 
-    // ========== Snapshot Operations ==========
-
-    public Task SaveSnapshotAsync(Guid agentId, AgentSnapshot snapshot, CancellationToken ct = default)
-    {
-        _snapshots[agentId] = snapshot;
-        return Task.CompletedTask;
-    }
-
-    public Task<AgentSnapshot?> GetLatestSnapshotAsync(Guid agentId, CancellationToken ct = default)
-    {
-        _snapshots.TryGetValue(agentId, out var snapshot);
-        return Task.FromResult(snapshot);
-    }
+    // Note: Snapshots are handled by IStateStore<TState> in GAgentBase
 
     // ========== Background Processing ==========
 

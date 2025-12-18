@@ -9,6 +9,8 @@ namespace Aevatar.Agents.Persistence.MongoDB.Tests;
 
 /// <summary>
 /// Tests for MongoDBServiceCollectionExtensions
+/// 
+/// Uses Protobuf-generated test types for byte[] serialization compatibility.
 /// </summary>
 public class MongoDBServiceCollectionExtensionsTests
 {
@@ -188,16 +190,4 @@ public class MongoDBServiceCollectionExtensionsTests
 
         result.Should().BeSameAs(services);
     }
-}
-
-// Test types for generic parameters
-public class TestState
-{
-    public string Name { get; set; } = string.Empty;
-    public int Value { get; set; }
-}
-
-public class TestConfig
-{
-    public string Setting { get; set; } = string.Empty;
 }

@@ -1,13 +1,19 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.EventSourcing;
+using Aevatar.Agents.Abstractions.Persistence;
 using Aevatar.Agents.Core.EventDeduplication;
 using Aevatar.Agents.Core.EventSourcing;
+using Aevatar.Agents.Persistence.MongoDB;
 using Aevatar.Agents.Runtime.Local;
 using Aevatar.Agents.Runtime.Local.Subscription;
 using Aevatar.Agents.Runtime.Orleans;
+using Aevatar.Agents.Runtime.Orleans.EventSourcing;
+using Aevatar.Agents.Orleans.MongoDB;
+using Aevatar.Agents.Runtime.Orleans.MongoDB;
 using Aevatar.Agents.Runtime.Orleans.Subscription;
 using Aevatar.Agents.Runtime.ProtoActor.Subscription;
 using Microsoft.Extensions.Logging;
+using MongoDB.Driver;
 
 namespace Demo.Api;
 
@@ -21,8 +27,29 @@ public static class AgentRuntimeExtensions
             .GetSection(AgentRuntimeOptions.SectionName)
             .Get<AgentRuntimeOptions>() ?? new AgentRuntimeOptions();
 
-        // 注册Event Store（用于Event Sourcing）
-        services.AddSingleton<IEventStore, InMemoryEventStore>();
+        var databaseName = configuration.GetSection("Storage")
+            .GetValue("DatabaseName", "DemoAgents");
+
+        // 注册 Event Repository (MongoDB)
+        services.AddSingleton<IEventRepository>(sp =>
+        {
+            var client = sp.GetRequiredService<IMongoClient>();
+            var logger = sp.GetRequiredService<ILogger<MongoEventRepository>>();
+            return new MongoEventRepository(client, new MongoEventRepositoryOptions
+            {
+                DatabaseName = databaseName,
+                CollectionName = "agent_events",
+                EnableDetailedLogging = true
+            }, logger);
+        });
+
+        // 注册 Event Store (Orleans)
+        services.AddSingleton<IEventStore>(sp =>
+        {
+            var eventRepository = sp.GetRequiredService<IEventRepository>();
+            var logger = sp.GetRequiredService<ILogger<OrleansEventStore>>();
+            return new OrleansEventStore(eventRepository, logger);
+        });
         
         // 注册Event Deduplicator（共享组件）
         services.AddSingleton<IEventDeduplicator>(sp => 

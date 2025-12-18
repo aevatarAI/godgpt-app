@@ -1,0 +1,86 @@
+syntax = "proto3";
+
+package ComplexState.Server;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "ComplexState.Server";
+
+// Sub-object for testing nested object handling
+message AddressInfo {
+    string street = 1;
+    string city = 2;
+    string country = 3;
+    int32 zip_code = 4;
+}
+
+// Sub-object for order item
+message OrderItem {
+    string product_id = 1;
+    string product_name = 2;
+    int32 quantity = 3;
+    double price = 4;
+}
+
+// State with complex types for testing ES projection
+message ComplexAgentState {
+    string agent_id = 1;
+    string name = 2;
+    int32 age = 3;
+    double balance = 4;
+    bool is_active = 5;
+    google.protobuf.Timestamp created_at = 6;
+    google.protobuf.Timestamp last_updated = 7;
+    
+    // Nested object (sub-object)
+    AddressInfo address = 8;
+    
+    // List of strings
+    repeated string tags = 9;
+    
+    // List of nested objects
+    repeated OrderItem orders = 10;
+    
+    // Map (dictionary) string -> string
+    map<string, string> metadata = 11;
+    
+    // Map (dictionary) string -> int
+    map<string, int32> scores = 12;
+    
+    // List of integers
+    repeated int32 lucky_numbers = 13;
+}
+
+// Events for the complex state agent
+message UpdateProfileEvent {
+    string name = 1;
+    int32 age = 2;
+    AddressInfo address = 3;
+}
+
+message AddTagEvent {
+    string tag = 1;
+}
+
+message AddOrderEvent {
+    OrderItem order = 1;
+}
+
+message SetMetadataEvent {
+    string key = 1;
+    string value = 2;
+}
+
+message SetScoreEvent {
+    string category = 1;
+    int32 score = 2;
+}
+
+message AddLuckyNumberEvent {
+    int32 number = 1;
+}
+
+message UpdateBalanceEvent {
+    double amount = 1;
+}
+

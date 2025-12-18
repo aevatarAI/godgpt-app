@@ -1,5 +1,8 @@
 using System;
 using Microsoft.Extensions.DependencyInjection;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver;
 
 namespace Aevatar.Agents.Persistence.MongoDB;
@@ -9,6 +12,36 @@ namespace Aevatar.Agents.Persistence.MongoDB;
 /// </summary>
 public static class MongoDBServiceCollectionExtensions
 {
+    private static bool _serializersConfigured;
+    private static readonly object _lock = new();
+
+    /// <summary>
+    /// Configure MongoDB BSON serialization globally (call at startup)
+    /// </summary>
+    public static void ConfigureBsonSerializers()
+    {
+        if (_serializersConfigured) return;
+
+        lock (_lock)
+        {
+            if (_serializersConfigured) return;
+
+            // Register Guid serializer with Standard representation
+            // to avoid "GuidRepresentation is Unspecified" errors
+            try
+            {
+                BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.Standard));
+            }
+            catch (BsonSerializationException)
+            {
+                // Already registered
+            }
+
+            _serializersConfigured = true;
+        }
+    }
+
+
     /// <summary>
     /// Add MongoDB services with proper connection management
     /// 
@@ -27,6 +60,9 @@ public static class MongoDBServiceCollectionExtensions
         string databaseName = "aevatar")
     {
         ArgumentNullException.ThrowIfNull(connectionString);
+
+        // Configure BSON serializers (once globally)
+        ConfigureBsonSerializers();
 
         // Register IMongoClient as singleton (connection pool is managed internally)
         services.AddSingleton<IMongoClient>(_ => new MongoClient(connectionString));
@@ -63,14 +99,14 @@ public static class MongoDBServiceCollectionExtensions
     /// Add MongoDB state store for a specific state type
     /// Requires AddAevatarMongoDB to be called first
     /// </summary>
-    /// <typeparam name="TState">State type (must be a class)</typeparam>
+    /// <typeparam name="TState">State type (must be Protobuf IMessage)</typeparam>
     /// <param name="services">Service collection</param>
     /// <param name="collectionName">Optional custom collection name</param>
     /// <returns>Service collection for chaining</returns>
     public static IServiceCollection AddMongoDBStateStore<TState>(
         this IServiceCollection services,
         string? collectionName = null)
-        where TState : class
+        where TState : class, Google.Protobuf.IMessage<TState>, new()
     {
         services.AddSingleton(sp =>
         {

@@ -191,17 +191,33 @@ try
         Console.WriteLine($"   ⚠️ Count failed: {countResponse.StatusCode}");
     }
 
-    // Test 6: Search with query
+    // Test 6: Search with query (using POST /api/states/query)
     Console.WriteLine("\n6️⃣  Search with query string...");
-    var searchResponse = await client.GetAsync($"/api/states/{agentType}?query=name:Alice*");
+    var queryRequest = new
+    {
+        agentType = agentType,
+        queryString = "name:Alice*",
+        pageIndex = 0,
+        pageSize = 10
+    };
+    var searchResponse = await client.PostAsJsonAsync("/api/states/query", queryRequest);
     if (searchResponse.IsSuccessStatusCode)
     {
         var searchResult = await searchResponse.Content.ReadFromJsonAsync<JsonElement>();
         Console.WriteLine($"   ✅ Found: {searchResult.GetProperty("totalCount").GetInt64()} results");
+        if (searchResult.TryGetProperty("items", out var items) && items.GetArrayLength() > 0)
+        {
+            Console.WriteLine($"   ✅ Retrieved {items.GetArrayLength()} items in this page");
+        }
     }
     else
     {
         Console.WriteLine($"   ⚠️ Search failed: {searchResponse.StatusCode}");
+        if (verbose)
+        {
+            var body = await searchResponse.Content.ReadAsStringAsync();
+            Console.WriteLine($"      {body}");
+        }
     }
 
     Console.WriteLine("\n════════════════════════════════════════════════════════════");

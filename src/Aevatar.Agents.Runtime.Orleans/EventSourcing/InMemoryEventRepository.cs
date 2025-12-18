@@ -22,8 +22,10 @@ public class InMemoryEventRepository : IEventRepository
     public Task<long> AppendEventsAsync(
         Guid agentId,
         IEnumerable<AgentStateEvent> events,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
+        // Note: InMemoryEventRepository ignores agentTypeName (single in-memory store)
         var eventsList = events.ToList();
         if (!eventsList.Any()) return Task.FromResult(0L);
 
@@ -41,8 +43,10 @@ public class InMemoryEventRepository : IEventRepository
         long? fromVersion = null,
         long? toVersion = null,
         int? maxCount = null,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
+        // Note: InMemoryEventRepository ignores agentTypeName (single in-memory store)
         if (!_events.TryGetValue(agentId, out var events))
         {
             return Task.FromResult<IReadOnlyList<AgentStateEvent>>(Array.Empty<AgentStateEvent>());
@@ -72,8 +76,10 @@ public class InMemoryEventRepository : IEventRepository
 
     public Task<long> GetLatestVersionAsync(
         Guid agentId,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
+        // Note: InMemoryEventRepository ignores agentTypeName (single in-memory store)
         if (!_events.TryGetValue(agentId, out var events) || !events.Any())
         {
             return Task.FromResult(0L);
@@ -85,8 +91,10 @@ public class InMemoryEventRepository : IEventRepository
     public Task DeleteEventsBeforeVersionAsync(
         Guid agentId,
         long version,
+        string? agentTypeName = null,
         CancellationToken ct = default)
     {
+        // Note: InMemoryEventRepository ignores agentTypeName (single in-memory store)
         if (_events.TryGetValue(agentId, out var events))
         {
             // Create a new bag without old events (ConcurrentBag doesn't support Remove)

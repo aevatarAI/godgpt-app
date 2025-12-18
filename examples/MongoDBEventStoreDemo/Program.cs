@@ -1,9 +1,12 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.EventSourcing;
+using Aevatar.Agents.Abstractions.Extensions;
+using Aevatar.Agents.Abstractions.Persistence;
 using Aevatar.Agents.AI.Core;
 using Aevatar.Agents.Core.Extensions;
 using Aevatar.Agents.Core.Factory;
 using Aevatar.Agents.Orleans.MongoDB;
+using Aevatar.Agents.Persistence.MongoDB;
 using Aevatar.Agents.Runtime.Orleans;
 using Aevatar.Agents.Runtime.Orleans.EventSourcing;
 using Aevatar.Agents.Runtime.Orleans.MongoDB;
@@ -77,6 +80,14 @@ var host = Host.CreateDefaultBuilder(args)
             
             .AddMemoryStreams(AevatarAgentsOrleansConstants.StreamProviderName)
 
+            // ✅ MongoDB GrainStorage for Default (required by OrleansGAgentGrain)
+            .AddMongoDBGrainStorage("Default", options =>
+            {
+                options.DatabaseName = mongoDatabase;
+                options.CollectionPrefix = collectionPrefix;
+                options.CreateShardKeyForCosmos = false;
+            })
+            
             // ✅ MongoDB GrainStorage for EventStore
             .AddMongoDBGrainStorage("EventStoreStorage", options =>
             {
@@ -95,24 +106,38 @@ var host = Host.CreateDefaultBuilder(args)
     })
     .ConfigureServices(services =>
     {
-        // ✅ Register MongoDB Event Repository (decoupled storage implementation)
-        // IMPORTANT: Use separate collection per Agent type for better performance
+        // ✅ Register IMongoDatabase for StateStore
+        services.AddSingleton<IMongoDatabase>(sp =>
+        {
+            var client = sp.GetRequiredService<IMongoClient>();
+            return client.GetDatabase(mongoDatabase);
+        });
+        
+        // ✅ Register MongoDB Event Repository (auto-sharding by AgentType)
+        // Collection naming: agent_events_{AgentTypeName} (automatic)
+        // Each agent type gets its own collection for better query performance
         services.AddSingleton<IEventRepository>(sp =>
         {
             var mongoClient = sp.GetRequiredService<IMongoClient>();
             var logger = sp.GetRequiredService<ILogger<MongoEventRepository>>();
             
-            // Collection name pattern: {AgentType}Events
-            // This ensures each agent type has its own collection with optimized indexes
             return new MongoEventRepository(
                 mongoClient, 
-                mongoDatabase, 
-                collectionName: "BankAccountEvents",  // ✅ Separate collection for BankAccount
+                new MongoEventRepositoryOptions
+                {
+                    DatabaseName = mongoDatabase,
+                    CollectionName = "agent_events",  // Base name, actual = agent_events_{AgentType}
+                    EnableDetailedLogging = true
+                },
                 logger);
         });
         
-        // ✅ Register OrleansEventStore (uses IEventRepository + IEventStorageGrain)
+        // ✅ Register OrleansEventStore (uses IEventRepository)
         services.AddSingleton<IEventStore, OrleansEventStore>();
+        
+        // ✅ Register MongoDB StateStore for Snapshots (per-state-type collections)
+        // Collection naming: agent_states_{StateTypeName}
+        services.AddSingleton(typeof(IStateStore<>), typeof(MongoDBStateStore<>));
         
         // ✅ Register AIGAgentFactory for automatic EventStore injection
         services.AddSingleton<IGAgentFactory, AIGAgentFactory>();
@@ -147,53 +172,52 @@ try
     // ✅ Create Actor (EventSourcing is automatically enabled via IEventStore registration)
     var actor = await factory.CreateGAgentActorAsync<BankAccountAgent>(accountId);
 
-    var agent = actor.GetAgent() as BankAccountAgent;
-    if (agent == null)
-    {
-        throw new InvalidOperationException("Failed to get BankAccountAgent instance");
-    }
+    // ✅ Use RPC proxy to call Agent methods (works across Orleans boundaries!)
+    var agent = actor.As<IBankAccountAgent>();
 
     // Create account
     await agent.CreateAccountAsync("Alice Smith", 100m);
     
     Console.WriteLine($"✅ Account created");
-    Console.WriteLine($"   Holder: {agent.GetState().AccountHolder}");
-    Console.WriteLine($"   Balance: ${agent.GetState().Balance:F2}");
-    Console.WriteLine($"   Version: v{agent.GetCurrentVersion()}\n");
+    Console.WriteLine($"   Holder: {await agent.GetAccountHolderAsync()}");
+    Console.WriteLine($"   Balance: ${await agent.GetBalanceAsync():F2}");
+    Console.WriteLine($"   Version: v{await agent.GetCurrentVersionAsync()}\n");
 
     // Individual transactions
     Console.WriteLine("💰 Individual Transactions:");
     Console.WriteLine("────────────────────────────");
     await agent.DepositAsync(1000m, "Salary");
-    Console.WriteLine($"  ✓ Deposited $1000 (Salary) - Balance: ${agent.GetState().Balance:F2}");
+    Console.WriteLine($"  ✓ Deposited $1000 (Salary) - Balance: ${await agent.GetBalanceAsync():F2}");
 
     await agent.DepositAsync(500m, "Bonus");
-    Console.WriteLine($"  ✓ Deposited $500 (Bonus) - Balance: ${agent.GetState().Balance:F2}");
+    Console.WriteLine($"  ✓ Deposited $500 (Bonus) - Balance: ${await agent.GetBalanceAsync():F2}");
 
     await agent.WithdrawAsync(300m, "Rent");
-    Console.WriteLine($"  ✓ Withdrew $300 (Rent) - Balance: ${agent.GetState().Balance:F2}\n");
+    Console.WriteLine($"  ✓ Withdrew $300 (Rent) - Balance: ${await agent.GetBalanceAsync():F2}\n");
 
-    Console.WriteLine($"💵 Current Balance: ${agent.GetState().Balance:F2}");
-    Console.WriteLine($"📈 Current Version: v{agent.GetCurrentVersion()}\n");
+    Console.WriteLine($"💵 Current Balance: ${await agent.GetBalanceAsync():F2}");
+    Console.WriteLine($"📈 Current Version: v{await agent.GetCurrentVersionAsync()}\n");
 
     // ============================================================
-    // Part 2: Batch Transactions
+    // Part 2: More Transactions (simulating batch)
     // ============================================================
-    Console.WriteLine("📍 Part 2: Batch Transactions");
+    Console.WriteLine("📍 Part 2: Additional Transactions");
     Console.WriteLine("══════════════════════════════════════════════════\n");
 
-    Console.WriteLine("⚡ Submitting 3 transactions in one batch:");
+    Console.WriteLine("⚡ Executing 3 more transactions:");
     Console.WriteLine("────────────────────────────────────────────");
-    await agent.BatchTransactionsAsync(
-        (200m, "Freelance payment"),
-        (-150m, "Groceries"),
-        (100m, "Gift")
-    );
+    
+    await agent.DepositAsync(200m, "Freelance payment");
+    Console.WriteLine($"  ✓ Deposited $200 (Freelance) - Balance: ${await agent.GetBalanceAsync():F2}");
+    
+    await agent.WithdrawAsync(150m, "Groceries");
+    Console.WriteLine($"  ✓ Withdrew $150 (Groceries) - Balance: ${await agent.GetBalanceAsync():F2}");
+    
+    await agent.DepositAsync(100m, "Gift");
+    Console.WriteLine($"  ✓ Deposited $100 (Gift) - Balance: ${await agent.GetBalanceAsync():F2}\n");
 
-    Console.WriteLine($"  ✓ Batch completed - Balance: ${agent.GetState().Balance:F2}\n");
-
-    Console.WriteLine($"💵 Current Balance: ${agent.GetState().Balance:F2}");
-    Console.WriteLine($"📈 Current Version: v{agent.GetCurrentVersion()} (Snapshot will trigger at v11)\n");
+    Console.WriteLine($"💵 Current Balance: ${await agent.GetBalanceAsync():F2}");
+    Console.WriteLine($"📈 Current Version: v{await agent.GetCurrentVersionAsync()} (Snapshot will trigger at v10)\n");
 
     // ============================================================
     // Part 2.5: More Transactions to Trigger Snapshot
@@ -205,26 +229,26 @@ try
     Console.WriteLine("────────────────────────────────────────────");
     
     await agent.DepositAsync(300m, "Investment return");
-    Console.WriteLine($"  ✓ Deposited $300 (Investment) - Balance: ${agent.GetState().Balance:F2}, Version: v{agent.GetCurrentVersion()}");
+    Console.WriteLine($"  ✓ Deposited $300 (Investment) - Balance: ${await agent.GetBalanceAsync():F2}, Version: v{await agent.GetCurrentVersionAsync()}");
 
     await agent.WithdrawAsync(100m, "Utilities");
-    Console.WriteLine($"  ✓ Withdrew $100 (Utilities) - Balance: ${agent.GetState().Balance:F2}, Version: v{agent.GetCurrentVersion()}");
+    Console.WriteLine($"  ✓ Withdrew $100 (Utilities) - Balance: ${await agent.GetBalanceAsync():F2}, Version: v{await agent.GetCurrentVersionAsync()}");
 
     await agent.DepositAsync(50m, "Cashback");
-    Console.WriteLine($"  ✓ Deposited $50 (Cashback) - Balance: ${agent.GetState().Balance:F2}, Version: v{agent.GetCurrentVersion()}");
+    Console.WriteLine($"  ✓ Deposited $50 (Cashback) - Balance: ${await agent.GetBalanceAsync():F2}, Version: v{await agent.GetCurrentVersionAsync()}");
 
     await agent.WithdrawAsync(200m, "Dining");
-    Console.WriteLine($"  ✓ Withdrew $200 (Dining) - Balance: ${agent.GetState().Balance:F2}, Version: v{agent.GetCurrentVersion()}");
+    Console.WriteLine($"  ✓ Withdrew $200 (Dining) - Balance: ${await agent.GetBalanceAsync():F2}, Version: v{await agent.GetCurrentVersionAsync()}");
 
     await agent.DepositAsync(150m, "Gift received");
-    Console.WriteLine($"  ✓ Deposited $150 (Gift) - Balance: ${agent.GetState().Balance:F2}, Version: v{agent.GetCurrentVersion()}");
+    Console.WriteLine($"  ✓ Deposited $150 (Gift) - Balance: ${await agent.GetBalanceAsync():F2}, Version: v{await agent.GetCurrentVersionAsync()}");
 
     Console.WriteLine($"\n📸 Snapshot should be saved at version 10!");
-    Console.WriteLine($"💵 Final Balance: ${agent.GetState().Balance:F2}");
-    Console.WriteLine($"📈 Final Version: v{agent.GetCurrentVersion()}\n");
+    Console.WriteLine($"💵 Final Balance: ${await agent.GetBalanceAsync():F2}");
+    Console.WriteLine($"📈 Final Version: v{await agent.GetCurrentVersionAsync()}\n");
 
-    var balanceBeforeRecovery = agent.GetState().Balance;
-    var versionBeforeRecovery = agent.GetCurrentVersion();
+    var balanceBeforeRecovery = await agent.GetBalanceAsync();
+    var versionBeforeRecovery = await agent.GetCurrentVersionAsync();
 
     // ============================================================
     // Part 3: Event Replay with Snapshot (Crash Recovery Simulation)
@@ -239,22 +263,21 @@ try
     // Event sourcing automatically replays events from storage when the Agent handles events
     var actor2 = await factory.CreateGAgentActorAsync<BankAccountAgent>(accountId);
 
-    var agent2 = actor2.GetAgent() as BankAccountAgent;
-    if (agent2 == null)
-    {
-        throw new InvalidOperationException("Failed to get BankAccountAgent instance on recovery");
-    }
+    // ✅ Use RPC proxy for recovered Agent
+    var agent2 = actor2.As<IBankAccountAgent>();
 
     Console.WriteLine("✅ Grain reactivated and state recovered from MongoDB!");
-    Console.WriteLine($"   Holder: {agent2.GetState().AccountHolder}");
-    Console.WriteLine($"   Balance: ${agent2.GetState().Balance:F2}");
-    Console.WriteLine($"   Transactions: {agent2.GetState().TransactionCount}");
-    Console.WriteLine($"   Version: v{agent2.GetCurrentVersion()}");
+    Console.WriteLine($"   Holder: {await agent2.GetAccountHolderAsync()}");
+    Console.WriteLine($"   Balance: ${await agent2.GetBalanceAsync():F2}");
+    Console.WriteLine($"   Transactions: {await agent2.GetTransactionCountAsync()}");
+    Console.WriteLine($"   Version: v{await agent2.GetCurrentVersionAsync()}");
     Console.WriteLine($"   📸 Recovery used Snapshot + incremental events!\n");
 
     // Verify consistency
-    if (Math.Abs(agent2.GetState().Balance - balanceBeforeRecovery) < 0.01 && 
-        agent2.GetCurrentVersion() == versionBeforeRecovery)
+    var recoveredBalance = await agent2.GetBalanceAsync();
+    var recoveredVersion = await agent2.GetCurrentVersionAsync();
+    if (Math.Abs(recoveredBalance - balanceBeforeRecovery) < 0.01 && 
+        recoveredVersion == versionBeforeRecovery)
     {
         Console.WriteLine("✅ State consistency verified!");
         Console.WriteLine($"   Balance matches: ${balanceBeforeRecovery:F2}");
@@ -263,28 +286,21 @@ try
     else
     {
         Console.WriteLine("❌ State mismatch detected!");
-        Console.WriteLine($"   Expected: ${balanceBeforeRecovery:F2}, Got: ${agent2.GetState().Balance:F2}");
-        Console.WriteLine($"   Expected version: v{versionBeforeRecovery}, Got: v{agent2.GetCurrentVersion()}\n");
+        Console.WriteLine($"   Expected: ${balanceBeforeRecovery:F2}, Got: ${recoveredBalance:F2}");
+        Console.WriteLine($"   Expected version: v{versionBeforeRecovery}, Got: v{recoveredVersion}\n");
     }
 
     // ============================================================
-    // Part 4: Transaction History
+    // Part 4: Final Statistics (via RPC)
     // ============================================================
-    Console.WriteLine("📍 Part 4: Transaction History (from MongoDB)");
+    Console.WriteLine("📍 Part 4: Final Statistics (from MongoDB via RPC)");
     Console.WriteLine("══════════════════════════════════════════════════\n");
 
-    var state = agent2.GetState();
-    Console.WriteLine("📜 Complete History:");
-    foreach (var entry in state.History)
-    {
-        Console.WriteLine($"   {entry}");
-    }
-
-    Console.WriteLine($"\n📊 Final Statistics:");
-    Console.WriteLine($"   Account Holder: {state.AccountHolder}");
-    Console.WriteLine($"   Final Balance: ${state.Balance:F2}");
-    Console.WriteLine($"   Total Transactions: {state.TransactionCount}");
-    Console.WriteLine($"   Event Version: v{agent2.GetCurrentVersion()}\n");
+    Console.WriteLine($"📊 Final Statistics:");
+    Console.WriteLine($"   Account Holder: {await agent2.GetAccountHolderAsync()}");
+    Console.WriteLine($"   Final Balance: ${await agent2.GetBalanceAsync():F2}");
+    Console.WriteLine($"   Total Transactions: {await agent2.GetTransactionCountAsync()}");
+    Console.WriteLine($"   Event Version: v{await agent2.GetCurrentVersionAsync()}\n");
 
     // ============================================================
     // MongoDB Collection Information

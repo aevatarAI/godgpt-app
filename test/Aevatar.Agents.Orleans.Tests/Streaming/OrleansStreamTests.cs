@@ -46,10 +46,8 @@ public class OrleansStreamTests : IClassFixture<OrleansStreamTests.ClusterFixtur
         var childGrain = _grainFactory.GetGrain<IGAgentGrain>(childId.ToString());
 
         // 激活grains (使用Orleans测试的实际Agent类型)
-        await parentGrain.ActivateAsync("Aevatar.Agents.Orleans.Tests.OrleansTestAgent",
-            "Aevatar.Agents.Orleans.Tests.OrleansTestState");
-        await childGrain.ActivateAsync("Aevatar.Agents.Orleans.Tests.OrleansTestAgent",
-            "Aevatar.Agents.Orleans.Tests.OrleansTestState");
+        await parentGrain.InitializeAgentAsync("Aevatar.Agents.Orleans.Tests.OrleansTestAgent");
+        await childGrain.InitializeAgentAsync("Aevatar.Agents.Orleans.Tests.OrleansTestAgent");
 
         // Act - 建立父子关系
         await childGrain.SetParentAsync(parentId);

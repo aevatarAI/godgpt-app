@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package Aevatar.Agents.Persistence.MongoDB.Tests;
+
+// Test state for MongoDBStateStore tests
+message StateStoreTestState {
+    string name = 1;
+    int32 value = 2;
+}
+
+// Another test state for type isolation tests
+message AnotherTestState {
+    string id = 1;
+}
+
+// Test state for service collection extension tests
+message TestState {
+    string name = 1;
+    int32 value = 2;
+}
+
+// Test config for service collection extension tests  
+message TestConfig {
+    string setting = 1;
+}
+

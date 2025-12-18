@@ -2,56 +2,77 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions.Persistence;
+using Google.Protobuf;
 using MongoDB.Driver;
 
 namespace Aevatar.Agents.Persistence.MongoDB;
 
 /// <summary>
-/// MongoDB state store implementation
-/// Stores agent states in MongoDB collections
+/// MongoDB state store implementation with Protobuf serialization
+/// 
+/// Architecture:
+/// - State is serialized to byte[] using Protobuf (same as Events)
+/// - Provides consistent serialization across Events and States
+/// - Supports all Protobuf types (RepeatedField, MapField, Timestamp, etc.)
 /// </summary>
-/// <typeparam name="TState">State type</typeparam>
+/// <typeparam name="TState">State type (must be Protobuf IMessage)</typeparam>
 public class MongoDBStateStore<TState> : IVersionedStateStore<TState>
-    where TState : class
+    where TState : class, IMessage<TState>, new()
 {
-    private readonly IMongoCollection<AgentStateDocument<TState>> _collection;
+    private readonly IMongoCollection<AgentStateDocument> _collection;
+    private readonly string _stateTypeName;
+
+    // Static constructor ensures BSON serializers are configured once per type
+    static MongoDBStateStore()
+    {
+        MongoDBServiceCollectionExtensions.ConfigureBsonSerializers();
+    }
 
     /// <summary>
-    /// Create MongoDB state store
+    /// Create MongoDB state store with Protobuf serialization
     /// </summary>
     /// <param name="database">MongoDB database instance</param>
-    /// <param name="collectionName">Optional custom collection name</param>
+    /// <param name="collectionName">Optional custom collection name (default: agent_states_{StateTypeName})</param>
     public MongoDBStateStore(
         IMongoDatabase database,
         string? collectionName = null)
     {
         var name = collectionName ?? $"agent_states_{typeof(TState).Name}";
-        _collection = database.GetCollection<AgentStateDocument<TState>>(name);
+        _collection = database.GetCollection<AgentStateDocument>(name);
+        _stateTypeName = typeof(TState).FullName ?? typeof(TState).Name;
 
-        // Ensure indexes are created (idempotent, runs once per collection per process)
+        // Ensure indexes are created (idempotent)
         MongoDBIndexManager.EnsureStateStoreIndexes(_collection);
     }
 
     /// <summary>
-    /// Load state from MongoDB
+    /// Load state from MongoDB and deserialize from Protobuf bytes
     /// </summary>
     public async Task<TState?> LoadAsync(Guid agentId, CancellationToken ct = default)
     {
         var doc = await _collection.Find(x => x.AgentId == agentId)
                                    .FirstOrDefaultAsync(ct)
                                    .ConfigureAwait(false);
-        return doc?.State;
+
+        if (doc == null || doc.StateData == null || doc.StateData.Length == 0)
+            return null;
+
+        // Deserialize from Protobuf bytes
+        var state = new TState();
+        state.MergeFrom(doc.StateData);
+        return state;
     }
 
     /// <summary>
-    /// Save state to MongoDB (upsert)
+    /// Serialize state to Protobuf bytes and save to MongoDB (upsert)
     /// </summary>
     public async Task SaveAsync(Guid agentId, TState state, CancellationToken ct = default)
     {
-        var doc = new AgentStateDocument<TState>
+        var doc = new AgentStateDocument
         {
             AgentId = agentId,
-            State = state,
+            StateData = SerializeState(state),
+            StateType = _stateTypeName,
             Version = 1,
             UpdatedAt = DateTime.UtcNow
         };
@@ -64,39 +85,29 @@ public class MongoDBStateStore<TState> : IVersionedStateStore<TState>
     }
 
     /// <summary>
-    /// Save with version control (optimistic concurrency)
+    /// Save with version control (for EventSourcing snapshots)
+    /// Version represents the event version at snapshot time
     /// </summary>
-    public async Task SaveAsync(Guid agentId, TState state, long expectedVersion, CancellationToken ct = default)
+    public async Task SaveAsync(Guid agentId, TState state, long version, CancellationToken ct = default)
     {
-        var currentVersion = await GetCurrentVersionAsync(agentId, ct).ConfigureAwait(false);
-
-        if (currentVersion != expectedVersion)
-        {
-            throw new StateVersionConflictException(agentId, expectedVersion, currentVersion);
-        }
-
-        var doc = new AgentStateDocument<TState>
+        var doc = new AgentStateDocument
         {
             AgentId = agentId,
-            State = state,
-            Version = currentVersion + 1,
+            StateData = SerializeState(state),
+            StateType = _stateTypeName,
+            Version = version,
             UpdatedAt = DateTime.UtcNow
         };
 
-        var result = await _collection.ReplaceOneAsync(
-            x => x.AgentId == agentId && x.Version == expectedVersion,
+        await _collection.ReplaceOneAsync(
+            x => x.AgentId == agentId,
             doc,
-            new ReplaceOptions { IsUpsert = false },
+            new ReplaceOptions { IsUpsert = true },
             ct).ConfigureAwait(false);
-
-        if (result.MatchedCount == 0)
-        {
-            throw new StateVersionConflictException(agentId, expectedVersion, currentVersion);
-        }
     }
 
     /// <summary>
-    /// Get current version
+    /// Get current version (for EventSourcing replay optimization)
     /// </summary>
     public async Task<long> GetCurrentVersionAsync(Guid agentId, CancellationToken ct = default)
     {
@@ -124,6 +135,14 @@ public class MongoDBStateStore<TState> : IVersionedStateStore<TState>
                                       .ConfigureAwait(false);
         return count > 0;
     }
+
+    /// <summary>
+    /// Serialize Protobuf state to byte array
+    /// </summary>
+    private static byte[] SerializeState(TState state)
+    {
+        return state.ToByteArray();
+    }
 }
 
 /// <summary>
@@ -133,18 +152,12 @@ public static class MongoDBStateStoreFactory
 {
     /// <summary>
     /// Create MongoDB state store factory function using DI-registered IMongoDatabase
-    /// 
-    /// Preferred usage:
-    /// <code>
-    /// services.AddAevatarMongoDB("mongodb://localhost:27017");
-    /// services.AddMongoDBStateStore&lt;MyState&gt;();
-    /// </code>
     /// </summary>
-    /// <typeparam name="TState">State type</typeparam>
+    /// <typeparam name="TState">State type (must be Protobuf IMessage)</typeparam>
     /// <param name="collectionName">Optional custom collection name</param>
     /// <returns>Factory function for DI</returns>
     public static Func<IServiceProvider, object> Create<TState>(string? collectionName = null)
-        where TState : class
+        where TState : class, IMessage<TState>, new()
     {
         return sp =>
         {

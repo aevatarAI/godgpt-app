@@ -193,41 +193,7 @@ public class InMemoryEventStoreTests
         latestVersion.Should().Be(0);
     }
 
-    [Fact(DisplayName = "SaveSnapshotAsync should save snapshot")]
-    public async Task SaveSnapshotAsync_ShouldSaveSnapshot()
-    {
-        // Arrange
-        var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
-        var snapshot = new AgentSnapshot
-        {
-            Version = 100,
-            Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
-            StateData = Any.Pack(new ParentChangedEvent { NewParent = "snapshot" })
-        };
-
-        // Act
-        await store.SaveSnapshotAsync(agentId, snapshot);
-        var retrievedSnapshot = await store.GetLatestSnapshotAsync(agentId);
-
-        // Assert
-        retrievedSnapshot.Should().NotBeNull();
-        retrievedSnapshot!.Version.Should().Be(100);
-    }
-
-    [Fact(DisplayName = "GetLatestSnapshotAsync should return null for non-existent snapshot")]
-    public async Task GetLatestSnapshotAsync_ShouldReturnNullForNonExistentSnapshot()
-    {
-        // Arrange
-        var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
-
-        // Act
-        var snapshot = await store.GetLatestSnapshotAsync(agentId);
-
-        // Assert
-        snapshot.Should().BeNull();
-    }
+    // Note: Snapshot tests removed - snapshots are now handled by IStateStore<TState> in GAgentBase
 
     [Fact(DisplayName = "Multiple agents should be isolated")]
     public async Task MultipleAgents_ShouldBeIsolated()

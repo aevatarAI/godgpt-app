@@ -90,7 +90,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         Assert.NotNull(description);
     }
 
-    [Fact(Skip = "OrleansGAgentActor is now a lightweight proxy, hierarchy ops need to use Grain RPC")]
+    [Fact]
     public async Task Factory_Created_Actors_Should_Support_Hierarchical_Relationships()
     {
         // Arrange
@@ -137,7 +137,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         Assert.NotEqual(eventId2, eventId3);
     }
 
-    [Fact(Skip = "OrleansGAgentActor is now a lightweight proxy, hierarchy ops need to use Grain RPC")]
+    [Fact]
     public async Task Multiple_Actors_Should_Work_Independently()
     {
         // Arrange

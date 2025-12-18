@@ -73,7 +73,9 @@ internal static class StateProtectionContext
             throw new InvalidOperationException(
                 $"{operationName} is not allowed outside of event handlers. " +
                 "State must only be modified within event handler methods to ensure consistency through the event stream. " +
-                "Consider publishing an event and handling it in an [EventHandler] method instead.");
+                "RPC methods cannot directly modify State. " +
+                "For EventSourcing mode: Use RaiseEvent + ConfirmEventsAsync. " +
+                "For StateStore mode: Publish an event and handle it in an [EventHandler] method instead.");
         }
     }
 }

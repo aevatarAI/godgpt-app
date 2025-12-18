@@ -1,0 +1,100 @@
+name: Publish MyGet Packages
+
+# Trigger only when a version tag is pushed, e.g. v1.2.3
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+# Displayed run name for easier tracking
+run-name: Publish MyGet Packages from ${{ github.ref }}
+
+# Prevent multiple publishes for the same tag
+concurrency:
+  group: workflow-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      # Checkout repository code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Install .NET SDK (matching your repo target)
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Cache NuGet packages to speed up restores
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+
+      # Extract package version from git tag
+      # Example: v1.2.3 → VERSION=1.2.3
+      - name: Get version from git tag
+        run: |
+          TAG=$(git describe --tags --abbrev=0)
+          VERSION=${TAG#v}
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      # Restore all dependencies for the solution
+      - name: Restore solution
+        run: dotnet restore
+
+      # Build everything once in Release mode
+      - name: Build solution
+        run: dotnet build --configuration Release --no-restore
+
+      # Pack ONLY the explicitly listed projects
+      - name: Pack selected projects
+        run: |
+          mkdir -p nupkg
+
+          # Explicit allowlist of NuGet-packable projects
+          PROJECTS=(
+            src/Aevatar.Agents.Abstractions/Aevatar.Agents.Abstractions.csproj
+            src/Aevatar.Agents.AI.Abstractions/Aevatar.Agents.AI.Abstractions.csproj
+            src/Aevatar.Agents.AI.Core/Aevatar.Agents.AI.Core.csproj
+            src/Aevatar.Agents.AI.LLM.Tornado/Aevatar.Agents.AI.LLM.Tornado.csproj
+            src/Aevatar.Agents.AI.MEAI/Aevatar.Agents.AI.MEAI.csproj
+            src/Aevatar.Agents.AI.WithProcessStrategy/Aevatar.Agents.AI.WithProcessStrategy.csproj
+            src/Aevatar.Agents.AI.WithTool/Aevatar.Agents.AI.WithTool.csproj
+            src/Aevatar.Agents.Cognitive/Aevatar.Agents.Cognitive.csproj
+            src/Aevatar.Agents.Core/Aevatar.Agents.Core.csproj
+            src/Aevatar.Agents.CreativeReasoning/Aevatar.Agents.CreativeReasoning.csproj
+            src/Aevatar.Agents.Maker/Aevatar.Agents.Maker.csproj
+            src/Aevatar.Agents.Persistence.MongoDB/Aevatar.Agents.Persistence.MongoDB.csproj
+            src/Aevatar.Agents.Runtime/Aevatar.Agents.Runtime.csproj
+            src/Aevatar.Agents.Runtime.Local/Aevatar.Agents.Runtime.Local.csproj
+            src/Aevatar.Agents.Runtime.Orleans/Aevatar.Agents.Runtime.Orleans.csproj
+            src/Aevatar.Agents.Runtime.Orleans.MongoDB/Aevatar.Agents.Runtime.Orleans.MongoDB.csproj
+            src/Aevatar.Agents.Runtime.ProtoActor/Aevatar.Agents.Runtime.ProtoActor.csproj
+          )
+
+          # Pack each project using the version derived from the tag
+          for PROJECT in "${PROJECTS[@]}"; do
+            echo "📦 Packing $PROJECT"
+            dotnet pack "$PROJECT" \
+              --configuration Release \
+              --no-build \
+              -p:PackageVersion=${VERSION} \
+              --output ./nupkg
+          done
+
+      # Push all generated NuGet packages to MyGet
+      - name: Publish to MyGet
+        env:
+          MYGET_URL: ${{ secrets.MYGET_URL }}
+          MYGET_API_KEY: ${{ secrets.MYGET_API_KEY }}
+        run: |
+          dotnet nuget push "nupkg/*.nupkg" \
+            --api-key $MYGET_API_KEY \
+            --source $MYGET_URL \
+            --skip-duplicate

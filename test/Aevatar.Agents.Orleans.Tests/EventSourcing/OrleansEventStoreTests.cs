@@ -10,6 +10,7 @@ namespace Aevatar.Agents.Orleans.Tests.EventSourcing;
 /// <summary>
 /// OrleansEventStore integration tests
 /// Tests the Orleans-based EventStore implementation using TestCluster
+/// Note: Snapshot tests removed - snapshots are now handled by IStateStore<TState> in GAgentBase
 /// </summary>
 public class OrleansEventStoreTests : AevatarAgentsTestBase
 {
@@ -19,10 +20,12 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
     public OrleansEventStoreTests(ClusterFixture fixture) : base(fixture)
     {
         // Get the shared IEventRepository instance used by both Silo and Client
-        // This ensures EventStorageGrain (in Silo) and tests use the same repository instance
+        // This ensures OrleansEventStore (in Silo) and tests use the same repository instance
         _eventRepository = Fixture.GetSharedEventRepository();
         _logger = ServiceProvider.GetRequiredService<ILogger<OrleansEventStore>>();
     }
+
+    private OrleansEventStore CreateEventStore() => new OrleansEventStore(_eventRepository, _logger);
 
     private AgentStateEvent CreateTestEvent(Guid agentId, long version, string eventType)
     {
@@ -39,26 +42,11 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
         };
     }
 
-    private AgentSnapshot CreateTestSnapshot(Guid agentId, long version)
-    {
-        return new AgentSnapshot
-        {
-            Version = version,
-            Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
-            StateData = Google.Protobuf.WellKnownTypes.Any.Pack(new LLMAgentState
-            {
-                CurrentVersion = version,
-                LlmConfig = $"config-{version}"
-            }),
-            Metadata = { { "snapshotKey", $"snapshotValue-{version}" } }
-        };
-    }
-
     [Fact(DisplayName = "OrleansEventStore should append events successfully")]
     public async Task AppendEventsAsync_ShouldAppendEvents()
     {
         // Arrange
-        var eventStore = new OrleansEventStore(GrainFactory, _eventRepository, _logger);
+        var eventStore = CreateEventStore();
         var agentId = Guid.NewGuid();
         var events = new List<AgentStateEvent>
         {
@@ -80,11 +68,14 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
     public async Task AppendEventsAsync_ShouldEnforceOptimisticConcurrency()
     {
         // Arrange
-        var eventStore = new OrleansEventStore(GrainFactory, _eventRepository, _logger);
+        var eventStore = CreateEventStore();
         var agentId = Guid.NewGuid();
-        await eventStore.AppendEventsAsync(agentId, new[] { CreateTestEvent(agentId, 1, "Event1") }, 0);
+        // First append: version 0 -> 1
+        var firstVersion = await eventStore.AppendEventsAsync(agentId, new[] { CreateTestEvent(agentId, 1, "Event1") }, 0);
+        Assert.Equal(1, firstVersion);
 
         // Act & Assert
+        // Second append: expected version 0, but current version is 1, should throw
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
             eventStore.AppendEventsAsync(agentId, new[] { CreateTestEvent(agentId, 2, "Event2") }, 0));
 
@@ -95,7 +86,7 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
     public async Task GetEventsAsync_ShouldSupportRangeQuery()
     {
         // Arrange
-        var eventStore = new OrleansEventStore(GrainFactory, _eventRepository, _logger);
+        var eventStore = CreateEventStore();
         var agentId = Guid.NewGuid();
         var events = new List<AgentStateEvent>
         {
@@ -119,7 +110,7 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
     public async Task GetLatestVersionAsync_ShouldReturnLatestVersion()
     {
         // Arrange
-        var eventStore = new OrleansEventStore(GrainFactory, _eventRepository, _logger);
+        var eventStore = CreateEventStore();
         var agentId = Guid.NewGuid();
         var events = new List<AgentStateEvent>
         {
@@ -136,29 +127,13 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
         Assert.Equal(3, latestVersion);
     }
 
-    [Fact(DisplayName = "OrleansEventStore should save and retrieve snapshot")]
-    public async Task SaveSnapshotAsync_ShouldSaveSnapshot()
-    {
-        // Arrange
-        var eventStore = new OrleansEventStore(GrainFactory, _eventRepository, _logger);
-        var agentId = Guid.NewGuid();
-        var snapshot = CreateTestSnapshot(agentId, 5);
-
-        // Act
-        await eventStore.SaveSnapshotAsync(agentId, snapshot);
-        var retrievedSnapshot = await eventStore.GetLatestSnapshotAsync(agentId);
-
-        // Assert
-        Assert.NotNull(retrievedSnapshot);
-        Assert.Equal(5, retrievedSnapshot.Version);
-        Assert.Equal("snapshotValue-5", retrievedSnapshot.Metadata["snapshotKey"]);
-    }
+    // Note: Snapshot tests removed - snapshots are now handled by IStateStore<TState> in GAgentBase
 
     [Fact(DisplayName = "OrleansEventStore should return 0 for non-existent agent")]
     public async Task GetLatestVersionAsync_ShouldReturn0ForNonExistentAgent()
     {
         // Arrange
-        var eventStore = new OrleansEventStore(GrainFactory, _eventRepository, _logger);
+        var eventStore = CreateEventStore();
         var agentId = Guid.NewGuid();
 
         // Act
@@ -166,19 +141,5 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
 
         // Assert
         Assert.Equal(0, version);
-    }
-
-    [Fact(DisplayName = "OrleansEventStore should return null for non-existent snapshot")]
-    public async Task GetLatestSnapshotAsync_ShouldReturnNullForNonExistentSnapshot()
-    {
-        // Arrange
-        var eventStore = new OrleansEventStore(GrainFactory, _eventRepository, _logger);
-        var agentId = Guid.NewGuid();
-
-        // Act
-        var snapshot = await eventStore.GetLatestSnapshotAsync(agentId);
-
-        // Assert
-        Assert.Null(snapshot);
     }
 }
