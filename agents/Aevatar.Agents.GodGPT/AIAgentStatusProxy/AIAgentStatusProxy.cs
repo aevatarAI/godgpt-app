@@ -81,7 +81,7 @@ public class AIAgentStatusProxy :
             Logger.LogError(ex, $"[AIAgentStatusProxy][SendProxyInitStatusUpdateAsync] Failed to send status update: {status} for proxy: {this.GetPrimaryKey()}");
         }
     }
-    public async Task<List<ChatMessage>?> ChatWithHistory(string prompt, List<ChatMessage>? history = null,
+    public new async Task<List<ChatMessage>?> ChatWithHistory(string prompt, List<ChatMessage>? history = null,
         ExecutionPromptSettings? promptSettings = null, AIChatContextDto? context = null)
     {
         var systemPrompt = State.PromptTemplate;
@@ -91,7 +91,7 @@ public class AIAgentStatusProxy :
         return await base.ChatWithHistory(prompt, selectedHistory, promptSettings, context: context);
     }
 
-    public async Task<bool> PromptWithStreamAsync(string prompt, List<ChatMessage>? history = null,
+    public new async Task<bool> PromptWithStreamAsync(string prompt, List<ChatMessage>? history = null,
         ExecutionPromptSettings? promptSettings = null, AIChatContextDto? context = null, List<string>? imageKeys = null)
     {
         // Get system prompt

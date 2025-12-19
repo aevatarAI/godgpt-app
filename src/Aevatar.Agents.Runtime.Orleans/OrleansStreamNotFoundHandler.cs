@@ -34,8 +34,8 @@ public class OrleansStreamNotFoundHandler : IStreamNotFoundHandler
             var grain = _grainFactory.GetGrain<IGAgentGrain>(streamId.ToString());
             
             // Invoke a method to force activation
-            // ActivateAsync is a safe idempotent method
-            await grain.ActivateAsync();
+            // GetDescriptionAsync will trigger grain activation if not already activated
+            await grain.GetDescriptionAsync();
             
             _logger.LogDebug("Successfully triggered activation for Orleans Grain {AgentId}", streamId);
         }
