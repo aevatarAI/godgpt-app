@@ -4,10 +4,10 @@ using System.Diagnostics;
 using System.Security;
 using System.Threading.Tasks;
 using Aevatar.App.Application.Contracts.Services;
+using Aevatar.App.Application.Services.Admin;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Dtos;
 using Aevatar.Options;
-using Aevatar.Service;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -26,17 +26,18 @@ public class GodGPTManagementController : AbpControllerBase
 {
     private readonly ILogger<GodGPTManagementController> _logger;
     private readonly IUserFeedbackService _userFeedbackService;
-    private readonly IGodGPTService _godGptService;
+    private readonly IGodGPTAdminService _adminService;
     private readonly WeeklyFeedbackReportOptions _options;
 
     public GodGPTManagementController(
         ILogger<GodGPTManagementController> logger, 
         IUserFeedbackService userFeedbackService,
-        IGodGPTService godGptService, IOptionsSnapshot<WeeklyFeedbackReportOptions> options)
+        IGodGPTAdminService adminService, 
+        IOptionsSnapshot<WeeklyFeedbackReportOptions> options)
     {
         _userFeedbackService = userFeedbackService;
         _logger = logger;
-        _godGptService = godGptService;
+        _adminService = adminService;
         _options = options.Value;
     }
 
@@ -133,7 +134,7 @@ public class GodGPTManagementController : AbpControllerBase
         
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var batchInfoDto = await _godGptService.GetBatchInfoAsync(batchId);
+        var batchInfoDto = await _adminService.GetBatchInfoAsync(batchId);
         _logger.LogDebug("[GodGPTInvitationController][GetBatchInfoAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return batchInfoDto;
@@ -168,7 +169,7 @@ public class GodGPTManagementController : AbpControllerBase
     private async Task CheckUserIsManager()
     {
         var currentUserId = (Guid)CurrentUser.Id!;
-        if (!await _godGptService.CheckIsManager(currentUserId))
+        if (!await _adminService.CheckIsManagerAsync(currentUserId))
         {
             _logger.LogInformation($"User is not manager {currentUserId}");
             throw new SecurityException($"User is not manager {currentUserId}");

@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using System.Linq;
 using Aevatar.App.HttpApi.Controllers;
 using Aevatar.Quantum;
-using Aevatar.Service;
+using Aevatar.App.Application.Services.Config;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;
@@ -17,12 +17,12 @@ using Volo.Abp;
 [Authorize]
 public class GodGPTConfigController : AevatarController
 {
-    private readonly IGodGPTService _godGptService;
+    private readonly IGodGPTConfigService _configService;
     private readonly ILogger<GodGPTConfigController> _logger;
 
-    public GodGPTConfigController(IGodGPTService godGptService, ILogger<GodGPTConfigController> logger)
+    public GodGPTConfigController(IGodGPTConfigService configService, ILogger<GodGPTConfigController> logger)
     {
-        _godGptService = godGptService;
+        _configService = configService;
         _logger = logger;
     }
 
@@ -59,7 +59,7 @@ public class GodGPTConfigController : AevatarController
             return "Permission denied: 'systemPromptManager' role is required.";
         }
 
-        var systemPrompt = await _godGptService.GetSystemPromptAsync();
+        var systemPrompt = await _configService.GetSystemPromptAsync();
 
         _logger.LogInformation("System Prompt Retrieved: {SystemPrompt}", systemPrompt);
         return systemPrompt;
@@ -105,7 +105,7 @@ public class GodGPTConfigController : AevatarController
             });
         }
         
-        await _godGptService.UpdateSystemPromptAsync(godGptConfigurationDto);
+        await _configService.UpdateSystemPromptAsync(godGptConfigurationDto);
 
         _logger.LogInformation("System Prompt Updated Successfully by User: {User}", user);
 

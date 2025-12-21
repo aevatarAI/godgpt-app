@@ -1,30 +1,18 @@
 using Aevatar.App.HttpApi.Controllers;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Threading.Tasks;
-using Aevatar.Application.Grains.ChatManager.Dtos;
-using Aevatar.Application.Grains.ChatManager.UserBilling;
-using Aevatar.Application.Grains.Common.Constants;
-using Aevatar.Application.Grains.Common.Options;
+using Aevatar.App.Application.Services.Admin;
+using Aevatar.App.Application.Services.Invitation;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Application.Grains.Invitation;
 using Aevatar.Dtos;
 using Aevatar.GodGPT.Dtos;
-using Aevatar.Service;
-using Aevatar.App.HttpApi.Extensions;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Newtonsoft.Json;
-using OpenIddict.Abstractions;
-using Orleans;
-using Stripe;
 using Volo.Abp;
-using Volo.Abp.Security.Claims;
 
 namespace Aevatar.Controllers;
 
@@ -34,13 +22,18 @@ namespace Aevatar.Controllers;
 [Authorize]
 public class GodGPTInvitationController : AevatarController
 {
-    private readonly ILogger<GodGPTPaymentController> _logger;
-    private readonly IGodGPTService _godGptService;
+    private readonly ILogger<GodGPTInvitationController> _logger;
+    private readonly IGodGPTInvitationService _invitationService;
+    private readonly IGodGPTAdminService _adminService;
 
-    public GodGPTInvitationController(ILogger<GodGPTPaymentController> logger, IGodGPTService godGptService)
+    public GodGPTInvitationController(
+        ILogger<GodGPTInvitationController> logger, 
+        IGodGPTInvitationService invitationService,
+        IGodGPTAdminService adminService)
     {
         _logger = logger;
-        _godGptService = godGptService;
+        _invitationService = invitationService;
+        _adminService = adminService;
     }
     
     [HttpPost("generate-trial-code")]
@@ -48,7 +41,7 @@ public class GodGPTInvitationController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var generateCodesResultDto = await _godGptService.GenerateFreeTrialCodeAsync(currentUserId, input);
+        var generateCodesResultDto = await _adminService.GenerateFreeTrialCodeAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTInvitationController][GenerateFreeTrialCodeAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return generateCodesResultDto;
@@ -59,7 +52,7 @@ public class GodGPTInvitationController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var invitationInfo = await _godGptService.GetInvitationInfoAsync(currentUserId);
+        var invitationInfo = await _invitationService.GetInvitationInfoAsync(currentUserId);
         _logger.LogDebug("[GodGPTInvitationController][GetInvitationInfoAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return invitationInfo;
@@ -70,7 +63,7 @@ public class GodGPTInvitationController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var invitationInfo = await _godGptService.GetInvitationCodeTypeAsync(currentUserId, input);
+        var invitationInfo = await _invitationService.GetInvitationCodeTypeAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTInvitationController][GetInvitationCodeTypeAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return invitationInfo;
@@ -81,7 +74,7 @@ public class GodGPTInvitationController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _godGptService.RedeemInviteCodeAsync(currentUserId, input);
+        var response = await _invitationService.RedeemInviteCodeAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTInvitationController][RedeemInviteCodeAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return response;
@@ -92,7 +85,7 @@ public class GodGPTInvitationController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _godGptService.GetCreditsHistoryAsync(currentUserId, input);
+        var response = await _invitationService.GetCreditsHistoryAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTInvitationController][GetCreditsHistoryAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return response;

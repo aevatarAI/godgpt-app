@@ -6,13 +6,14 @@ using System.IO;
 using System.Threading.Tasks;
 using Aevatar.Application.Constants;
 using Aevatar.App.Application.Contracts.Services;
+using Aevatar.App.Application.Services.Payment;
+using Aevatar.App.Application.Services.Subscription;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.ChatManager.UserBilling;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Options;
 using Aevatar.App.HttpApi.Extensions;
 using Aevatar.GodGPT.Dtos;
-using Aevatar.Service;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -33,15 +34,22 @@ public class GodGPTPaymentController : AevatarController
     private readonly ILogger<GodGPTPaymentController> _logger;
     private readonly IOptionsMonitor<StripeOptions> _stripeOptions;
     private readonly IClusterClient _clusterClient;
-    private readonly IGodGPTService _godGptService;
+    private readonly IGodGPTPaymentService _paymentService;
+    private readonly IGodGPTSubscriptionService _subscriptionService;
     private readonly ILocalizationService _localizationService;
 
-    public GodGPTPaymentController(IClusterClient clusterClient, ILogger<GodGPTPaymentController> logger,
-        IGodGPTService godGptService, IOptionsMonitor<StripeOptions> stripeOptions, ILocalizationService localizationService)
+    public GodGPTPaymentController(
+        IClusterClient clusterClient, 
+        ILogger<GodGPTPaymentController> logger,
+        IGodGPTPaymentService paymentService,
+        IGodGPTSubscriptionService subscriptionService,
+        IOptionsMonitor<StripeOptions> stripeOptions, 
+        ILocalizationService localizationService)
     {
         _clusterClient = clusterClient;
         _logger = logger;
-        _godGptService = godGptService;
+        _paymentService = paymentService;
+        _subscriptionService = subscriptionService;
         _stripeOptions = stripeOptions;
         _localizationService = localizationService;
     }
@@ -60,7 +68,7 @@ public class GodGPTPaymentController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var productDtos = await _godGptService.GetStripeProductsAsync(currentUserId);
+        var productDtos = await _paymentService.GetStripeProductsAsync(currentUserId);
         _logger.LogDebug("[GodGPTPaymentController][GetStripeProductsAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return productDtos;
@@ -71,7 +79,7 @@ public class GodGPTPaymentController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var productDtos = await _godGptService.GetAppleProductsAsync(currentUserId);
+        var productDtos = await _paymentService.GetAppleProductsAsync(currentUserId);
         _logger.LogDebug("[GodGPTPaymentController][GetAppleProductsAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return productDtos;
@@ -89,7 +97,7 @@ public class GodGPTPaymentController : AevatarController
         
         try
         {
-            var result = await _godGptService.CreateCheckoutSessionAsync(currentUserId, createCheckoutSessionInput);
+            var result = await _paymentService.CreateCheckoutSessionAsync(currentUserId, createCheckoutSessionInput);
             _logger.LogDebug("[GodGPTPaymentController][CreateCheckoutSessionAsync] userId: {0}, duration: {1}ms",
                 currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
             if (createCheckoutSessionInput.UiMode == StripeUiMode.EMBEDDED)
@@ -114,7 +122,7 @@ public class GodGPTPaymentController : AevatarController
         _logger.LogWarning("CreateSubscriptionAsync Platform={A}",input.DevicePlatform);
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var responseDto = await _godGptService.CreateSubscriptionAsync(currentUserId, input);
+        var responseDto = await _paymentService.CreateSubscriptionAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTPaymentController][CreateSubscriptionAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return responseDto;
@@ -125,7 +133,7 @@ public class GodGPTPaymentController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var paymentHistories = await _godGptService.GetPaymentHistoryAsync(currentUserId, input);
+        var paymentHistories = await _paymentService.GetPaymentHistoryAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTPaymentController][GetPaymentHistoryAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return paymentHistories;
@@ -136,7 +144,7 @@ public class GodGPTPaymentController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        GetCustomerResponseDto customerResponseDto = await _godGptService.GetStripeCustomerAsync(currentUserId);
+        GetCustomerResponseDto customerResponseDto = await _paymentService.GetStripeCustomerAsync(currentUserId);
         _logger.LogDebug("[GodGPTPaymentController][GetPaymentHistoryAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return customerResponseDto;
@@ -147,7 +155,7 @@ public class GodGPTPaymentController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var cancelSubscription = await _godGptService.CancelSubscriptionAsync(currentUserId, input);
+        var cancelSubscription = await _paymentService.CancelSubscriptionAsync(currentUserId, input);
         _logger.LogDebug("[GodGPTPaymentController][GetPaymentHistoryAsync] userId: {0}, duration: {1}ms",
             currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
         return cancelSubscription;
@@ -164,7 +172,7 @@ public class GodGPTPaymentController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _godGptService.VerifyAppStoreReceiptAsync(currentUserId, input);
+        var response = await _paymentService.VerifyAppStoreReceiptAsync(currentUserId, input);
         // _logger.LogDebug("[GodGPTPaymentController][VerifyAppStoreReceiptAsync] userId: {0}, sandboxMode: {1}, duration: {2}ms",
         //     currentUserId.ToString(), input.SandboxMode.ToString(), stopwatch.ElapsedMilliseconds);
         _logger.LogDebug($"[GodGPTPaymentController][VerifyAppStoreReceiptAsync] userId: {currentUserId.ToString()}, sandboxMode: {input.SandboxMode.ToString()}, duration: {stopwatch.ElapsedMilliseconds}ms");
@@ -195,7 +203,7 @@ public class GodGPTPaymentController : AevatarController
         
         try
         {
-            var response = await _godGptService.VerifyGooglePlayTransactionAsync(currentUserId, input);
+            var response = await _paymentService.VerifyGooglePlayTransactionAsync(currentUserId, input);
             
             _logger.LogInformation("[GodGPTPaymentController][VerifyGooglePlayTransactionAsync] Request completed for userId: {UserId}, transactionId: {TransactionId}, duration: {Duration}ms, result: {IsValid}, errorCode: {ErrorCode}", 
                 currentUserId, input.TransactionIdentifier, stopwatch.ElapsedMilliseconds, response.IsValid, response.ErrorCode);
@@ -234,7 +242,7 @@ public class GodGPTPaymentController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var result = await _godGptService.HasActiveAppleSubscriptionAsync(currentUserId);
+        var result = await _subscriptionService.HasActiveAppleSubscriptionAsync(currentUserId);
         _logger.LogDebug($"[GodGPTPaymentController][HasActiveAppleSubscriptionAsync] userId: {currentUserId.ToString()}, result: {result}, duration: {stopwatch.ElapsedMilliseconds}ms");
         return result;
     }
@@ -244,7 +252,7 @@ public class GodGPTPaymentController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        var result = await _godGptService.HasActiveSubscriptionAsync(currentUserId);
+        var result = await _subscriptionService.HasActiveSubscriptionAsync(currentUserId);
         _logger.LogDebug($"[GodGPTPaymentController][HasActiveSubscriptionAsync] userId: {currentUserId.ToString()}, duration: {stopwatch.ElapsedMilliseconds}ms");
         return result;
     }
