@@ -11,19 +11,34 @@ import "google/protobuf/timestamp.proto";
 // =============================================================================
 
 enum QuotaPlanType {
-    QUOTA_PLAN_TYPE_NONE = 0;
-    QUOTA_PLAN_TYPE_DAY = 1;
-    QUOTA_PLAN_TYPE_MONTH = 2;
-    QUOTA_PLAN_TYPE_YEAR = 3;
-    QUOTA_PLAN_TYPE_WEEK = 4;
+    NONE = 0;
+    DAY = 1;
+    MONTH = 2;
+    YEAR = 3;
+    WEEK = 4;
 }
 
+// Payment status
 enum QuotaPaymentStatus {
-    QUOTA_PAYMENT_STATUS_NONE = 0;
-    QUOTA_PAYMENT_STATUS_ACTIVE = 1;
-    QUOTA_PAYMENT_STATUS_CANCELLED = 2;
-    QUOTA_PAYMENT_STATUS_EXPIRED = 3;
-    QUOTA_PAYMENT_STATUS_PENDING = 4;
+  QUOTA_PAYMENT_STATUS_NONE = 0;
+  QUOTA_PAYMENT_STATUS_PENDING = 1;
+  QUOTA_PAYMENT_STATUS_PROCESSING = 2;
+  QUOTA_PAYMENT_STATUS_COMPLETED = 3;
+  QUOTA_PAYMENT_STATUS_FAILED = 4;
+  QUOTA_PAYMENT_STATUS_REFUNDED_IN_PROCESSING = 5;
+  QUOTA_PAYMENT_STATUS_REFUNDED = 6;
+  QUOTA_PAYMENT_STATUS_CANCELLED_IN_PROCESSING = 7;
+  QUOTA_PAYMENT_STATUS_CANCELLED = 8;
+  QUOTA_PAYMENT_STATUS_DISPUTED = 9;
+  QUOTA_PAYMENT_STATUS_CANCEL_PENDING = 10;
+  QUOTA_PAYMENT_STATUS_UNKNOWN = 11;
+}
+
+// Action type
+enum QuotaActionType {
+  QUOTA_ACTION_TYPE_CONVERSATION = 0;
+  QUOTA_ACTION_TYPE_VOICE_CONVERSATION = 1;
+  QUOTA_ACTION_TYPE_IMAGE_CONVERSATION = 2;
 }
 
 // =============================================================================
@@ -56,6 +71,34 @@ message FreeTrialInfoProto {
     QuotaPlanType plan_type = 3;
     bool is_ultimate = 4;
     string transaction_id = 5;
+}
+
+// =============================================================================
+// DTO Types (for interface methods)
+// =============================================================================
+
+message CreditsInfoProto {
+    bool is_initialized = 1;
+    int32 credits = 2;
+    bool should_show_toast = 3;
+}
+
+message ExecuteActionResultProto {
+    bool success = 1;
+    int32 code = 2;
+    string message = 3;
+}
+
+message GrainResultIntProto {
+    bool success = 1;
+    string message = 2;
+    int32 data = 3;
+}
+
+message GrainResultSubscriptionListProto {
+    bool success = 1;
+    string message = 2;
+    repeated SubscriptionInfoProto data = 3;
 }
 
 // =============================================================================

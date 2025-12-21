@@ -2,6 +2,7 @@ using System.Text;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.Invitation;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Agents.Invitation;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
@@ -11,7 +12,7 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
+// Using QuotaPlanType from user_quota.proto as the unified plan type
 using CsRewardTypeEnum = Aevatar.Application.Grains.Common.Constants.RewardTypeEnum;
 using CsMembershipLevel = Aevatar.Application.Grains.Common.Constants.MembershipLevel;
 
@@ -21,11 +22,11 @@ namespace Aevatar.Application.Grains.Invitation;
 public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
 {
     private readonly DateTime DefaultIssueAt = new DateTime(2025, 7, 8, 0, 0, 0, DateTimeKind.Utc);
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
 
-    public InvitationGAgent(Guid id, IGAgentFactory agentFactory) : base(id)
+    public InvitationGAgent(Guid id, IGAgentActorFactory actorFactory) : base(id)
     {
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -242,7 +243,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         await ConfirmEventsAsync();
     }
 
-    public async Task ProcessInviteeSubscriptionAsync(string inviteeId, CsPlanType planType, bool isUltimate,
+    public async Task ProcessInviteeSubscriptionAsync(string inviteeId, QuotaPlanType planType, bool isUltimate,
         string invoiceId)
     {
         if (!State.Invitees.TryGetValue(inviteeId, out var invitee) || invitee.HasPaid)
@@ -261,7 +262,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
             InviteeId = inviteeId,
             HasCompletedChat = invitee.HasCompletedChat,
             HasPaid = true,
-            PaidPlan = (InvitationPlanType)planType,
+            PaidPlan = planType,
             PaidAt = Timestamp.FromDateTime(DateTime.UtcNow),
             MembershipLevel = isUltimate
                 ? CsMembershipLevel.Membership_Level_Ultimate
@@ -270,7 +271,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         await ConfirmEventsAsync();
 
         // For annual plans, schedule the reward for 30 days later
-        if (planType == CsPlanType.Year)
+        if (planType == QuotaPlanType.Year)
         {
             var addRewardEvent = new AddRewardEvent
             {
@@ -307,15 +308,15 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         await ConfirmEventsAsync();
     }
 
-    private int GetSubscriptionRewardCredits(CsPlanType planType, bool isUltimate)
+    private int GetSubscriptionRewardCredits(QuotaPlanType planType, bool isUltimate)
     {
         if (isUltimate)
         {
             return planType switch
             {
-                CsPlanType.Week => 500,
-                CsPlanType.Month => 2000,
-                CsPlanType.Year => 20000,
+                QuotaPlanType.Week => 500,
+                QuotaPlanType.Month => 2000,
+                QuotaPlanType.Year => 20000,
                 _ => 0
             };
         }
@@ -323,9 +324,9 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         {
             return planType switch
             {
-                CsPlanType.Week => 100,
-                CsPlanType.Month => 400,
-                CsPlanType.Year => 4000,
+                QuotaPlanType.Week => 100,
+                QuotaPlanType.Month => 400,
+                QuotaPlanType.Year => 4000,
                 _ => 0
             };
         }
@@ -541,17 +542,15 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         return true;
     }
 
-    private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
+    private async Task<IInviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
     {
-        var agent = _agentFactory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
-        await agent.ActivateAsync();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<InviteCodeGAgent>(codeGrainId);
+        return (IInviteCodeGAgent)actor.GetAgent();
     }
     
-    private async Task<UserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    private async Task<IUserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
     {
-        var agent = _agentFactory.CreateGAgent<UserQuotaGAgent>(userId);
-        await agent.ActivateAsync();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId);
+        return (IUserQuotaGAgent)actor.GetAgent();
     }
 }

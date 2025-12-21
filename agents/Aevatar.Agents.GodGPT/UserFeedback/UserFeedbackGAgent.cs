@@ -1,6 +1,7 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.UserFeedback;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Service;
@@ -12,8 +13,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
 
+// Use QuotaPlanType from user_quota.proto as the unified plan type
 using CsFeedbackReasonEnum = Aevatar.Application.Grains.Common.Constants.FeedbackReasonEnum;
-using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
 
 namespace Aevatar.Application.Grains.UserFeedback;
 
@@ -126,18 +127,6 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState>, IUserFeedbackGA
             
             // Map reason texts
             feedbackInfo.ReasonTextsEnglish.AddRange(englishReasonTexts);
-
-            // Map subscription if present
-            if (request.Subscription != null)
-            {
-                feedbackInfo.Subscription = new UserSubscriptionInfo
-                {
-                    PlanType = (FeedbackPlanType)request.Subscription.PlanType,
-                    IsUltimate = request.Subscription.IsUltimate,
-                    StartDate = Timestamp.FromDateTime(DateTime.SpecifyKind(request.Subscription.StartDate, DateTimeKind.Utc)),
-                    EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(request.Subscription.EndDate, DateTimeKind.Utc))
-                };
-            }
 
             // Raise event to update state
             RaiseEvent(new SubmitFeedbackEvent
@@ -295,7 +284,7 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState>, IUserFeedbackGA
         {
             item.Subscription = new Dtos.UserSubscription
             {
-                PlanType = (CsPlanType)info.Subscription.PlanType,
+                PlanType = (QuotaPlanType)info.Subscription.PlanType,
                 IsUltimate = info.Subscription.IsUltimate,
                 StartDate = info.Subscription.StartDate?.ToDateTime() ?? DateTime.MinValue,
                 EndDate = info.Subscription.EndDate?.ToDateTime() ?? DateTime.MinValue

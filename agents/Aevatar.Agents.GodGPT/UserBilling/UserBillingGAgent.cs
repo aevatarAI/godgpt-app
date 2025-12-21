@@ -1,9 +1,9 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Linq;
 using System.Net.Http.Headers;
-using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Aevatar.Agents.GodGPT.Protos.InviteCode;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Agents.Invitation;
@@ -18,6 +18,7 @@ using Aevatar.Application.Grains.Common.Observability;
 using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.Common.Service;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.GodGPT.Common;
 using Orleans;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
@@ -27,8 +28,11 @@ using Aevatar.Application.Grains.UserBilling.SEvents;
 using Aevatar.Application.Grains.UserQuota;
 using Aevatar.Core;
 using Aevatar.Agents.GodGPT.Protos.UserBilling;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
+using Aevatar.Application.Grains.UserProfile;
 using Google.Protobuf;
-using Aevatar.Core.Abstractions;
+using Google.Protobuf.Collections;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -37,11 +41,13 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using Stripe;
 using Stripe.Checkout;
+using Enum = System.Enum;
+using JsonException = Newtonsoft.Json.JsonException;
 using PaymentMethod = Aevatar.Application.Grains.Common.Constants.PaymentMethod;
 
 namespace Aevatar.Application.Grains.UserBilling;
 
-public interface IUserBillingGAgent : Aevatar.Core.Abstractions.IGAgent
+public interface IUserBillingGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
     Task<List<StripeProductDto>> GetStripeProductsAsync();
     Task<List<AppleProductDto>> GetAppleProductsAsync();
@@ -60,7 +66,7 @@ public interface IUserBillingGAgent : Aevatar.Core.Abstractions.IGAgent
     Task<Guid> AddPaymentRecordAsync(ChatManager.UserBilling.PaymentSummary paymentSummary);
     Task<ChatManager.UserBilling.PaymentSummary> GetPaymentSummaryAsync(Guid paymentId);
     Task<List<PaymentSummaryDto>> GetPaymentHistoryAsync(int page = 1, int pageSize = 10);
-    Task<bool> UpdatePaymentStatusAsync(ChatManager.UserBilling.PaymentSummary payment, PaymentStatus newStatus);
+    Task<bool> UpdatePaymentStatusAsync(ChatManager.UserBilling.PaymentSummary payment, QuotaPaymentStatus newStatus);
     Task<bool> HandleStripeWebhookEventAsync(string jsonPayload, string stripeSignature);
     Task<CancelSubscriptionResponseDto> CancelSubscriptionAsync(CancelSubscriptionDto cancelSubscriptionDto);
     Task<object> RefundedSubscriptionAsync(object  obj);
@@ -123,25 +129,25 @@ public interface IUserBillingGAgent : Aevatar.Core.Abstractions.IGAgent
 [GAgent(nameof(UserBillingGAgent))]
 public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingStateProto>, IUserBillingGAgent
 {
-    private readonly ILogger<UserBillingGrain> _logger;
+    private readonly ILogger<UserBillingGAgent> _logger;
     private readonly IOptionsMonitor<StripeOptions> _stripeOptions;
     private readonly IOptionsMonitor<ApplePayOptions> _appleOptions;
     private readonly IOptionsMonitor<GooglePayOptions> _googlePayOptions;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IGooglePayService _googlePayService;
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly IClusterClient _clusterClient;
     
     private readonly IStripeClient _client; 
     
     public UserBillingGAgent(
-        ILogger<UserBillingGrain> logger, 
+        ILogger<UserBillingGAgent> logger, 
         IOptionsMonitor<StripeOptions> stripeOptions,
         IOptionsMonitor<ApplePayOptions> appleOptions,
         IOptionsMonitor<GooglePayOptions> googlePayOptions,
         IHttpClientFactory httpClientFactory,
         IGooglePayService googlePayService,
-        IGAgentFactory agentFactory,
+        IGAgentActorFactory actorFactory,
         IClusterClient clusterClient)
     {
         _logger = logger;
@@ -150,7 +156,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         _googlePayOptions = googlePayOptions;
         _httpClientFactory = httpClientFactory;
         _googlePayService = googlePayService;
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
         _clusterClient = clusterClient;
         
         StripeConfiguration.ApiKey = _stripeOptions.CurrentValue.SecretKey;
@@ -158,18 +164,16 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         _logger.LogDebug("[UserBillingGAgent] Activating agent for user {UserId}", Id.ToString());
     }
     
-    private async Task<FreeTrialCodeFactoryGAgent> GetFreeTrialCodeFactoryAgentAsync(long batchId)
+    private async Task<IFreeTrialCodeFactoryGAgent> GetFreeTrialCodeFactoryAgentAsync(long batchId)
     {
-        var agent = _agentFactory.CreateGAgent<FreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId));
-        await agent.ActivateAsync();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId));
+        return (IFreeTrialCodeFactoryGAgent)actor.GetAgent();
     }
     
-    private async Task<UserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    private async Task<IUserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
     {
-        var agent = _agentFactory.CreateGAgent<UserQuotaGAgent>(userId);
-        await agent.ActivateAsync();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId);
+        return (IUserQuotaGAgent)actor.GetAgent();
     }
     
     public override Task<string> GetDescriptionAsync()
@@ -192,9 +196,9 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         var productDtos = new List<StripeProductDto>();
         foreach (var product in products)
         {
-            var planType = (PlanType)product.PlanType;
+            var planType = (QuotaPlanType)product.PlanType;
 
-            if (planType == PlanType.Day)
+            if (planType == QuotaPlanType.Day)
             {
                 continue;
             }
@@ -234,18 +238,18 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         foreach (var product in products)
         {
             var dailyAvgPrice = string.Empty;
-            if (product.PlanType == (int)PlanType.Day)
+            if (product.PlanType == (int)QuotaPlanType.Day)
             {
                 dailyAvgPrice = product.Amount.ToString();
-            } else if (product.PlanType == (int)PlanType.Week)
+            } else if (product.PlanType == (int)QuotaPlanType.Week)
             {
                 dailyAvgPrice = Math.Round(product.Amount / 7, 2, MidpointRounding.ToZero).ToString();
             }
-            else if (product.PlanType == (int)PlanType.Month)
+            else if (product.PlanType == (int)QuotaPlanType.Month)
             {
                 dailyAvgPrice = Math.Round(product.Amount / 30, 2, MidpointRounding.ToZero).ToString();
             }
-            else if (product.PlanType == (int)PlanType.Year)
+            else if (product.PlanType == (int)QuotaPlanType.Year)
             {
                 dailyAvgPrice = Math.Round(product.Amount / 390, 2, MidpointRounding.ToZero).ToString();
             }
@@ -432,8 +436,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         var cancelUrl = _stripeOptions.CurrentValue.CancelUrl;
         if (trialDays > 0)
         {
-            successUrl = $"{successUrl}&codeType={InvitationCodeType.FreeTrialReward}";
-            cancelUrl = $"{cancelUrl}&codeType={InvitationCodeType.FreeTrialReward}";
+            successUrl = $"{successUrl}&codeType={InviteCodeType.FreeTrialReward}";
+            cancelUrl = $"{cancelUrl}&codeType={InviteCodeType.FreeTrialReward}";
 
             if (createCheckoutSessionDto.Mode == PaymentMode.SUBSCRIPTION && options.SubscriptionData != null)
             {
@@ -713,7 +717,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                     Amount = amount,
                     Currency = currency,
                     PaymentType = PaymentType.OneTime,
-                    Status = PaymentStatus.Processing,
+                    Status = QuotaPaymentStatus.Processing,
                     Mode = PaymentMode.PAYMENT,
                     Platform = PaymentPlatform.Stripe,
                     Description = createPaymentSheetDto.Description ?? $"Payment sheet for {amount} {currency}",
@@ -829,7 +833,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 {
                     SaveDefaultPaymentMethod = "on_subscription",
                     // Set payment methods based on platform, default to card
-                    // "card","apple_pay","google_pay", "bank_transfer","alipay"，"wechat_pay"
+                    // "card", "apple_pay", "google_pay", "bank_transfer", "alipay", "wechat_pay"
                     PaymentMethodTypes = new List<string> { "card" }
                 },
                 Metadata = new Dictionary<string, string>
@@ -875,7 +879,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 Amount = productConfig.Amount,
                 Currency = productConfig.Currency,
                 PaymentType = PaymentType.Subscription,
-                Status = PaymentStatus.Processing,
+                Status = QuotaPaymentStatus.Processing,
                 Mode = PaymentMode.SUBSCRIPTION,
                 Platform = PaymentPlatform.Stripe,
                 Description = createSubscriptionDto.Description ?? $"Subscription for {createSubscriptionDto.PriceId}",
@@ -1014,7 +1018,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             RaiseEvent(new UpdatePaymentStatusEvent
             {
                 PaymentId = paymentSummary.PaymentGrainId.ToString(),
-                NewStatus = (int)PaymentStatus.Cancelled_In_Processing
+                NewStatus = QuotaPaymentStatus.CancelledInProcessing
             });
             await ConfirmEventsAsync();
 
@@ -1135,8 +1139,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             userId, detailsDto.OrderId, detailsDto.SubscriptionId, detailsDto.InvoiceId);
         var subscriptionInfoDto = await userQuotaGAgent.GetSubscriptionAsync(productConfig.IsUltimate);
 
-        var subscriptionIds = subscriptionInfoDto.SubscriptionIds ?? new List<string>();
-        var invoiceIds = subscriptionInfoDto.InvoiceIds ?? new List<string>();
+        var subscriptionIds = subscriptionInfoDto.SubscriptionIds ?? new RepeatedField<string>();
+        var invoiceIds = subscriptionInfoDto.InvoiceIds ?? new RepeatedField<string>();
         var invoiceDetail = paymentSummary.InvoiceDetails.LastOrDefault();
         if (invoiceDetail != null && invoiceDetail.Status == PaymentStatus.Completed && !invoiceIds.Contains(invoiceDetail.InvoiceId))
         {
@@ -1162,9 +1166,9 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
 
             if (subscriptionInfoDto.IsActive)
             {
-                if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscriptionInfoDto.PlanType) <= SubscriptionHelper.GetPlanTypeLogicalOrder((PlanType) productConfig.PlanType))
+                if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscriptionInfoDto.PlanType) <= SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType) productConfig.PlanType))
                 {
-                    subscriptionInfoDto.PlanType = (PlanType) productConfig.PlanType;
+                    subscriptionInfoDto.PlanType = (QuotaPlanType) productConfig.PlanType;
                 }
                 subscriptionInfoDto.EndDate =
                     GetSubscriptionEndDate(subscriptionInfoDto.PlanType, subscriptionInfoDto.EndDate, trialDays);
@@ -1172,15 +1176,17 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             else
             {
                 subscriptionInfoDto.IsActive = true;
-                subscriptionInfoDto.PlanType = (PlanType) productConfig.PlanType;
-                subscriptionInfoDto.StartDate = DateTime.UtcNow;
+                subscriptionInfoDto.PlanType = (QuotaPlanType) productConfig.PlanType;
+                subscriptionInfoDto.StartDate = DateTime.UtcNow.ToProtoTimestamp();
                 subscriptionInfoDto.EndDate =
                     GetSubscriptionEndDate(subscriptionInfoDto.PlanType, subscriptionInfoDto.StartDate, trialDays);
                 await userQuotaGAgent.ResetRateLimitsAsync();
             }
-            subscriptionInfoDto.Status = PaymentStatus.Completed;
-            subscriptionInfoDto.SubscriptionIds = subscriptionIds;
-            subscriptionInfoDto.InvoiceIds = invoiceIds;
+            subscriptionInfoDto.Status = QuotaPaymentStatus.Completed;
+            subscriptionInfoDto.SubscriptionIds.Clear();
+            subscriptionInfoDto.SubscriptionIds.AddRange(subscriptionIds);
+            subscriptionInfoDto.InvoiceIds.Clear();
+            subscriptionInfoDto.InvoiceIds.AddRange(invoiceIds);
             await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionInfoDto, productConfig.IsUltimate);
 
             if (productConfig.IsUltimate)
@@ -1202,15 +1208,15 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 if (premiumSubscription.IsActive)
                 {
                     premiumSubscription.StartDate =
-                        GetSubscriptionEndDate((PlanType)productConfig.PlanType, premiumSubscription.StartDate, trialDays);
+                        GetSubscriptionEndDate((QuotaPlanType)productConfig.PlanType, premiumSubscription.StartDate, trialDays);
                     premiumSubscription.EndDate =
-                        GetSubscriptionEndDate((PlanType)productConfig.PlanType, premiumSubscription.EndDate, trialDays);
+                        GetSubscriptionEndDate((QuotaPlanType)productConfig.PlanType, premiumSubscription.EndDate, trialDays);
                     await userQuotaGAgent.UpdateSubscriptionAsync(premiumSubscription);
                 }
             }
             
             //Invite users to pay rewards
-            await ProcessInviteeSubscriptionAsync(userId, (PlanType) productConfig.PlanType, productConfig.IsUltimate, invoiceDetail.InvoiceId);
+            await ProcessInviteeSubscriptionAsync(userId, (QuotaPlanType) productConfig.PlanType, productConfig.IsUltimate, invoiceDetail.InvoiceId);
             _logger.LogWarning("[UserBillingGAgent][HandleStripeWebhookEventAsync] Process invitee subscription completed, user {UserId}",
                 userId);
             
@@ -1227,7 +1233,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             _logger.LogDebug("[UserBillingGAgent][HandleStripeWebhookEventAsync] Cancel User subscription {0}, {1}, {2}",
                 userId, paymentSummary.SubscriptionId, invoiceDetail.InvoiceId);
             subscriptionIds.Remove(paymentSummary.SubscriptionId);
-            subscriptionInfoDto.SubscriptionIds = subscriptionIds;
+            subscriptionInfoDto.SubscriptionIds.Clear();
+            subscriptionInfoDto.SubscriptionIds.AddRange(subscriptionIds);
             await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionInfoDto, productConfig.IsUltimate);
         }
         else if (invoiceDetail != null && invoiceDetail.Status == PaymentStatus.Refunded && invoiceIds.Contains(invoiceDetail.InvoiceId))
@@ -1235,7 +1242,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             _logger.LogDebug("[UserBillingGAgent][HandleStripeWebhookEventAsync] Refund User subscription {0}, {1}, {2}",
                 userId, paymentSummary.SubscriptionId, invoiceDetail.InvoiceId);
             
-            await RollbackQuotaAfterRefundAsync(userId, paymentSummary.SubscriptionId, productConfig.IsUltimate, paymentSummary.PlanType, invoiceDetail);
+            await RollbackQuotaAfterRefundAsync(userId, paymentSummary.SubscriptionId, productConfig.IsUltimate, (QuotaPlanType)paymentSummary.PlanType, invoiceDetail);
         }
         
         return true;
@@ -1288,20 +1295,22 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         return purchaseType;
     }
 
-    private async Task RollbackQuotaAfterRefundAsync(Guid userId, string subscriptionId, bool isUltimate, PlanType planType, UserBillingInvoiceDetail invoiceDetail)
+    private async Task RollbackQuotaAfterRefundAsync(Guid userId, string subscriptionId, bool isUltimate, QuotaPlanType planType, UserBillingInvoiceDetail invoiceDetail)
     {
         var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         var subscriptionInfoDto = await userQuotaGAgent.GetSubscriptionAsync(isUltimate);
-        var subscriptionIds = subscriptionInfoDto.SubscriptionIds ?? new List<string>();
+        var subscriptionIds = subscriptionInfoDto.SubscriptionIds.ToList();
         
         var diff = GetDaysForPlanType(planType);
-        subscriptionInfoDto.EndDate = subscriptionInfoDto.EndDate.AddDays(-diff);
+        var newEndDate = subscriptionInfoDto.EndDate.ToDateTime().AddDays(-diff);
+        subscriptionInfoDto.EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(newEndDate, DateTimeKind.Utc));
         subscriptionIds.Remove(subscriptionId);
 
         //reset plantype
         subscriptionInfoDto.PlanType = await GetMaxPlanTypeAsync(DateTime.UtcNow, isUltimate);
 
-        subscriptionInfoDto.SubscriptionIds = subscriptionIds;
+        subscriptionInfoDto.SubscriptionIds.Clear();
+        subscriptionInfoDto.SubscriptionIds.AddRange(subscriptionIds);
         
         
         await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionInfoDto, isUltimate);
@@ -1314,23 +1323,23 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 var premiumSubscription = await userQuotaGAgent.GetSubscriptionAsync();
                 if (premiumSubscription.IsActive)
                 {
-                    premiumSubscription.StartDate = premiumSubscription.StartDate.Add(-diffTimeSpan);
-                    premiumSubscription.EndDate = premiumSubscription.EndDate.Add(-diffTimeSpan);
+                    premiumSubscription.StartDate = premiumSubscription.StartDate + Duration.FromTimeSpan(-diffTimeSpan);
+                    premiumSubscription.EndDate = premiumSubscription.EndDate+ Duration.FromTimeSpan(-diffTimeSpan);
                     await userQuotaGAgent.UpdateSubscriptionAsync(premiumSubscription);
                 }
             }
         }
     }
 
-    private async Task<Tuple<DateTime, DateTime>> CalculateSubscriptionDurationAsync(Guid userId, StripeProduct productConfig)
+    private async Task<Tuple<Timestamp, Timestamp>> CalculateSubscriptionDurationAsync(Guid userId, StripeProduct productConfig)
     {
-        DateTime subscriptionStartDate;
-        DateTime subscriptionEndDate;
+        Timestamp subscriptionStartDate;
+        Timestamp subscriptionEndDate;
         var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         
         // Use unified subscription interface
         var subscription = await userQuotaGAgent.GetAndSetSubscriptionAsync(productConfig.IsUltimate);
-        var targetPlanType = (PlanType)productConfig.PlanType;
+        var targetPlanType = (QuotaPlanType)productConfig.PlanType;
         
         if (subscription.IsActive)
         {
@@ -1339,17 +1348,17 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         else
         {
             // No active subscription, start fresh
-            subscriptionStartDate = DateTime.UtcNow;
+            subscriptionStartDate = DateTime.UtcNow.ToProtoTimestamp();
         }
         
         subscriptionEndDate = GetSubscriptionEndDate(targetPlanType, subscriptionStartDate);
-        return new Tuple<DateTime, DateTime>(subscriptionStartDate, subscriptionEndDate);
+        return new Tuple<Timestamp, Timestamp>(subscriptionStartDate, subscriptionEndDate);
     }
     
-    private async Task<Tuple<DateTime, DateTime>> CalculateSubscriptionDurationAsync(Guid userId, PlanType planType, bool ultimate)
+    private async Task<Tuple<Timestamp, Timestamp>> CalculateSubscriptionDurationAsync(Guid userId, QuotaPlanType planType, bool ultimate)
     {
-        DateTime subscriptionStartDate;
-        DateTime subscriptionEndDate;
+        Timestamp subscriptionStartDate;
+        Timestamp subscriptionEndDate;
         var userQuotaGAgent = await GetUserQuotaAgentAsync(userId);
         var subscriptionInfoDto = await userQuotaGAgent.GetSubscriptionAsync(ultimate);
         if (subscriptionInfoDto.IsActive)
@@ -1358,10 +1367,10 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         }
         else
         {
-            subscriptionStartDate = DateTime.UtcNow;
+            subscriptionStartDate = DateTime.UtcNow.ToProtoTimestamp();
         }
         subscriptionEndDate = GetSubscriptionEndDate(planType, subscriptionStartDate);
-        return new Tuple<DateTime, DateTime>(subscriptionStartDate, subscriptionEndDate);
+        return new Tuple<Timestamp, Timestamp>(subscriptionStartDate, subscriptionEndDate);
     }
 
     public async Task<Guid> AddPaymentRecordAsync(ChatManager.UserBilling.PaymentSummary paymentSummary)
@@ -1433,7 +1442,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         var recordsToRemove = State.PaymentHistory
             .Where(payment => 
                 payment.InvoiceDetails.Count == 0 && 
-                payment.Status == (int)PaymentStatus.Processing && 
+                payment.Status == QuotaPaymentStatus.Processing && 
                 payment.CreatedAt.ToDateTime() <= DateTime.UtcNow.AddDays(-1))
             .ToList();
             
@@ -1562,14 +1571,14 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             .ToList();
     }
 
-    public async Task<bool> UpdatePaymentStatusAsync(ChatManager.UserBilling.PaymentSummary payment, PaymentStatus newStatus)
+    public async Task<bool> UpdatePaymentStatusAsync(ChatManager.UserBilling.PaymentSummary payment, QuotaPaymentStatus newStatus)
     {
         _logger.LogInformation(
             "[UserBillingGAgent][UpdatePaymentStatusAsync] Updating payment status for ID {PaymentId} to {NewStatus}",
             payment.PaymentGrainId, newStatus);
 
         // Skip update if status is already the same
-        if (payment.Status == newStatus)
+        if (payment.Status == (PaymentStatus)newStatus)
         {
             _logger.LogInformation(
                 "[UserBillingGAgent][UpdatePaymentStatusAsync] Payment {PaymentId} already has status {Status}",
@@ -1580,7 +1589,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         RaiseEvent(new UpdatePaymentStatusEvent
         {
             PaymentId = payment.PaymentGrainId.ToString(),
-            NewStatus = (int)newStatus
+            NewStatus = newStatus
         });
         await ConfirmEventsAsync();
 
@@ -1612,7 +1621,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             PaymentType = productConfig.Mode == PaymentMode.SUBSCRIPTION
                 ? PaymentType.Subscription
                 : PaymentType.OneTime,
-            Status = PaymentStatus.Processing,
+            Status = QuotaPaymentStatus.Processing,
             Mode = createCheckoutSessionDto.Mode,
             Platform = PaymentPlatform.Stripe,
             Description = $"Checkout session for {productConfig.PriceId}",
@@ -1659,7 +1668,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             existingPaymentSummary.MembershipLevel = SubscriptionHelper.GetMembershipLevel(productConfig.IsUltimate);
             existingPaymentSummary.Amount = productConfig.Amount;
             existingPaymentSummary.Currency = productConfig.Currency;
-            existingPaymentSummary.Status = paymentDetails.Status;
+            existingPaymentSummary.Status = (PaymentStatus)paymentDetails.Status;
             existingPaymentSummary.SubscriptionId = paymentDetails.SubscriptionId;
             existingPaymentSummary.AmountNetTotal = paymentDetails.AmountNetTotal;
             await CreateOrUpdateInvoiceDetailAsync(paymentDetails, productConfig, existingPaymentSummary);
@@ -1694,7 +1703,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 Amount = productConfig.Amount,
                 Currency = productConfig.Currency,
                 CreatedAt = paymentDetails.CreatedAt,
-                Status = paymentDetails.Status,
+                Status = (PaymentStatus)paymentDetails.Status,
                 SubscriptionId = paymentDetails.SubscriptionId,
                 AmountNetTotal = paymentDetails.AmountNetTotal
             };
@@ -1728,18 +1737,18 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             {
                 InvoiceId = paymentDetails.InvoiceId,
                 CreatedAt = paymentDetails.CreatedAt,
-                Status = paymentDetails.Status,
+                Status = (PaymentStatus)paymentDetails.Status,
                 Amount = productConfig.Amount,
                 Currency = paymentDetails.Currency,
                 
             };
-            if (paymentDetails.Status == PaymentStatus.Completed)
+            if (paymentDetails.Status == QuotaPaymentStatus.Completed)
             {
                 invoiceDetail.CompletedAt = paymentDetails.CompletedAt ?? DateTime.UtcNow;
                 var (subscriptionStartDate, subscriptionEndDate) =
                     await CalculateSubscriptionDurationAsync(paymentDetails.UserId, productConfig);
-                invoiceDetail.SubscriptionStartDate = subscriptionStartDate;
-                invoiceDetail.SubscriptionEndDate = subscriptionEndDate;
+                invoiceDetail.SubscriptionStartDate = subscriptionStartDate.ToDateTime();
+                invoiceDetail.SubscriptionEndDate = subscriptionEndDate.ToDateTime();
                 invoiceDetail.AmountNetTotal = paymentDetails.AmountNetTotal;
                 invoiceDetail.Discounts = paymentDetails.Discounts;
                 invoiceDetail.IsTrial = paymentDetails.IsTrial;
@@ -1750,8 +1759,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         }
         else
         {
-            invoiceDetail.Status = paymentDetails.Status;
-            if (paymentDetails.Status == PaymentStatus.Completed)
+            invoiceDetail.Status = (PaymentStatus)paymentDetails.Status;
+            if (paymentDetails.Status == QuotaPaymentStatus.Completed)
             {
                 invoiceDetail.CompletedAt = paymentDetails.CompletedAt ?? DateTime.UtcNow;
                 invoiceDetail.AmountNetTotal = paymentDetails.AmountNetTotal;
@@ -1759,11 +1768,11 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 invoiceDetail.IsTrial = paymentDetails.IsTrial;
                 invoiceDetail.TrialCode = paymentDetails.TrialCode;
             }
-            if (paymentDetails.Status == PaymentStatus.Completed && invoiceDetail.SubscriptionStartDate == default)
+            if (paymentDetails.Status == QuotaPaymentStatus.Completed && invoiceDetail.SubscriptionStartDate == default)
             {
                 var (subscriptionStartDate, subscriptionEndDate) = await CalculateSubscriptionDurationAsync(paymentDetails.UserId, productConfig);
-                invoiceDetail.SubscriptionStartDate = subscriptionStartDate;
-                invoiceDetail.SubscriptionEndDate = subscriptionEndDate;
+                invoiceDetail.SubscriptionStartDate = subscriptionStartDate.ToDateTime();
+                invoiceDetail.SubscriptionEndDate = subscriptionEndDate.ToDateTime();
             }
         }
     }
@@ -1789,7 +1798,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         }
 
         var currentPlanType = currentSubscription.PlanType;
-        var targetPlanType = (PlanType)productConfig.PlanType;
+        var targetPlanType = (QuotaPlanType)productConfig.PlanType;
 
         _logger.LogInformation(
             "[UserBillingGAgent][ValidateSubscriptionUpgradePath] Validating upgrade path: Current={CurrentPlan}, Target={TargetPlan}",
@@ -1897,7 +1906,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         {
             _logger.LogInformation("[UserBillingGAgent][CreateOrUpdateGooglePlayPaymentSummaryAsync] Updating existing Google Play payment for purchase token: {PurchaseToken}", purchaseToken);
             var invoiceDetail = existingPayment.InvoiceDetails.First(i => i.PurchaseToken == purchaseToken);
-            invoiceDetail.Status = PaymentStatus.Completed;
+            invoiceDetail.Status = (PaymentStatus)QuotaPaymentStatus.Completed;
             invoiceDetail.CompletedAt = DateTime.UtcNow;
             
             RaiseEvent(new UpdatePaymentEvent { PaymentId = existingPayment.PaymentGrainId.ToString(), PaymentSummary = existingPayment.ToProto() });
@@ -1909,11 +1918,11 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             _logger.LogInformation("[UserBillingGAgent][CreateOrUpdateGooglePlayPaymentSummaryAsync] Creating new Google Play payment for purchase token: {PurchaseToken}", purchaseToken);
             
             // First calculate standard subscription duration
-            var (calculatedStartDate, calculatedEndDate) = await CalculateGooglePlaySubscriptionDurationAsync(userId, (PlanType)productConfig.PlanType, productConfig.IsUltimate);
+            var (calculatedStartDate, calculatedEndDate) = await CalculateGooglePlaySubscriptionDurationAsync(userId, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate);
             
             // Override with RevenueCat dates if they are valid and make sense
-            DateTime subscriptionStartDate = calculatedStartDate;
-            DateTime subscriptionEndDate = calculatedEndDate;
+            Timestamp subscriptionStartDate = calculatedStartDate;
+            Timestamp subscriptionEndDate = calculatedEndDate;
             
             // Fix: Always use our fixed-day calculation system for consistency, ignore RevenueCat webhook dates  
             _logger.LogInformation("[UserBillingGAgent][CreateOrUpdateGooglePlayPaymentSummaryAsync] Using fixed-day calculation: Start={Start}, End={End}", subscriptionStartDate, subscriptionEndDate);
@@ -1946,12 +1955,12 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 Currency = productConfig.Currency,
                 CreatedAt = DateTime.UtcNow,
                 CompletedAt = DateTime.UtcNow,
-                Status = PaymentStatus.Completed,
+                Status = (PaymentStatus)QuotaPaymentStatus.Completed,
                 PaymentType = paymentType,
                 Platform = PaymentPlatform.GooglePlay,
                 SubscriptionId = verificationResult.PurchaseToken ?? verificationResult.OriginalTransactionId ?? verificationResult.TransactionId, // Fix: Ensure SubscriptionId is never null using hierarchy
-                SubscriptionStartDate = subscriptionStartDate,
-                SubscriptionEndDate = subscriptionEndDate
+                SubscriptionStartDate = subscriptionStartDate.ToDateTime(),
+                SubscriptionEndDate = subscriptionEndDate.ToDateTime()
             };
 
             var invoiceDetail = new ChatManager.UserBilling.UserBillingInvoiceDetail
@@ -1962,8 +1971,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 CreatedAt = DateTime.UtcNow,
                 CompletedAt = DateTime.UtcNow,
                 Status = PaymentStatus.Completed,
-                SubscriptionStartDate = subscriptionStartDate,
-                SubscriptionEndDate = subscriptionEndDate,
+                SubscriptionStartDate = subscriptionStartDate.ToDateTime(),
+                SubscriptionEndDate = subscriptionEndDate.ToDateTime(),
                 PlanType = (PlanType)productConfig.PlanType,
                 Amount = productConfig.Amount,
                 MembershipLevel = SubscriptionHelper.GetMembershipLevel(productConfig.IsUltimate)
@@ -1976,13 +1985,13 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         }
     }
 
-    private async Task<(DateTime, DateTime)> CalculateGooglePlaySubscriptionDurationAsync(Guid userId, PlanType planType, bool isUltimate)
+    private async Task<(Timestamp, Timestamp)> CalculateGooglePlaySubscriptionDurationAsync(Guid userId, QuotaPlanType planType, bool isUltimate)
     {
         var userQuotaAgent = await GetUserQuotaAgentAsync(userId);
         var subscription = await userQuotaAgent.GetSubscriptionAsync(isUltimate);
 
-        DateTime subscriptionStartDate;
-        DateTime subscriptionEndDate;
+        Timestamp subscriptionStartDate;
+        Timestamp subscriptionEndDate;
         
         if (subscription.IsActive)
         {
@@ -1992,7 +2001,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         else
         {
             // For new subscriptions, start from now
-            subscriptionStartDate = DateTime.UtcNow;
+            subscriptionStartDate = DateTime.UtcNow.ToProtoTimestamp();
         }
         
         subscriptionEndDate = GetSubscriptionEndDate(planType, subscriptionStartDate);
@@ -2020,9 +2029,9 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         {
             // Only upgrade plan if new plan is higher or equal level
             if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscription.PlanType) <= 
-                SubscriptionHelper.GetPlanTypeLogicalOrder((PlanType)productConfig.PlanType))
+                SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType)productConfig.PlanType))
             {
-                subscription.PlanType = (PlanType)productConfig.PlanType;
+                subscription.PlanType = (QuotaPlanType)productConfig.PlanType;
             }
             // Extend subscription from current EndDate (cumulative approach)
             subscription.EndDate = GetSubscriptionEndDate(subscription.PlanType, subscription.EndDate);
@@ -2031,13 +2040,13 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         {
             // New subscription - use system time for consistency with Apple Pay and Stripe
             subscription.IsActive = true;
-            subscription.PlanType = (PlanType)productConfig.PlanType;
-            subscription.StartDate = DateTime.UtcNow;
+            subscription.PlanType = (QuotaPlanType)productConfig.PlanType;
+            subscription.StartDate = DateTime.UtcNow.ToProtoTimestamp();
             subscription.EndDate = GetSubscriptionEndDate(subscription.PlanType, subscription.StartDate);
             await userQuotaAgent.ResetRateLimitsAsync();
         }
         
-        subscription.Status = PaymentStatus.Completed;
+        subscription.Status = QuotaPaymentStatus.Completed;
         if (!subscription.SubscriptionIds.Contains(paymentSummary.SubscriptionId))
         {
             subscription.SubscriptionIds.Add(paymentSummary.SubscriptionId);
@@ -2046,7 +2055,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         await userQuotaAgent.UpdateSubscriptionAsync(subscription, productConfig.IsUltimate);
         
         // Fix: Handle subscription activation - only Ultimate changes affect Premium subscription time 
-        await SyncOtherSubscriptionTimesAsync(userId, userQuotaAgent, (PlanType)productConfig.PlanType, productConfig.IsUltimate, isExtend: true);
+        await SyncOtherSubscriptionTimesAsync(userId, userQuotaAgent, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate, isExtend: true);
         
         // Determine purchase type based on payment history for proper analytics
         var purchaseType = await DetermineGooglePlayPurchaseTypeAsync(userId, verificationResult.PurchaseToken);
@@ -2054,7 +2063,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         await ReportGooglePaymentSuccessAsync(userId, verificationResult.TransactionId, purchaseType, 
             PaymentPlatform.GooglePlay, verificationResult.ProductId, productConfig.Currency, productConfig.Amount);
         
-        await ProcessInviteeSubscriptionAsync(userId, (PlanType)productConfig.PlanType, productConfig.IsUltimate, verificationResult.TransactionId);
+        await ProcessInviteeSubscriptionAsync(userId, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate, verificationResult.TransactionId);
     }
 
     private async Task ProcessGooglePlayPurchaseSuccessAsync(Guid userId, PaymentVerificationResultDto verificationResult, PurchaseType purchaseType)
@@ -2074,11 +2083,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
 
         // Fix: Use productConfig.IsUltimate to get the correct subscription type
         var subscription = await userQuotaAgent.GetSubscriptionAsync(productConfig.IsUltimate);
-        if (subscription.SubscriptionIds.IsNullOrEmpty())
-        {
-            subscription.SubscriptionIds = new List<string>();
-        }
-
+        
         if (!subscription.SubscriptionIds.Contains(paymentSummary.SubscriptionId))
         {
             subscription.SubscriptionIds.Add(paymentSummary.SubscriptionId);
@@ -2094,9 +2099,9 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         {
             // Only upgrade plan if new plan is higher or equal level
             if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscription.PlanType) <= 
-                SubscriptionHelper.GetPlanTypeLogicalOrder((PlanType)productConfig.PlanType))
+                SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType)productConfig.PlanType))
             {
-                subscription.PlanType = (PlanType)productConfig.PlanType;
+                subscription.PlanType = (QuotaPlanType)productConfig.PlanType;
             }
             // Extend subscription from current EndDate (cumulative approach)
             subscription.EndDate = GetSubscriptionEndDate(subscription.PlanType, subscription.EndDate);
@@ -2105,23 +2110,23 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         {
             // New subscription - use system time for consistency with Apple Pay and Stripe
             subscription.IsActive = true;
-            subscription.PlanType = (PlanType)productConfig.PlanType;
-            subscription.StartDate = DateTime.UtcNow;
+            subscription.PlanType = (QuotaPlanType)productConfig.PlanType;
+            subscription.StartDate = DateTime.UtcNow.ToProtoTimestamp();
             subscription.EndDate = GetSubscriptionEndDate(subscription.PlanType, subscription.StartDate);
             await userQuotaAgent.ResetRateLimitsAsync();
         }
         
-        subscription.Status = PaymentStatus.Completed;
+        subscription.Status = QuotaPaymentStatus.Completed;
         await userQuotaAgent.UpdateSubscriptionAsync(subscription, productConfig.IsUltimate);
         
         // Fix: Handle subscription activation - only Ultimate changes affect Premium subscription time 
-        await SyncOtherSubscriptionTimesAsync(userId, userQuotaAgent, (PlanType)productConfig.PlanType, productConfig.IsUltimate, isExtend: true);
+        await SyncOtherSubscriptionTimesAsync(userId, userQuotaAgent, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate, isExtend: true);
         
         // Report payment success with the specified purchase type for accurate analytics
         await ReportGooglePaymentSuccessAsync(userId, verificationResult.TransactionId, purchaseType, 
             PaymentPlatform.GooglePlay, verificationResult.ProductId, productConfig.Currency, productConfig.Amount);
         
-        await ProcessInviteeSubscriptionAsync(userId, (PlanType)productConfig.PlanType, productConfig.IsUltimate, verificationResult.TransactionId);
+        await ProcessInviteeSubscriptionAsync(userId, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate, verificationResult.TransactionId);
     }
 
     private async Task ReportPaymentSuccessAsync(Guid userId, string transactionId, PaymentPlatform platform)
@@ -2178,9 +2183,9 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             {
                 // Existing active subscription - use cumulative approach (same as other methods)
                 if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscription.PlanType) <= 
-                    SubscriptionHelper.GetPlanTypeLogicalOrder((PlanType)productConfig.PlanType))
+                    SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType)productConfig.PlanType))
                 {
-                    subscription.PlanType = (PlanType)productConfig.PlanType;
+                    subscription.PlanType = (QuotaPlanType)productConfig.PlanType;
                 }
                 subscription.EndDate = GetSubscriptionEndDate(subscription.PlanType, subscription.EndDate);
             }
@@ -2188,16 +2193,11 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             {
                 // New subscription - use system time for consistency
                 subscription.IsActive = true;
-                subscription.PlanType = (PlanType)productConfig.PlanType;
-                subscription.StartDate = DateTime.UtcNow;
+                subscription.PlanType = (QuotaPlanType)productConfig.PlanType;
+                subscription.StartDate = Timestamp.FromDateTime(DateTime.UtcNow);
                 subscription.EndDate = GetSubscriptionEndDate(subscription.PlanType, subscription.StartDate);
             }
-            subscription.Status = PaymentStatus.Completed;
-            
-            if (subscription.SubscriptionIds == null)
-            {
-                subscription.SubscriptionIds = new List<string>();
-            }
+            subscription.Status = QuotaPaymentStatus.Completed;
             
             if (!subscription.SubscriptionIds.Contains(paymentSummary.SubscriptionId))
             {
@@ -2207,14 +2207,14 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             await userQuotaAgent.UpdateSubscriptionAsync(subscription, productConfig.IsUltimate);
 
             // Fix: Handle subscription activation - only Ultimate changes affect Premium subscription time 
-            await SyncOtherSubscriptionTimesAsync(userId, userQuotaAgent, (PlanType)productConfig.PlanType, productConfig.IsUltimate, true);
+            await SyncOtherSubscriptionTimesAsync(userId, userQuotaAgent, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate, true);
 
             // Report payment success for analytics
             await ReportGooglePaymentSuccessAsync(userId, verificationResult.TransactionId, PurchaseType.Subscription,
                 PaymentPlatform.GooglePlay, verificationResult.ProductId, productConfig.Currency, productConfig.Amount);
 
             // Process invitee benefits if applicable
-            await ProcessInviteeSubscriptionAsync(userId, (PlanType)productConfig.PlanType, productConfig.IsUltimate, verificationResult.TransactionId);
+            await ProcessInviteeSubscriptionAsync(userId, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate, verificationResult.TransactionId);
 
             _logger.LogInformation("[UserBillingGAgent][ProcessGooglePayPurchaseSuccessAsync] Successfully processed Google Pay Web payment for user {UserId}", userId);
         }
@@ -2265,7 +2265,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 CreatedAt = DateTime.UtcNow,
                 CompletedAt = DateTime.UtcNow,
                 SubscriptionStartDate = DateTime.UtcNow,
-                SubscriptionEndDate = DateTime.UtcNow.AddDays(GetDaysForPlanType((PlanType)productConfig.PlanType)),
+                SubscriptionEndDate = DateTime.UtcNow.AddDays(GetDaysForPlanType((QuotaPlanType)productConfig.PlanType)),
                 MembershipLevel = SubscriptionHelper.GetMembershipLevel(productConfig.IsUltimate),
                 Amount = productConfig.Amount,
                 PlanType = (PlanType)productConfig.PlanType,
@@ -2285,7 +2285,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
 
             // Fix: Use fixed-day calculation instead of RevenueCat webhook dates
             var subscriptionStartDate = DateTime.UtcNow;
-            var subscriptionEndDate = DateTime.UtcNow.AddDays(GetDaysForPlanType((PlanType)productConfig.PlanType));
+            var subscriptionEndDate = DateTime.UtcNow.AddDays(GetDaysForPlanType((QuotaPlanType)productConfig.PlanType));
 
             var newPaymentSummary = new ChatManager.UserBilling.PaymentSummary
             {
@@ -2415,7 +2415,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         };
     }
 
-    private DateTime GetSubscriptionEndDate(PlanType planType, DateTime startDate, int trialDay = 0)
+    private Timestamp GetSubscriptionEndDate(QuotaPlanType planType, Timestamp startDate, int trialDay = 0)
     {
         var endDate = startDate;
 
@@ -2426,20 +2426,20 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         
         switch (planType)
         {
-            case PlanType.Day:
+            case QuotaPlanType.Day:
                 return endDate.AddDays(1);
-            case PlanType.Week:
+            case QuotaPlanType.Week:
                 return endDate.AddDays(7);
-            case PlanType.Month:
+            case QuotaPlanType.Month:
                 return endDate.AddDays(30);
-            case PlanType.Year:
+            case QuotaPlanType.Year:
                 return endDate.AddDays(390);
             default:
                 throw new ArgumentException($"Invalid plan type: {planType}");
         }
     }
 
-    private int GetDaysForPlanType(PlanType planType)
+    private int GetDaysForPlanType(QuotaPlanType planType)
     {
         // Use SubscriptionHelper for consistent days calculation with Ultimate support and historical compatibility
         return SubscriptionHelper.GetDaysForPlanType(planType);
@@ -2986,7 +2986,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
 
             // 5. Rollback user quota and subscription - reuse existing Stripe refund logic
             await RollbackQuotaAfterRefundAsync(userId, transactionInfo.OriginalTransactionId, 
-                appleProduct.IsUltimate, (PlanType)appleProduct.PlanType, invoiceDetail);
+                appleProduct.IsUltimate, (QuotaPlanType)appleProduct.PlanType, invoiceDetail);
 
             _logger.LogInformation("[UserBillingGAgent][HandleRefundAsync] Successfully processed refund for user {UserId}, originalTransactionId {OriginalTransactionId}, transactionId {TransactionId}", 
                 userId, transactionInfo.OriginalTransactionId, transactionInfo.TransactionId);
@@ -3225,7 +3225,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             Amount = GetActualApplePrice(appleResponse.Price),
             Currency = appleResponse.Currency,
             PaymentType = PaymentType.Subscription,
-            Status = PaymentStatus.Completed,
+            Status = QuotaPaymentStatus.Completed,
             Method = PaymentMethod.ApplePay,
             Platform = PaymentPlatform.AppStore,
             Mode = null,
@@ -3240,7 +3240,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
 
         
         var (subscriptionStartDate, subscriptionEndDate) =
-            await CalculateSubscriptionDurationAsync(userId, (PlanType)appleProduct.PlanType, appleProduct.IsUltimate);
+            await CalculateSubscriptionDurationAsync(userId, (QuotaPlanType)appleProduct.PlanType, appleProduct.IsUltimate);
         var newPayment = new ChatManager.UserBilling.PaymentSummary
         {
             PaymentGrainId = paymentGrainId,
@@ -3254,8 +3254,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             Status = PaymentStatus.Completed,
             SubscriptionId = appleResponse.OriginalTransactionId,
             PriceId = appleResponse.ProductId,
-            SubscriptionStartDate = subscriptionStartDate,
-            SubscriptionEndDate = subscriptionEndDate,
+            SubscriptionStartDate = subscriptionStartDate.ToDateTime(),
+            SubscriptionEndDate = subscriptionEndDate.ToDateTime(),
             Platform = PaymentPlatform.AppStore,
             MembershipLevel = SubscriptionHelper.GetMembershipLevel(appleProduct.IsUltimate),
             AppStoreEnvironment = appleResponse.Environment
@@ -3268,8 +3268,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             CreatedAt = purchaseDate,
             CompletedAt = DateTime.UtcNow,
             Status = PaymentStatus.Completed,
-            SubscriptionStartDate = subscriptionStartDate,
-            SubscriptionEndDate = subscriptionEndDate,
+            SubscriptionStartDate = subscriptionStartDate.ToDateTime(),
+            SubscriptionEndDate = subscriptionEndDate.ToDateTime(),
             PriceId = appleResponse.ProductId,
             MembershipLevel = SubscriptionHelper.GetMembershipLevel(appleProduct.IsUltimate),
             Amount = GetActualApplePrice(appleResponse.Price),
@@ -3281,7 +3281,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         await AddPaymentRecordAsync(newPayment);
         await UpdateUserQuotaOnApplePaySuccess(userId, appleResponse, appleProduct);
         //Invite users to pay rewards
-        await ProcessInviteeSubscriptionAsync(userId, (PlanType) appleProduct.PlanType, appleProduct.IsUltimate, appleResponse.TransactionId);
+        await ProcessInviteeSubscriptionAsync(userId, (QuotaPlanType) appleProduct.PlanType, appleProduct.IsUltimate, appleResponse.TransactionId);
         _logger.LogWarning("[UserBillingGAgent][CreateAppStoreSubscriptionAsync] Process invitee subscription completed, user {UserId}",
             userId);
     }
@@ -3317,9 +3317,9 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         if (subscriptionDto.IsActive)
         {
             if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscriptionDto.PlanType) <=
-                SubscriptionHelper.GetPlanTypeLogicalOrder((PlanType)appleProduct.PlanType))
+                SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType)appleProduct.PlanType))
             {
-                subscriptionDto.PlanType = (PlanType)appleProduct.PlanType;
+                subscriptionDto.PlanType = (QuotaPlanType)appleProduct.PlanType;
             }
 
             subscriptionDto.EndDate =
@@ -3328,14 +3328,14 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         else
         {
             subscriptionDto.IsActive = true;
-            subscriptionDto.PlanType = (PlanType)appleProduct.PlanType;
-            subscriptionDto.StartDate = DateTime.UtcNow;
+            subscriptionDto.PlanType = (QuotaPlanType)appleProduct.PlanType;
+            subscriptionDto.StartDate = DateTime.UtcNow.ToProtoTimestamp();
             subscriptionDto.EndDate =
                 GetSubscriptionEndDate(subscriptionDto.PlanType, subscriptionDto.StartDate);
             await userQuotaGAgent.ResetRateLimitsAsync();
         }
 
-        subscriptionDto.Status = PaymentStatus.Completed;
+        subscriptionDto.Status = QuotaPaymentStatus.Completed;
         await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionDto, appleProduct.IsUltimate);
 
         //UpdatePremium quota
@@ -3381,7 +3381,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         return State.PaymentHistory.FromProtoList().FirstOrDefault(p => p.SubscriptionId == subscriptionId);
     }
 
-    private async Task<PlanType> GetMaxPlanTypeAsync(DateTime? dateTime = null, bool? isUltimate = null)
+    private async Task<QuotaPlanType> GetMaxPlanTypeAsync(DateTime? dateTime = null, bool? isUltimate = null)
     {
         _logger.LogInformation("GetMaxPlanTypeAsync isUltimate={IsUltimate}", isUltimate);
         var now = dateTime ?? DateTime.UtcNow;
@@ -3397,9 +3397,9 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 (p.InvoiceDetails != null && p.InvoiceDetails.Any(i => 
                     (i.Status is PaymentStatus.Completed or PaymentStatus.Cancelled or PaymentStatus.Cancelled_In_Processing) && i.SubscriptionEndDate != null && i.SubscriptionEndDate > now))
             )
-            .OrderByDescending(p => SubscriptionHelper.GetPlanTypeLogicalOrder(p.PlanType))
-            .Select(p => p.PlanType)
-            .DefaultIfEmpty(PlanType.None)
+            .OrderByDescending(p => SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType)p.PlanType))
+            .Select(p => (QuotaPlanType)p.PlanType)
+            .DefaultIfEmpty(QuotaPlanType.None)
             .First();
 
         return maxPlanType;
@@ -3441,15 +3441,15 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         var appleProduct = await GetAppleProductConfigAsync(transactionInfo.ProductId);
         var purchaseDate = DateTimeOffset.FromUnixTimeMilliseconds(transactionInfo.PurchaseDate).UtcDateTime;
         var (subscriptionStartDate, subscriptionEndDate) =
-            await CalculateSubscriptionDurationAsync(userId, (PlanType)appleProduct.PlanType, appleProduct.IsUltimate);
+            await CalculateSubscriptionDurationAsync(userId, (QuotaPlanType)appleProduct.PlanType, appleProduct.IsUltimate);
         existingSubscription.CreatedAt = purchaseDate;
         existingSubscription.CompletedAt = DateTime.UtcNow;
         existingSubscription.Status = PaymentStatus.Completed;
         existingSubscription.SubscriptionId = transactionInfo.OriginalTransactionId;
         existingSubscription.PlanType = (PlanType)appleProduct.PlanType;
         existingSubscription.MembershipLevel = SubscriptionHelper.GetMembershipLevel(appleProduct.IsUltimate);
-        existingSubscription.SubscriptionStartDate = subscriptionStartDate;
-        existingSubscription.SubscriptionEndDate = subscriptionEndDate;
+        existingSubscription.SubscriptionStartDate = subscriptionStartDate.ToDateTime();
+        existingSubscription.SubscriptionEndDate = subscriptionEndDate.ToDateTime();
         existingSubscription.Platform = PaymentPlatform.AppStore;
         existingSubscription.AppStoreEnvironment = transactionInfo.Environment;
 
@@ -3460,8 +3460,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             CreatedAt = purchaseDate,
             CompletedAt = DateTime.UtcNow,
             Status = PaymentStatus.Completed,
-            SubscriptionStartDate = subscriptionStartDate,
-            SubscriptionEndDate = subscriptionEndDate,
+            SubscriptionStartDate = subscriptionStartDate.ToDateTime(),
+            SubscriptionEndDate = subscriptionEndDate.ToDateTime(),
             PriceId = transactionInfo.ProductId,
             MembershipLevel = SubscriptionHelper.GetMembershipLevel(appleProduct.IsUltimate),
             Amount = GetActualApplePrice(transactionInfo.Price),
@@ -3492,7 +3492,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         _logger.LogWarning("[UserBillingGAgent][UpdateSubscriptionStateAsync] Transaction processed user {UserId}, product {ProductId}, originaltransaction: {Id}, trancaction: {trancactionId}",
             userId, transactionInfo.ProductId, transactionInfo.OriginalTransactionId, transactionInfo.TransactionId);
         //Invite users to pay rewards
-        await ProcessInviteeSubscriptionAsync(userId, (PlanType) appleProduct.PlanType, appleProduct.IsUltimate, transactionInfo.TransactionId);
+        await ProcessInviteeSubscriptionAsync(userId, (QuotaPlanType) appleProduct.PlanType, appleProduct.IsUltimate, transactionInfo.TransactionId);
         _logger.LogWarning("[UserBillingGAgent][UpdateSubscriptionStateAsync] Process invitee subscription completed, user {UserId}, product {ProductId}, originaltransaction: {Id}, trancaction: {trancactionId}",
             userId, transactionInfo.ProductId, transactionInfo.OriginalTransactionId, transactionInfo.TransactionId);
     }
@@ -3963,13 +3963,14 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         return result;
     }
     
-    private async Task ProcessInviteeSubscriptionAsync(Guid userId, PlanType planType, bool isUltimate, string invoiceId)
+    private async Task ProcessInviteeSubscriptionAsync(Guid userId, QuotaPlanType planType, bool isUltimate, string invoiceId)
     {
-        var chatManagerGAgent = _clusterClient.GetGrain<IChatManagerGAgent>(userId);
-        var inviterId = await chatManagerGAgent.GetInviterAsync();
-        if (inviterId != null && inviterId != Guid.Empty)
+        var userProfileGAgent = _clusterClient.GetGrain<IUserProfileGAgent>(userId);
+        var userProfile = await userProfileGAgent.GetUserProfileAsync();
+        var inviterId = userProfile.InviterId;
+        if (inviterId != null && inviterId != string.Empty)
         {
-            var invitationGAgent = await GetInvitationAgentAsync((Guid)inviterId);
+            var invitationGAgent = await GetInvitationAgentAsync(Guid.Parse(inviterId));
             await invitationGAgent.ProcessInviteeSubscriptionAsync(userId.ToString(), planType, isUltimate, invoiceId);
         }
     }
@@ -3981,7 +3982,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             case AddPaymentEvent addPayment:
                 state.PaymentHistory.Add(addPayment.PaymentSummary);
                 state.TotalPayments++;
-                if (addPayment.PaymentSummary.Status == (int)PaymentStatus.Refunded)
+                if (addPayment.PaymentSummary.Status == QuotaPaymentStatus.Refunded)
                 {
                     state.RefundedPayments++;
                 }
@@ -4000,15 +4001,15 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 var payment = state.PaymentHistory.FirstOrDefault(p => p.PaymentGrainId == updateStatus.PaymentId);
                 if (payment != null)
                 {
-                    if (updateStatus.NewStatus == (int)PaymentStatus.Completed && payment.CompletedAt == null)
+                    if (updateStatus.NewStatus == QuotaPaymentStatus.Completed && payment.CompletedAt == null)
                     {
-                        payment.CompletedAt = DateTime.UtcNow.ToTimestamp();
+                        payment.CompletedAt = DateTime.UtcNow.ToProtoTimestamp();
                     }
-                    if (updateStatus.NewStatus == (int)PaymentStatus.Refunded && payment.Status != (int)PaymentStatus.Refunded)
+                    if (updateStatus.NewStatus == QuotaPaymentStatus.Refunded && payment.Status != QuotaPaymentStatus.Refunded)
                     {
                         state.RefundedPayments++;
                     }
-                    else if (payment.Status == (int)PaymentStatus.Refunded && updateStatus.NewStatus != (int)PaymentStatus.Refunded)
+                    else if (payment.Status == QuotaPaymentStatus.Refunded && updateStatus.NewStatus != QuotaPaymentStatus.Refunded)
                     {
                         state.RefundedPayments--;
                     }
@@ -4590,12 +4591,12 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 break;
         
             case GooglePlayNotificationType.SUBSCRIPTION_CANCELED:
-                await UpdateGooglePlaySubscriptionStatusAsync(userId, purchaseToken, PaymentStatus.Cancelled);
+                await UpdateGooglePlaySubscriptionStatusAsync(userId, purchaseToken, QuotaPaymentStatus.Cancelled);
                 break;
 
             case GooglePlayNotificationType.SUBSCRIPTION_EXPIRED:
             case GooglePlayNotificationType.SUBSCRIPTION_REVOKED:
-                await UpdateGooglePlaySubscriptionStatusAsync(userId, purchaseToken, PaymentStatus.Cancelled, true);
+                await UpdateGooglePlaySubscriptionStatusAsync(userId, purchaseToken, QuotaPaymentStatus.Cancelled, true);
                 break;
             
             default:
@@ -4608,11 +4609,11 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             private async Task<bool> HandleVoidedPurchaseNotification(Guid userId, VoidedPurchaseNotification notification)
     {
         _logger.LogInformation("[UserBillingGAgent][HandleVoidedPurchaseNotification] Received Voided Purchase Notification. PurchaseToken: {PurchaseToken}, OrderId: {OrderId}", notification.PurchaseToken, notification.OrderId);
-        await UpdateGooglePlaySubscriptionStatusAsync(userId, notification.PurchaseToken, PaymentStatus.Refunded, true);
+        await UpdateGooglePlaySubscriptionStatusAsync(userId, notification.PurchaseToken, QuotaPaymentStatus.Refunded, true);
         return true;
     }
     
-    private async Task UpdateGooglePlaySubscriptionStatusAsync(Guid userId, string purchaseToken, PaymentStatus newStatus, bool revokeImmediately = false)
+    private async Task UpdateGooglePlaySubscriptionStatusAsync(Guid userId, string purchaseToken, QuotaPaymentStatus newStatus, bool revokeImmediately = false)
     {
         _logger.LogInformation("[UserBillingGAgent][UpdateGooglePlaySubscriptionStatusAsync] Updating status for purchase token {PurchaseToken} to {NewStatus}. Revoke immediately: {RevokeImmediately}", purchaseToken, newStatus, revokeImmediately);
 
@@ -4626,10 +4627,10 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
     
         var invoiceDetail = paymentSummary.InvoiceDetails.First(i => i.PurchaseToken == purchaseToken);
     
-        invoiceDetail.Status = newStatus;
-        if (newStatus == PaymentStatus.Cancelled || newStatus == PaymentStatus.Refunded)
+        invoiceDetail.Status = (PaymentStatus)newStatus;
+        if (newStatus == QuotaPaymentStatus.Cancelled || newStatus == QuotaPaymentStatus.Refunded)
         {
-            paymentSummary.Status = newStatus;
+            paymentSummary.Status = (PaymentStatus)newStatus;
         }
 
         RaiseEvent(new UpdatePaymentEvent
@@ -5036,7 +5037,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             }
 
             // Fix: Calculate correct cumulative subscription duration using existing method
-            var (calculatedStartDate, calculatedEndDate) = await CalculateGooglePlaySubscriptionDurationAsync(userId, (PlanType)productConfig.PlanType, productConfig.IsUltimate);
+            var (calculatedStartDate, calculatedEndDate) = await CalculateGooglePlaySubscriptionDurationAsync(userId, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate);
             
             _logger.LogInformation("[UserBillingGAgent][ProcessRevenueCatRenewalAsync] Using cumulative time calculation: Start={Start}, End={End}", calculatedStartDate, calculatedEndDate);
 
@@ -5048,8 +5049,8 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 CreatedAt = DateTime.UtcNow,
                 CompletedAt = DateTime.UtcNow,
                 Status = PaymentStatus.Completed,
-                SubscriptionStartDate = calculatedStartDate,
-                SubscriptionEndDate = calculatedEndDate,
+                SubscriptionStartDate = calculatedStartDate.ToDateTime(),
+                SubscriptionEndDate = calculatedEndDate.ToDateTime(),
                 PriceId = verificationResult.ProductId,
                 MembershipLevel = SubscriptionHelper.GetMembershipLevel(productConfig.IsUltimate),
                 Amount = productConfig.Amount,
@@ -5067,7 +5068,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             existingPayment.CompletedAt = DateTime.UtcNow;
             existingPayment.Status = PaymentStatus.Completed;
             // Fix: Use the same calculated end date as the invoice detail for consistency
-            existingPayment.SubscriptionEndDate = calculatedEndDate;
+            existingPayment.SubscriptionEndDate = calculatedEndDate.ToDateTime();
 
             // Save the updated payment summary
             RaiseEvent(new UpdatePaymentEvent
@@ -5082,19 +5083,19 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             var subscription = await userQuotaAgent.GetSubscriptionAsync(productConfig.IsUltimate);
             
             // Extend the subscription using consistent cumulative logic
-            var now = DateTime.UtcNow;
+            var now = DateTime.UtcNow.ToProtoTimestamp();
             
             if (subscription.IsActive && subscription.EndDate > now)
             {
                 // For active and not-expired subscription: extend from current EndDate
                 if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscription.PlanType) <= 
-                    SubscriptionHelper.GetPlanTypeLogicalOrder((PlanType)productConfig.PlanType))
+                    SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType)productConfig.PlanType))
                 {
-                    subscription.PlanType = (PlanType)productConfig.PlanType;
+                    subscription.PlanType = (QuotaPlanType)productConfig.PlanType;
                 }
                 // Use fixed duration extension for consistency with other methods
                 subscription.EndDate = GetSubscriptionEndDate(subscription.PlanType, subscription.EndDate);
-                subscription.Status = PaymentStatus.Completed;
+                subscription.Status = QuotaPaymentStatus.Completed;
                 if (!subscription.SubscriptionIds.Contains(existingPayment.SubscriptionId))
                 {
                     subscription.SubscriptionIds.Add(existingPayment.SubscriptionId);
@@ -5106,14 +5107,12 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             {
                 // For expired or inactive subscription: restart from current time
                 subscription.IsActive = true;
-                subscription.StartDate = await CalculateReactivationStartTimeAsync(userQuotaAgent, productConfig.IsUltimate);
-                subscription.PlanType = (PlanType)productConfig.PlanType;
-                subscription.EndDate = GetSubscriptionEndDate(subscription.PlanType, subscription.StartDate);
-                subscription.Status = PaymentStatus.Completed;
-                if (subscription.SubscriptionIds == null)
-                {
-                    subscription.SubscriptionIds = new List<string>();
-                }
+                var startDateTime = await CalculateReactivationStartTimeAsync(userQuotaAgent, productConfig.IsUltimate);
+                subscription.StartDate = Timestamp.FromDateTime(DateTime.SpecifyKind(startDateTime, DateTimeKind.Utc));
+                subscription.PlanType = (QuotaPlanType)productConfig.PlanType;
+                subscription.EndDate = GetSubscriptionEndDate(subscription.PlanType, startDateTime.ToProtoTimestamp());
+                subscription.Status = QuotaPaymentStatus.Completed;
+                
                 if (!subscription.SubscriptionIds.Contains(existingPayment.SubscriptionId))
                 {
                     subscription.SubscriptionIds.Add(existingPayment.SubscriptionId);
@@ -5126,14 +5125,14 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             await userQuotaAgent.UpdateSubscriptionAsync(subscription, productConfig.IsUltimate);
 
             // Fix: Handle renewal - only Ultimate changes affect Premium subscription time 
-            await SyncOtherSubscriptionTimesAsync(userId, userQuotaAgent, (PlanType)productConfig.PlanType, productConfig.IsUltimate, isExtend: true);
+            await SyncOtherSubscriptionTimesAsync(userId, userQuotaAgent, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate, isExtend: true);
 
             // Report analytics with proper renewal type
             await ReportGooglePaymentSuccessAsync(userId, verificationResult.TransactionId, PurchaseType.Renewal,
                 PaymentPlatform.GooglePlay, verificationResult.ProductId, productConfig.Currency, productConfig.Amount);
 
             // Process invitee rewards
-            await ProcessInviteeSubscriptionAsync(userId, (PlanType)productConfig.PlanType, productConfig.IsUltimate, verificationResult.TransactionId);
+            await ProcessInviteeSubscriptionAsync(userId, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate, verificationResult.TransactionId);
 
             _logger.LogInformation("[UserBillingGAgent][ProcessRevenueCatRenewalAsync] Successfully processed renewal for user {UserId}, TransactionId: {TransactionId}", 
                 userId, verificationResult.TransactionId);
@@ -5216,7 +5215,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             await UpdateUserQuotaOnRefundAsync(userId, paymentSummary, invoiceDetail);
 
             _logger.LogInformation("[UserBillingGAgent][ProcessRevenueCatRefundAsync] Successfully processed refund for user {UserId}, TransactionId: {TransactionId}, Status: {OldStatus} -> {NewStatus}", 
-                userId, verificationResult.TransactionId, oldStatus, PaymentStatus.Refunded);
+                userId, verificationResult.TransactionId, oldStatus, QuotaPaymentStatus.Refunded);
         }
         catch (Exception ex)
         {
@@ -5285,7 +5284,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
                 paymentSummary.SubscriptionId, userId);
 
             _logger.LogInformation("[UserBillingGAgent][ProcessRevenueCatExpirationAsync] Successfully processed expiration for user {UserId}, SubscriptionId: {SubscriptionId}, Status: {OldStatus} -> {NewStatus}", 
-                userId, paymentSummary.SubscriptionId, oldStatus, PaymentStatus.Cancelled);
+                userId, paymentSummary.SubscriptionId, oldStatus, QuotaPaymentStatus.Cancelled);
         }
         catch (Exception ex)
         {
@@ -5314,7 +5313,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             var subscription = await userQuotaAgent.GetSubscriptionAsync(productConfig.IsUltimate);
 
             // Apply the same refund logic as Apple Pay: rollback subscription days using the product configuration's PlanType (like Apple uses appleProduct.PlanType)
-            var diff = GetDaysForPlanType((PlanType)productConfig.PlanType);
+            var diff = GetDaysForPlanType((QuotaPlanType)productConfig.PlanType);
             subscription.EndDate = subscription.EndDate.AddDays(-diff);
             
             // Remove the subscription ID from the active list
@@ -5330,13 +5329,13 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             if (subscription.SubscriptionIds == null || !subscription.SubscriptionIds.Any())
             {
                 subscription.IsActive = false;
-                subscription.Status = PaymentStatus.Refunded;
+                subscription.Status = QuotaPaymentStatus.Refunded;
             }
 
             await userQuotaAgent.UpdateSubscriptionAsync(subscription, productConfig.IsUltimate);
             
             // Fix: Handle refund - only Ultimate changes affect Premium subscription time 
-            await SyncOtherSubscriptionTimesAsync(userId, userQuotaAgent, (PlanType)productConfig.PlanType, productConfig.IsUltimate, isExtend: false);
+            await SyncOtherSubscriptionTimesAsync(userId, userQuotaAgent, (QuotaPlanType)productConfig.PlanType, productConfig.IsUltimate, isExtend: false);
 
             _logger.LogInformation("[UserBillingGAgent][UpdateUserQuotaOnRefundAsync] Applied refund rollback consistent with Apple Pay. UserId: {UserId}, SubscriptionId: {SubscriptionId}, ProductPlanType: {ProductPlanType}, RolledBackDays: {Days}, NewEndDate: {EndDate}, IsActive: {IsActive}", 
                 userId, paymentSummary.SubscriptionId, productConfig.PlanType, diff, subscription.EndDate, subscription.IsActive);
@@ -5373,7 +5372,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
 
             // Deactivate the subscription due to expiration
             subscription.IsActive = false;
-            subscription.Status = PaymentStatus.Cancelled;
+            subscription.Status = QuotaPaymentStatus.Cancelled;
 
             await userQuotaAgent.UpdateSubscriptionAsync(subscription, productConfig.IsUltimate);
 
@@ -5389,7 +5388,7 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
     /// <summary>
     /// Simplified subscription time sync logic: Ultimate plan changes affect Premium plan, Premium plan changes don't affect other subscriptions
     /// </summary>
-    private async Task SyncOtherSubscriptionTimesAsync(Guid userId, IUserQuotaGAgent userQuotaAgent, PlanType triggerPlanType, bool triggerIsUltimate, bool isExtend)
+    private async Task SyncOtherSubscriptionTimesAsync(Guid userId, IUserQuotaGAgent userQuotaAgent, QuotaPlanType triggerPlanType, bool triggerIsUltimate, bool isExtend)
     {
         var days = GetDaysForPlanType(triggerPlanType);
         var timeSpan = TimeSpan.FromDays(days);
@@ -5402,13 +5401,13 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
             {
                 if (isExtend)
                 {
-                    premiumSubscription.StartDate = premiumSubscription.StartDate.Add(timeSpan);
-                    premiumSubscription.EndDate = premiumSubscription.EndDate.Add(timeSpan);
+                    premiumSubscription.StartDate = premiumSubscription.StartDate+ Duration.FromTimeSpan(timeSpan);
+                    premiumSubscription.EndDate = premiumSubscription.EndDate+ Duration.FromTimeSpan(timeSpan);
                 }
                 else
                 {
-                    premiumSubscription.StartDate = premiumSubscription.StartDate.Add(-timeSpan);
-                    premiumSubscription.EndDate = premiumSubscription.EndDate.Add(-timeSpan);
+                    premiumSubscription.StartDate = premiumSubscription.StartDate+ Duration.FromTimeSpan(-timeSpan);
+                    premiumSubscription.EndDate = premiumSubscription.EndDate+ Duration.FromTimeSpan(-timeSpan);
                 }
                 await userQuotaAgent.UpdateSubscriptionAsync(premiumSubscription, false);
                 
@@ -5422,9 +5421,9 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
     /// <summary>
     /// Determine if subscription needs time sync: active and not expired, regardless of status being Completed or Cancelled
     /// </summary>
-    private bool ShouldSyncSubscriptionTime(SubscriptionInfoDto subscription)
+    private bool ShouldSyncSubscriptionTime(SubscriptionInfoProto subscription)
     {
-        var now = DateTime.UtcNow;
+        var now = Timestamp.FromDateTime(DateTime.UtcNow);
         return subscription.EndDate > now && // Not expired
                subscription.SubscriptionIds != null && 
                subscription.SubscriptionIds.Count > 0; // Has subscription ID (even if cancelled)
@@ -5453,17 +5452,15 @@ public class UserBillingGAgent : Aevatar.Agents.Core.GAgentBase<UserBillingState
         return applePrice / 1000m;
     }
 
-    private async Task<InviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
+    private async Task<IInviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
     {
-        var agent = _agentFactory.CreateGAgent<InviteCodeGAgent>(codeGrainId);
-        await agent.ActivateAsync();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<InviteCodeGAgent>(codeGrainId);
+        return (IInviteCodeGAgent)actor.GetAgent();
     }
 
-    private async Task<InvitationGAgent> GetInvitationAgentAsync(Guid userId)
+    private async Task<IInvitationGAgent> GetInvitationAgentAsync(Guid userId)
     {
-        var agent = _agentFactory.CreateGAgent<InvitationGAgent>(userId);
-        await agent.ActivateAsync();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>(userId);
+        return (IInvitationGAgent)actor.GetAgent();
     }
 }

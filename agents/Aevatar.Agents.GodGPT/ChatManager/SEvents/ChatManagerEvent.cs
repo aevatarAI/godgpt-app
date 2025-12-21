@@ -1,3 +1,4 @@
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
 using Aevatar.Core.Abstractions;
 using Aevatar.GAgents.AI.Common;
@@ -23,44 +24,11 @@ public enum VoiceContentType
 }
 
 [GenerateSerializer]
-public class RequestCreateGodChatEvent : EventBase
-{
-    [Id(0)] public string SystemLLM { get; set; }
-    [Id(1)] public string Prompt { get; set; }
-    [Id(2)] public UserProfileDto UserProfile { get; set; }
-    [Id(3)] public string? Guider { get; set; } // Role information for the conversation
-}
-
-[GenerateSerializer]
 public class ResponseCreateGod : ResponseToPublisherEventBase
 {
     [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.CreateSession;
     [Id(1)] public Guid SessionId { get; set; }
     [Id(2)] public String SessionVersion { get; set; }
-}
-
-[GenerateSerializer]
-public class RequestGodChatEvent : EventBase
-{
-    [Id(0)] public Guid SessionId { get; set; }
-    [Id(1)] public string SystemLLM { get; set; }
-    [Id(2)] public string Content { get; set; }
-}
-
-[GenerateSerializer]
-public class ResponseGodChat : ResponseToPublisherEventBase
-{
-    [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.ChatResponse;
-    [Id(1)] public string Response { get; set; }
-    [Id(2)] public string NewTitle { get; set; }
-}
-
-[GenerateSerializer]
-public class RequestStreamGodChatEvent : EventBase
-{
-    [Id(0)] public Guid SessionId { get; set; }
-    [Id(1)] public string SystemLLM { get; set; }
-    [Id(2)] public string Content { get; set; }
 }
 
 [GenerateSerializer]
@@ -141,102 +109,6 @@ public class ResponseStreamGodChatForHttp
 }
 
 [GenerateSerializer]
-public class RequestGodSessionListEvent : EventBase
-{
-}
-
-[GenerateSerializer]
-public class ResponseGodSessionList : ResponseToPublisherEventBase
-{
-    [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.SessionListResponse;
-    [Id(1)] public List<SessionInfoDto> SessionList { get; set; }
-}
-
-[GenerateSerializer]
-public class RequestSessionChatHistoryEvent : EventBase
-{
-    [Id(0)] public Guid SessionId { get; set; }
-}
-
-[GenerateSerializer]
-public class ResponseSessionChatHistory : ResponseToPublisherEventBase
-{
-    [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.SessionChatHistory;
-    [Id(1)] public List<ChatMessage> ChatHistory { get; set; }
-}
-
-[GenerateSerializer]
-public class RequestDeleteSessionEvent : EventBase
-{
-    [Id(0)] public Guid SessionId { get; set; }
-}
-
-[GenerateSerializer]
-public class ResponseDeleteSession : ResponseToPublisherEventBase
-{
-    [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.SessionDelete;
-    [Id(1)] public bool IfSuccess { get; set; }
-}
-
-[GenerateSerializer]
-public class RequestRenameSessionEvent : EventBase
-{
-    [Id(0)] public Guid SessionId { get; set; }
-    [Id(1)] public string Title { get; set; }
-}
-
-[GenerateSerializer]
-public class ResponseRenameSession : ResponseToPublisherEventBase
-{
-    [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.SessionRename;
-    [Id(1)] public Guid SessionId { get; set; }
-    [Id(2)] public string Title { get; set; }
-}
-
-[GenerateSerializer]
-public class RequestClearAllEvent : EventBase
-{
-}
-
-[GenerateSerializer]
-public class ResponseClearAll : ResponseToPublisherEventBase
-{
-    [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.ClearAll;
-    [Id(1)] public bool Success { get; set; }
-}
-
-[GenerateSerializer]
-public class RequestSetUserProfileEvent : EventBase
-{
-    [Id(0)] public string Gender { get; set; }
-    [Id(1)] public DateTime BirthDate { get; set; }
-    [Id(2)] public string BirthPlace { get; set; }
-    [Id(3)] public string FullName { get; set; }
-}
-
-[GenerateSerializer]
-public class ResponseSetUserProfile : ResponseToPublisherEventBase
-{
-    [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.SetUserProfile;
-    [Id(1)] public bool Success { get; set; }
-}
-
-[GenerateSerializer]
-public class RequestGetUserProfileEvent : EventBase
-{
-}
-
-[GenerateSerializer]
-public class ResponseGetUserProfile : ResponseToPublisherEventBase
-{
-    [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.GetUserProfile;
-    [Id(1)] public string Gender { get; set; }
-    [Id(2)] public DateTime BirthDate { get; set; }
-    [Id(3)] public string BirthPlace { get; set; }
-    [Id(4)] public string FullName { get; set; }
-}
-
-[GenerateSerializer]
 public class UserProfileDto
 {
     [Id(0)] public string Gender { get; set; }
@@ -244,8 +116,8 @@ public class UserProfileDto
     [Id(2)] public string BirthPlace { get; set; }
     [Id(3)] public string FullName { get; set; }
     [Id(4)] public CreditsInfoDto Credits { get; set; }
-    [Id(5)] public SubscriptionInfoDto Subscription { get; set; }
-    [Id(6)] public SubscriptionInfoDto UltimateSubscription { get; set; }
+    [Id(5)] public SubscriptionInfoProto Subscription { get; set; }
+    [Id(6)] public SubscriptionInfoProto UltimateSubscription { get; set; }
     [Id(7)] public Guid Id { get; set; }
     [Id(8)] public Guid? InviterId { get; set; }
     [Id(9)] public VoiceLanguageEnum VoiceLanguage { get; set; }

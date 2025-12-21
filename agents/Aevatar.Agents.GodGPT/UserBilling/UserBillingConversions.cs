@@ -1,4 +1,5 @@
 using Aevatar.Agents.GodGPT.Protos.UserBilling;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.ChatManager.UserBilling;
 using Aevatar.Application.Grains.ChatManager.UserBilling.Payment;
 using Aevatar.Application.Grains.Common.Constants;
@@ -15,10 +16,7 @@ public static class UserBillingConversions
     // Timestamp Helpers
     // =============================================================================
     
-    public static Timestamp ToTimestamp(this DateTime dateTime)
-    {
-        return Timestamp.FromDateTime(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc));
-    }
+ 
 
     public static Timestamp? ToTimestampNullable(this DateTime? dateTime)
     {
@@ -42,18 +40,18 @@ public static class UserBillingConversions
         {
             PaymentGrainId = summary.PaymentGrainId.ToString(),
             OrderId = summary.OrderId ?? "",
-            PlanType = (int)summary.PlanType,
+            PlanType = (QuotaPlanType)summary.PlanType,
             Amount = (double)summary.Amount,
             Currency = summary.Currency ?? "USD",
-            CreatedAt = summary.CreatedAt.ToTimestamp(),
-            Status = (int)summary.Status,
+            CreatedAt = summary.CreatedAt.ToProtoTimestamp(),
+            Status = (QuotaPaymentStatus)summary.Status,
             PaymentType = (int)summary.PaymentType,
             Method = (int)summary.Method,
             Platform = (int)summary.Platform,
             IsSubscriptionRenewal = summary.IsSubscriptionRenewal,
             SubscriptionId = summary.SubscriptionId ?? "",
-            SubscriptionStartDate = summary.SubscriptionStartDate.ToTimestamp(),
-            SubscriptionEndDate = summary.SubscriptionEndDate.ToTimestamp(),
+            SubscriptionStartDate = summary.SubscriptionStartDate.ToProtoTimestamp(),
+            SubscriptionEndDate = summary.SubscriptionEndDate.ToProtoTimestamp(),
             SessionId = summary.SessionId ?? "",
             UserId = summary.UserId.ToString(),
             PriceId = summary.PriceId ?? "",
@@ -63,7 +61,7 @@ public static class UserBillingConversions
 
         if (summary.CompletedAt.HasValue)
         {
-            proto.CompletedAt = summary.CompletedAt.Value.ToTimestamp();
+            proto.CompletedAt = summary.CompletedAt.Value.ToProtoTimestamp();
         }
 
         if (summary.AmountNetTotal.HasValue)
@@ -125,14 +123,14 @@ public static class UserBillingConversions
         var proto = new UserBillingInvoiceDetailProto
         {
             InvoiceId = detail.InvoiceId ?? "",
-            CreatedAt = detail.CreatedAt.ToTimestamp(),
-            CompletedAt = detail.CompletedAt.ToTimestamp(),
-            Status = (int)detail.Status,
-            SubscriptionStartDate = detail.SubscriptionStartDate.ToTimestamp(),
-            SubscriptionEndDate = detail.SubscriptionEndDate.ToTimestamp(),
+            CreatedAt = detail.CreatedAt.ToProtoTimestamp(),
+            CompletedAt = detail.CompletedAt.ToProtoTimestamp(),
+            Status = (QuotaPaymentStatus)detail.Status,
+            SubscriptionStartDate = detail.SubscriptionStartDate.ToProtoTimestamp(),
+            SubscriptionEndDate = detail.SubscriptionEndDate.ToProtoTimestamp(),
             PriceId = detail.PriceId ?? "",
             MembershipLevel = detail.MembershipLevel ?? "",
-            PlanType = (int)detail.PlanType,
+            PlanType = (QuotaPlanType)detail.PlanType,
             PurchaseToken = detail.PurchaseToken ?? "",
             IsTrial = detail.IsTrial,
             TrialCode = detail.TrialCode ?? ""

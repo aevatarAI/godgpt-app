@@ -1,14 +1,14 @@
 using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.InviteCode;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Core.Abstractions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
-// Alias to avoid conflict with Proto enums
-using CsInvitationCodeType = Aevatar.Application.Grains.Common.Constants.InvitationCodeType;
-using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
-using CsPaymentPlatform = Aevatar.Application.Grains.Common.Constants.PaymentPlatform;
+
+// Using Proto types from invite_code.proto and user_quota.proto
+using PaymentPlatform = Aevatar.Application.Grains.Common.Constants.PaymentPlatform;
 
 namespace Aevatar.Application.Grains.Agents.Invitation;
 
@@ -85,14 +85,14 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
             BatchId = initDto.BatchId,
             TrialDays = initDto.TrialDays,
             ProductId = initDto.ProductId ?? string.Empty,
-            PlanType = (PlanType)initDto.PlanType,
+            PlanType = initDto.PlanType,
             IsUltimate = initDto.IsUltimate,
             StartDate = Timestamp.FromDateTime(initDto.StartDate.ToUniversalTime()),
             EndDate = Timestamp.FromDateTime(initDto.EndDate.ToUniversalTime()),
             InviteeId = initDto.InviteeId ?? string.Empty,
             CreatedAt = Timestamp.FromDateTime(DateTime.UtcNow),
             IsActive = true,
-            Platform = (PaymentPlatform)initDto.Platform,
+            Platform = (int)initDto.Platform,
             SessionUrl = initDto.SessionUrl ?? string.Empty,
             SessionExpiresAt = Timestamp.FromDateTime(initDto.SessionExpiresAt.ToUniversalTime())
         });
@@ -113,18 +113,18 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
             {
                 IsValid = true,
                 Message = string.Empty,
-                CodeType = CsInvitationCodeType.FreeTrialReward,
+                CodeType = InviteCodeType.FreeTrialReward,
                 ActivationInfo = null
             });
         } 
         
-        if (State.CodeType != InvitationCodeType.FreeTrialReward)
+        if (State.CodeType != InviteCodeType.FreeTrialReward)
         {
             return Task.FromResult(new ValidateCodeResultDto
             {
                 IsValid = false,
                 Message = "Invalid code type",
-                CodeType = (CsInvitationCodeType)State.CodeType,
+                CodeType = State.CodeType,
                 ActivationInfo = null
             });
         }
@@ -135,7 +135,7 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
             {
                 IsValid = false,
                 Message = "Code is not active",
-                CodeType = (CsInvitationCodeType)State.CodeType,
+                CodeType = State.CodeType,
                 ActivationInfo = null
             });
         }
@@ -146,7 +146,7 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
             {
                 IsValid = false,
                 Message = "Code already used by another user",
-                CodeType = (CsInvitationCodeType)State.CodeType,
+                CodeType = State.CodeType,
                 ActivationInfo = null
             });
         }
@@ -157,20 +157,20 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
             {
                 IsValid = true,
                 Message = string.Empty,
-                CodeType = (CsInvitationCodeType)State.CodeType,
+                CodeType = State.CodeType,
                 ActivationInfo = new FreeTrialActivationDto
                 {
                     CreatedAt = State.CreatedAt?.ToDateTime() ?? DateTime.MinValue,
                     IsActive = State.IsActive,
                     UsageCount = State.UsageCount,
                     InviteCode = State.InviteCode,
-                    CodeType = (CsInvitationCodeType)State.CodeType,
+                    CodeType = State.CodeType,
                     BatchId = State.BatchId,
                     TrialDays = State.TrialDays,
                     ProductId = State.ProductId,
-                    PlanType = (CsPlanType)State.PlanType,
+                    PlanType = State.PlanType,
                     IsUltimate = State.IsUltimate,
-                    Platform = (CsPaymentPlatform)State.Platform,
+                    Platform = (PaymentPlatform)State.Platform,
                     InviteeId = State.InviteeId,
                     UsedAt = State.UsedAt?.ToDateTime(),
                     SessionUrl = State.SessionUrl,
@@ -185,7 +185,7 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
             {
                 IsValid = false,
                 Message = "Internal error occurred",
-                CodeType = (CsInvitationCodeType)State.CodeType,
+                CodeType = State.CodeType,
                 ActivationInfo = null
             });
         }
@@ -208,7 +208,7 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
 
     public Task<FreeTrialCodeInfoDto?> GetCodeInfoAsync()
     {
-        if (State.CodeType != InvitationCodeType.FreeTrialReward)
+        if (State.CodeType != InviteCodeType.FreeTrialReward)
         {
             return Task.FromResult<FreeTrialCodeInfoDto?>(null);
         }
@@ -217,7 +217,7 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
         {
             BatchId = State.BatchId,
             TrialDays = State.TrialDays,
-            PlanType = (CsPlanType)State.PlanType,
+            PlanType = State.PlanType,
             IsUltimate = State.IsUltimate,
             UsedAt = State.UsedAt?.ToDateTime()
         };
@@ -268,7 +268,7 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
                 state.CreatedAt = initEvent.CreatedAt;
                 state.IsActive = true;
                 state.UsageCount = 0;
-                state.CodeType = InvitationCodeType.FriendInvitation;
+                state.CodeType = InviteCodeType.FriendInvitation;
                 state.InviteCode = initEvent.InviteCode;
                 break;
 
@@ -285,7 +285,7 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
                 state.CreatedAt = freeTrialEvent.CreatedAt;
                 state.IsActive = freeTrialEvent.IsActive;
                 state.UsageCount = 1;
-                state.CodeType = InvitationCodeType.FreeTrialReward;
+                state.CodeType = InviteCodeType.FreeTrialReward;
                 state.BatchId = freeTrialEvent.BatchId;
                 state.TrialDays = freeTrialEvent.TrialDays;
                 state.ProductId = freeTrialEvent.ProductId;

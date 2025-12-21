@@ -24,16 +24,6 @@ message ChatManagerStateProto {
   optional google.protobuf.Timestamp registered_at_utc = 11;
   optional string inviter_id = 12;  // Guid? as string
   int32 voice_language = 13;  // VoiceLanguageEnum as int
-  
-  // Daily Push Notification Fields
-  map<string, UserDeviceInfoProto> user_devices = 14;
-  map<string, string> token_to_device_map = 15;
-  map<string, bool> daily_push_read_status = 16;
-  
-  // Enhanced Device Management V2
-  map<string, UserDeviceInfoV2Proto> user_devices_v2 = 17;
-  map<string, string> token_to_device_map_v2 = 18;
-  repeated string migrated_device_ids = 19;  // HashSet as repeated
   int32 state_version = 20;
 }
 
@@ -43,46 +33,6 @@ message SessionInfoProto {
   google.protobuf.Timestamp create_at = 3;
   optional string guider = 4;
   optional string share_id = 5;  // Guid? as string
-}
-
-message UserDeviceInfoProto {
-  string push_token = 1;
-  string device_type = 2;
-  google.protobuf.Timestamp registered_at = 3;
-  google.protobuf.Timestamp last_active_at = 4;
-  bool is_push_enabled = 5;
-  optional google.protobuf.Timestamp local_time = 6;
-  string timezone = 7;
-}
-
-message UserDeviceInfoV2Proto {
-  string push_token = 1;
-  string device_type = 2;
-  google.protobuf.Timestamp registered_at = 3;
-  google.protobuf.Timestamp last_active_at = 4;
-  bool is_push_enabled = 5;
-  optional google.protobuf.Timestamp local_time = 6;
-  string timezone = 7;
-  
-  // V2 enhanced fields (matching C# UserDeviceInfoV2 properties)
-  string device_id = 8;
-  string time_zone_id = 9;
-  string push_language = 10;
-  bool push_enabled = 11;
-  google.protobuf.Timestamp last_token_update = 12;
-  int32 consecutive_failures = 13;
-  optional google.protobuf.Timestamp last_failure_at = 14;
-  optional google.protobuf.Timestamp last_success_at = 15;
-  int32 push_status = 16;  // DevicePushStatus enum as int
-  optional google.protobuf.Timestamp token_updated_at = 17;
-  
-  // Additional fields from C# UserDeviceInfoV2
-  string user_id = 18;  // Guid as string
-  string platform = 19;
-  string app_version = 20;
-  int32 status = 21;  // DeviceStatus enum as int
-  int32 structure_version = 22;
-  optional google.protobuf.Timestamp last_successful_push = 23;
 }
 
 // =============================================================================
@@ -112,17 +62,6 @@ message RenameTitleEvent {
 message ClearAllEvent {
 }
 
-message SetUserProfileEvent {
-  string gender = 1;
-  google.protobuf.Timestamp birth_date = 2;
-  string birth_place = 3;
-  string full_name = 4;
-}
-
-message SetVoiceLanguageEvent {
-  int32 voice_language = 1;  // VoiceLanguageEnum as int
-}
-
 message GenerateChatShareContentEvent {
   string session_id = 1;  // Guid as string
   string share_id = 2;    // Guid as string
@@ -130,10 +69,6 @@ message GenerateChatShareContentEvent {
 
 message SetMaxShareCountEvent {
   int32 max_share_count = 1;
-}
-
-message SetInviterEvent {
-  string inviter_id = 1;  // Guid as string
 }
 
 message SetRegisteredAtUtcEvent {
@@ -147,50 +82,6 @@ message InitializeNewUserStatusEvent {
   int32 max_share_count = 4;
 }
 
-message RegisterOrUpdateDeviceEvent {
-  string device_id = 1;
-  UserDeviceInfoProto device_info = 2;
-  bool is_new_device = 3;
-  optional string old_push_token = 4;
-}
-
-message MarkDailyPushReadEvent {
-  string date_key = 1;
-  google.protobuf.Timestamp read_time = 2;
-}
-
-message CleanExpiredDevicesEvent {
-  repeated string device_ids_to_remove = 1;
-  google.protobuf.Timestamp cleanup_time = 2;
-  string cleanup_reason = 3;
-  int32 removed_count = 4;
-}
-
-// V2 Events
-
-message RegisterOrUpdateDeviceV2Event {
-  string device_id = 1;
-  UserDeviceInfoV2Proto device_info = 2;
-  bool is_new_device = 3;
-  optional string old_push_token = 4;
-  bool is_migration = 5;
-}
-
-message MigrateDeviceToV2Event {
-  string device_id = 1;
-  UserDeviceInfoProto old_device_info = 2;
-  UserDeviceInfoV2Proto new_device_info = 3;
-  google.protobuf.Timestamp migration_time = 4;
-}
-
-message CleanupDevicesV2Event {
-  repeated string device_ids_to_remove = 1;
-  int32 removed_count = 2;
-  string cleanup_reason = 3;
-  map<string, string> cleanup_details = 4;
-  google.protobuf.Timestamp cleanup_time = 5;
-}
-
 // =============================================================================
 // Response Events (for PublishAsync to subscribers)
 // =============================================================================
@@ -199,12 +90,6 @@ message ResponseCreateGodProto {
   int32 response_type = 1;  // ResponseType enum
   string session_id = 2;     // Guid as string
   string session_version = 3;
-}
-
-message ResponseGodChatProto {
-  int32 response_type = 1;
-  string response = 2;
-  string new_title = 3;
 }
 
 message ResponseStreamGodChatProto {
@@ -218,46 +103,7 @@ message ResponseStreamGodChatProto {
   bytes audio_data = 8;
 }
 
-message ResponseGodSessionListProto {
-  int32 response_type = 1;
-  repeated SessionInfoProto session_list = 2;
-}
-
-message ResponseSessionChatHistoryProto {
-  int32 response_type = 1;
-  repeated ChatMessageProto chat_history = 2;
-}
-
 message ChatMessageProto {
   string role = 1;  // user/assistant/system
   string content = 2;
-}
-
-message ResponseDeleteSessionProto {
-  int32 response_type = 1;
-  bool if_success = 2;
-}
-
-message ResponseRenameSessionProto {
-  int32 response_type = 1;
-  string session_id = 2;
-  string title = 3;
-}
-
-message ResponseClearAllProto {
-  int32 response_type = 1;
-  bool success = 2;
-}
-
-message ResponseSetUserProfileProto {
-  int32 response_type = 1;
-  bool success = 2;
-}
-
-message ResponseGetUserProfileProto {
-  int32 response_type = 1;
-  string gender = 2;
-  google.protobuf.Timestamp birth_date = 3;
-  string birth_place = 4;
-  string full_name = 5;
 }

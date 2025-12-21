@@ -1,3 +1,4 @@
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Core.Abstractions;
 using Aevatar.Application.Grains.ChatManager.UserBilling;
@@ -26,7 +27,7 @@ public class UpdatePaymentLogEvent : UserBillingLogEvent
 public class UpdatePaymentStatusLogEvent : UserBillingLogEvent
 {
     [Id(0)] public Guid PaymentId { get; set; }
-    [Id(1)] public PaymentStatus NewStatus { get; set; }
+    [Id(1)] public QuotaPaymentStatus NewStatus { get; set; }
 }
 
 [GenerateSerializer]

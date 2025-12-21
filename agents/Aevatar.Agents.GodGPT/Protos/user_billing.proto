@@ -6,6 +6,7 @@ option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.UserBilling";
 
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/wrappers.proto";
+import "Protos/user_quota.proto";
 
 // =============================================================================
 // State
@@ -28,12 +29,12 @@ message UserBillingStateProto {
 message PaymentSummaryProto {
   string payment_grain_id = 1;   // Guid as string
   string order_id = 2;
-  int32 plan_type = 3;           // PlanType enum
+  aevatar.agents.godgpt.userquota.QuotaPlanType plan_type = 3;  // Using QuotaPlanType
   double amount = 4;             // decimal as double
   string currency = 5;
   google.protobuf.Timestamp created_at = 6;
   optional google.protobuf.Timestamp completed_at = 7;
-  int32 status = 8;              // PaymentStatus enum
+  aevatar.agents.godgpt.userquota.QuotaPaymentStatus status = 8;
   int32 payment_type = 9;        // PaymentType enum (obsolete but kept)
   int32 method = 10;             // PaymentMethod enum (obsolete but kept)
   int32 platform = 11;           // PaymentPlatform enum
@@ -54,13 +55,13 @@ message UserBillingInvoiceDetailProto {
   string invoice_id = 1;
   google.protobuf.Timestamp created_at = 2;
   google.protobuf.Timestamp completed_at = 3;
-  int32 status = 4;              // PaymentStatus enum
+  aevatar.agents.godgpt.userquota.QuotaPaymentStatus status = 4;
   google.protobuf.Timestamp subscription_start_date = 5;
   google.protobuf.Timestamp subscription_end_date = 6;
   string price_id = 7;
   string membership_level = 8;
   optional double amount = 9;
-  int32 plan_type = 10;          // PlanType enum
+  aevatar.agents.godgpt.userquota.QuotaPlanType plan_type = 10;  // Using QuotaPlanType
   string purchase_token = 11;
   optional string currency = 12;
   optional double amount_net_total = 13;
@@ -94,7 +95,7 @@ message UpdatePaymentEvent {
 
 message UpdatePaymentStatusEvent {
   string payment_id = 1;         // Guid as string
-  int32 new_status = 2;          // PaymentStatus enum
+  aevatar.agents.godgpt.userquota.QuotaPaymentStatus new_status = 2;
 }
 
 message ClearAllBillingEvent {

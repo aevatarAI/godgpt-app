@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.protos.userprofile;
+
+import "google/protobuf/timestamp.proto";
+import "Protos/user_quota.proto";
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.UserProfile";
+
+// =============================================================================
+// State
+// =============================================================================
+
+// Note: VoiceLanguage is stored as int32 since the C# enum has -1 for Unset
+// VOICE_LANGUAGE_UNSET = -1, ENGLISH = 0, CHINESE = 1, SPANISH = 2
+
+// User profile state
+message UserProfileState {
+  // User ID
+  string user_id = 1;
+  
+  // Gender
+  string gender = 2;
+  
+  // Birth date
+  google.protobuf.Timestamp birth_date = 3;
+  
+  // Birth place
+  string birth_place = 4;
+  
+  // Full name
+  string full_name = 5;
+  
+  // Voice language preference
+  int32 voice_language = 6;
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+// Set user profile event
+message SetUserProfileEvent {
+  string gender = 1;
+  google.protobuf.Timestamp birth_date = 2;
+  string birth_place = 3;
+  string full_name = 4;
+}
+
+// Set voice language event
+message SetVoiceLanguageEvent {
+  int32 voice_language = 1;
+}
+
+// Clear user profile event
+message ClearUserProfileEvent {
+}
+
+// =============================================================================
+// DTOs
+// =============================================================================
+
+// User profile DTO (includes credits and subscription info)
+message UserProfileDtoProto {
+  string id = 1;
+  string gender = 2;
+  google.protobuf.Timestamp birth_date = 3;
+  string birth_place = 4;
+  string full_name = 5;
+  int32 voice_language = 6;
+  aevatar.agents.godgpt.userquota.CreditsInfoProto credits = 7;
+  aevatar.agents.godgpt.userquota.SubscriptionInfoProto subscription = 8;
+  aevatar.agents.godgpt.userquota.SubscriptionInfoProto ultimate_subscription = 9;
+  string inviter_id = 10;
+}

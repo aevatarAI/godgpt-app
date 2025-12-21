@@ -59,108 +59,9 @@ public static class ChatManagerConversions
         return protos.Select(p => p.FromProto()).ToList();
     }
 
-    // =============================================================================
-    // UserDeviceInfo Conversions
-    // =============================================================================
+    // Note: UserDeviceInfoProto (V1) conversions removed - type does not exist
+    // Only UserDeviceInfoV2Proto is available in daily_push_user.proto
 
-    public static UserDeviceInfoProto ToProto(this UserDeviceInfo info)
-    {
-        var proto = new UserDeviceInfoProto
-        {
-            PushToken = info.PushToken ?? "",
-            DeviceType = "",  // UserDeviceInfo doesn't have DeviceType
-            RegisteredAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.RegisteredAt, DateTimeKind.Utc)),
-            LastActiveAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.LastTokenUpdate, DateTimeKind.Utc)),
-            IsPushEnabled = info.PushEnabled,
-            Timezone = info.TimeZoneId ?? ""
-        };
-        return proto;
-    }
-
-    public static UserDeviceInfo FromProto(this UserDeviceInfoProto proto)
-    {
-        return new UserDeviceInfo
-        {
-            DeviceId = "",  // Not in proto
-            PushToken = proto.PushToken,
-            TimeZoneId = proto.Timezone,
-            PushLanguage = "en",
-            PushEnabled = proto.IsPushEnabled,
-            RegisteredAt = proto.RegisteredAt?.ToDateTime() ?? DateTime.MinValue,
-            LastTokenUpdate = proto.LastActiveAt?.ToDateTime() ?? DateTime.MinValue
-        };
-    }
-
-    // =============================================================================
-    // UserDeviceInfoV2 Conversions
-    // =============================================================================
-
-    public static UserDeviceInfoV2Proto ToProto(this UserDeviceInfoV2 info)
-    {
-        var proto = new UserDeviceInfoV2Proto
-        {
-            PushToken = info.PushToken ?? "",
-            DeviceType = info.Platform ?? "",  // Platform maps to DeviceType
-            RegisteredAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.RegisteredAt, DateTimeKind.Utc)),
-            LastActiveAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.LastActiveAt, DateTimeKind.Utc)),
-            IsPushEnabled = info.PushEnabled,
-            Timezone = info.TimeZoneId ?? "",
-            ConsecutiveFailures = info.ConsecutiveFailures,
-            PushStatus = (int)info.Status
-        };
-        if (info.LastSuccessfulPush.HasValue)
-        {
-            proto.LastSuccessAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.LastSuccessfulPush.Value, DateTimeKind.Utc));
-        }
-        proto.TokenUpdatedAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.LastTokenUpdate, DateTimeKind.Utc));
-        return proto;
-    }
-
-    public static UserDeviceInfoV2 FromProto(this UserDeviceInfoV2Proto proto)
-    {
-        return new UserDeviceInfoV2
-        {
-            DeviceId = "",  // Not in proto
-            UserId = Guid.Empty,  // Not in proto
-            PushToken = proto.PushToken,
-            TimeZoneId = proto.Timezone,
-            PushLanguage = "en",
-            PushEnabled = proto.IsPushEnabled,
-            RegisteredAt = proto.RegisteredAt?.ToDateTime() ?? DateTime.MinValue,
-            LastTokenUpdate = proto.TokenUpdatedAt?.ToDateTime() ?? DateTime.MinValue,
-            LastActiveAt = proto.LastActiveAt?.ToDateTime() ?? DateTime.MinValue,
-            Platform = proto.DeviceType,
-            AppVersion = "",
-            StructureVersion = 2,
-            Status = (DeviceStatus)proto.PushStatus,
-            ConsecutiveFailures = proto.ConsecutiveFailures,
-            LastSuccessfulPush = proto.LastSuccessAt?.ToDateTime()
-        };
-    }
-
-    // =============================================================================
-    // Dictionary Conversions
-    // =============================================================================
-
-    public static Dictionary<string, UserDeviceInfoProto> ToProtoDict(this Dictionary<string, UserDeviceInfo> dict)
-    {
-        return dict.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToProto());
-    }
-
-    public static Dictionary<string, UserDeviceInfo> FromProtoDict(this IDictionary<string, UserDeviceInfoProto> dict)
-    {
-        return dict.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.FromProto());
-    }
-
-    public static Dictionary<string, UserDeviceInfoV2Proto> ToProtoDict(this Dictionary<string, UserDeviceInfoV2> dict)
-    {
-        return dict.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.ToProto());
-    }
-
-    public static Dictionary<string, UserDeviceInfoV2> FromProtoDict(this IDictionary<string, UserDeviceInfoV2Proto> dict)
-    {
-        return dict.ToDictionary(kvp => kvp.Key, kvp => kvp.Value.FromProto());
-    }
 
     // =============================================================================
     // VoiceLanguageEnum Conversions
@@ -179,11 +80,6 @@ public static class ChatManagerConversions
     // =============================================================================
     // Timestamp Helpers
     // =============================================================================
-
-    public static Timestamp ToTimestamp(this DateTime dateTime)
-    {
-        return Timestamp.FromDateTime(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc));
-    }
 
     public static Timestamp? ToTimestampNullable(this DateTime? dateTime)
     {
@@ -324,16 +220,6 @@ public static class ChatManagerConversions
         };
     }
 
-    public static ResponseGodChatProto ToProto(this ResponseGodChat response)
-    {
-        return new ResponseGodChatProto
-        {
-            ResponseType = (int)response.ResponseType,
-            Response = response.Response ?? "",
-            NewTitle = response.NewTitle ?? ""
-        };
-    }
-
     public static ResponseStreamGodChatProto ToProto(this ResponseStreamGodChat response)
     {
         var proto = new ResponseStreamGodChatProto
@@ -351,96 +237,5 @@ public static class ChatManagerConversions
             proto.AudioData = Google.Protobuf.ByteString.CopyFrom(response.AudioData);
         }
         return proto;
-    }
-
-    public static ResponseGodSessionListProto ToProto(this ResponseGodSessionList response)
-    {
-        var proto = new ResponseGodSessionListProto
-        {
-            ResponseType = (int)response.ResponseType
-        };
-        if (response.SessionList != null)
-        {
-            foreach (var session in response.SessionList)
-            {
-                proto.SessionList.Add(new SessionInfoProto
-                {
-                    SessionId = session.SessionId.ToString(),
-                    Title = session.Title ?? "",
-                    CreateAt = session.CreateAt.ToTimestamp(),
-                    Guider = session.Guider ?? ""
-                });
-            }
-        }
-        return proto;
-    }
-
-    public static ResponseSessionChatHistoryProto ToProto(this ResponseSessionChatHistory response)
-    {
-        var proto = new ResponseSessionChatHistoryProto
-        {
-            ResponseType = (int)response.ResponseType
-        };
-        if (response.ChatHistory != null)
-        {
-            foreach (var msg in response.ChatHistory)
-            {
-                proto.ChatHistory.Add(new ChatMessageProto
-                {
-                    Role = msg.Role?.ToString() ?? "",
-                    Content = msg.Content ?? ""
-                });
-            }
-        }
-        return proto;
-    }
-
-    public static ResponseDeleteSessionProto ToProto(this ResponseDeleteSession response)
-    {
-        return new ResponseDeleteSessionProto
-        {
-            ResponseType = (int)response.ResponseType,
-            IfSuccess = response.IfSuccess
-        };
-    }
-
-    public static ResponseRenameSessionProto ToProto(this ResponseRenameSession response)
-    {
-        return new ResponseRenameSessionProto
-        {
-            ResponseType = (int)response.ResponseType,
-            SessionId = response.SessionId.ToString(),
-            Title = response.Title ?? ""
-        };
-    }
-
-    public static ResponseClearAllProto ToProto(this ResponseClearAll response)
-    {
-        return new ResponseClearAllProto
-        {
-            ResponseType = (int)response.ResponseType,
-            Success = response.Success
-        };
-    }
-
-    public static ResponseSetUserProfileProto ToProto(this ResponseSetUserProfile response)
-    {
-        return new ResponseSetUserProfileProto
-        {
-            ResponseType = (int)response.ResponseType,
-            Success = response.Success
-        };
-    }
-
-    public static ResponseGetUserProfileProto ToProto(this ResponseGetUserProfile response)
-    {
-        return new ResponseGetUserProfileProto
-        {
-            ResponseType = (int)response.ResponseType,
-            Gender = response.Gender ?? "",
-            BirthDate = response.BirthDate.ToTimestamp(),
-            BirthPlace = response.BirthPlace ?? "",
-            FullName = response.FullName ?? ""
-        };
     }
 }

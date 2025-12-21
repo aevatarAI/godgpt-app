@@ -1,3 +1,4 @@
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.ChatManager.UserBilling.Payment;
 using Aevatar.Application.Grains.Common.Constants;
 
@@ -12,7 +13,7 @@ public class PaymentDetailsDto
     [Id(3)] public decimal Amount { get; set; }          
     [Id(4)] public string Currency { get; set; } = "USD";
     [Id(5)] public PaymentType PaymentType { get; set; }
-    [Id(6)] public PaymentStatus Status { get; set; } = PaymentStatus.Pending;
+    [Id(6)] public QuotaPaymentStatus Status { get; set; } = QuotaPaymentStatus.Pending;
     [Id(7)] public PaymentMethod Method { get; set; } 
     [Id(8)] public PaymentPlatform Platform { get; set; } = PaymentPlatform.Stripe;
     [Id(9)] public string Mode { get; set; } = PaymentMode.SUBSCRIPTION;
@@ -37,7 +38,7 @@ public class PaymentDetailsDto
 public class PaymentInvoiceDetailDto
 {
     [Id(0)] public string InvoiceId { get; set; }
-    [Id(1)] public PaymentStatus Status { get; set; } = PaymentStatus.Pending;
+    [Id(1)] public QuotaPaymentStatus Status { get; set; } = QuotaPaymentStatus.Pending;
     [Id(2)] public DateTime CreatedAt { get; set; }
     [Id(3)] public DateTime? CompletedAt { get; set; }
     [Id(4)] public decimal Amount { get; set; }   

@@ -1,3 +1,4 @@
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Common.Constants;
 
 namespace Aevatar.Application.Grains.UserFeedback.Dtos;
@@ -40,7 +41,7 @@ public class SubmitFeedbackRequest
 [GenerateSerializer]
 public class UserSubscription
 {
-    [Id(0)] public PlanType PlanType { get; set; }
+    [Id(0)] public QuotaPlanType PlanType { get; set; }
     [Id(1)] public bool IsUltimate { get; set; }
     [Id(2)] public DateTime StartDate { get; set; }
     [Id(3)] public DateTime EndDate { get; set; }

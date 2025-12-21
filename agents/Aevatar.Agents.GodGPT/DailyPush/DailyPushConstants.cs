@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Aevatar.Agents.Abstractions;
 
 namespace GodGPT.GAgents.DailyPush;
 
@@ -61,10 +62,12 @@ public static class DailyPushConstants
     /// <summary>
     /// Register timezone mapping when timezone GAgent is first created
     /// </summary>
-    public static async Task RegisterTimezoneMapping(string timezoneId, Aevatar.Agents.Abstractions.IGAgentFactory agentFactory)
+    public static async Task RegisterTimezoneMapping(string timezoneId, IGAgentActorFactory agentActorFactory)
     {
         var timezoneGuid = TimezoneToGuid(timezoneId);
-        var contentGAgent = agentFactory.CreateGAgent<DailyContentGAgent>(CONTENT_GAGENT_ID);
+        var actor = await agentActorFactory.CreateGAgentActorAsync<DailyContentGAgent>(CONTENT_GAGENT_ID);
+        var contentGAgent = (IDailyContentGAgent) actor.GetAgent();
+        
         await contentGAgent.ActivateAsync();
         await contentGAgent.RegisterTimezoneGuidMappingAsync(timezoneGuid, timezoneId);
     }
@@ -72,9 +75,10 @@ public static class DailyPushConstants
     /// <summary>
     /// Get timezone ID from GUID (reverse lookup from DailyContentGAgent)
     /// </summary>
-    public static async Task<string?> GetTimezoneFromGuidAsync(Guid timezoneGuid, Aevatar.Agents.Abstractions.IGAgentFactory agentFactory)
+    public static async Task<string?> GetTimezoneFromGuidAsync(Guid timezoneGuid, IGAgentActorFactory agentActorFactory)
     {
-        var contentGAgent = agentFactory.CreateGAgent<DailyContentGAgent>(CONTENT_GAGENT_ID);
+        var actor = await agentActorFactory.CreateGAgentActorAsync<DailyContentGAgent>(CONTENT_GAGENT_ID);
+        var contentGAgent = (IDailyContentGAgent) actor.GetAgent();
         await contentGAgent.ActivateAsync();
         return await contentGAgent.GetTimezoneFromGuidAsync(timezoneGuid);
     }

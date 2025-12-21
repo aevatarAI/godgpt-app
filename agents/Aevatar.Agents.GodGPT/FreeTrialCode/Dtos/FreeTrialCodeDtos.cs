@@ -1,3 +1,5 @@
+using Aevatar.Agents.GodGPT.Protos.InviteCode;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Common.Constants;
 
 namespace Aevatar.Application.Grains.FreeTrialCode.Dtos;
@@ -56,7 +58,7 @@ public class ValidateCodeResultDto
 {
     [Id(0)] public bool IsValid { get; set; }
     [Id(1)] public string Message { get; set; }
-    [Id(2)] public InvitationCodeType CodeType { get; set; }
+    [Id(2)] public InviteCodeType CodeType { get; set; }
     [Id(3)] public FreeTrialActivationDto ActivationInfo { get; set; }
 }
 
@@ -67,11 +69,11 @@ public class FreeTrialActivationDto
     [Id(1)] public bool IsActive { get; set; }
     [Id(2)] public int UsageCount { get; set; }
     [Id(3)] public string InviteCode { get; set; }
-    [Id(4)] public InvitationCodeType CodeType { get; set; }
+    [Id(4)] public InviteCodeType CodeType { get; set; }
     [Id(5)] public long BatchId { get; set; }
     [Id(6)] public int TrialDays { get; set; }
     [Id(7)] public string ProductId { get; set; }
-    [Id(8)] public PlanType PlanType { get; set; }
+    [Id(8)] public QuotaPlanType PlanType { get; set; }
     [Id(9)] public bool IsUltimate { get; set; }
     [Id(10)] public PaymentPlatform Platform { get; set; } = PaymentPlatform.Stripe;
     [Id(11)] public string InviteeId { get; set; }
@@ -86,7 +88,7 @@ public class FreeTrialCodeInitDto
     [Id(0)] public long BatchId { get; set; }
     [Id(1)] public int TrialDays { get; set; }
     [Id(2)] public string ProductId { get; set; }
-    [Id(3)] public PlanType PlanType { get; set; }
+    [Id(3)] public QuotaPlanType PlanType { get; set; }
     [Id(4)] public bool IsUltimate { get; set; }
     [Id(5)] public DateTime StartDate { get; set; }
     [Id(6)] public DateTime EndDate { get; set; }
@@ -102,7 +104,7 @@ public class FreeTrialCodeInfoDto
 {
     [Id(0)] public long BatchId { get; set; }
     [Id(1)] public int TrialDays { get; set; }
-    [Id(2)] public PlanType PlanType { get; set; }
+    [Id(2)] public QuotaPlanType PlanType { get; set; }
     [Id(3)] public bool IsUltimate { get; set; }
     [Id(4)] public string InviteeId { get; set; }
     [Id(5)] public DateTime? UsedAt { get; set; }
@@ -113,7 +115,7 @@ public class FreeTrialInfoDto
 {
     [Id(1)] public string FreeTrialCode { get; set; }
     [Id(2)] public int TrialDays { get; set; }
-    [Id(3)] public PlanType PlanType { get; set; }
+    [Id(3)] public QuotaPlanType PlanType { get; set; }
     [Id(4)] public bool IsUltimate { get; set; }
     [Id(5)] public string TransactionId { get; set; }
 }
@@ -123,7 +125,7 @@ public class CreateFreeTrialDto
 {
     [Id(0)] public string UserId { get; set; }
     [Id(1)] public int TrialDays { get; set; }
-    [Id(2)] public PlanType PlanType { get; set; }
+    [Id(2)] public QuotaPlanType PlanType { get; set; }
     [Id(3)] public bool IsUltimate { get; set; }
     [Id(4)] public string FreeTrialCode { get; set; }
 }
@@ -155,7 +157,7 @@ public class FreeTrialCodeBatchConfig
 {
     [Id(0)] public int TrialDays { get; set; }
     [Id(1)] public string ProductId { get; set; }
-    [Id(2)] public PlanType PlanType { get; set; }
+    [Id(2)] public QuotaPlanType PlanType { get; set; }
     [Id(3)] public bool IsUltimate { get; set; }
     [Id(4)] public PaymentPlatform Platform { get; set; } = PaymentPlatform.Stripe;
     [Id(5)] public DateTime StartTime { get; set; }

@@ -1,0 +1,160 @@
+using Aevatar.Application.Grains.Agents.ChatManager.Chat;
+using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
+using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.Dtos;
+using Aevatar.Application.Grains.GodChat;
+using GodGPT.GAgents.Awakening.Dtos;
+using GodGPT.GAgents.Awakening.Helpers;
+using GodGPT.GAgents.SpeechChat;
+using Microsoft.Extensions.Logging;
+
+// Protobuf types aliases
+using AwakeningStatusProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStatusProto;
+using LockGenerationTimestampEvent = Aevatar.Agents.GodGPT.Protos.Awakening.LockGenerationTimestampEvent;
+using UpdateAwakeningStatusEvent = Aevatar.Agents.GodGPT.Protos.Awakening.UpdateAwakeningStatusEvent;
+using ResetAwakeningContentEvent = Aevatar.Agents.GodGPT.Protos.Awakening.ResetAwakeningContentEvent;
+
+namespace GodGPT.GAgents.Awakening;
+
+/// <summary>
+/// Awakening GAgent - Generation and LLM calling methods
+/// </summary>
+public partial class AwakeningGAgent
+{
+    #region Generation Methods
+
+    /// <summary>
+    /// Call LLM with retry logic
+    /// </summary>
+    private async Task<AwakeningResultDto> CallLLMWithRetry(string prompt, VoiceLanguageEnum language, string? region)
+    {
+        var maxAttempts = _options.CurrentValue.MaxRetryAttempts;
+        var timeout = TimeSpan.FromSeconds(_options.CurrentValue.TimeoutSeconds);
+        
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                using var cts = new CancellationTokenSource(timeout);
+                
+                // Get current user ID
+                var userId = Id;
+                
+                // Get IGodChat instance for current user using new framework
+                var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(userId);
+                var godChat = (IGodChat)godChatActor.GetAgent();
+                var chatId = Guid.NewGuid().ToString();
+                
+                var settings = new ExecutionPromptSettings
+                {
+                    Temperature = _options.CurrentValue.Temperature.ToString()
+                };
+                
+                // Call IGodChat.ChatWithoutHistory with our prompt
+                var response = await godChat.ChatWithoutHistoryAsync(userId, string.Empty, prompt, chatId, settings, true, region);
+                
+                string responseContent;
+                if (response.IsNullOrEmpty())
+                {
+                    responseContent = string.Empty;
+                }
+                else
+                {
+                    responseContent = response.FirstOrDefault()?.Content ?? string.Empty;
+                }
+                
+                if (!string.IsNullOrWhiteSpace(responseContent))
+                {
+                    var result = AwakeningParserHelper.ParseAwakeningResponse(responseContent, language, GetTodayTimestamp(), _logger);
+                    if (result.IsSuccess)
+                    {
+                        return result;
+                    }
+                }
+                
+                _logger.LogWarning("Attempt {Attempt} failed: No valid response from LLM", attempt);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Exception on attempt {Attempt}", attempt);
+            }
+            
+            if (attempt < maxAttempts)
+            {
+                await Task.Delay(1000 * attempt); // Incremental delay
+            }
+        }
+        
+        // All retries failed, return failure result
+        return new AwakeningResultDto 
+        { 
+            IsSuccess = false, 
+            ErrorMessage = "Failed to generate awakening content after all retries" 
+        };
+    }
+
+    /// <summary>
+    /// Try to lock today's generation slot
+    /// </summary>
+    private async Task<bool> TryLockTodayGenerationAsync(VoiceLanguageEnum language)
+    {
+        var todayTimestamp = GetTodayTimestamp();
+        
+        // If it's already today's timestamp, it means it's locked or generated
+        if (IsToday(State.LastGeneratedTimestamp))
+        {
+            return false; // Already locked, no need to regenerate
+        }
+        
+        // Atomically update timestamp to today and reset content
+        RaiseEvent(new LockGenerationTimestampEvent 
+        { 
+            Timestamp = todayTimestamp 
+        });
+        
+        // Reset awakening content for new day
+        RaiseEvent(new ResetAwakeningContentEvent
+        {
+            Timestamp = todayTimestamp,
+            Language = (int)language
+        });
+        
+        // Set status to generating
+        RaiseEvent(new UpdateAwakeningStatusEvent
+        {
+            Status = AwakeningStatusProto.AwakeningStatusGenerating
+        });
+        
+        await ConfirmEventsAsync();
+        return true; // Successfully locked and initialized
+    }
+
+    /// <summary>
+    /// Set awakening status
+    /// </summary>
+    private async Task SetStatusAsync(AwakeningStatus status)
+    {
+        RaiseEvent(new UpdateAwakeningStatusEvent
+        {
+            Status = ToProto(status)
+        });
+        
+        await ConfirmEventsAsync();
+    }
+
+    /// <summary>
+    /// Complete generation and update status
+    /// </summary>
+    private async Task CompleteGenerationAsync(bool isSuccess)
+    {
+        // Always set status to completed regardless of success/failure
+        await SetStatusAsync(AwakeningStatus.Completed);
+        
+        if (!isSuccess)
+        {
+            _logger.LogWarning("Awakening generation completed with failure for user {UserId}", Id);
+        }
+    }
+
+    #endregion
+}
+

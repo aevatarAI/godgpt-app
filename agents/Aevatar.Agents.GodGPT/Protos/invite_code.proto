@@ -5,31 +5,19 @@ package aevatar.agents.godgpt.invitecode;
 option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.InviteCode";
 
 import "google/protobuf/timestamp.proto";
+import "Protos/user_quota.proto";
 
 // =============================================================================
-// Enums - Values match C# enums in Common.Constants
+// NOTE: Now using QuotaPlanType from user_quota.proto for type safety
 // =============================================================================
 
-// Maps to: Aevatar.Application.Grains.Common.Constants.InvitationCodeType
-enum InvitationCodeType {
-    INVITATION_CODE_TYPE_FRIEND_INVITATION = 0;
-    INVITATION_CODE_TYPE_FREE_TRIAL_REWARD = 1;
-}
+// =============================================================================
+// Enums
+// =============================================================================
 
-// Maps to: Aevatar.Application.Grains.Common.Constants.PlanType
-enum PlanType {
-    PLAN_TYPE_NONE = 0;
-    PLAN_TYPE_DAY = 1;
-    PLAN_TYPE_MONTH = 2;
-    PLAN_TYPE_YEAR = 3;
-    PLAN_TYPE_WEEK = 4;
-}
-
-// Maps to: Aevatar.Application.Grains.Common.Constants.PaymentPlatform
-enum PaymentPlatform {
-    PAYMENT_PLATFORM_STRIPE = 0;
-    PAYMENT_PLATFORM_APP_STORE = 1;
-    PAYMENT_PLATFORM_GOOGLE_PLAY = 2;
+enum InviteCodeType {
+    INVITE_CODE_TYPE_FRIEND_INVITATION = 0;  // Friend invitation code
+    INVITE_CODE_TYPE_FREE_TRIAL_REWARD = 1;  // Free trial reward code
 }
 
 // =============================================================================
@@ -42,13 +30,13 @@ message InviteCodeState {
     bool is_active = 3;                               // [Id(2)]
     int32 usage_count = 4;                            // [Id(3)]
     string invite_code = 5;                           // [Id(4)]
-    InvitationCodeType code_type = 6;                 // [Id(5)]
+    InviteCodeType code_type = 6;                     // Invitation code type
     int64 batch_id = 7;                               // [Id(6)]
     int32 trial_days = 8;                             // [Id(7)]
     string product_id = 9;                            // [Id(8)]
-    PlanType plan_type = 10;                          // [Id(9)]
+    aevatar.agents.godgpt.userquota.QuotaPlanType plan_type = 10;  // Using QuotaPlanType
     bool is_ultimate = 11;                            // [Id(10)]
-    PaymentPlatform platform = 12;                    // [Id(11)]
+    int32 platform = 12;                              // PaymentPlatform as int
     string invitee_id = 13;                           // [Id(12)]
     optional google.protobuf.Timestamp used_at = 14;  // [Id(13)] nullable
     string session_url = 15;                          // [Id(14)]
@@ -78,14 +66,14 @@ message InitializeFreeTrialCodeEvent {
     int64 batch_id = 2;
     int32 trial_days = 3;
     string product_id = 4;
-    PlanType plan_type = 5;
+    aevatar.agents.godgpt.userquota.QuotaPlanType plan_type = 5;  // Using QuotaPlanType
     bool is_ultimate = 6;
     google.protobuf.Timestamp start_date = 7;
     google.protobuf.Timestamp end_date = 8;
     string invitee_id = 9;
     google.protobuf.Timestamp created_at = 10;
     bool is_active = 11;
-    PaymentPlatform platform = 12;
+    int32 platform = 12;                              // PaymentPlatform as int
     string session_url = 13;
     google.protobuf.Timestamp session_expires_at = 14;
 }
@@ -94,4 +82,3 @@ message MarkCodeAsUsedEvent {
     bool is_active = 1;
     google.protobuf.Timestamp used_at = 2;
 }
-

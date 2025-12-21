@@ -21,9 +21,15 @@ using Aevatar.Application.Grains.Common;
 using System.Security.Cryptography.X509Certificates;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.GodGPT.Common;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Invitation;
+using Aevatar.Application.Grains.UserInvitation;
+using Aevatar.Application.Grains.UserProfile;
 using Aevatar.Application.Grains.UserQuota;
+using Google.Protobuf.Collections;
 using Newtonsoft.Json.Linq;
+using Duration = Google.Protobuf.WellKnownTypes.Duration;
 
 namespace Aevatar.Application.Grains.ChatManager.UserBilling;
 
@@ -69,7 +75,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
     private readonly IOptionsMonitor<GooglePayOptions> _googlePayOptions;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IGooglePayService _googlePayService;
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     
     private IStripeClient _client; 
     
@@ -80,7 +86,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         IOptionsMonitor<GooglePayOptions> googlePayOptions,
         IHttpClientFactory httpClientFactory,
         IGooglePayService googlePayService,
-        IGAgentFactory agentFactory)
+        IGAgentActorFactory actorFactory)
     {
         _logger = logger;
         _stripeOptions = stripeOptions;
@@ -88,7 +94,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         _googlePayOptions = googlePayOptions;
         _httpClientFactory = httpClientFactory;
         _googlePayService = googlePayService;
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
     }
 
     public override async Task OnActivateAsync(CancellationToken cancellationToken)
@@ -110,11 +116,10 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         await base.OnDeactivateAsync(reason, cancellationToken);
     }
     
-    private async Task<UserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    private async Task<IUserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
     {
-        var agent = _agentFactory.CreateGAgent<UserQuotaGAgent>(userId);
-        await agent.ActivateAsync();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId);
+        return (IUserQuotaGAgent)actor.GetAgent();
     }
 
     public async Task<List<StripeProductDto>> GetStripeProductsAsync()
@@ -139,11 +144,11 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             }
             
             // Use SubscriptionHelper for consistent daily average price calculation
-            var dailyAvgPrice = SubscriptionHelper.CalculateDailyAveragePrice(planType, product.Amount).ToString();
+            var dailyAvgPrice = SubscriptionHelper.CalculateDailyAveragePrice((QuotaPlanType)planType, product.Amount).ToString();
 
             productDtos.Add(new StripeProductDto
             {
-                PlanType = planType,
+                PlanType = (QuotaPlanType)planType,
                 PriceId = product.PriceId,
                 Mode = product.Mode,
                 Amount = product.Amount,
@@ -545,7 +550,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
                     Amount = amount,
                     Currency = currency,
                     PaymentType = PaymentType.OneTime,
-                    Status = PaymentStatus.Processing,
+                    Status = QuotaPaymentStatus.Processing,
                     Mode = PaymentMode.PAYMENT,
                     Platform = PaymentPlatform.Stripe,
                     Description = createPaymentSheetDto.Description ?? $"Payment sheet for {amount} {currency}",
@@ -661,7 +666,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
                 {
                     SaveDefaultPaymentMethod = "on_subscription",
                     // Set payment methods based on platform, default to card
-                    // "card","apple_pay","google_pay", "bank_transfer","alipay"，"wechat_pay"
+                    // "card", "apple_pay", "google_pay", "bank_transfer", "alipay", "wechat_pay"
                     PaymentMethodTypes = new List<string> { "card" }
                 },
                 Metadata = new Dictionary<string, string>
@@ -707,7 +712,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
                 Amount = productConfig.Amount,
                 Currency = productConfig.Currency,
                 PaymentType = PaymentType.Subscription,
-                Status = PaymentStatus.Processing,
+                Status = (QuotaPaymentStatus)PaymentStatus.Processing,
                 Mode = PaymentMode.SUBSCRIPTION,
                 Platform = PaymentPlatform.Stripe,
                 Description = createSubscriptionDto.Description ?? $"Subscription for {createSubscriptionDto.PriceId}",
@@ -960,8 +965,8 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             userId, detailsDto.OrderId, detailsDto.SubscriptionId, detailsDto.InvoiceId);
         var subscriptionInfoDto = await userQuotaGAgent.GetSubscriptionAsync(productConfig.IsUltimate);
 
-        var subscriptionIds = subscriptionInfoDto.SubscriptionIds ?? new List<string>();
-        var invoiceIds = subscriptionInfoDto.InvoiceIds ?? new List<string>();
+        var subscriptionIds = subscriptionInfoDto.SubscriptionIds ?? new RepeatedField<string>();
+        var invoiceIds = subscriptionInfoDto.InvoiceIds ?? new RepeatedField<string>();
         var invoiceDetail = paymentSummary.InvoiceDetails.LastOrDefault();
         if (invoiceDetail != null && invoiceDetail.Status == PaymentStatus.Completed && !invoiceIds.Contains(invoiceDetail.InvoiceId))
         {
@@ -984,25 +989,26 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
 
             if (subscriptionInfoDto.IsActive)
             {
-                if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscriptionInfoDto.PlanType) <= SubscriptionHelper.GetPlanTypeLogicalOrder((PlanType) productConfig.PlanType))
+                if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscriptionInfoDto.PlanType) <= SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType) productConfig.PlanType))
                 {
-                    subscriptionInfoDto.PlanType = (PlanType) productConfig.PlanType;
+                    subscriptionInfoDto.PlanType = (QuotaPlanType) productConfig.PlanType;
                 }
                 subscriptionInfoDto.EndDate =
-                    GetSubscriptionEndDate(subscriptionInfoDto.PlanType, subscriptionInfoDto.EndDate);
+                    GetSubscriptionEndDate((PlanType)subscriptionInfoDto.PlanType, subscriptionInfoDto.EndDate.ToDateTime()).ToProtoTimestamp();
             }
             else
             {
                 subscriptionInfoDto.IsActive = true;
-                subscriptionInfoDto.PlanType = (PlanType) productConfig.PlanType;
-                subscriptionInfoDto.StartDate = DateTime.UtcNow;
+                subscriptionInfoDto.PlanType = (QuotaPlanType)productConfig.PlanType;
+                subscriptionInfoDto.StartDate = DateTime.UtcNow.ToProtoTimestamp();
                 subscriptionInfoDto.EndDate =
-                    GetSubscriptionEndDate(subscriptionInfoDto.PlanType, subscriptionInfoDto.StartDate);
+                    GetSubscriptionEndDate((PlanType)subscriptionInfoDto.PlanType, subscriptionInfoDto.StartDate.ToDateTime()).ToProtoTimestamp();
                 await userQuotaGAgent.ResetRateLimitsAsync();
             }
-            subscriptionInfoDto.Status = PaymentStatus.Completed;
-            subscriptionInfoDto.SubscriptionIds = subscriptionIds;
-            subscriptionInfoDto.InvoiceIds = invoiceIds;
+            subscriptionInfoDto.Status = QuotaPaymentStatus.Completed;
+            subscriptionInfoDto.SubscriptionIds.AddRange(subscriptionIds);
+            ;
+            subscriptionInfoDto.InvoiceIds.AddRange(invoiceIds);
             await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionInfoDto, productConfig.IsUltimate);
 
             if (productConfig.IsUltimate)
@@ -1024,9 +1030,9 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
                 if (premiumSubscription.IsActive)
                 {
                     premiumSubscription.StartDate =
-                        GetSubscriptionEndDate((PlanType)productConfig.PlanType, premiumSubscription.StartDate);
+                        GetSubscriptionEndDate((PlanType)productConfig.PlanType, premiumSubscription.StartDate.ToDateTime()).ToProtoTimestamp();
                     premiumSubscription.EndDate =
-                        GetSubscriptionEndDate((PlanType)productConfig.PlanType, premiumSubscription.EndDate);
+                        GetSubscriptionEndDate((PlanType)productConfig.PlanType, premiumSubscription.EndDate.ToDateTime()).ToProtoTimestamp();
                     await userQuotaGAgent.UpdateSubscriptionAsync(premiumSubscription);
                 }
             }
@@ -1041,7 +1047,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             _logger.LogDebug("[UserBillingGrain][HandleStripeWebhookEventAsync] Cancel User subscription {0}, {1}, {2}",
                 userId, paymentSummary.SubscriptionId, invoiceDetail.InvoiceId);
             subscriptionIds.Remove(paymentSummary.SubscriptionId);
-            subscriptionInfoDto.SubscriptionIds = subscriptionIds;
+            subscriptionInfoDto.SubscriptionIds.AddRange(subscriptionIds);
             await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionInfoDto);
         }
         else if (invoiceDetail != null && invoiceDetail.Status == PaymentStatus.Refunded && invoiceIds.Contains(invoiceDetail.InvoiceId))
@@ -1054,9 +1060,9 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             subscriptionIds.Remove(paymentSummary.SubscriptionId);
             
             //reset plantype
-            subscriptionInfoDto.PlanType = await GetMaxPlanTypeAsync(DateTime.UtcNow, productConfig.IsUltimate);
+            subscriptionInfoDto.PlanType = (QuotaPlanType)await GetMaxPlanTypeAsync(DateTime.UtcNow, productConfig.IsUltimate);
             
-            subscriptionInfoDto.SubscriptionIds = subscriptionIds;
+            subscriptionInfoDto.SubscriptionIds.AddRange(subscriptionIds);
             await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionInfoDto, productConfig.IsUltimate);
 
             if (productConfig.IsUltimate)
@@ -1067,8 +1073,8 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
                     var premiumSubscription = await userQuotaGAgent.GetSubscriptionAsync();
                     if (premiumSubscription.IsActive)
                     {
-                        premiumSubscription.StartDate = premiumSubscription.StartDate.Add(- diffTimeSpan);
-                        premiumSubscription.EndDate = premiumSubscription.EndDate.Add(- diffTimeSpan);
+                        premiumSubscription.StartDate = premiumSubscription.StartDate+ Duration.FromTimeSpan(-diffTimeSpan);
+                        premiumSubscription.EndDate = premiumSubscription.EndDate+ Duration.FromTimeSpan(- diffTimeSpan);
                         await userQuotaGAgent.UpdateSubscriptionAsync(premiumSubscription);
                     }
                 }
@@ -1090,7 +1096,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         
         if (subscription.IsActive)
         {
-            subscriptionStartDate = subscription.EndDate;
+            subscriptionStartDate = subscription.EndDate.ToDateTime();
         }
         else
         {
@@ -1110,7 +1116,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         var subscriptionInfoDto = await userQuotaGAgent.GetSubscriptionAsync(ultimate);
         if (subscriptionInfoDto.IsActive)
         {
-            subscriptionStartDate = subscriptionInfoDto.EndDate;
+            subscriptionStartDate = subscriptionInfoDto.EndDate.ToDateTime();
         }
         else
         {
@@ -1351,7 +1357,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             PaymentType = productConfig.Mode == PaymentMode.SUBSCRIPTION
                 ? PaymentType.Subscription
                 : PaymentType.OneTime,
-            Status = PaymentStatus.Processing,
+            Status = QuotaPaymentStatus.Processing,
             Mode = createCheckoutSessionDto.Mode,
             Platform = PaymentPlatform.Stripe,
             Description = $"Checkout session for {productConfig.PriceId}",
@@ -1398,7 +1404,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             existingPaymentSummary.MembershipLevel = SubscriptionHelper.GetMembershipLevel(productConfig.IsUltimate);
             existingPaymentSummary.Amount = productConfig.Amount;
             existingPaymentSummary.Currency = productConfig.Currency;
-            existingPaymentSummary.Status = paymentDetails.Status;
+            existingPaymentSummary.Status = (PaymentStatus)paymentDetails.Status;
             existingPaymentSummary.SubscriptionId = paymentDetails.SubscriptionId;
             await CreateOrUpdateInvoiceDetailAsync(paymentDetails, productConfig, existingPaymentSummary);
             await WriteStateAsync();
@@ -1426,7 +1432,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
                 Amount = productConfig.Amount,
                 Currency = productConfig.Currency,
                 CreatedAt = paymentDetails.CreatedAt,
-                Status = paymentDetails.Status,
+                Status = (PaymentStatus)paymentDetails.Status,
                 SubscriptionId = paymentDetails.SubscriptionId
             };
             await CreateOrUpdateInvoiceDetailAsync(paymentDetails, productConfig, newPaymentSummary);
@@ -1459,9 +1465,9 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             {
                 InvoiceId = paymentDetails.InvoiceId,
                 CreatedAt = paymentDetails.CreatedAt,
-                Status = paymentDetails.Status
+                Status = (PaymentStatus)paymentDetails.Status
             };
-            if (paymentDetails.Status == PaymentStatus.Completed)
+            if (paymentDetails.Status == QuotaPaymentStatus.Completed)
             {
                 invoiceDetail.CompletedAt = paymentDetails.CompletedAt ?? DateTime.UtcNow;
                 var (subscriptionStartDate, subscriptionEndDate) =
@@ -1473,12 +1479,12 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         }
         else
         {
-            invoiceDetail.Status = paymentDetails.Status;
-            if (paymentDetails.Status == PaymentStatus.Completed)
+            invoiceDetail.Status = (PaymentStatus)paymentDetails.Status;
+            if (paymentDetails.Status == QuotaPaymentStatus.Completed)
             {
                 invoiceDetail.CompletedAt = paymentDetails.CompletedAt ?? DateTime.UtcNow;
             }
-            if (paymentDetails.Status == PaymentStatus.Completed && invoiceDetail.SubscriptionStartDate == default)
+            if (paymentDetails.Status == QuotaPaymentStatus.Completed && invoiceDetail.SubscriptionStartDate == default)
             {
                 var (subscriptionStartDate, subscriptionEndDate) = await CalculateSubscriptionDurationAsync(paymentDetails.UserId, productConfig);
                 invoiceDetail.SubscriptionStartDate = subscriptionStartDate;
@@ -1515,10 +1521,10 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             currentPlanType, targetPlanType);
 
         // Use SubscriptionHelper to validate upgrade path
-        if (!SubscriptionHelper.IsUpgradePathValid(currentPlanType, targetPlanType))
+        if (!SubscriptionHelper.IsUpgradePathValid(currentPlanType, (QuotaPlanType)targetPlanType))
         {
             var currentPlanName = SubscriptionHelper.GetPlanDisplayName(currentPlanType);
-            var targetPlanName = SubscriptionHelper.GetPlanDisplayName(targetPlanType);
+            var targetPlanName = SubscriptionHelper.GetPlanDisplayName((QuotaPlanType)targetPlanType);
             
             _logger.LogWarning(
                 "[UserBillingGrain][ValidateSubscriptionUpgradePath] Invalid upgrade path: {CurrentPlan} -> {TargetPlan}",
@@ -1590,7 +1596,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
     private int GetDaysForPlanType(PlanType planType)
     {
         // Use SubscriptionHelper for consistent days calculation with Ultimate support and historical compatibility
-        return SubscriptionHelper.GetDaysForPlanType(planType);
+        return SubscriptionHelper.GetDaysForPlanType((QuotaPlanType)planType);
     }
 
     private async Task<Tuple<string, string, string>> ExtractBusinessDataAsync(Event stripeEvent)
@@ -2575,7 +2581,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             Amount = appleProduct.Amount,
             Currency = appleProduct.Currency,
             PaymentType = PaymentType.Subscription,
-            Status = PaymentStatus.Completed,
+            Status = QuotaPaymentStatus.Completed,
             Method = PaymentMethod.ApplePay,
             Platform = PaymentPlatform.AppStore,
             Mode = null,
@@ -2666,25 +2672,26 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         if (subscriptionDto.IsActive)
         {
             if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscriptionDto.PlanType) <=
-                SubscriptionHelper.GetPlanTypeLogicalOrder((PlanType)appleProduct.PlanType))
+                SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType)appleProduct.PlanType))
             {
-                subscriptionDto.PlanType = (PlanType)appleProduct.PlanType;
+                subscriptionDto.PlanType = (QuotaPlanType)appleProduct.PlanType;
             }
 
             subscriptionDto.EndDate =
-                GetSubscriptionEndDate(subscriptionDto.PlanType, subscriptionDto.EndDate);
+                GetSubscriptionEndDate((PlanType)subscriptionDto.PlanType, subscriptionDto.EndDate.ToDateTime()).ToProtoTimestamp();
         }
         else
         {
             subscriptionDto.IsActive = true;
-            subscriptionDto.PlanType = (PlanType)appleProduct.PlanType;
-            subscriptionDto.StartDate = DateTime.UtcNow;
+            subscriptionDto.PlanType = (QuotaPlanType)appleProduct.PlanType;
+            subscriptionDto.StartDate = DateTime.UtcNow.ToProtoTimestamp();
             subscriptionDto.EndDate =
-                GetSubscriptionEndDate(subscriptionDto.PlanType, subscriptionDto.StartDate);
+                GetSubscriptionEndDate((PlanType)subscriptionDto.PlanType, subscriptionDto.StartDate.ToDateTime())
+                    .ToProtoTimestamp();
             await userQuotaGAgent.ResetRateLimitsAsync();
         }
 
-        subscriptionDto.Status = PaymentStatus.Completed;
+        subscriptionDto.Status = QuotaPaymentStatus.Completed;
         await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionDto, appleProduct.IsUltimate);
 
         //UpdatePremium quota
@@ -2712,9 +2719,9 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             if (premiumSubscriptionDto.IsActive)
             {
                 premiumSubscriptionDto.StartDate =
-                    GetSubscriptionEndDate(subscriptionDto.PlanType, premiumSubscriptionDto.StartDate);
+                    GetSubscriptionEndDate((PlanType)subscriptionDto.PlanType, premiumSubscriptionDto.StartDate.ToDateTime()).ToTimestamp();
                 premiumSubscriptionDto.EndDate =
-                    GetSubscriptionEndDate(subscriptionDto.PlanType, premiumSubscriptionDto.EndDate);
+                    GetSubscriptionEndDate((PlanType)subscriptionDto.PlanType, premiumSubscriptionDto.EndDate.ToDateTime()).ToTimestamp();
                 await userQuotaGAgent.UpdateSubscriptionAsync(premiumSubscriptionDto);
             }
         }
@@ -2735,7 +2742,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             Amount = appleProduct.Amount,
             Currency = appleProduct.Currency,
             PaymentType = PaymentType.Subscription,
-            Status = PaymentStatus.Completed,
+            Status = QuotaPaymentStatus.Completed,
             Method = PaymentMethod.ApplePay,
             Platform = PaymentPlatform.AppStore,
             Mode = null,
@@ -2819,25 +2826,25 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
         }
         if (subscriptionDto.IsActive)
         {
-            if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscriptionDto.PlanType) <= SubscriptionHelper.GetPlanTypeLogicalOrder((PlanType)appleProduct.PlanType))
+            if (SubscriptionHelper.GetPlanTypeLogicalOrder(subscriptionDto.PlanType) <= SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType)appleProduct.PlanType))
             {
-                subscriptionDto.PlanType = (PlanType)appleProduct.PlanType;
+                subscriptionDto.PlanType = (QuotaPlanType)appleProduct.PlanType;
             }
 
             subscriptionDto.EndDate =
-                GetSubscriptionEndDate(subscriptionDto.PlanType, subscriptionDto.EndDate);
+                GetSubscriptionEndDate((PlanType)subscriptionDto.PlanType, subscriptionDto.EndDate.ToDateTime()).ToProtoTimestamp();
         }
         else
         {
             subscriptionDto.IsActive = true;
-            subscriptionDto.PlanType = (PlanType)appleProduct.PlanType;
-            subscriptionDto.StartDate = DateTime.UtcNow;
+            subscriptionDto.PlanType = (QuotaPlanType)appleProduct.PlanType;
+            subscriptionDto.StartDate = DateTime.UtcNow.ToProtoTimestamp();
             subscriptionDto.EndDate =
-                GetSubscriptionEndDate(subscriptionDto.PlanType, subscriptionDto.StartDate);
+                GetSubscriptionEndDate((PlanType)subscriptionDto.PlanType, subscriptionDto.StartDate.ToDateTime()).ToProtoTimestamp();
             await userQuotaGAgent.ResetRateLimitsAsync();
         }
 
-        subscriptionDto.Status = PaymentStatus.Completed;
+        subscriptionDto.Status = QuotaPaymentStatus.Completed;
         await userQuotaGAgent.UpdateSubscriptionAsync(subscriptionDto, appleProduct.IsUltimate);
 
         //UpdatePremium quota
@@ -2862,9 +2869,9 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
             if (premiumSubscriptionDto.IsActive)
             {
                 premiumSubscriptionDto.StartDate =
-                    GetSubscriptionEndDate(subscriptionDto.PlanType, premiumSubscriptionDto.StartDate);
+                    GetSubscriptionEndDate((PlanType)subscriptionDto.PlanType, premiumSubscriptionDto.StartDate.ToDateTime()).ToProtoTimestamp();
                 premiumSubscriptionDto.EndDate =
-                    GetSubscriptionEndDate(subscriptionDto.PlanType, premiumSubscriptionDto.EndDate);
+                    GetSubscriptionEndDate((PlanType)subscriptionDto.PlanType, premiumSubscriptionDto.EndDate.ToDateTime()).ToProtoTimestamp();
                 await userQuotaGAgent.UpdateSubscriptionAsync(premiumSubscriptionDto);
             }
         }
@@ -2956,7 +2963,7 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
                 (p.InvoiceDetails != null && p.InvoiceDetails.Any(i => 
                     (i.Status is PaymentStatus.Completed or PaymentStatus.Cancelled or PaymentStatus.Cancelled_In_Processing) && i.SubscriptionEndDate != null && i.SubscriptionEndDate > now))
             )
-            .OrderByDescending(p => SubscriptionHelper.GetPlanTypeLogicalOrder(p.PlanType))
+            .OrderByDescending(p => SubscriptionHelper.GetPlanTypeLogicalOrder((QuotaPlanType)p.PlanType))
             .Select(p => p.PlanType)
             .DefaultIfEmpty(PlanType.None)
             .First();
@@ -3621,13 +3628,13 @@ public class UserBillingGrain : Grain<UserBillingState>, IUserBillingGrain
 
     private async Task ProcessInviteeSubscriptionAsync(Guid userId, PlanType planType, bool isUltimate, string invoiceId)
     {
-        var chatManagerGAgent = GrainFactory.GetGrain<IChatManagerGAgent>(userId);
-        var inviterId = await chatManagerGAgent.GetInviterAsync();
+        var userInvitationGAgent = GrainFactory.GetGrain<IUserInvitationGAgent>(userId);
+        var inviterId = await userInvitationGAgent.GetInviterAsync();
         if (inviterId != null && inviterId != Guid.Empty)
         {
-            var invitationGAgent = _agentFactory.CreateGAgent<InvitationGAgent>((Guid)inviterId);
-            await invitationGAgent.ActivateAsync();
-            await invitationGAgent.ProcessInviteeSubscriptionAsync(userId.ToString(), planType, isUltimate, invoiceId);
+            var invitationActor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>((Guid)inviterId);
+            var invitationGAgent = (IInvitationGAgent)invitationActor.GetAgent();
+            await invitationGAgent.ProcessInviteeSubscriptionAsync(userId.ToString(), (QuotaPlanType)planType, isUltimate, invoiceId);
         }
     }
 }

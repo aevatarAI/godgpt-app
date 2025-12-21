@@ -1,6 +1,8 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.FreeTrialCode;
+using Aevatar.Agents.GodGPT.Protos.InviteCode;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Common;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Options;
@@ -10,8 +12,7 @@ using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
-using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
-using CsPaymentPlatform = Aevatar.Application.Grains.Common.Constants.PaymentPlatform;
+// Using QuotaPlanType from user_quota.proto as the unified plan type
 
 namespace Aevatar.Application.Grains.FreeTrialCode;
 
@@ -351,7 +352,7 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
         var codes = new HashSet<string>();
         var usedCodes = new HashSet<string>(State.GeneratedCodes);
 
-        var codeType = InvitationCodeType.FreeTrialReward;
+        var codeType = InviteCodeType.FreeTrialReward;
         var unixTimestamp = State.HasBatchId ? State.BatchId : 0;
 
         for (int i = 0; i < quantity; i++)
@@ -401,9 +402,9 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
         {
             TrialDays = config.TrialDays,
             ProductId = config.ProductId,
-            PlanType = (CsPlanType)config.PlanType,
+            PlanType = (QuotaPlanType)config.PlanType,
             IsUltimate = config.IsUltimate,
-            Platform = (CsPaymentPlatform)config.Platform,
+            Platform = (PaymentPlatform)config.Platform,
             StartTime = config.StartTime?.ToDateTime() ?? DateTime.MinValue,
             EndTime = config.EndTime?.ToDateTime() ?? DateTime.MaxValue,
             Description = config.Description

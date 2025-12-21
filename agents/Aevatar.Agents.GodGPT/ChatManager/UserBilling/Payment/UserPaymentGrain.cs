@@ -1,3 +1,4 @@
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Options;
@@ -20,13 +21,13 @@ public interface IUserPaymentGrain : IGrainWithGuidKey
 
 public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
 {
-    private readonly ILogger<UserBillingGrain> _logger;
+    private readonly ILogger<UserPaymentGrain> _logger;
     private readonly IOptionsMonitor<StripeOptions> _stripeOptions;
     
     private readonly IStripeClient _client; 
 
     public UserPaymentGrain(
-        ILogger<UserBillingGrain> logger, 
+        ILogger<UserPaymentGrain> logger, 
         IOptionsMonitor<StripeOptions> stripeOptions)
     {
         _logger = logger;
@@ -53,7 +54,7 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
             GrainResultDto<PaymentDetailsDto> resultDto =  null;
             switch (stripeEvent.Type)
             {
-                //（Deprecated）checkout.session.completed
+                // (Deprecated) checkout.session.completed
                 case EventTypes.CheckoutSessionCompleted: 
                     resultDto = await ProcessCheckoutSessionCompletedAsync(stripeEvent);
                     break;
@@ -133,7 +134,7 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
             session.Id, userId);
         
         bool canUpdateStatus = true;
-        if (State.Status >= PaymentStatus.Completed)
+        if (State.Status >= QuotaPaymentStatus.Completed)
         {
             canUpdateStatus = false;
             _logger.LogWarning("[PaymentGAgent][ProcessCheckoutSessionCompletedAsync] Cannot update status from {CurrentStatus} to Processing as current status is finalized", 
@@ -150,7 +151,7 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
             : PaymentType.OneTime;
         if (canUpdateStatus)
         {
-            State.Status = PaymentStatus.Completed;
+            State.Status = QuotaPaymentStatus.Completed;
             State.CompletedAt = DateTime.UtcNow;
         }
         State.Method = (PaymentMethod)((int)session.PaymentMethodTypes.MapToPaymentMethod());
@@ -210,7 +211,7 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
             paymentIntent.Id, userId);
 
         bool canUpdateStatus = true;
-        if (State.Status > PaymentStatus.Processing)
+        if (State.Status > QuotaPaymentStatus.Processing)
         {
             canUpdateStatus = false;
             _logger.LogWarning("[PaymentGAgent][ProcessCheckoutSessionCompletedAsync] Cannot update status from {CurrentStatus} to Processing as current status is finalized", 
@@ -221,7 +222,7 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
         State.UserId = Guid.Parse(userId);
         if (canUpdateStatus)
         {
-            State.Status = PaymentStatus.Completed;
+            State.Status = QuotaPaymentStatus.Completed;
             State.CompletedAt = DateTime.UtcNow;
         }
         State.PaymentType = PaymentType.Subscription;
@@ -255,7 +256,7 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
             };
         }
 
-        if (State.Status is PaymentStatus.Cancelled or PaymentStatus.Refunded)
+        if (State.Status is QuotaPaymentStatus.Cancelled or QuotaPaymentStatus.Refunded)
         {
             _logger.LogError("[PaymentGAgent][ProcessInvoicePaidAsync] Subscription has been canceled or refunded.{0}, {1}", State.SubscriptionId, State.Status);
             return new GrainResultDto<PaymentDetailsDto>
@@ -296,7 +297,7 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
         }
         else
         {
-            if (State.Status != PaymentStatus.Failed && State.Status >= PaymentStatus.Completed)
+            if (State.Status != QuotaPaymentStatus.Failed && State.Status >= QuotaPaymentStatus.Completed)
             {
                 canUpdateStatus = false;
                 _logger.LogWarning("[PaymentGAgent][ProcessCheckoutSessionCompletedAsync] Cannot update status from {CurrentStatus} to Processing as current status is finalized", 
@@ -324,7 +325,7 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
         State.AmountNetTotal = ((decimal)invoice.Total) / 100;
         if (canUpdateStatus)
         {
-            State.Status = PaymentStatus.Completed;
+            State.Status = QuotaPaymentStatus.Completed;
             State.CompletedAt = DateTime.UtcNow;
         }
         if (State.CreatedAt == default)
@@ -368,14 +369,14 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
 
         if (State.InvoiceId.IsNullOrWhiteSpace() || State.InvoiceId == invoice.Id)
         {
-            State.Status = PaymentStatus.Failed;
+            State.Status = QuotaPaymentStatus.Failed;
         }
         else
         {
             var paymentInvoiceDetail = State.InvoiceDetails.FirstOrDefault(t => t.InvoiceId == invoice.Id);
             if (paymentInvoiceDetail != null)
             {
-                paymentInvoiceDetail.Status = PaymentStatus.Failed;
+                paymentInvoiceDetail.Status = QuotaPaymentStatus.Failed;
             }
             else
             {
@@ -414,9 +415,9 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
 
         if (subscription.Status == "canceled" || IsAutoRenewalCancelled(stripeEvent))
         {
-            if (State.Status != PaymentStatus.Failed && State.Status != PaymentStatus.Refunded_In_Processing && State.Status != PaymentStatus.Refunded)
+            if (State.Status != QuotaPaymentStatus.Failed && State.Status != QuotaPaymentStatus.RefundedInProcessing && State.Status != QuotaPaymentStatus.Refunded)
             {
-                State.Status = PaymentStatus.Cancelled;
+                State.Status = QuotaPaymentStatus.Cancelled;
             }
             State.LastUpdated = DateTime.UtcNow;
             State.SubscriptionId = subscription.Id;
@@ -465,7 +466,7 @@ public class UserPaymentGrain : Grain<UserPaymentState>, IUserPaymentGrain
         
         _logger.LogInformation("[PaymentGAgent][ProcessChargeRefundedAsync] Processing refunded charge {ChargeId}", charge.Id);
 
-        State.Status = PaymentStatus.Refunded;
+        State.Status = QuotaPaymentStatus.Refunded;
         State.LastUpdated = DateTime.UtcNow;
 
         await WriteStateAsync();

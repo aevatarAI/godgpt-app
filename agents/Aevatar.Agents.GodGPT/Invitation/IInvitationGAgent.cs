@@ -1,3 +1,4 @@
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Agents.Invitation;
 
@@ -43,7 +44,7 @@ public interface IInvitationGAgent : Aevatar.Agents.Abstractions.IGAgent
     /// <summary>
     /// Process invitee's subscription purchase
     /// </summary>
-    Task ProcessInviteeSubscriptionAsync(string inviteeId, PlanType planType, bool isUltimate, string invoiceId);
+    Task ProcessInviteeSubscriptionAsync(string inviteeId, QuotaPlanType planType, bool isUltimate, string invoiceId);
 
     /// <summary>
     /// Process Twitter reward for the user
