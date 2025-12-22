@@ -183,15 +183,15 @@ public partial class GodChatGAgent
             }); // Fire and forget - don't await
             RaiseEvent(new UpdateProxyInitStatusEvent
             {
-                ProxyId = proxy.GetPrimaryKey().ToString(),
+                ProxyId = proxy.Id.ToString(),
                 Status = ProxyInitStatus.Initializing.ToProto()
             });
             await ConfirmEventsAsync();
             Logger.LogDebug(
-                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, UpdateProxyInitStatusEvent status Initializing proxyId {proxy.GetPrimaryKey().ToString()}");
-            proxies.Add(proxy.GetPrimaryKey());
+                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, UpdateProxyInitStatusEvent status Initializing proxyId {proxy.Id.ToString()}");
+            proxies.Add(proxy.Id);
             Logger.LogDebug(
-                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, initialized proxy for region {region} with LLM {llm}. id {proxy.GetPrimaryKey().ToString()}");
+                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, initialized proxy for region {region} with LLM {llm}. id {proxy.Id.ToString()}");
         }
         totalProxyStopwatch.Stop();
         stopwatch.Stop();
@@ -255,7 +255,7 @@ public partial class GodChatGAgent
         
         if (aiAgentStatusProxy != null)
         {
-            var proxyId = aiAgentStatusProxy.GetPrimaryKey();
+            var proxyId = aiAgentStatusProxy.Id;
             await EnsureProxyInitializedAsync(proxyId, sessionId);
         }
         

@@ -3,7 +3,7 @@ using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
-using Aevatar.App.Application.Services.Awakening;
+using Aevatar.App.Application.Contracts.Services.Awakening;
 using Aevatar.GodGPT.Dtos;
 using GodGPT.GAgents.SpeechChat;
 using Asp.Versioning;

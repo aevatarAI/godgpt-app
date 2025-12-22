@@ -11,6 +11,7 @@ using Volo.Abp;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Auditing;
 using Aevatar.GAgents.AI.Abstractions;
+using Aevatar.App.Application.Contracts.Services.Session;
 
 namespace Aevatar.App.Application.Services.Session;
 
@@ -22,14 +23,14 @@ namespace Aevatar.App.Application.Services.Session;
 [DisableAuditing]
 public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
 {
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<GodGPTSessionService> _logger;
 
     public GodGPTSessionService(
-        IGAgentFactory agentFactory,
+        IGAgentActorFactory actorFactory,
         ILogger<GodGPTSessionService> logger)
     {
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
         _logger = logger;
     }
 
@@ -37,7 +38,8 @@ public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
     public async Task<Guid> CreateSessionAsync(Guid userId, string systemLLM, string prompt, string? guider = null,
         DateTime? userLocalTime = null)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.CreateSessionAsync(systemLLM, prompt, null, guider, userLocalTime);
     }
 
@@ -45,28 +47,32 @@ public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
     public async Task<Tuple<string, string>> ChatWithSessionAsync(Guid userId, Guid sessionId, string systemLLM,
         string content, ExecutionPromptSettings promptSettings = null)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.ChatWithSessionAsync(sessionId, systemLLM, content, promptSettings);
     }
 
     /// <inheritdoc />
     public async Task<List<SessionInfoDto>> GetSessionListAsync(Guid userId)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.GetSessionListAsync();
     }
 
     /// <inheritdoc />
     public async Task<List<ChatMessage>> GetSessionMessageListAsync(Guid userId, Guid sessionId)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.GetSessionMessageListAsync(sessionId);
     }
 
     /// <inheritdoc />
     public async Task<Aevatar.Quantum.SessionCreationInfoDto?> GetSessionCreationInfoAsync(Guid userId, Guid sessionId)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         var grainsResult = await manager.GetSessionCreationInfoAsync(sessionId);
 
         if (grainsResult != null)
@@ -86,14 +92,16 @@ public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
     /// <inheritdoc />
     public async Task<Guid> DeleteSessionAsync(Guid userId, Guid sessionId)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.DeleteSessionAsync(sessionId);
     }
 
     /// <inheritdoc />
     public async Task<Guid> RenameSessionAsync(Guid userId, Guid sessionId, string title)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.RenameSessionAsync(sessionId, title);
     }
 
@@ -115,7 +123,8 @@ public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
 
         try
         {
-            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
             return await manager.SearchSessionsAsync(keyword.Trim(), 1000);
         }
         catch (Exception ex)

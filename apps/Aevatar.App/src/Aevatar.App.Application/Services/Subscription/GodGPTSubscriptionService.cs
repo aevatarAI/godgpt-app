@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Auditing;
+using Aevatar.App.Application.Contracts.Services.Subscription;
 
 namespace Aevatar.App.Application.Services.Subscription;
 
@@ -23,42 +24,46 @@ namespace Aevatar.App.Application.Services.Subscription;
 [DisableAuditing]
 public class GodGPTSubscriptionService : ApplicationService, IGodGPTSubscriptionService
 {
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<GodGPTSubscriptionService> _logger;
 
     public GodGPTSubscriptionService(
-        IGAgentFactory agentFactory,
+        IGAgentActorFactory actorFactory,
         ILogger<GodGPTSubscriptionService> logger)
     {
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
         _logger = logger;
     }
 
     /// <inheritdoc />
     public async Task<bool> HasActiveAppleSubscriptionAsync(Guid currentUserId)
     {
-        var userBillingGAgent = _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
+        var userBillingActor = await _actorFactory.CreateGAgentActorAsync<UserBillingGAgent>(currentUserId);
+        var userBillingGAgent = (IUserBillingGAgent)userBillingActor.GetAgent();
         return await userBillingGAgent.HasActiveAppleSubscriptionAsync();
     }
 
     /// <inheritdoc />
     public async Task<ActiveSubscriptionStatusDto> HasActiveSubscriptionAsync(Guid currentUserId)
     {
-        var userBillingGAgent = _agentFactory.CreateGAgent<UserBillingGAgent>(currentUserId);
+        var userBillingActor = await _actorFactory.CreateGAgentActorAsync<UserBillingGAgent>(currentUserId);
+        var userBillingGAgent = (IUserBillingGAgent)userBillingActor.GetAgent();
         return await userBillingGAgent.GetActiveSubscriptionStatusAsync();
     }
 
     /// <inheritdoc />
     public async Task<GrainResultDto<int>> UpdateUserCreditsAsync(Guid currentUserId, UpdateUserCreditsInput input)
     {
-        var userQuotaGAgent = _agentFactory.CreateGAgent<UserQuotaGAgent>(input.UserId);
+        var userQuotaActor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(input.UserId);
+        var userQuotaGAgent = (IUserQuotaGAgent)userQuotaActor.GetAgent();
         return await userQuotaGAgent.UpdateCreditsAsync(currentUserId.ToString(), input.Credits);
     }
 
     /// <inheritdoc />
     public async Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateUserSubscriptionAsync(Guid currentUserId, UpdateUserSubscriptionsInput input)
     {
-        var userQuotaGAgent = _agentFactory.CreateGAgent<UserQuotaGAgent>(input.UserId);
+        var userQuotaActor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(input.UserId);
+        var userQuotaGAgent = (IUserQuotaGAgent)userQuotaActor.GetAgent();
         return await userQuotaGAgent.UpdateSubscriptionAsync(currentUserId.ToString(), input.PlanType, input.IsUltimate);
     }
 }

@@ -1,38 +1,37 @@
-using Aevatar.App.HttpApi.Controllers;
 using System;
 using System.Diagnostics;
 using System.Security;
 using System.Threading.Tasks;
 using Aevatar.App.Application.Services;
+using Aevatar.App.Application.Contracts.Services.Admin;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Dtos;
-using Aevatar.Service;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Volo.Abp.AspNetCore.Mvc;
 
 namespace Aevatar.Controllers;
 
 /// <summary>
-/// Weekly user feedback report controller
+/// Management controller for admin operations.
+/// Handles batch info queries and other administrative functions.
 /// </summary>
 [ApiController]
 [Route("api/godgpt/management")]
 [Authorize]
-public class GodGPTManagementController : AbpControllerBase
+public class GodGPTManagementController : AevatarController
 {
     private readonly ILogger<GodGPTManagementController> _logger;
-    private readonly IGodGPTService _godGptService;
+    private readonly IGodGPTAdminService _adminService;
     private readonly IInvitationService _invitationService;
 
     public GodGPTManagementController(
         ILogger<GodGPTManagementController> logger,
-        IGodGPTService godGptService,
+        IGodGPTAdminService adminService,
         IInvitationService invitationService)
     {
         _logger = logger;
-        _godGptService = godGptService;
+        _adminService = adminService;
         _invitationService = invitationService;
     }
 
@@ -52,7 +51,7 @@ public class GodGPTManagementController : AbpControllerBase
     private async Task CheckUserIsManager()
     {
         var currentUserId = (Guid)CurrentUser.Id!;
-        if (!await _godGptService.CheckIsManager(currentUserId))
+        if (!await _adminService.CheckIsManagerAsync(currentUserId))
         {
             _logger.LogInformation($"User is not manager {currentUserId}");
             throw new SecurityException($"User is not manager {currentUserId}");

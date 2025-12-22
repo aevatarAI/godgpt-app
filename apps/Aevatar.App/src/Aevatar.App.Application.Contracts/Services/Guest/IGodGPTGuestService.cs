@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
 using Aevatar.Anonymous;
 
-namespace Aevatar.App.Application.Services.Guest;
+namespace Aevatar.App.Application.Contracts.Services.Guest;
 
 /// <summary>
 /// Service interface for managing anonymous/guest user sessions and chat functionality.

@@ -6,7 +6,7 @@ using Aevatar.Anonymous;
 using Aevatar.Application.Constants;
 using Aevatar.App.Application.Contracts.Services;
 using Aevatar.App.Application.Services;
-using Aevatar.App.Application.Services.Guest;
+using Aevatar.App.Application.Contracts.Services.Guest;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.App.HttpApi.Extensions;
 using Asp.Versioning;

@@ -54,22 +54,22 @@ public class UserProfileGAgent : GAgentBase<UserProfileState>, IUserProfileGAgen
     /// </summary>
     public async Task<UserProfileDtoProto> GetUserProfileAsync()
     {
-        Logger.LogDebug($"[ChatGAgentManager][GetUserProfileAsync] userId: {this.GetPrimaryKey().ToString()}");
+        Logger.LogDebug($"[ChatGAgentManager][GetUserProfileAsync] userId: {Id.ToString()}");
 
-        var invitationActor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>(this.GetPrimaryKey());
+        var invitationActor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>(Id);
         var invitationGrain = (IInvitationGAgent)invitationActor.GetAgent();
         await invitationGrain.ProcessScheduledRewardAsync();
 
         // Sync latest subscription status from UserBillingGAgent before getting user profile
         // This ensures Google Pay and other platform subscriptions are up-to-date
-        var userBillingActor = await _actorFactory.CreateGAgentActorAsync<UserBillingGAgent>(this.GetPrimaryKey());
+        var userBillingActor = await _actorFactory.CreateGAgentActorAsync<UserBillingGAgent>(Id);
         var userBillingGAgent = (IUserBillingGAgent)userBillingActor.GetAgent();
         var activeSubscriptionStatus = await userBillingGAgent.GetActiveSubscriptionStatusAsync();
 
         Logger.LogDebug(
             $"[ChatGAgentManager][GetUserProfileAsync] Active subscription status - Apple: {activeSubscriptionStatus.HasActiveAppleSubscription}, Stripe: {activeSubscriptionStatus.HasActiveStripeSubscription}, GooglePlay: {activeSubscriptionStatus.HasActiveGooglePlaySubscription}");
 
-        var userQuotaActor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(this.GetPrimaryKey());
+        var userQuotaActor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(Id);
         var userQuotaGAgent = (IUserQuotaGAgent)userQuotaActor.GetAgent();
 
         // Check if we need to sync subscription status between UserBillingGAgent and UserQuotaGAgent

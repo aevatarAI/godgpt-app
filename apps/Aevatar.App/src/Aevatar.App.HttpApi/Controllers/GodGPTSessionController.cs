@@ -5,7 +5,7 @@ using System.Diagnostics;
 using System.Threading.Tasks;
 using Aevatar.App.Application.Common;
 using Aevatar.App.Application.Services;
-using Aevatar.App.Application.Services.Session;
+using Aevatar.App.Application.Contracts.Services.Session;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.ChatManager.Dtos;

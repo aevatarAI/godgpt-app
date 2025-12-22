@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using Aevatar.GodGPT.Dtos;
 using GodGPT.GAgents.SpeechChat;
 
-namespace Aevatar.App.Application.Services.Awakening;
+namespace Aevatar.App.Application.Contracts.Services.Awakening;
 
 /// <summary>
 /// Service interface for managing user awakening content.

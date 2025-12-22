@@ -19,6 +19,7 @@ using Aevatar.GAgents.AI.Abstractions;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.App.Domain.Shared;
 using Aevatar.Quantum;
+using Aevatar.App.Application.Contracts.Services.Share;
 
 namespace Aevatar.App.Application.Services.Share;
 
@@ -30,18 +31,18 @@ namespace Aevatar.App.Application.Services.Share;
 [DisableAuditing]
 public class GodGPTShareService : ApplicationService, IGodGPTShareService
 {
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly IClusterClient _clusterClient;
     private readonly ILogger<GodGPTShareService> _logger;
     private readonly ILocalizationService _localizationService;
 
     public GodGPTShareService(
-        IGAgentFactory agentFactory,
+        IGAgentActorFactory actorFactory,
         IClusterClient clusterClient,
         ILogger<GodGPTShareService> logger,
         ILocalizationService localizationService)
     {
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
         _clusterClient = clusterClient;
         _logger = logger;
         _localizationService = localizationService;
@@ -52,7 +53,8 @@ public class GodGPTShareService : ApplicationService, IGodGPTShareService
     {
         try
         {
-            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId);
+            var manager = (IChatManagerGAgent)managerActor.GetAgent();
             RequestContext.Set("GodGPTLanguage", language.ToString());
             var shareId = await manager.GenerateChatShareContentAsync(request.SessionId);
             return new CreateShareIdResponse
@@ -91,7 +93,8 @@ public class GodGPTShareService : ApplicationService, IGodGPTShareService
 
         try
         {
-            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+            var manager = (IChatManagerGAgent)managerActor.GetAgent();
             RequestContext.Set("GodGPTLanguage", language.ToString());
             var shareLinkDto = await manager.GetChatShareContentAsync(sessionId, shareId);
             return shareLinkDto.Messages;

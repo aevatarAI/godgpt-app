@@ -7,7 +7,7 @@ using Aevatar.GodGPT.Dtos;
 using Aevatar.App.Domain.Shared;
 using Aevatar.Quantum;
 
-namespace Aevatar.App.Application.Services.Share;
+namespace Aevatar.App.Application.Contracts.Services.Share;
 
 /// <summary>
 /// Service interface for managing conversation sharing functionality.

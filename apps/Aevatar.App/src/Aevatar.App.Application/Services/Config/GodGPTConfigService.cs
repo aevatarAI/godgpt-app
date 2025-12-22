@@ -6,6 +6,7 @@ using Aevatar.Quantum;
 using Volo.Abp;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Auditing;
+using Aevatar.App.Application.Contracts.Services.Config;
 
 namespace Aevatar.App.Application.Services.Config;
 
@@ -17,26 +18,26 @@ namespace Aevatar.App.Application.Services.Config;
 [DisableAuditing]
 public class GodGPTConfigService : ApplicationService, IGodGPTConfigService
 {
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
 
-    public GodGPTConfigService(IGAgentFactory agentFactory)
+    public GodGPTConfigService(IGAgentActorFactory actorFactory)
     {
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
     }
 
     /// <inheritdoc />
     public Task<string> GetSystemPromptAsync()
     {
-        var configurationAgent =
-            _agentFactory.CreateGAgent<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        var configurationActor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        var configurationAgent = (ConfigurationGAgent)configurationActor.GetAgent();
         return Task.FromResult(configurationAgent.GetPrompt());
     }
 
     /// <inheritdoc />
     public Task UpdateSystemPromptAsync(GodGPTConfigurationDto godGptConfigurationDto)
     {
-        var configurationAgent =
-            _agentFactory.CreateGAgent<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        var configurationActor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        var configurationAgent = (ConfigurationGAgent)configurationActor.GetAgent();
         return configurationAgent.UpdateSystemPromptAsync(godGptConfigurationDto.SystemPrompt);
     }
 }

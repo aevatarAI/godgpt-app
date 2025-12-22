@@ -101,7 +101,7 @@ public partial class ChatGAgentManager
         sw.Stop();
         Logger.LogDebug($"CreateSessionAsync - step2,time use:{sw.ElapsedMilliseconds}");
 
-        var sessionId = godChat.GetPrimaryKey();
+        var sessionId = godChat.Id;
         if (userProfile != null)
         {
             Logger.LogDebug("CreateSessionAsync set user profile. session={0}", sessionId);
@@ -132,7 +132,7 @@ public partial class ChatGAgentManager
 
         sw.Stop();
         Logger.LogDebug($"CreateSessionAsync - step2,time use:{sw.ElapsedMilliseconds}");
-        return godChat.GetPrimaryKey();
+        return godChat.Id;
     }
 
     public async Task<Tuple<string, string>> ChatWithSessionAsync(Guid sessionId, string sysmLLM, string content,

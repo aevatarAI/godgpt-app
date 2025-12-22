@@ -7,7 +7,7 @@ using Aevatar.Application.Constants;
 using Aevatar.App.Application.Contracts.BlobStorings;
 using Aevatar.App.Application.Contracts.Services;
 using Aevatar.App.Application.Services;
-using Aevatar.App.Application.Services.User;
+using Aevatar.App.Application.Contracts.Services.User;
 using Aevatar.App.Domain.Shared;
 using Aevatar.App.HttpApi.Extensions;
 using Aevatar.GodGPT.Dtos;
@@ -24,7 +24,8 @@ namespace Aevatar.Controllers;
 
 /// <summary>
 /// Controller for GodGPT file/image storage management.
-/// Handles file upload, deletion, and upload permission checks.
+/// Handles file upload and deletion.
+/// Note: Upload permission check endpoint is handled by GodGPTUserQuotaController.
 /// </summary>
 [RemoteService]
 [ControllerName("GodGPTStorage")]
@@ -53,28 +54,6 @@ public class GodGPTStorageController : AevatarController
         _blobStoringOptions = blobStoringOptions.Value;
         _thumbnailService = thumbnailService;
         _localizationService = localizationService;
-    }
-
-    /// <summary>
-    /// Check if user can upload image (daily limit check)
-    /// </summary>
-    [HttpGet("godgpt/can-upload-image")]
-    public async Task<CanUploadImageResponseDto> CanUploadImageAsync()
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var language = HttpContext.GetGodGPTLanguage();
-        var response = await _userService.CanUploadImageAsync(currentUserId, language);
-
-        var result = new CanUploadImageResponseDto
-        {
-            CanUpload = response.Success,
-            Reason = response.Message
-        };
-
-        _logger.LogDebug($"[GodGPTStorageController][CanUploadImageAsync] userId: {currentUserId}, canUpload: {result.CanUpload}, duration: {stopwatch.ElapsedMilliseconds}ms");
-
-        return result;
     }
 
     /// <summary>

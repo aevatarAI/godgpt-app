@@ -26,15 +26,15 @@ namespace Aevatar.Application.Grains.Agents.Anonymous;
 [GAgent(nameof(AnonymousUserGAgent))]
 public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUserGAgent
 {
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IServiceProvider _serviceProvider;
     private readonly IGAgentActorFactory _actorFactory;
     
     // Cached ConfigurationGAgent instance (new framework)
     private ConfigurationGAgent? _configurationAgent;
 
-    public AnonymousUserGAgent(Guid id, IGAgentFactory agentFactory, IGAgentActorFactory actorFactory) : base(id)
+    public AnonymousUserGAgent(Guid id, IServiceProvider serviceProvider, IGAgentActorFactory actorFactory) : base(id)
     {
-        _agentFactory = agentFactory;
+        _serviceProvider = serviceProvider;
         _actorFactory = actorFactory;
     }
 
@@ -250,9 +250,7 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
     {
         try
         {
-            var serviceProvider = _agentFactory as IServiceProvider ?? 
-                                  throw new InvalidOperationException("Cannot get ServiceProvider from IGAgentFactory");
-            var roleOptions = serviceProvider.GetService<IOptionsMonitor<RolePromptOptions>>()?.CurrentValue;
+            var roleOptions = _serviceProvider.GetService<IOptionsMonitor<RolePromptOptions>>()?.CurrentValue;
             var rolePrompt = roleOptions?.RolePrompts.GetValueOrDefault(roleName, string.Empty) ?? string.Empty;
             
             if (!string.IsNullOrEmpty(rolePrompt))
@@ -280,9 +278,7 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
     {
         try
         {
-            var serviceProvider = _agentFactory as IServiceProvider ?? 
-                                  throw new InvalidOperationException("Cannot get ServiceProvider from IGAgentFactory");
-            var options = serviceProvider.GetService<IOptionsMonitor<AnonymousGodGPTOptions>>()?.CurrentValue;
+            var options = _serviceProvider.GetService<IOptionsMonitor<AnonymousGodGPTOptions>>()?.CurrentValue;
             return options?.MaxChatCount ?? 3;
         }
         catch (Exception ex)

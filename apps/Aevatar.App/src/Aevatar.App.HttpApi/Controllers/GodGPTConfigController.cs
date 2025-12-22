@@ -4,7 +4,7 @@ using System.Threading.Tasks;
 using System.Linq;
 using Aevatar.App.HttpApi.Controllers;
 using Aevatar.Quantum;
-using Aevatar.App.Application.Services.Config;
+using Aevatar.App.Application.Contracts.Services.Config;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using System.Security.Claims;

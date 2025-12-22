@@ -3,7 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
-using Aevatar.App.Application.Services.Share;
+using Aevatar.App.Application.Contracts.Services.Share;
 using Aevatar.Quantum;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.App.HttpApi.Extensions;

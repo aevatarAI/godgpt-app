@@ -7,7 +7,7 @@ using Aevatar.GAgents.AI.Options;
 using Aevatar.Quantum;
 using Aevatar.GAgents.AI.Abstractions;
 
-namespace Aevatar.App.Application.Services.Session;
+namespace Aevatar.App.Application.Contracts.Services.Session;
 
 /// <summary>
 /// Service interface for managing GodGPT chat sessions.

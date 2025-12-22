@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security;
 using System.Threading.Tasks;
-using Aevatar.App.Application.Contracts.DailyPush;
 using Aevatar.Application.Grains.Agents.Anonymous;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
@@ -27,6 +26,7 @@ using Aevatar.Application.Grains.UserStatistics;
 using Aevatar.Application.Grains.UserStatistics.Dtos;
 using Aevatar.App.Domain.Shared;
 using Aevatar.Dtos;
+using Aevatar.Agents.Abstractions;
 using Aevatar.GAgents.AI.Abstractions;
 using Aevatar.GAgents.AI.Options;
 using Aevatar.App.Application.Contracts.Services;
@@ -122,7 +122,7 @@ public interface IGodGPTService
 public class GodGPTService : ApplicationService, IGodGPTService
 {
     private readonly IClusterClient _clusterClient;
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<GodGPTService> _logger;
     private readonly IOptionsMonitor<StripeOptions> _stripeOptions;
     private readonly IOptionsMonitor<ManagerOptions> _managerOptions;
@@ -134,7 +134,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
     public GodGPTService(
         IClusterClient clusterClient, 
-        IGAgentFactory agentFactory,
+        IGAgentActorFactory actorFactory,
         ILogger<GodGPTService> logger, 
         IOptionsMonitor<StripeOptions> stripeOptions,
         IOptionsMonitor<ManagerOptions> managerOptions, 
@@ -145,7 +145,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         IUserQuotaService userQuotaService)
     {
         _clusterClient = clusterClient;
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
         _logger = logger;
         _stripeOptions = stripeOptions;
         _managerOptions = managerOptions;
@@ -161,7 +161,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<Guid> CreateSessionAsync(Guid userId, string systemLLM, string prompt, string? guider = null,
         DateTime? userLocalTime = null)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.CreateSessionAsync(systemLLM, prompt, null, guider, userLocalTime);
     }
 
@@ -169,25 +170,29 @@ public class GodGPTService : ApplicationService, IGodGPTService
         string content,
         ExecutionPromptSettings promptSettings = null)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.ChatWithSessionAsync(sessionId, sysmLLM, content, promptSettings);
     }
 
     public async Task<List<SessionInfoDto>> GetSessionListAsync(Guid userId)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.GetSessionListAsync();
     }
 
     public async Task<List<ChatMessage>> GetSessionMessageListAsync(Guid userId, Guid sessionId)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.GetSessionMessageListAsync(sessionId);
     }
 
     public async Task<Aevatar.Quantum.SessionCreationInfoDto?> GetSessionCreationInfoAsync(Guid userId, Guid sessionId)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         var grainsResult = await manager.GetSessionCreationInfoAsync(sessionId);
         
         if (grainsResult != null)
@@ -206,13 +211,15 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
     public async Task<Guid> DeleteSessionAsync(Guid userId, Guid sessionId)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.DeleteSessionAsync(sessionId);
     }
 
     public async Task<Guid> RenameSessionAsync(Guid userId, Guid sessionId, string title)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.RenameSessionAsync(sessionId, title);
     }
 
@@ -233,7 +240,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
         try
         {
-            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+            var manager = (IChatManagerGAgent)managerActor.GetAgent();
             return await manager.SearchSessionsAsync(keyword.Trim(), 1000);
         }
         catch (Exception ex)
@@ -246,27 +254,29 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
     public Task<string> GetSystemPromptAsync()
     {
-        var configurationAgent =
-            _agentFactory.CreateGAgent<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        var configurationActor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        var configurationAgent = (ConfigurationGAgent)configurationActor.GetAgent();
         return Task.FromResult(configurationAgent.GetPrompt());
     }
 
     public Task UpdateSystemPromptAsync(GodGPTConfigurationDto godGptConfigurationDto)
     {
-        var configurationAgent =
-            _agentFactory.CreateGAgent<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        var configurationActor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
+        var configurationAgent = (ConfigurationGAgent)configurationActor.GetAgent();
         return configurationAgent.UpdateSystemPromptAsync(godGptConfigurationDto.SystemPrompt);
     }
 
     public async Task<UserProfileDto> GetUserProfileAsync(Guid currentUserId)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.GetUserProfileAsync();
     }
 
     public async Task<Guid> SetUserProfileAsync(Guid currentUserId, SetUserProfileInput userProfileDto)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.SetUserProfileAsync(userProfileDto.Gender, userProfileDto.BirthDate,
             userProfileDto.BirthPlace, userProfileDto.FullName);
     }
@@ -275,13 +285,15 @@ public class GodGPTService : ApplicationService, IGodGPTService
     {
         try
         {
-            var awakeningAgent = _agentFactory.CreateGAgent<AwakeningGAgent>(currentUserId);
+            var awakeningActor = await _actorFactory.CreateGAgentActorAsync<AwakeningGAgent>(currentUserId);
+            var awakeningAgent = (IAwakeningGAgent)awakeningActor.GetAgent();
             await awakeningAgent.ResetTodayContentAsync();
         }catch(Exception e)
         {
             _logger.LogError(e,"IAwakeningGAgent ResetTodayContentAsync error currentUserId:"+currentUserId);
         }
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         return await manager.ClearAllAsync();
     }
 
@@ -289,7 +301,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
     {
         try
         {
-            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId);
+            var manager = (IChatManagerGAgent)managerActor.GetAgent();
             RequestContext.Set("GodGPTLanguage", language.ToString());
             var shareId = await manager.GenerateChatShareContentAsync(request.SessionId);
             return new CreateShareIdResponse
@@ -327,7 +340,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
 
         try
         {
-            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(userId);
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
+            var manager = (IChatManagerGAgent)managerActor.GetAgent();
             RequestContext.Set("GodGPTLanguage", language.ToString());
             var shareLinkDto = await manager.GetChatShareContentAsync(sessionId, shareId);
             return shareLinkDto.Messages;
@@ -366,7 +380,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
         var codeType = InvitationCodeHelper.GetCodeType(input.InviteCode) ?? InvitationCodeType.FriendInvitation;
         if (codeType == InvitationCodeType.FriendInvitation)
         {
-            var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId);
+            var manager = (IChatManagerGAgent)managerActor.GetAgent();
             var result = await manager.RedeemInviteCodeAsync(input.InviteCode);
             return new RedeemInviteCodeResponse
             {
@@ -432,7 +447,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<CreateGuestSessionResponseDto> CreateGuestSessionAsync(string clientIp, string? guider = null)
     {
         var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserGrain = _agentFactory.CreateGAgent<AnonymousUserGAgent>(grainId);
+        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(grainId);
+        var anonymousUserGrain = (IAnonymousUserGAgent)anonymousUserActor.GetAgent();
         
         // Check if user can still chat
         if (!await anonymousUserGrain.CanChatAsync())
@@ -462,7 +478,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task GuestChatAsync(string clientIp, string content, string chatId)
     {
         var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserGrain = _agentFactory.CreateGAgent<AnonymousUserGAgent>(grainId);
+        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(grainId);
+        var anonymousUserGrain = (IAnonymousUserGAgent)anonymousUserActor.GetAgent();
         await anonymousUserGrain.GuestChatAsync(content, chatId);
     }
 
@@ -472,7 +489,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<GuestChatLimitsResponseDto> GetGuestChatLimitsAsync(string clientIp)
     { 
         var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserGrain = _agentFactory.CreateGAgent<AnonymousUserGAgent>(grainId);
+        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(grainId);
+        var anonymousUserGrain = (IAnonymousUserGAgent)anonymousUserActor.GetAgent();
         var remaining = await anonymousUserGrain.GetRemainingChatsAsync();
         
         return new GuestChatLimitsResponseDto
@@ -488,13 +506,15 @@ public class GodGPTService : ApplicationService, IGodGPTService
     public async Task<bool> CanGuestChatAsync(string clientIp)
     {
         var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserGrain = _agentFactory.CreateGAgent<AnonymousUserGAgent>(grainId);
+        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(grainId);
+        var anonymousUserGrain = (IAnonymousUserGAgent)anonymousUserActor.GetAgent();
         return await anonymousUserGrain.CanChatAsync();
     }
 
     public async Task<UserProfileDto> SetVoiceLanguageAsync(Guid currentUserId, VoiceLanguageEnum voiceLanguage)
     {
-        var manager = _agentFactory.CreateGAgent<ChatGAgentManager>(currentUserId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId);
+        var manager = (IChatManagerGAgent)managerActor.GetAgent();
         await manager.SetVoiceLanguageAsync(voiceLanguage);
         return await manager.GetUserProfileAsync();
     }
@@ -513,7 +533,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
         
         try
         {
-            var awakeningAgent = _agentFactory.CreateGAgent<AwakeningGAgent>(currentUserId);
+            var awakeningActor = await _actorFactory.CreateGAgentActorAsync<AwakeningGAgent>(currentUserId);
+            var awakeningAgent = (IAwakeningGAgent)awakeningActor.GetAgent();
             var result = await awakeningAgent.GetTodayAwakeningAsync(language, region);
             
             _logger.LogInformation("[GodGPTService][GetTodayAwakeningAsync] Completed for userId: {UserId}, result: {HasResult}",
@@ -553,7 +574,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
         {
             // Use a dummy IP to get configuration from AnonymousUserGAgent
             var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId("127.0.0.1"));
-            var configGrain = _agentFactory.CreateGAgent<AnonymousUserGAgent>(grainId);
+            var configActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(grainId);
+            var configGrain = (IAnonymousUserGAgent)configActor.GetAgent();
             return await configGrain.GetMaxChatCountAsync();
         }
         catch (Exception ex)
@@ -605,7 +627,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
         
         try
         {
-            var awakeningAgent = _agentFactory.CreateGAgent<AwakeningGAgent>(userId);
+            var awakeningActor = await _actorFactory.CreateGAgentActorAsync<AwakeningGAgent>(userId);
+            var awakeningAgent = (IAwakeningGAgent)awakeningActor.GetAgent();
             bool resetSuccess = await awakeningAgent.ResetAwakeningStateForTestingAsync();
             
             _logger.LogInformation("[GodGPTService][ResetAwakeningStateForTestingAsync] Completed for userId: {UserId}, success: {Success}",

@@ -1,15 +1,9 @@
 using Aevatar.App.HttpApi.Controllers;
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
-using Aevatar.App.Application.Contracts.Services;
-using Aevatar.App.Application.Services.Subscription;
-using Aevatar.App.Application.Services.User;
+using Aevatar.App.Application.Contracts.Services.User;
 using Aevatar.Application.Grains.ChatManager.Dtos;
-using Aevatar.Application.Grains.Agents.ChatManager;
-using Aevatar.Application.Grains.ChatManager.UserQuota;
-using Aevatar.Dtos;
 using Aevatar.GAgents.AI.Common;
 using GodGPT.GAgents.SpeechChat;
 using Asp.Versioning;
@@ -23,7 +17,8 @@ namespace Aevatar.Controllers;
 
 /// <summary>
 /// Controller for GodGPT user account management.
-/// Handles profile, credits, subscription, and preferences.
+/// Handles profile and preferences.
+/// Note: Credits and subscription endpoints are handled by GodGPTUserQuotaController.
 /// </summary>
 [RemoteService]
 [ControllerName("GodGPTAccount")]
@@ -32,16 +27,13 @@ namespace Aevatar.Controllers;
 public class GodGPTAccountController : AevatarController
 {
     private readonly IGodGPTUserService _userService;
-    private readonly IGodGPTSubscriptionService _subscriptionService;
     private readonly ILogger<GodGPTAccountController> _logger;
 
     public GodGPTAccountController(
         IGodGPTUserService userService,
-        IGodGPTSubscriptionService subscriptionService,
         ILogger<GodGPTAccountController> logger)
     {
         _userService = userService;
-        _subscriptionService = subscriptionService;
         _logger = logger;
     }
 
@@ -85,48 +77,6 @@ public class GodGPTAccountController : AevatarController
         _logger.LogDebug("[GodGPTAccountController][DeleteAccountAsync] userId: {0}, duration: {1}ms",
             deleteUserId, stopwatch.ElapsedMilliseconds);
         return deleteUserId;
-    }
-
-    /// <summary>
-    /// Update show toast status for current user
-    /// </summary>
-    [HttpPost("godgpt/account/show-toast")]
-    public async Task<Guid> UpdateShowToastAsync()
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        await _userService.UpdateShowToastAsync(currentUserId);
-        _logger.LogDebug("[GodGPTAccountController][UpdateShowToastAsync] userId: {0}, duration: {1}ms",
-            currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
-        return currentUserId;
-    }
-
-    /// <summary>
-    /// Update user credits
-    /// </summary>
-    [HttpPost("godgpt/account/credits")]
-    public async Task<GrainResultDto<int>> UpdateUserCreditsAsync(UpdateUserCreditsInput input)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var resultDto = await _subscriptionService.UpdateUserCreditsAsync(currentUserId, input);
-        _logger.LogDebug("[GodGPTAccountController][UpdateUserCreditsAsync] userId: {0}, duration: {1}ms",
-            currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
-        return resultDto;
-    }
-
-    /// <summary>
-    /// Update user subscription
-    /// </summary>
-    [HttpPost("godgpt/account/subscription")]
-    public async Task<GrainResultDto<List<SubscriptionInfoDto>>> UpdateUserSubscriptionAsync(UpdateUserSubscriptionsInput input)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var resultDto = await _subscriptionService.UpdateUserSubscriptionAsync(currentUserId, input);
-        _logger.LogDebug("[GodGPTAccountController][UpdateUserSubscriptionAsync] userId: {0}, duration: {1}ms",
-            currentUserId.ToString(), stopwatch.ElapsedMilliseconds);
-        return resultDto;
     }
 
     /// <summary>

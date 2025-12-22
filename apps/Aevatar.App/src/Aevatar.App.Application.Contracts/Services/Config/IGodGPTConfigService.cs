@@ -1,7 +1,7 @@
 using System.Threading.Tasks;
 using Aevatar.Quantum;
 
-namespace Aevatar.App.Application.Services.Config;
+namespace Aevatar.App.Application.Contracts.Services.Config;
 
 /// <summary>
 /// Service interface for managing GodGPT system configuration.

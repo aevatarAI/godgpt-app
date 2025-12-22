@@ -3,7 +3,7 @@ using System.Threading.Tasks;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Dtos;
 
-namespace Aevatar.App.Application.Services.Admin;
+namespace Aevatar.App.Application.Contracts.Services.Admin;
 
 /// <summary>
 /// Service interface for admin operations.

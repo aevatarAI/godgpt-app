@@ -6,7 +6,7 @@ using Aevatar.GodGPT.Dtos;
 using GodGPT.GAgents.SpeechChat;
 using Aevatar.App.Domain.Shared;
 
-namespace Aevatar.App.Application.Services.User;
+namespace Aevatar.App.Application.Contracts.Services.User;
 
 /// <summary>
 /// Service interface for managing user profile and account operations.

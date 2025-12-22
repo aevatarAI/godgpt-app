@@ -3,9 +3,6 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Aevatar.App.Application.Contracts.Analytics;
-using Aevatar.App.Application.Services.Statistics;
-using Aevatar.Application.Grains.UserStatistics.Dtos;
-using Aevatar.Dtos;
 using Aevatar.App.Application.Services;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
@@ -16,8 +13,9 @@ using Volo.Abp;
 namespace Aevatar.Controllers;
 
 /// <summary>
-/// Controller for GodGPT analytics and user statistics.
-/// Handles event tracking (GA/Firebase) and app rating.
+/// Controller for GodGPT analytics event tracking.
+/// Handles Google Analytics (gtag) and Firebase Analytics event tracking.
+/// Note: User statistics endpoints are handled by GodGPTUserStatisticsController.
 /// </summary>
 [RemoteService]
 [ControllerName("GodGPTAnalytics")]
@@ -25,16 +23,13 @@ namespace Aevatar.Controllers;
 [Authorize]
 public class GodGPTAnalyticsController : AevatarController
 {
-    private readonly IGodGPTStatisticsService _statisticsService;
     private readonly ILogger<GodGPTAnalyticsController> _logger;
     private readonly IGoogleAnalyticsService _googleAnalyticsService;
 
     public GodGPTAnalyticsController(
-        IGodGPTStatisticsService statisticsService,
         ILogger<GodGPTAnalyticsController> logger,
         IGoogleAnalyticsService googleAnalyticsService)
     {
-        _statisticsService = statisticsService;
         _logger = logger;
         _googleAnalyticsService = googleAnalyticsService;
     }
@@ -137,33 +132,5 @@ public class GodGPTAnalyticsController : AevatarController
                 ErrorMessage = "Internal server error"
             });
         }
-    }
-
-    /// <summary>
-    /// Record user's app rating
-    /// </summary>
-    [HttpPost("godgpt/user-statistics/app-rating")]
-    public async Task<AppRatingRecordDto> RecordAppRatingAsync(RecordAppRatingInput input)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _statisticsService.RecordAppRatingAsync(currentUserId, input);
-        _logger.LogDebug("[GodGPTAnalyticsController][RecordAppRatingAsync] userId: {0}, duration: {1}ms",
-            currentUserId, stopwatch.ElapsedMilliseconds);
-        return response;
-    }
-
-    /// <summary>
-    /// Check if user can rate the app
-    /// </summary>
-    [HttpGet("godgpt/user-statistics/can-rate")]
-    public async Task<bool> CanUserRateAppAsync(CanUserRateAppInput input)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        var response = await _statisticsService.CanUserRateAppAsync(currentUserId, input);
-        _logger.LogDebug("[GodGPTAnalyticsController][CanUserRateAppAsync] userId: {0}, duration: {1}ms",
-            currentUserId, stopwatch.ElapsedMilliseconds);
-        return response;
     }
 }

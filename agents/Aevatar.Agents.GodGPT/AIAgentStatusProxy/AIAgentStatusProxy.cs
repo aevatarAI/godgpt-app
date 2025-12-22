@@ -15,6 +15,7 @@ using Newtonsoft.Json;
 using Orleans.Concurrency;
 using System.Diagnostics;
 using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.GEvents;
+using Aevatar.Agents.Abstractions;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
 
@@ -24,6 +25,8 @@ public class AIAgentStatusProxy :
     AIGAgentBase<AIAgentStatusProxyState, AIAgentStatusProxyLogEvent, EventBase, AIAgentStatusProxyConfig>,
     IAIAgentStatusProxy
 {
+    // Injected by OrleansGAgentGrain via reflection (see InjectActorFactory)
+    public IGAgentActorFactory? ActorFactory { get; set; }
     public override Task<string> GetDescriptionAsync()
     {
         return Task.FromResult("AIGAgent supporting state management");
@@ -49,14 +52,14 @@ public class AIAgentStatusProxy :
     private async Task HandlerEventAsync(AIAgentStatusProxyInitializeGEvent @event)
     {
         var stopwatch = Stopwatch.StartNew();
-        Logger.LogDebug($"[HandlerEventAsync][AIAgentStatusProxyInitializeGEvent] Start- SessionId:{this.GetPrimaryKey()}, event:{JsonConvert.SerializeObject(@event)}");
+        Logger.LogDebug($"[HandlerEventAsync][AIAgentStatusProxyInitializeGEvent] Start- SessionId:{Id}, event:{JsonConvert.SerializeObject(@event)}");
         //await SendProxyInitStatusUpdateAsync(ProxyInitStatus.Initializing);
 
         await InitializeAsync(@event.InitializeDto);
         // Send status update to GodChatGAgent - Initialized
         await SendProxyInitStatusUpdateAsync(ProxyInitStatus.Initialized);
         stopwatch.Stop();
-        Logger.LogDebug($"[HandlerEventAsync][AIAgentStatusProxyInitializeGEvent] End - SessionId: {this.GetPrimaryKey()} ,Duration: {stopwatch.ElapsedMilliseconds}ms");
+        Logger.LogDebug($"[HandlerEventAsync][AIAgentStatusProxyInitializeGEvent] End - SessionId: {Id} ,Duration: {stopwatch.ElapsedMilliseconds}ms");
     }
     
     private async Task SendProxyInitStatusUpdateAsync(ProxyInitStatus status)
@@ -65,11 +68,18 @@ public class AIAgentStatusProxy :
         {
             if (State.ParentId != Guid.Empty)
             {
-                // Direct grain call instead of Orleans Stream
-                var godChatGrain = GrainFactory.GetGrain<IGodChat>(State.ParentId);
-                await godChatGrain.UpdateProxyInitStatusAsync(this.GetPrimaryKey(), status);
+                // Use new framework IGAgentActorFactory to get GodChatGAgent
+                if (ActorFactory == null)
+                {
+                    Logger.LogError("[AIAgentStatusProxy][SendProxyInitStatusUpdateAsync] ActorFactory is not injected");
+                    return;
+                }
+                
+                var godChatActor = await ActorFactory.CreateGAgentActorAsync<GodChatGAgent>(State.ParentId);
+                var godChat = (IGodChat)godChatActor.GetAgent();
+                await godChat.UpdateProxyInitStatusAsync(Id, status);
 
-                Logger.LogDebug($"[AIAgentStatusProxy][SendProxyInitStatusUpdateAsync] Sent status update: {status} for proxy: {this.GetPrimaryKey()} to GodChatGAgent: {State.ParentId}");
+                Logger.LogDebug($"[AIAgentStatusProxy][SendProxyInitStatusUpdateAsync] Sent status update: {status} for proxy: {Id} to GodChatGAgent: {State.ParentId}");
             }
             else
             {
@@ -78,7 +88,7 @@ public class AIAgentStatusProxy :
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, $"[AIAgentStatusProxy][SendProxyInitStatusUpdateAsync] Failed to send status update: {status} for proxy: {this.GetPrimaryKey()}");
+            Logger.LogError(ex, $"[AIAgentStatusProxy][SendProxyInitStatusUpdateAsync] Failed to send status update: {status} for proxy: {Id}");
         }
     }
     public new async Task<List<ChatMessage>?> ChatWithHistory(string prompt, List<ChatMessage>? history = null,
@@ -119,10 +129,17 @@ public class AIAgentStatusProxy :
                 IsAvailable = false,
                 ExceptionCount = 1
             });
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
         }
         
-        var godChat = GrainFactory.GetGrain<IGodChat>(State.ParentId);
+        if (ActorFactory == null)
+        {
+            Logger.LogError("[AIAgentStatusProxy][AIChatHandleStreamAsync] ActorFactory is not injected");
+            return;
+        }
+        
+        var godChatActor = await ActorFactory.CreateGAgentActorAsync<GodChatGAgent>(State.ParentId);
+        var godChat = (IGodChat)godChatActor.GetAgent();
         await godChat.ChatMessageCallbackAsync(context, errorEnum, errorMessage, content);
     }
 
@@ -148,7 +165,7 @@ public class AIAgentStatusProxy :
             {
                 IsAvailable = true
             });
-            await ConfirmEvents();
+            await ConfirmEventsAsync();
             return true;
         }
 

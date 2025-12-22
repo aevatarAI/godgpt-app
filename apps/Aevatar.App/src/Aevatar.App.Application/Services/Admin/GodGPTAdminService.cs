@@ -11,6 +11,7 @@ using Microsoft.Extensions.Options;
 using Volo.Abp;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Auditing;
+using Aevatar.App.Application.Contracts.Services.Admin;
 
 namespace Aevatar.App.Application.Services.Admin;
 
@@ -22,16 +23,16 @@ namespace Aevatar.App.Application.Services.Admin;
 [DisableAuditing]
 public class GodGPTAdminService : ApplicationService, IGodGPTAdminService
 {
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly IOptionsMonitor<ManagerOptions> _managerOptions;
     private readonly ILogger<GodGPTAdminService> _logger;
 
     public GodGPTAdminService(
-        IGAgentFactory agentFactory,
+        IGAgentActorFactory actorFactory,
         IOptionsMonitor<ManagerOptions> managerOptions,
         ILogger<GodGPTAdminService> logger)
     {
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
         _managerOptions = managerOptions;
         _logger = logger;
     }
@@ -40,8 +41,9 @@ public class GodGPTAdminService : ApplicationService, IGodGPTAdminService
     public async Task<GenerateCodesResultDto> GenerateFreeTrialCodeAsync(Guid currentUserId, GenerateFreeTrialCodeRequest input)
     {
         var batchId = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var factoryGAgent = _agentFactory.CreateGAgent<FreeTrialCodeFactoryGAgent>(
+        var factoryActor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(
             CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId));
+        var factoryGAgent = (IFreeTrialCodeFactoryGAgent)factoryActor.GetAgent();
         
         return await factoryGAgent.GenerateCodesAsync(new GenerateCodesRequestDto
         {
@@ -59,8 +61,9 @@ public class GodGPTAdminService : ApplicationService, IGodGPTAdminService
     /// <inheritdoc />
     public async Task<BatchInfoDto> GetBatchInfoAsync(string batchId)
     {
-        var factoryGAgent = _agentFactory.CreateGAgent<FreeTrialCodeFactoryGAgent>(
+        var factoryActor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(
             CommonHelper.GetFreeTrialCodeFactoryGAgentId(long.Parse(batchId)));
+        var factoryGAgent = (IFreeTrialCodeFactoryGAgent)factoryActor.GetAgent();
         return await factoryGAgent.GetBatchInfoAsync();
     }
 

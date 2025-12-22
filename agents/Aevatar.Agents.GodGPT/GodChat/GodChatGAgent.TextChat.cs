@@ -144,12 +144,12 @@ public partial class GodChatGAgent
 
         if (aiAgentStatusProxy != null)
         {
-            var proxyId = aiAgentStatusProxy.GetPrimaryKey();
+            var proxyId = aiAgentStatusProxy.Id;
             // Ensure proxy is initialized before proceeding
             await EnsureProxyInitializedAsync(proxyId, sessionId);
             
             Logger.LogDebug(
-                $"[GodChatGAgent][GodStreamChatAsync] agent {aiAgentStatusProxy.GetPrimaryKey().ToString()}, session {sessionId.ToString()}, chat {chatId}");
+                $"[GodChatGAgent][GodStreamChatAsync] agent {aiAgentStatusProxy.Id.ToString()}, session {sessionId.ToString()}, chat {chatId}");
 
             // Check if this is a voice chat from context
             bool isPromptVoiceChat = false;

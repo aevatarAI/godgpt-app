@@ -6,7 +6,7 @@ using Aevatar.Application.Grains.ChatManager.UserBilling;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
 using Aevatar.GodGPT.Dtos;
 
-namespace Aevatar.App.Application.Services.Subscription;
+namespace Aevatar.App.Application.Contracts.Services.Subscription;
 
 /// <summary>
 /// Service interface for managing subscription status and user quotas.

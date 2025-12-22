@@ -37,7 +37,7 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
     /// </summary>
     public async Task<string> GenerateInviteCodeAsync()
     {
-        var invitationActor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>(this.GetPrimaryKey());
+        var invitationActor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>(Id);
         var invitationAgent = (IInvitationGAgent)invitationActor.GetAgent();
         var inviteCode = await invitationAgent.GenerateInviteCodeAsync();
         return inviteCode;
@@ -69,7 +69,7 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
         }
 
         // Step 1: First, check if the current user (invitee) is eligible for the reward.
-        var userQuotaActor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(this.GetPrimaryKey());
+        var userQuotaActor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(Id);
         var userQuotaGAgent = (IUserQuotaGAgent)userQuotaActor.GetAgent();
 
         if (State.RegisteredAtUtc == null) //&& State.SessionInfoList.IsNullOrEmpty())

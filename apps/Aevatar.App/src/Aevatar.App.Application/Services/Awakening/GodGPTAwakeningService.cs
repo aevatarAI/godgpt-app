@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Auditing;
+using Aevatar.App.Application.Contracts.Services.Awakening;
 
 namespace Aevatar.App.Application.Services.Awakening;
 
@@ -19,14 +20,14 @@ namespace Aevatar.App.Application.Services.Awakening;
 [DisableAuditing]
 public class GodGPTAwakeningService : ApplicationService, IGodGPTAwakeningService
 {
-    private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<GodGPTAwakeningService> _logger;
 
     public GodGPTAwakeningService(
-        IGAgentFactory agentFactory,
+        IGAgentActorFactory actorFactory,
         ILogger<GodGPTAwakeningService> logger)
     {
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
         _logger = logger;
     }
 
@@ -38,7 +39,8 @@ public class GodGPTAwakeningService : ApplicationService, IGodGPTAwakeningServic
         
         try
         {
-            var awakeningAgent = _agentFactory.CreateGAgent<AwakeningGAgent>(currentUserId);
+            var awakeningActor = await _actorFactory.CreateGAgentActorAsync<AwakeningGAgent>(currentUserId);
+            var awakeningAgent = (IAwakeningGAgent)awakeningActor.GetAgent();
             var result = await awakeningAgent.GetTodayAwakeningAsync(language, region);
             
             _logger.LogInformation("[GodGPTAwakeningService][GetTodayAwakeningAsync] Completed for userId: {UserId}, result: {HasResult}",
@@ -76,7 +78,8 @@ public class GodGPTAwakeningService : ApplicationService, IGodGPTAwakeningServic
         
         try
         {
-            var awakeningAgent = _agentFactory.CreateGAgent<AwakeningGAgent>(userId);
+            var awakeningActor = await _actorFactory.CreateGAgentActorAsync<AwakeningGAgent>(userId);
+            var awakeningAgent = (IAwakeningGAgent)awakeningActor.GetAgent();
             bool resetSuccess = await awakeningAgent.ResetAwakeningStateForTestingAsync();
             
             _logger.LogInformation("[GodGPTAwakeningService][ResetAwakeningStateForTestingAsync] Completed for userId: {UserId}, success: {Success}",
