@@ -1,0 +1,106 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.protos.dailypushuser;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.DailyPushUser";
+
+// =============================================================================
+// State - User-level Daily Push State
+// =============================================================================
+
+message DailyPushUserStateProto {
+  string user_id = 1;  // Guid as string
+  
+  // V2 Device Management
+  map<string, UserDeviceInfoV2Proto> user_devices_v2 = 2;
+  map<string, string> token_to_device_map_v2 = 3;  // pushToken -> deviceId
+  
+  // Daily Push Read Status (dateKey -> isRead)
+  map<string, bool> daily_push_read_status = 4;
+  
+  // State version for migration tracking
+  int32 state_version = 5;
+  
+  // Initialization timestamp
+  google.protobuf.Timestamp initialized_at = 6;
+}
+
+message UserDeviceInfoV2Proto {
+  string device_id = 1;
+  string user_id = 2;  // Guid as string
+  string push_token = 3;
+  string time_zone_id = 4;
+  string push_language = 5;
+  bool push_enabled = 6;
+  google.protobuf.Timestamp registered_at = 7;
+  google.protobuf.Timestamp last_token_update = 8;
+  google.protobuf.Timestamp last_active_at = 9;
+  string platform = 10;
+  string app_version = 11;
+  int32 structure_version = 12;
+  int32 status = 13;  // DeviceStatus enum as int
+  repeated HistoricalPushTokenProto push_token_history = 14;
+  optional google.protobuf.Timestamp last_successful_push = 15;
+  int32 consecutive_failures = 16;
+  map<string, string> metadata = 17;
+}
+
+message HistoricalPushTokenProto {
+  string token = 1;
+  google.protobuf.Timestamp used_from = 2;
+  optional google.protobuf.Timestamp used_until = 3;
+  string replacement_reason = 4;
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+message InitializeDailyPushUserEvent {
+  string user_id = 1;
+  google.protobuf.Timestamp initialized_at = 2;
+}
+
+message RegisterOrUpdateDeviceV2Event {
+  string device_id = 1;
+  UserDeviceInfoV2Proto device_info = 2;
+  bool is_new_device = 3;
+  optional string old_push_token = 4;
+}
+
+message MarkDailyPushReadEvent {
+  string date_key = 1;
+  google.protobuf.Timestamp read_time = 2;
+  optional string device_id = 3;
+}
+
+message CleanupDevicesV2Event {
+  repeated string device_ids_to_remove = 1;
+  int32 removed_count = 2;
+  string cleanup_reason = 3;
+  map<string, string> cleanup_details = 4;
+  google.protobuf.Timestamp cleanup_time = 5;
+}
+
+message UpdateDeviceStatusEvent {
+  string device_id = 1;
+  int32 old_status = 2;
+  int32 new_status = 3;
+  string reason = 4;
+  google.protobuf.Timestamp update_time = 5;
+}
+
+message RecordPushResultEvent {
+  string device_id = 1;
+  bool success = 2;
+  optional string error_code = 3;
+  google.protobuf.Timestamp push_time = 4;
+}
+
+message CleanExpiredReadStatusEvent {
+  repeated string date_keys_removed = 1;
+  google.protobuf.Timestamp cleanup_time = 2;
+}
+

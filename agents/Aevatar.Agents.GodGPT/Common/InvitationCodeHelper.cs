@@ -1,4 +1,4 @@
-using Aevatar.Application.Grains.Common.Constants;
+using Aevatar.Agents.GodGPT.Protos.InviteCode;
 
 namespace Aevatar.Application.Grains.Common;
 
@@ -8,7 +8,7 @@ public static class InvitationCodeHelper
     private const string Base62Chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
     private static readonly Random Random = new Random();
     
-    public static string GenerateOptimizedCode(InvitationCodeType codeType, long unixTimestamp)
+    public static string GenerateOptimizedCode(InviteCodeType codeType, long unixTimestamp)
     {
         // 64-bit allocation:
         // Bits 63-62: Reserved (2 bits, always 0) - NOT XORed
@@ -32,7 +32,7 @@ public static class InvitationCodeHelper
         return EncodeToBase36(combinedValue);
     }
 
-    public static InvitationCodeType? GetCodeType(string code)
+    public static InviteCodeType? GetCodeType(string code)
     {
         if (code.IsNullOrWhiteSpace())
         {
@@ -45,7 +45,7 @@ public static class InvitationCodeHelper
             return codeType;
         } else if (IsValidFriendInvitationCodeFormat(code))
         {
-            return InvitationCodeType.FriendInvitation;
+            return InviteCodeType.FriendInvitation;
         }
         return null;
     }
@@ -101,7 +101,7 @@ public static class InvitationCodeHelper
         }
     }
     
-    public static (InvitationCodeType codeType, long unixTimestamp) ParseCodeInfo(string code)
+    public static (InviteCodeType codeType, long unixTimestamp) ParseCodeInfo(string code)
     {
         if (!IsValidFreeTrialCodeFormat(code))
         {
@@ -116,7 +116,7 @@ public static class InvitationCodeHelper
         low58Bits ^= 0x15A5A5A5A5A5A5AL;     // Reverse XOR only low 58 bits
         value = (high6Bits << 58) | low58Bits; // Combine back
         
-        var codeType = (InvitationCodeType)((value >> 58) & 0xF); // Extract from bits 61-58
+        var codeType = (InviteCodeType)((value >> 58) & 0xF); // Extract from bits 61-58
         var unixTimestamp = value & 0xFFFFFFFF;
         
         return (codeType, unixTimestamp);

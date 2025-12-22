@@ -74,17 +74,17 @@ public static class MigrationHelpers
     
     #region Timestamp Conversions
     
-    /// <summary>
-    /// Convert DateTime to Protobuf Timestamp (handles UTC conversion).
-    /// </summary>
-    public static Timestamp ToProtoTimestamp(this DateTime dateTime)
-    {
-        // Ensure UTC before conversion
-        var utc = dateTime.Kind == DateTimeKind.Utc 
-            ? dateTime 
-            : dateTime.ToUniversalTime();
-        return Timestamp.FromDateTime(utc);
-    }
+    // /// <summary>
+    // /// Convert DateTime to Protobuf Timestamp (handles UTC conversion).
+    // /// </summary>
+    // public static Timestamp ToProtoTimestamp(this DateTime dateTime)
+    // {
+    //     // Ensure UTC before conversion
+    //     var utc = dateTime.Kind == DateTimeKind.Utc 
+    //         ? dateTime 
+    //         : dateTime.ToUniversalTime();
+    //     return Timestamp.FromDateTime(utc);
+    // }
     
     /// <summary>
     /// Convert nullable DateTime to Protobuf Timestamp.

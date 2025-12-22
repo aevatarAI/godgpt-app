@@ -1,3 +1,4 @@
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Helpers;
 
@@ -6,7 +7,7 @@ namespace Aevatar.Application.Grains.ChatManager.Dtos;
 [GenerateSerializer]
 public class StripeProductDto
 {
-    [Id(0)] public PlanType PlanType { get; set; }
+    [Id(0)] public QuotaPlanType PlanType { get; set; }
     [Id(1)] public string PriceId { get; set; }
     
     /// <summary>

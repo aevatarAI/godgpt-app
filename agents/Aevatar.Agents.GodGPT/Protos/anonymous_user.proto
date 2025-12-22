@@ -41,3 +41,15 @@ message InitializeAnonymousUserEvent {
     google.protobuf.Timestamp created_at = 2;             // [Id(1)]
 }
 
+// =============================================================================
+// DTOs
+// =============================================================================
+
+message GuestSessionInfoProto {
+    string session_id = 1;                                // [Id(0)] Guid -> string
+    optional string guider = 2;                           // [Id(1)]
+    google.protobuf.Timestamp created_at = 3;             // [Id(2)]
+    int32 chat_count = 4;                                 // [Id(3)]
+    int32 remaining_chats = 5;                            // [Id(4)]
+    bool session_used = 6;                                // [Id(5)]
+}

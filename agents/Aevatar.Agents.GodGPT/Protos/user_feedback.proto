@@ -5,6 +5,7 @@ package aevatar.agents.godgpt.userfeedback;
 option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.UserFeedback";
 
 import "google/protobuf/timestamp.proto";
+import "Protos/user_quota.proto";
 
 // =============================================================================
 // Enums
@@ -25,20 +26,14 @@ enum FeedbackReason {
     FEEDBACK_REASON_OTHER = 11;
 }
 
-enum FeedbackPlanType {
-    FEEDBACK_PLAN_TYPE_NONE = 0;
-    FEEDBACK_PLAN_TYPE_DAY = 1;
-    FEEDBACK_PLAN_TYPE_MONTH = 2;
-    FEEDBACK_PLAN_TYPE_YEAR = 3;
-    FEEDBACK_PLAN_TYPE_WEEK = 4;
-}
+// NOTE: FeedbackPlanType removed - now using QuotaPlanType from user_quota.proto
 
 // =============================================================================
 // Nested Types
 // =============================================================================
 
 message UserSubscriptionInfo {
-    FeedbackPlanType plan_type = 1;
+    aevatar.agents.godgpt.userquota.QuotaPlanType plan_type = 1;
     bool is_ultimate = 2;
     google.protobuf.Timestamp start_date = 3;
     google.protobuf.Timestamp end_date = 4;

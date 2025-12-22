@@ -1,9 +1,9 @@
 namespace Aevatar.Application.Grains.Common.Constants;
 
-[GenerateSerializer]
+[Orleans.GenerateSerializer]
 public enum PaymentPlatform
 {
-    [Id(0)] Stripe = 0,
-    [Id(1)] AppStore = 1,
-    [Id(2)] GooglePlay = 2
+    [Orleans.Id(0)] Stripe = 0,
+    [Orleans.Id(1)] AppStore = 1,
+    [Orleans.Id(2)] GooglePlay = 2
 }

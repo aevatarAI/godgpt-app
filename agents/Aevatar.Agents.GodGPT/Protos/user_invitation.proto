@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.protos.userinvitation;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.UserInvitation";
+
+// =============================================================================
+// State
+// =============================================================================
+
+// UserInvitationState - Manages the invitation information for the current user
+message UserInvitationState {
+  // Inviter ID (who invited the current user)
+  string inviter_id = 1;
+  
+  // User registration time (used to calculate invitation reward time window)
+  google.protobuf.Timestamp registered_at_utc = 2;
+  
+  // User ID
+  string user_id = 3;
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+// Set inviter event
+message SetInviterEvent {
+  string inviter_id = 1;
+}
+
+// Redeem invite code event
+message RedeemInviteCodeEvent {
+  string inviter_id = 1;
+}
+

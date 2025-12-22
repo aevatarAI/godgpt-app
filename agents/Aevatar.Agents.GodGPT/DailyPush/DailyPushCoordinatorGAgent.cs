@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.GodGPT.Protos.DailyPushUser;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Core;
 using Aevatar.Core.Abstractions;
@@ -20,8 +22,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
     IDailyPushCoordinatorGAgent, IRemindable
 {
     private readonly ILogger<DailyPushCoordinatorGAgent> _logger;
-    private readonly IGrainFactory _grainFactory;
-    private readonly Aevatar.Agents.Abstractions.IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly IOptionsMonitor<DailyPushOptions> _options;
     private string _timeZoneId = "";
 
@@ -34,34 +35,30 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
 
     public DailyPushCoordinatorGAgent(
         ILogger<DailyPushCoordinatorGAgent> logger,
-        IGrainFactory grainFactory,
-        Aevatar.Agents.Abstractions.IGAgentFactory agentFactory,
+        IGAgentActorFactory actorFactory,
         IOptionsMonitor<DailyPushOptions> options)
     {
         _logger = logger;
-        _grainFactory = grainFactory;
-        _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
         _options = options;
     }
     
     /// <summary>
     /// Get DailyContentGAgent via IGAgentFactory (new framework)
     /// </summary>
-    private async Task<DailyContentGAgent> GetDailyContentAgentAsync()
+    private async Task<IDailyContentGAgent> GetDailyContentAgentAsync()
     {
-        var agent = _agentFactory.CreateGAgent<DailyContentGAgent>(DailyPushConstants.CONTENT_GAGENT_ID);
-        await agent.ActivateAsync();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<DailyContentGAgent>(DailyPushConstants.CONTENT_GAGENT_ID);
+        return (IDailyContentGAgent)actor.GetAgent();
     }
     
     /// <summary>
     /// Get PushSubscriberIndexGAgent via IGAgentFactory (new framework)
     /// </summary>
-    private async Task<PushSubscriberIndexGAgent> GetPushSubscriberIndexAgentAsync(Guid timezoneGuid)
+    private async Task<IPushSubscriberIndexGAgent> GetPushSubscriberIndexAgentAsync(Guid timezoneGuid)
     {
-        var agent = _agentFactory.CreateGAgent<PushSubscriberIndexGAgent>(timezoneGuid);
-        await agent.ActivateAsync();
-        return agent;
+        var actor = await _actorFactory.CreateGAgentActorAsync<PushSubscriberIndexGAgent>(timezoneGuid);
+        return (IPushSubscriberIndexGAgent)actor.GetAgent();
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -139,7 +136,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
         {
             // Try to get timezone from GUID mapping
             var grainGuid = this.GetPrimaryKey();
-            var inferredTimezone = await DailyPushConstants.GetTimezoneFromGuidAsync(grainGuid, _agentFactory);
+            var inferredTimezone = await DailyPushConstants.GetTimezoneFromGuidAsync(grainGuid, _actorFactory);
 
             if (!string.IsNullOrEmpty(inferredTimezone))
             {
@@ -212,7 +209,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
         }
 
         // Register timezone mapping for reverse lookup
-        await DailyPushConstants.RegisterTimezoneMapping(timeZoneId, _agentFactory);
+        await DailyPushConstants.RegisterTimezoneMapping(timeZoneId, _actorFactory);
 
         // ✅ Use event sourcing for state initialization
         RaiseEvent(new InitializeCoordinatorEventLog
@@ -872,8 +869,8 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
     private class DeviceCandidate
     {
         public Guid UserId { get; set; }
-        public UserDeviceInfo DeviceInfo { get; set; } = null!;
-        public IChatManagerGAgent ChatManagerGAgent { get; set; } = null!;
+        public UserDeviceInfoV2Proto DeviceInfo { get; set; } = null!;
+        public IDailyPushUserGAgent DailyPushUserGAgent { get; set; } = null!;
     }
 
     /// <summary>
@@ -896,14 +893,15 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
             {
                 try
                 {
-                    var chatManagerGAgent = _grainFactory.GetGrain<IChatManagerGAgent>(userId);
-                    var userDevices = await chatManagerGAgent.GetDevicesForCoordinatedPushAsync(_timeZoneId, targetDate);
+                    var actor = await _actorFactory.CreateGAgentActorAsync<DailyPushUserGAgent>(userId);
+                    var dailyPushUserGAgent = (IDailyPushUserGAgent)actor.GetAgent();
+                    var userDevices = await dailyPushUserGAgent.GetDevicesForCoordinatedPushAsync(_timeZoneId, targetDate);
                     
                     return userDevices.Select(device => new DeviceCandidate
                     {
                         UserId = userId,
                         DeviceInfo = device,
-                        ChatManagerGAgent = chatManagerGAgent
+                        DailyPushUserGAgent = dailyPushUserGAgent
                     }).ToList();
                 }
                 catch (Exception ex)
@@ -948,7 +946,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
             {
                 try
                 {
-                    var success = await candidate.ChatManagerGAgent.ExecuteCoordinatedPushAsync(
+                    var success = await candidate.DailyPushUserGAgent.ExecuteCoordinatedPushAsync(
                         candidate.DeviceInfo, targetDate, contents, 
                         isRetryPush: false, isTestPush: isManualTrigger);
                     
@@ -1050,18 +1048,19 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
             {
                 try
                 {
-                    var chatManagerGAgent = _grainFactory.GetGrain<IChatManagerGAgent>(userId);
+                    var actor = await _actorFactory.CreateGAgentActorAsync<DailyPushUserGAgent>(userId);
+                    var dailyPushUserGAgent = (IDailyPushUserGAgent)actor.GetAgent();
                     
                     // Check if user needs afternoon retry
-                    if (isManualTrigger || await chatManagerGAgent.ShouldSendAfternoonRetryAsync(targetDate))
+                    if (isManualTrigger || await dailyPushUserGAgent.ShouldSendAfternoonRetryAsync(targetDate))
                     {
-                        var userDevices = await chatManagerGAgent.GetDevicesForCoordinatedPushAsync(_timeZoneId, targetDate);
+                        var userDevices = await dailyPushUserGAgent.GetDevicesForCoordinatedPushAsync(_timeZoneId, targetDate);
                         
                         eligibleCandidates.AddRange(userDevices.Select(device => new DeviceCandidate
                         {
                             UserId = userId,
                             DeviceInfo = device,
-                            ChatManagerGAgent = chatManagerGAgent
+                            DailyPushUserGAgent = dailyPushUserGAgent
                         }));
                     }
                 }
@@ -1092,7 +1091,7 @@ public class DailyPushCoordinatorGAgent : GAgentBase<DailyPushCoordinatorState, 
             {
                 try
                 {
-                    var success = await candidate.ChatManagerGAgent.ExecuteCoordinatedPushAsync(
+                    var success = await candidate.DailyPushUserGAgent.ExecuteCoordinatedPushAsync(
                         candidate.DeviceInfo, targetDate, contents, 
                         isRetryPush: true, isTestPush: isManualTrigger);
                     

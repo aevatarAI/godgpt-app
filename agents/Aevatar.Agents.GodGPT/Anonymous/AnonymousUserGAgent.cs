@@ -15,7 +15,6 @@ using Json.Schema.Generation;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Orleans;
 
 namespace Aevatar.Application.Grains.Agents.Anonymous;
 
@@ -27,16 +26,16 @@ namespace Aevatar.Application.Grains.Agents.Anonymous;
 [GAgent(nameof(AnonymousUserGAgent))]
 public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUserGAgent
 {
-    private readonly IClusterClient _clusterClient;
     private readonly IGAgentFactory _agentFactory;
+    private readonly IGAgentActorFactory _actorFactory;
     
     // Cached ConfigurationGAgent instance (new framework)
     private ConfigurationGAgent? _configurationAgent;
 
-    public AnonymousUserGAgent(Guid id, IClusterClient clusterClient, IGAgentFactory agentFactory) : base(id)
+    public AnonymousUserGAgent(Guid id, IGAgentFactory agentFactory, IGAgentActorFactory actorFactory) : base(id)
     {
-        _clusterClient = clusterClient;
         _agentFactory = agentFactory;
+        _actorFactory = actorFactory;
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -109,7 +108,8 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
 
         // Create new GodChat session (mimic ChatManagerGAgent.CreateSessionAsync)
         var newSessionId = Guid.NewGuid();
-        IGodChat godChat = _clusterClient.GetGrain<IGodChat>(newSessionId);
+        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(newSessionId);
+        var godChat = (IGodChat)godChatActor.GetAgent();
 
         // Get system prompt and append role prompt if provided (exact copy from ChatManagerGAgent)
         var sysMessage = configuration.GetPrompt();
@@ -176,7 +176,8 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
         }
 
         var sessionId = Guid.Parse(State.CurrentSessionId);
-        IGodChat godChat = _clusterClient.GetGrain<IGodChat>(sessionId);
+        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionId);
+        var godChat = (IGodChat)godChatActor.GetAgent();
         var configuration = await GetConfigurationAsync();
 
         // Execute streaming chat (exact copy from ChatManagerGAgent.StreamChatWithSessionAsync)
@@ -207,7 +208,7 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
         Logger.LogDebug($"[AnonymousUserGAgent][GuestChatAsync] Chat completed for user: {State.UserHashId}, new count: {State.ChatCount + 1}");
     }
 
-    public async Task<GuestSessionInfo?> GetCurrentSessionAsync()
+    public async Task<GuestSessionInfoProto?> GetCurrentSessionAsync()
     {
         await EnsureInitializedAsync();
         
@@ -216,11 +217,11 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
             return null;
         }
 
-        return new GuestSessionInfo
+        return new GuestSessionInfoProto
         {
-            SessionId = Guid.Parse(State.CurrentSessionId),
+            SessionId = State.CurrentSessionId,
             Guider = State.CurrentGuider,
-            CreatedAt = State.CreatedAt?.ToDateTime() ?? DateTime.MinValue,
+            CreatedAt = State.CreatedAt ?? Timestamp.FromDateTime(DateTime.MinValue),
             ChatCount = State.ChatCount,
             RemainingChats = await GetRemainingChatsAsync(),
             SessionUsed = State.CurrentSessionUsed
@@ -234,8 +235,9 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
     {
         if (_configurationAgent == null)
         {
-            _configurationAgent = _agentFactory.CreateGAgent<ConfigurationGAgent>(
+            var actor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(
                 CommonHelper.GetSessionManagerConfigurationId());
+            _configurationAgent = (ConfigurationGAgent)actor.GetAgent();
             await _configurationAgent.ActivateAsync();
         }
         return _configurationAgent;

@@ -1,3 +1,5 @@
+using Aevatar.Agents.GodGPT.Protos.Anonymous;
+
 namespace Aevatar.Application.Grains.Agents.Anonymous;
 
 /// <summary>
@@ -38,5 +40,5 @@ public interface IAnonymousUserGAgent : Aevatar.Agents.Abstractions.IGAgent
     /// <summary>
     /// Get current session info
     /// </summary>
-    Task<GuestSessionInfo?> GetCurrentSessionAsync();
+    Task<GuestSessionInfoProto?> GetCurrentSessionAsync();
 } 
