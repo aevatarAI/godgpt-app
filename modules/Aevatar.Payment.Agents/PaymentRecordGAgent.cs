@@ -559,7 +559,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             "[PaymentRecordGAgent] Sending PaymentCompleted to callback agent {CallbackAgentId}",
             callbackId);
 
-        await SendToAsync(callbackId.Value, evt);
+        await SendToAsync(callbackId.Value.ToString(), evt);
     }
 
     public async Task NotifyCallbackAgentAsync(PaymentFailedEvent evt)
@@ -575,7 +575,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             "[PaymentRecordGAgent] Sending PaymentFailed to callback agent {CallbackAgentId}",
             callbackId);
 
-        await SendToAsync(callbackId.Value, evt);
+        await SendToAsync(callbackId.Value.ToString(), evt);
     }
 
     public async Task NotifyCallbackAgentAsync(RefundCompletedEvent evt)
@@ -591,7 +591,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             "[PaymentRecordGAgent] Sending RefundCompleted to callback agent {CallbackAgentId}",
             callbackId);
 
-        await SendToAsync(callbackId.Value, evt);
+        await SendToAsync(callbackId.Value.ToString(), evt);
     }
 }
 
