@@ -11,12 +11,12 @@ namespace Aevatar.Agents.Core.Persistence;
 public class InMemoryStateStore<TState> : IStateStore<TState>
     where TState : class
 {
-    private readonly ConcurrentDictionary<Guid, TState> _states = new();
+    private readonly ConcurrentDictionary<string, TState> _states = new();
 
     /// <summary>
     /// Load state from memory
     /// </summary>
-    public Task<TState?> LoadAsync(Guid agentId, CancellationToken ct = default)
+    public Task<TState?> LoadAsync(string agentId, CancellationToken ct = default)
     {
         _states.TryGetValue(agentId, out var state);
         return Task.FromResult(state);
@@ -25,7 +25,7 @@ public class InMemoryStateStore<TState> : IStateStore<TState>
     /// <summary>
     /// Save state to memory
     /// </summary>
-    public Task SaveAsync(Guid agentId, TState state, CancellationToken ct = default)
+    public Task SaveAsync(string agentId, TState state, CancellationToken ct = default)
     {
         _states[agentId] = state;
         return Task.CompletedTask;
@@ -34,7 +34,7 @@ public class InMemoryStateStore<TState> : IStateStore<TState>
     /// <summary>
     /// Delete state from memory
     /// </summary>
-    public Task DeleteAsync(Guid agentId, CancellationToken ct = default)
+    public Task DeleteAsync(string agentId, CancellationToken ct = default)
     {
         _states.TryRemove(agentId, out _);
         return Task.CompletedTask;
@@ -43,7 +43,7 @@ public class InMemoryStateStore<TState> : IStateStore<TState>
     /// <summary>
     /// Check if state exists in memory
     /// </summary>
-    public Task<bool> ExistsAsync(Guid agentId, CancellationToken ct = default)
+    public Task<bool> ExistsAsync(string agentId, CancellationToken ct = default)
     {
         return Task.FromResult(_states.ContainsKey(agentId));
     }
@@ -51,7 +51,7 @@ public class InMemoryStateStore<TState> : IStateStore<TState>
     /// <summary>
     /// Get all stored states (for testing/debugging)
     /// </summary>
-    public IReadOnlyDictionary<Guid, TState> GetAllStates()
+    public IReadOnlyDictionary<string, TState> GetAllStates()
     {
         return _states;
     }

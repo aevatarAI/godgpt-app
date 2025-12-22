@@ -25,7 +25,7 @@ public class WeatherController : ControllerBase
         {
             // 通过 ActorFactory 创建 Actor
             var factory = _serviceProvider.GetRequiredService<IGAgentActorFactory>();
-            var agentActor = await factory.CreateGAgentActorAsync<WeatherAgent>(Guid.NewGuid());
+            var agentActor = await factory.CreateGAgentActorAsync<WeatherAgent>(Guid.NewGuid().ToString());
             
             // 获取 Agent 并执行业务逻辑
             var weatherAgent = (WeatherAgent)agentActor.GetAgent();

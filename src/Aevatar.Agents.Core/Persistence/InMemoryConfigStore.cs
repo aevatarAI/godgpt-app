@@ -17,7 +17,7 @@ public class InMemoryConfigStore<TConfig> : IConfigStore<TConfig>
     /// <summary>
     /// Create composite key from agent type and ID
     /// </summary>
-    private static string CreateKey(Type agentType, Guid agentId)
+    private static string CreateKey(Type agentType, string agentId)
     {
         return $"{agentType.FullName}:{agentId}";
     }
@@ -25,7 +25,7 @@ public class InMemoryConfigStore<TConfig> : IConfigStore<TConfig>
     /// <summary>
     /// Load configuration from memory
     /// </summary>
-    public Task<TConfig?> LoadAsync(Type agentType, Guid agentId, CancellationToken ct = default)
+    public Task<TConfig?> LoadAsync(Type agentType, string agentId, CancellationToken ct = default)
     {
         var key = CreateKey(agentType, agentId);
         _configs.TryGetValue(key, out var config);
@@ -35,7 +35,7 @@ public class InMemoryConfigStore<TConfig> : IConfigStore<TConfig>
     /// <summary>
     /// Save configuration to memory
     /// </summary>
-    public Task SaveAsync(Type agentType, Guid agentId, TConfig config, CancellationToken ct = default)
+    public Task SaveAsync(Type agentType, string agentId, TConfig config, CancellationToken ct = default)
     {
         var key = CreateKey(agentType, agentId);
         _configs[key] = config;
@@ -45,7 +45,7 @@ public class InMemoryConfigStore<TConfig> : IConfigStore<TConfig>
     /// <summary>
     /// Delete configuration from memory
     /// </summary>
-    public Task DeleteAsync(Type agentType, Guid agentId, CancellationToken ct = default)
+    public Task DeleteAsync(Type agentType, string agentId, CancellationToken ct = default)
     {
         var key = CreateKey(agentType, agentId);
         _configs.TryRemove(key, out _);
@@ -55,7 +55,7 @@ public class InMemoryConfigStore<TConfig> : IConfigStore<TConfig>
     /// <summary>
     /// Check if configuration exists
     /// </summary>
-    public Task<bool> ExistsAsync(Type agentType, Guid agentId, CancellationToken ct = default)
+    public Task<bool> ExistsAsync(Type agentType, string agentId, CancellationToken ct = default)
     {
         var key = CreateKey(agentType, agentId);
         return Task.FromResult(_configs.ContainsKey(key));

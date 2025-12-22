@@ -39,11 +39,11 @@ public class EventRoutingController : ControllerBase
         {
             // 创建Agent链
             var agents = new List<IGAgentActor>();
-            var agentIds = new List<Guid>();
+            var agentIds = new List<string>();
             
             for (int i = 0; i < chainLength; i++)
             {
-                var agentId = Guid.NewGuid();
+                var agentId = Guid.NewGuid().ToString();
                 agentIds.Add(agentId);
                 var agent = await _agentFactory.CreateGAgentActorAsync<RouterAgent>(agentId);
                 agents.Add(agent);
@@ -112,10 +112,10 @@ public class EventRoutingController : ControllerBase
         try
         {
             // 创建路由器和处理器
-            var routerId = Guid.NewGuid();
-            var processorId = Guid.NewGuid();
-            var filterId = Guid.NewGuid();
-            var loggerId = Guid.NewGuid();
+            var routerId = Guid.NewGuid().ToString();
+            var processorId = Guid.NewGuid().ToString();
+            var filterId = Guid.NewGuid().ToString();
+            var loggerId = Guid.NewGuid().ToString();
 
             var router = await _agentFactory.CreateGAgentActorAsync<RouterAgent>(routerId);
             var processor = await _agentFactory.CreateGAgentActorAsync<ProcessorAgent>(processorId);
@@ -202,16 +202,16 @@ public class EventRoutingController : ControllerBase
         try
         {
             // 创建广播Agent
-            var broadcasterId = Guid.NewGuid();
+            var broadcasterId = Guid.NewGuid().ToString();
             var broadcaster = await _agentFactory.CreateGAgentActorAsync<BroadcastAgent>(broadcasterId);
             
             // 创建接收者
             var receivers = new List<IGAgentActor>();
-            var receiverIds = new List<Guid>();
+            var receiverIds = new List<string>();
             
             for (int i = 0; i < receiverCount; i++)
             {
-                var receiverId = Guid.NewGuid();
+                var receiverId = Guid.NewGuid().ToString();
                 receiverIds.Add(receiverId);
                 var receiver = await _agentFactory.CreateGAgentActorAsync<ProcessorAgent>(receiverId);
                 receivers.Add(receiver);

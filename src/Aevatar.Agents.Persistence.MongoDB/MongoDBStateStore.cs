@@ -48,7 +48,7 @@ public class MongoDBStateStore<TState> : IVersionedStateStore<TState>
     /// <summary>
     /// Load state from MongoDB and deserialize from Protobuf bytes
     /// </summary>
-    public async Task<TState?> LoadAsync(Guid agentId, CancellationToken ct = default)
+    public async Task<TState?> LoadAsync(string agentId, CancellationToken ct = default)
     {
         var doc = await _collection.Find(x => x.AgentId == agentId)
                                    .FirstOrDefaultAsync(ct)
@@ -66,7 +66,7 @@ public class MongoDBStateStore<TState> : IVersionedStateStore<TState>
     /// <summary>
     /// Serialize state to Protobuf bytes and save to MongoDB (upsert)
     /// </summary>
-    public async Task SaveAsync(Guid agentId, TState state, CancellationToken ct = default)
+    public async Task SaveAsync(string agentId, TState state, CancellationToken ct = default)
     {
         var doc = new AgentStateDocument
         {
@@ -88,7 +88,7 @@ public class MongoDBStateStore<TState> : IVersionedStateStore<TState>
     /// Save with version control (for EventSourcing snapshots)
     /// Version represents the event version at snapshot time
     /// </summary>
-    public async Task SaveAsync(Guid agentId, TState state, long version, CancellationToken ct = default)
+    public async Task SaveAsync(string agentId, TState state, long version, CancellationToken ct = default)
     {
         var doc = new AgentStateDocument
         {
@@ -109,7 +109,7 @@ public class MongoDBStateStore<TState> : IVersionedStateStore<TState>
     /// <summary>
     /// Get current version (for EventSourcing replay optimization)
     /// </summary>
-    public async Task<long> GetCurrentVersionAsync(Guid agentId, CancellationToken ct = default)
+    public async Task<long> GetCurrentVersionAsync(string agentId, CancellationToken ct = default)
     {
         var doc = await _collection.Find(x => x.AgentId == agentId)
                                    .Project(x => x.Version)
@@ -121,7 +121,7 @@ public class MongoDBStateStore<TState> : IVersionedStateStore<TState>
     /// <summary>
     /// Delete state from MongoDB
     /// </summary>
-    public async Task DeleteAsync(Guid agentId, CancellationToken ct = default)
+    public async Task DeleteAsync(string agentId, CancellationToken ct = default)
     {
         await _collection.DeleteOneAsync(x => x.AgentId == agentId, ct).ConfigureAwait(false);
     }
@@ -129,7 +129,7 @@ public class MongoDBStateStore<TState> : IVersionedStateStore<TState>
     /// <summary>
     /// Check if state exists
     /// </summary>
-    public async Task<bool> ExistsAsync(Guid agentId, CancellationToken ct = default)
+    public async Task<bool> ExistsAsync(string agentId, CancellationToken ct = default)
     {
         var count = await _collection.CountDocumentsAsync(x => x.AgentId == agentId, cancellationToken: ct)
                                       .ConfigureAwait(false);

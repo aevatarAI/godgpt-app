@@ -1,6 +1,7 @@
 using Aevatar.Agents.Abstractions;
 using Google.Protobuf;
 using Orleans;
+using Orleans.Concurrency;
 
 namespace Aevatar.Agents.Runtime.Orleans;
 
@@ -12,8 +13,10 @@ public interface IGAgentGrain : IGrainWithStringKey
 {
     /// <summary>
     /// 获取关联的 Agent ID
+    /// [AlwaysInterleave] allows this to execute even when Grain is processing other requests
     /// </summary>
-    Task<Guid> GetIdAsync();
+    [AlwaysInterleave]
+    Task<string> GetIdAsync();
 
     /// <summary>
     /// 初始化 Agent 实例（在 Silo 内创建）
@@ -25,12 +28,16 @@ public interface IGAgentGrain : IGrainWithStringKey
 
     /// <summary>
     /// 检查 Agent 是否已初始化
+    /// [AlwaysInterleave] allows concurrent read access
     /// </summary>
+    [AlwaysInterleave]
     Task<bool> IsInitializedAsync();
 
     /// <summary>
     /// 获取 Agent 描述
+    /// [AlwaysInterleave] allows this read-only operation to execute without waiting for other calls
     /// </summary>
+    [AlwaysInterleave]
     Task<string> GetDescriptionAsync();
 
     /// <summary>
@@ -41,17 +48,17 @@ public interface IGAgentGrain : IGrainWithStringKey
     /// <summary>
     /// 添加子 Agent
     /// </summary>
-    Task AddChildAsync(Guid childId);
+    Task AddChildAsync(string childId);
 
     /// <summary>
     /// 移除子 Agent
     /// </summary>
-    Task RemoveChildAsync(Guid childId);
+    Task RemoveChildAsync(string childId);
 
     /// <summary>
     /// 设置父 Agent
     /// </summary>
-    Task SetParentAsync(Guid parentId);
+    Task SetParentAsync(string parentId);
 
     /// <summary>
     /// 清除父 Agent
@@ -60,13 +67,17 @@ public interface IGAgentGrain : IGrainWithStringKey
 
     /// <summary>
     /// 获取所有子 Agent ID
+    /// [AlwaysInterleave] allows concurrent read access
     /// </summary>
-    Task<IReadOnlyList<Guid>> GetChildrenAsync();
+    [AlwaysInterleave]
+    Task<IReadOnlyList<string>> GetChildrenAsync();
 
     /// <summary>
     /// 获取父 Agent ID
+    /// [AlwaysInterleave] allows concurrent read access
     /// </summary>
-    Task<Guid?> GetParentAsync();
+    [AlwaysInterleave]
+    Task<string?> GetParentAsync();
 
     /// <summary>
     /// 激活并设置Agent类型（已废弃，请使用 InitializeAgentAsync）

@@ -13,17 +13,17 @@ public class EventRouterHierarchyDocument
     /// Agent ID (primary key)
     /// </summary>
     [BsonId]
-    public Guid AgentId { get; set; }
+    public string AgentId { get; set; } = string.Empty;
 
     /// <summary>
     /// Parent agent ID (null if root)
     /// </summary>
-    public Guid? ParentId { get; set; }
+    public string? ParentId { get; set; }
 
     /// <summary>
     /// Collection of child agent IDs
     /// </summary>
-    public List<Guid> ChildrenIds { get; set; } = new();
+    public List<string> ChildrenIds { get; set; } = new();
 
     /// <summary>
     /// Last update timestamp

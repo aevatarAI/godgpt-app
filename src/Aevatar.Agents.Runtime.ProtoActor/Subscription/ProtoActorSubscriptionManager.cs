@@ -31,8 +31,8 @@ public class ProtoActorSubscriptionManager : BaseSubscriptionManager
     }
 
     protected override async Task<IMessageStreamSubscription?> CreateStreamSubscriptionAsync(
-        Guid parentId,
-        Guid childId,
+        string parentId,
+        string childId,
         Func<EventEnvelope, Task> eventHandler,
         CancellationToken cancellationToken)
     {
@@ -55,7 +55,7 @@ public class ProtoActorSubscriptionManager : BaseSubscriptionManager
             Func<EventEnvelope, bool>? filter = envelope =>
             {
                 // 过滤掉子节点自己发布的事件，避免循环
-                if (envelope.PublisherId == childId.ToString())
+                if (envelope.PublisherId == childId)
                 {
                     Logger.LogTrace("Filtering out self-published event {EventId} for child {ChildId}",
                         envelope.Id, childId);
@@ -67,7 +67,7 @@ public class ProtoActorSubscriptionManager : BaseSubscriptionManager
                 // 所以需要特别注意避免循环
                 if (envelope.Direction == EventDirection.Both)
                 {
-                    if (envelope.Publishers.Contains(parentId.ToString()))
+                    if (envelope.Publishers.Contains(parentId))
                     {
                         Logger.LogTrace("BOTH event {EventId} from parent, will be converted to DOWN-only",
                             envelope.Id);
@@ -218,8 +218,8 @@ public class ProtoActorSubscriptionManager : BaseSubscriptionManager
     /// </summary>
     private Func<EventEnvelope, Task> CreateWrappedEventHandler(
         Func<EventEnvelope, Task> originalHandler,
-        Guid childId,
-        Guid parentId)
+        string childId,
+        string parentId)
     {
         return async (EventEnvelope envelope) =>
         {
@@ -231,7 +231,7 @@ public class ProtoActorSubscriptionManager : BaseSubscriptionManager
                 // ProtoActor特定：处理BOTH方向的事件
                 // 如果是从父节点接收的BOTH事件，需要转换为DOWN-only
                 if (envelope.Direction == EventDirection.Both && 
-                    envelope.Publishers.Contains(parentId.ToString()))
+                    envelope.Publishers.Contains(parentId))
                 {
                     Logger.LogDebug(
                         "Converting BOTH event {EventId} to DOWN-only for ProtoActor child {ChildId}",
@@ -268,7 +268,7 @@ public class ProtoActorSubscriptionManager : BaseSubscriptionManager
     /// <summary>
     /// 更新最后活动时间
     /// </summary>
-    private void UpdateLastActivity(Guid childId, Guid parentId)
+    private void UpdateLastActivity(string childId, string parentId)
     {
         foreach (var subscription in _subscriptions.Values)
         {
@@ -283,7 +283,7 @@ public class ProtoActorSubscriptionManager : BaseSubscriptionManager
     /// <summary>
     /// 从管理器获取Actor PID
     /// </summary>
-    private async Task<PID?> GetActorPidAsync(Guid actorId)
+    private async Task<PID?> GetActorPidAsync(string actorId)
     {
         // 从管理器获取Actor
         var actor = await _actorManager.GetActorAsync(actorId);
@@ -303,7 +303,7 @@ public class ProtoActorSubscriptionManager : BaseSubscriptionManager
     /// </summary>
     public async Task<ISubscriptionHandle> SubscribeDirectAsync(
         PID parentPid,
-        Guid childId,
+        string childId,
         Func<EventEnvelope, Task> eventHandler,
         IRetryPolicy? retryPolicy = null,
         CancellationToken cancellationToken = default)
@@ -311,7 +311,7 @@ public class ProtoActorSubscriptionManager : BaseSubscriptionManager
         // ProtoActor支持通过PID直接订阅，不需要通过Guid查找
         // 这可以提供更好的性能
         
-        var parentId = Guid.NewGuid(); // 生成一个临时ID
+        var parentId = Guid.NewGuid().ToString(); // 生成一个临时ID
         var subscription = await SubscribeWithRetryAsync(
             parentId, childId, eventHandler, retryPolicy, cancellationToken);
         
@@ -322,7 +322,7 @@ public class ProtoActorSubscriptionManager : BaseSubscriptionManager
     /// 批量创建订阅（优化版本）
     /// </summary>
     public async Task<IReadOnlyList<ISubscriptionHandle>> SubscribeBatchOptimizedAsync(
-        IReadOnlyList<(Guid ParentId, Guid ChildId)> subscriptions,
+        IReadOnlyList<(string ParentId, string ChildId)> subscriptions,
         Func<EventEnvelope, Task> eventHandler,
         IRetryPolicy? retryPolicy = null,
         CancellationToken cancellationToken = default)

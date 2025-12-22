@@ -13,12 +13,12 @@ internal class LocalMessageStreamSubscription : IMessageStreamSubscription
     private bool _isActive;
 
     public Guid SubscriptionId { get; }
-    public Guid StreamId { get; }
+    public string StreamId { get; }
     public bool IsActive => _isActive;
 
     public LocalMessageStreamSubscription(
         Guid subscriptionId,
-        Guid streamId,
+        string streamId,
         Func<EventEnvelope, Task> handler,
         Action onDisposed)
     {

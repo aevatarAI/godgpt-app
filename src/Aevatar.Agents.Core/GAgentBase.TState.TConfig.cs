@@ -20,7 +20,7 @@ public abstract class GAgentBase<TState, TConfig> : GAgentBase<TState>
     {
     }
 
-    public GAgentBase(Guid id) : base(id)
+    public GAgentBase(string id) : base(id)
     {
     }
     

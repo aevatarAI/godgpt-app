@@ -25,8 +25,8 @@ public class LocalSubscriptionManagerTests
     public async Task SubscribeWithRetry_ShouldCreateSubscription_WhenStreamExists()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         var eventReceived = false;
         
         // 创建父节点的stream
@@ -67,8 +67,8 @@ public class LocalSubscriptionManagerTests
     public async Task SubscribeWithRetry_ShouldRetry_WhenStreamNotInitiallyAvailable()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         var retryCount = 0;
         
         // Use more retries and shorter delay to give time for stream creation
@@ -98,8 +98,8 @@ public class LocalSubscriptionManagerTests
     public async Task IsSubscriptionHealthy_ShouldReturnTrue_WhenSubscriptionActive()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         _streamRegistry.GetOrCreateStream(parentId);
         
         var subscription = await _subscriptionManager.SubscribeWithRetryAsync(
@@ -116,8 +116,8 @@ public class LocalSubscriptionManagerTests
     public async Task IsSubscriptionHealthy_ShouldReturnFalse_WhenStreamRemoved()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         var stream = _streamRegistry.GetOrCreateStream(parentId);
         
         var subscription = await _subscriptionManager.SubscribeWithRetryAsync(
@@ -137,8 +137,8 @@ public class LocalSubscriptionManagerTests
     public async Task ReconnectSubscription_ShouldRestoreConnection_AfterDisconnection()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         var eventCount = 0;
         
         var stream = _streamRegistry.GetOrCreateStream(parentId);
@@ -174,8 +174,8 @@ public class LocalSubscriptionManagerTests
     public async Task UnsubscribeAsync_ShouldRemoveSubscription()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         _streamRegistry.GetOrCreateStream(parentId);
         
         var subscription = await _subscriptionManager.SubscribeWithRetryAsync(
@@ -193,10 +193,10 @@ public class LocalSubscriptionManagerTests
     public async Task GetActiveSubscriptions_ShouldReturnAllSubscriptions()
     {
         // Arrange
-        var parent1 = Guid.NewGuid();
-        var parent2 = Guid.NewGuid();
-        var child1 = Guid.NewGuid();
-        var child2 = Guid.NewGuid();
+        var parent1 = Guid.NewGuid().ToString();
+        var parent2 = Guid.NewGuid().ToString();
+        var child1 = Guid.NewGuid().ToString();
+        var child2 = Guid.NewGuid().ToString();
         
         _streamRegistry.GetOrCreateStream(parent1);
         _streamRegistry.GetOrCreateStream(parent2);
@@ -217,8 +217,8 @@ public class LocalSubscriptionManagerTests
     public async Task EventHandler_ShouldReceiveCorrectEvents()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         EventEnvelope? receivedEnvelope = null;
         
         var stream = _streamRegistry.GetOrCreateStream(parentId);
@@ -253,8 +253,8 @@ public class LocalSubscriptionManagerTests
     public async Task RetryPolicy_ShouldRespectMaxRetries()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         var attempts = 0;
         
         var retryPolicy = new TestRetryPolicy(2, () => attempts++);

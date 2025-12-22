@@ -31,7 +31,7 @@ public class CognitiveWorkerGAgent : AIGAgentBase<CognitiveWorkerState>
     private readonly OutputParserFactory _parserFactory = new();
     
     public CognitiveWorkerGAgent() { }
-    public CognitiveWorkerGAgent(Guid id) : base(id) { }
+    public CognitiveWorkerGAgent(string id) : base(id) { }
     
     // ============================================================
     //  生命周期
@@ -42,7 +42,7 @@ public class CognitiveWorkerGAgent : AIGAgentBase<CognitiveWorkerState>
         await base.OnActivateAsync(ct);
         
         // 初始化 Worker 状态
-        CustomState.WorkerId = Id.ToString("N")[..8];
+        CustomState.WorkerId = Id.Length > 8 ? Id[..8] : Id;
         CustomState.Status = WorkerStatus.WsIdle;
     }
     

@@ -14,3 +14,10 @@ message TypedAgentState {
   string stream_namespace = 6;  // Custom stream namespace for this agent
 }
 
+// Message for TypedAgent
+message TypedMessage {
+  string content = 1;
+  string sender_type = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+

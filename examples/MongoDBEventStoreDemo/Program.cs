@@ -166,8 +166,8 @@ try
     Console.WriteLine("📍 Part 1: Creating Account and Transactions");
     Console.WriteLine("══════════════════════════════════════════════\n");
 
-    var accountId = Guid.NewGuid();
-    Console.WriteLine($"📊 Agent ID: {accountId:N}\n");
+    var accountId = Guid.NewGuid().ToString();
+    Console.WriteLine($"📊 Agent ID: {accountId}\n");
 
     // ✅ Create Actor (EventSourcing is automatically enabled via IEventStore registration)
     var actor = await factory.CreateGAgentActorAsync<BankAccountAgent>(accountId);

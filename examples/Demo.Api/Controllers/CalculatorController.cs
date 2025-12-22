@@ -81,7 +81,7 @@ public class CalculatorController : ControllerBase
         {
             // 通过 ActorFactory 创建 Actor
             var factory = _serviceProvider.GetRequiredService<IGAgentActorFactory>();
-            var agentActor = await factory.CreateGAgentActorAsync<CalculatorAgent>(Guid.NewGuid());
+            var agentActor = await factory.CreateGAgentActorAsync<CalculatorAgent>(Guid.NewGuid().ToString());
 
             // 获取 Agent 并执行业务逻辑
             var calculatorAgent = (CalculatorAgent)agentActor.GetAgent();

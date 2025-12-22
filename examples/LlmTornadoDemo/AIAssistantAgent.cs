@@ -32,7 +32,7 @@ public class AIAssistantAgent : AIGAgentBase<AIAssistantState, AIAssistantConfig
         Console.WriteLine($"[DEBUG] AIAssistantAgent constructor called (no params)");
     }
 
-    public AIAssistantAgent(Guid id) : base(id)
+    public AIAssistantAgent(string id) : base(id)
     {
         Console.WriteLine($"[DEBUG] AIAssistantAgent constructor called with ID: {id}");
     }

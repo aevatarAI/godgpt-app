@@ -14,14 +14,14 @@ internal class MassTransitMessageStreamSubscription : IMessageStreamSubscription
     public Guid SubscriptionId { get; }
 
     /// <inheritdoc />
-    public Guid StreamId { get; }
+    public string StreamId { get; }
 
     /// <inheritdoc />
     public bool IsActive => _isActive;
 
     public MassTransitMessageStreamSubscription(
         Guid subscriptionId,
-        Guid streamId,
+        string streamId,
         Func<Task> unsubscribeAction)
     {
         SubscriptionId = subscriptionId;

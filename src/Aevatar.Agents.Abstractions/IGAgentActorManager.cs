@@ -11,8 +11,9 @@ public interface IGAgentActorManager
     /// <summary>
     /// 创建并注册 Agent Actor
     /// </summary>
+    /// <param name="id">Agent ID (format varies by runtime: Orleans uses "AgentType:Guid", Local uses "Guid")</param>
     Task<IGAgentActor> CreateAndRegisterAsync<TAgent>(
-        Guid id,
+        string id,
         CancellationToken ct = default)
         where TAgent : IGAgent;
     
@@ -20,19 +21,19 @@ public interface IGAgentActorManager
     /// 批量创建并注册 Agent Actor
     /// </summary>
     Task<IReadOnlyList<IGAgentActor>> CreateBatchAsync<TAgent>(
-        IEnumerable<Guid> ids,
+        IEnumerable<string> ids,
         CancellationToken ct = default)
         where TAgent : IGAgent;
     
     /// <summary>
     /// 停用并注销 Actor
     /// </summary>
-    Task DeactivateAndUnregisterAsync(Guid id, CancellationToken ct = default);
+    Task DeactivateAndUnregisterAsync(string id, CancellationToken ct = default);
     
     /// <summary>
     /// 批量停用指定的 Actor
     /// </summary>
-    Task DeactivateBatchAsync(IEnumerable<Guid> ids, CancellationToken ct = default);
+    Task DeactivateBatchAsync(IEnumerable<string> ids, CancellationToken ct = default);
     
     /// <summary>
     /// 批量停用所有 Actor
@@ -46,12 +47,12 @@ public interface IGAgentActorManager
     /// <summary>
     /// 获取已注册的 Actor
     /// </summary>
-    Task<IGAgentActor?> GetActorAsync(Guid id);
+    Task<IGAgentActor?> GetActorAsync(string id);
     
     /// <summary>
     /// 批量获取 Actor
     /// </summary>
-    Task<IReadOnlyList<IGAgentActor>> GetActorsAsync(IEnumerable<Guid> ids);
+    Task<IReadOnlyList<IGAgentActor>> GetActorsAsync(IEnumerable<string> ids);
     
     /// <summary>
     /// 获取所有已注册的 Actor
@@ -72,7 +73,7 @@ public interface IGAgentActorManager
     /// <summary>
     /// 检查 Actor 是否存在
     /// </summary>
-    Task<bool> ExistsAsync(Guid id);
+    Task<bool> ExistsAsync(string id);
     
     /// <summary>
     /// 获取 Actor 数量
@@ -92,12 +93,12 @@ public interface IGAgentActorManager
     /// <summary>
     /// 将指定的子 Actor 加入到父 Actor 名下，内部会同时更新双方的 EventRouter。
     /// </summary>
-    Task LinkParentChildAsync(Guid parentId, Guid childId, CancellationToken ct = default);
+    Task LinkParentChildAsync(string parentId, string childId, CancellationToken ct = default);
 
     /// <summary>
     /// 解除父子关系。如果没有提供 parentId，将自动查询子节点当前父节点后再解除。
     /// </summary>
-    Task UnlinkParentChildAsync(Guid childId, Guid? parentId = null, CancellationToken ct = default);
+    Task UnlinkParentChildAsync(string childId, string? parentId = null, CancellationToken ct = default);
 
     #endregion
     
@@ -106,7 +107,7 @@ public interface IGAgentActorManager
     /// <summary>
     /// 获取 Actor 健康状态
     /// </summary>
-    Task<ActorHealthStatus> GetHealthStatusAsync(Guid id);
+    Task<ActorHealthStatus> GetHealthStatusAsync(string id);
     
     /// <summary>
     /// 获取所有 Actor 的统计信息
@@ -124,7 +125,7 @@ public record ActorHealthStatus
     /// <summary>
     /// Actor ID
     /// </summary>
-    public Guid Id { get; init; }
+    public string Id { get; init; } = string.Empty;
     
     /// <summary>
     /// 是否健康

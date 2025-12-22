@@ -12,8 +12,8 @@ public class LocalGAgentActorManager : IGAgentActorManager
 {
     private readonly IGAgentActorFactory _factory;
     private readonly ILogger<LocalGAgentActorManager> _logger;
-    private readonly ConcurrentDictionary<Guid, IGAgentActor> _actors = new();
-    private readonly ConcurrentDictionary<Guid, DateTimeOffset> _lastActivityTime = new();
+    private readonly ConcurrentDictionary<string, IGAgentActor> _actors = new();
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _lastActivityTime = new();
 
     public LocalGAgentActorManager(
         IGAgentActorFactory factory,
@@ -26,7 +26,7 @@ public class LocalGAgentActorManager : IGAgentActorManager
     #region 生命周期管理
 
     public async Task<IGAgentActor> CreateAndRegisterAsync<TAgent>(
-        Guid id,
+        string id,
         CancellationToken ct = default)
         where TAgent : IGAgent
     {
@@ -36,16 +36,18 @@ public class LocalGAgentActorManager : IGAgentActorManager
         // Create Actor
         var actor = await _factory.CreateGAgentActorAsync<TAgent>(id, ct);
 
-        // Register
-        _actors[id] = actor;
-        _lastActivityTime[id] = DateTimeOffset.UtcNow;
+        // Register using actor.Id (full format) to avoid collisions
+        // when same raw ID is used for different Agent types
+        _actors[actor.Id] = actor;
+        _lastActivityTime[actor.Id] = DateTimeOffset.UtcNow;
 
-        _logger.LogInformation("Agent actor {Id} created and registered", id);
+        _logger.LogInformation("Agent actor {ActorId} created and registered (input: {InputId})", 
+            actor.Id, id);
         return actor;
     }
 
     public async Task<IReadOnlyList<IGAgentActor>> CreateBatchAsync<TAgent>(
-        IEnumerable<Guid> ids,
+        IEnumerable<string> ids,
         CancellationToken ct = default)
         where TAgent : IGAgent
     {
@@ -59,7 +61,7 @@ public class LocalGAgentActorManager : IGAgentActorManager
         return actors;
     }
 
-    public async Task DeactivateAndUnregisterAsync(Guid id, CancellationToken ct = default)
+    public async Task DeactivateAndUnregisterAsync(string id, CancellationToken ct = default)
     {
         if (!_actors.TryRemove(id, out var actor))
         {
@@ -73,7 +75,7 @@ public class LocalGAgentActorManager : IGAgentActorManager
         await actor.DeactivateAsync(ct);
     }
 
-    public async Task DeactivateBatchAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
+    public async Task DeactivateBatchAsync(IEnumerable<string> ids, CancellationToken ct = default)
     {
         var idList = ids.ToList();
         _logger.LogDebug("Batch deactivating {Count} actors", idList.Count);
@@ -98,7 +100,7 @@ public class LocalGAgentActorManager : IGAgentActorManager
 
     #region 查询和获取
 
-    public Task<IGAgentActor?> GetActorAsync(Guid id)
+    public Task<IGAgentActor?> GetActorAsync(string id)
     {
         if (_actors.TryGetValue(id, out var actor))
         {
@@ -109,7 +111,7 @@ public class LocalGAgentActorManager : IGAgentActorManager
         return Task.FromResult<IGAgentActor?>(null);
     }
 
-    public Task<IReadOnlyList<IGAgentActor>> GetActorsAsync(IEnumerable<Guid> ids)
+    public Task<IReadOnlyList<IGAgentActor>> GetActorsAsync(IEnumerable<string> ids)
     {
         var actors = new List<IGAgentActor>();
 
@@ -149,7 +151,7 @@ public class LocalGAgentActorManager : IGAgentActorManager
         return Task.FromResult<IReadOnlyList<IGAgentActor>>(actors);
     }
 
-    public Task<bool> ExistsAsync(Guid id)
+    public Task<bool> ExistsAsync(string id)
     {
         return Task.FromResult(_actors.ContainsKey(id));
     }
@@ -170,7 +172,7 @@ public class LocalGAgentActorManager : IGAgentActorManager
 
     #region 层级关系协调
 
-    public async Task LinkParentChildAsync(Guid parentId, Guid childId, CancellationToken ct = default)
+    public async Task LinkParentChildAsync(string parentId, string childId, CancellationToken ct = default)
     {
         var parent = GetRequiredActor(parentId);
         var child = GetRequiredActor(childId);
@@ -179,24 +181,24 @@ public class LocalGAgentActorManager : IGAgentActorManager
         await ActorHierarchyCoordinator.LinkAsync(parent, child, _logger, ct);
     }
 
-    public async Task UnlinkParentChildAsync(Guid childId, Guid? parentId = null, CancellationToken ct = default)
+    public async Task UnlinkParentChildAsync(string childId, string? parentId = null, CancellationToken ct = default)
     {
         var child = GetRequiredActor(childId);
 
-        Guid? resolvedParentId = parentId;
-        if (!resolvedParentId.HasValue)
+        string? resolvedParentId = parentId;
+        if (string.IsNullOrEmpty(resolvedParentId))
         {
             resolvedParentId = await child.GetParentAsync();
         }
 
         IGAgentActor? parent = null;
-        if (resolvedParentId.HasValue)
+        if (!string.IsNullOrEmpty(resolvedParentId))
         {
-            parent = await GetActorAsync(resolvedParentId.Value);
+            parent = await GetActorAsync(resolvedParentId);
             if (parent == null)
             {
                 _logger.LogWarning("Parent actor {ParentId} not found when unlinking child {ChildId}",
-                    resolvedParentId.Value, childId);
+                    resolvedParentId, childId);
             }
         }
 
@@ -207,7 +209,7 @@ public class LocalGAgentActorManager : IGAgentActorManager
 
     #region 监控和诊断
 
-    public Task<ActorHealthStatus> GetHealthStatusAsync(Guid id)
+    public Task<ActorHealthStatus> GetHealthStatusAsync(string id)
     {
         if (!_actors.TryGetValue(id, out var actor))
         {
@@ -245,7 +247,7 @@ public class LocalGAgentActorManager : IGAgentActorManager
 
     #endregion
 
-    private IGAgentActor GetRequiredActor(Guid id)
+    private IGAgentActor GetRequiredActor(string id)
     {
         if (_actors.TryGetValue(id, out var actor))
         {

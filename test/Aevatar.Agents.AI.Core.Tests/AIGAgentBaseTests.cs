@@ -35,7 +35,7 @@ public class AIGAgentBaseTests(AITestFixture fixture) : IClassFixture<AITestFixt
     public async Task Initialize_WithProviderName_ShouldWork()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var agent = _agentFactory.CreateGAgent<TestAIGAgent>(agentId);
         agent.Id.ShouldBe(agentId);
 

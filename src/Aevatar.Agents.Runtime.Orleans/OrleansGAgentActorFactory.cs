@@ -59,10 +59,10 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
     /// </summary>
     public async Task<IGAgentActor> CreateGAgentActorAsync(
         Type agentType, 
-        Guid? id = null, 
+        string? id = null, 
         CancellationToken ct = default)
     {
-        var actorId = id ?? Guid.NewGuid();
+        var actorId = id ?? Guid.NewGuid().ToString();
         var agentTypeName = agentType.AssemblyQualifiedName ?? agentType.FullName ?? agentType.Name;
 
         _logger.LogInformation("Creating Orleans Actor proxy for Agent - Type: {AgentType}, Id: {Id}",
@@ -91,7 +91,7 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
     /// Create agent actor by generic type
     /// </summary>
     public Task<IGAgentActor> CreateGAgentActorAsync<TAgent>(
-        Guid? id = null, 
+        string? id = null, 
         CancellationToken ct = default) 
         where TAgent : IGAgent
     {

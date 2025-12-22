@@ -18,8 +18,8 @@ namespace Aevatar.Agents.Core.EventRouting;
 /// Provides standard implementation of event propagation logic
 /// </summary>
 public class EventRouter(
-    Guid agentId,
-    Func<Guid, EventEnvelope, CancellationToken, Task> sendToActorAsync,
+    string agentId,
+    Func<string, EventEnvelope, CancellationToken, Task> sendToActorAsync,
     Func<EventEnvelope, CancellationToken, Task> sendToSelfAsync,
     ILogger? logger = null,
     IEventRouterStore? store = null,
@@ -30,11 +30,11 @@ public class EventRouter(
     private readonly EventRouterOptions _options = options ?? EventRouterOptions.Default;
 
     // Hierarchy relationships
-    private Guid? _parentId;
-    private readonly HashSet<Guid> _childrenIds = new();
+    private string? _parentId;
+    private readonly HashSet<string> _childrenIds = new();
 
     // Event sending delegates
-    private readonly Func<Guid, EventEnvelope, CancellationToken, Task> _sendToActorAsync =
+    private readonly Func<string, EventEnvelope, CancellationToken, Task> _sendToActorAsync =
         sendToActorAsync ?? throw new ArgumentNullException(nameof(sendToActorAsync));
 
     private readonly Func<EventEnvelope, CancellationToken, Task> _sendToSelfAsync =
@@ -42,21 +42,21 @@ public class EventRouter(
 
     // ============ Hierarchy Management ============
 
-    public async Task AddChildAsync(Guid childId, CancellationToken ct = default)
+    public async Task AddChildAsync(string childId, CancellationToken ct = default)
     {
         _childrenIds.Add(childId);
         _logger.LogDebug("Agent {AgentId} added child {ChildId}", agentId, childId);
         await SaveHierarchyAsync(ct);
     }
 
-    public async Task RemoveChildAsync(Guid childId, CancellationToken ct = default)
+    public async Task RemoveChildAsync(string childId, CancellationToken ct = default)
     {
         _childrenIds.Remove(childId);
         _logger.LogDebug("Agent {AgentId} removed child {ChildId}", agentId, childId);
         await SaveHierarchyAsync(ct);
     }
 
-    public async Task SetParentAsync(Guid parentId, CancellationToken ct = default)
+    public async Task SetParentAsync(string parentId, CancellationToken ct = default)
     {
         _parentId = parentId;
         _logger.LogDebug("Agent {AgentId} set parent to {ParentId}", agentId, parentId);
@@ -70,9 +70,9 @@ public class EventRouter(
         await SaveHierarchyAsync(ct);
     }
 
-    public Guid? GetParent() => _parentId;
+    public string? GetParent() => _parentId;
 
-    public IReadOnlyList<Guid> GetChildren() => _childrenIds.ToList();
+    public IReadOnlyList<string> GetChildren() => _childrenIds.ToList();
 
     // ============ Persistence Support ============
 
@@ -119,7 +119,7 @@ public class EventRouter(
         var hierarchy = new EventRouterHierarchy
         {
             ParentId = _parentId,
-            ChildrenIds = new HashSet<Guid>(_childrenIds)
+            ChildrenIds = new HashSet<string>(_childrenIds)
         };
 
         await _store.SaveAsync(agentId, hierarchy, ct);
@@ -142,7 +142,7 @@ public class EventRouter(
             Version = 1,
             Payload = Any.Pack(evt),
             CorrelationId = Guid.NewGuid().ToString(), // TODO: Get from context
-            PublisherId = agentId.ToString(),
+            PublisherId = agentId,
             Direction = direction,
             ShouldStopPropagation = false,
             MaxHopCount = _options.DefaultMaxHopCount,
@@ -151,7 +151,7 @@ public class EventRouter(
             Message = $"Published by {agentId}",
         };
 
-        envelope.Publishers.Add(agentId.ToString());
+        envelope.Publishers.Add(agentId);
 
         return envelope;
     }
@@ -220,12 +220,12 @@ public class EventRouter(
         parentEnvelope.CurrentHopCount++;
 
         // Only add current node ID if not already in Publishers list, avoid duplicates
-        if (!parentEnvelope.Publishers.Contains(agentId.ToString()))
+        if (!parentEnvelope.Publishers.Contains(agentId))
         {
-            parentEnvelope.Publishers.Add(agentId.ToString());
+            parentEnvelope.Publishers.Add(agentId);
         }
 
-        await _sendToActorAsync(_parentId.Value, parentEnvelope, ct);
+        await _sendToActorAsync(_parentId!, parentEnvelope, ct);
     }
 
     /// <summary>
@@ -260,7 +260,7 @@ public class EventRouter(
         foreach (var childId in _childrenIds)
         {
             // DOWN direction also needs to check for cycles: if child node is already in Publishers list, it indicates a cycle
-            if (envelope.Publishers.Contains(childId.ToString()))
+            if (envelope.Publishers.Contains(childId))
             {
                 _logger.LogWarning(
                     "Event {EventId} already visited child {ChildId}, skipping to avoid loop in DOWN direction",
@@ -284,9 +284,9 @@ public class EventRouter(
             childEnvelope.CurrentHopCount++;
 
             // Only add current node ID if not already in Publishers list, avoid duplicates
-            if (!childEnvelope.Publishers.Contains(agentId.ToString()))
+            if (!childEnvelope.Publishers.Contains(agentId))
             {
-                childEnvelope.Publishers.Add(agentId.ToString());
+                childEnvelope.Publishers.Add(agentId);
             }
 
             await _sendToActorAsync(childId, childEnvelope, ct);
@@ -332,11 +332,11 @@ public class EventRouter(
             case EventDirection.Up:
                 // Up direction: only continue propagating upward when event was not received from parent node stream
                 // If Publishers list contains parent node ID, the event has already been broadcast through parent node stream
-                if (_parentId.HasValue && !envelope.Publishers.Contains(_parentId.Value.ToString()))
+                if (!string.IsNullOrEmpty(_parentId) && !envelope.Publishers.Contains(_parentId))
                 {
                     await SendToParentAsync(envelope, ct);
                 }
-                else if (!_parentId.HasValue)
+                else if (string.IsNullOrEmpty(_parentId))
                 {
                     // Also try sending when there's no parent node (might be root node)
                     await SendToParentAsync(envelope, ct);
@@ -347,11 +347,11 @@ public class EventRouter(
             case EventDirection.Both:
                 // Bidirectional propagation
                 // Up direction also needs to check if already in parent node stream
-                if (_parentId.HasValue && !envelope.Publishers.Contains(_parentId.Value.ToString()))
+                if (!string.IsNullOrEmpty(_parentId) && !envelope.Publishers.Contains(_parentId))
                 {
                     await SendToParentAsync(envelope, ct);
                 }
-                else if (!_parentId.HasValue)
+                else if (string.IsNullOrEmpty(_parentId))
                 {
                     await SendToParentAsync(envelope, ct);
                 }

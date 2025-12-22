@@ -57,7 +57,7 @@ public class CognitiveCoordinatorGAgent : AIGAgentBase<CognitiveCoordinatorState
     
     // Worker 管理（由外部注入）
     private IGAgentActorManager? _actorManager;
-    private readonly List<Guid> _workerIds = [];
+    private readonly List<string> _workerIds = [];
     
     // 语义聚类投票 (可选)
     private IEmbeddingGenerator<string, Embedding<float>>? _embeddingGenerator;
@@ -77,7 +77,7 @@ public class CognitiveCoordinatorGAgent : AIGAgentBase<CognitiveCoordinatorState
     // ============================================================
     
     public CognitiveCoordinatorGAgent() { }
-    public CognitiveCoordinatorGAgent(Guid id) : base(id) { }
+    public CognitiveCoordinatorGAgent(string id) : base(id) { }
     
     // ============================================================
     //  生命周期
@@ -169,7 +169,7 @@ public class CognitiveCoordinatorGAgent : AIGAgentBase<CognitiveCoordinatorState
         for (int i = 0; i < poolSize; i++)
         {
             // 创建 Worker Actor
-            var workerId = Guid.NewGuid();
+            var workerId = Guid.NewGuid().ToString();
             await _actorManager.CreateAndRegisterAsync<CognitiveWorkerGAgent>(workerId);
             
             // 设置父子关系（Worker 订阅 Coordinator 的流）

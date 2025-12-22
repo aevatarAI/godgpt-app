@@ -6,16 +6,16 @@ namespace Aevatar.Agents.Core.Tests.Actor;
 
 public class MockGAgentActor(IGAgent agent) : GAgentActorBase(agent)
 {
-    private readonly Dictionary<Guid, List<EventEnvelope>> _sentEvents = new();
+    private readonly Dictionary<string, List<EventEnvelope>> _sentEvents = new();
     private readonly List<EventEnvelope> _selfEvents = new();
 
-    public IReadOnlyDictionary<Guid, List<EventEnvelope>> SentEvents => _sentEvents;
+    public IReadOnlyDictionary<string, List<EventEnvelope>> SentEvents => _sentEvents;
     public IReadOnlyList<EventEnvelope> SelfEvents => _selfEvents;
     public int ActivateCallCount { get; private set; }
     public int DeactivateCallCount { get; private set; }
 
     // Override abstract methods for sending events
-    protected override Task SendEventToActorAsync(Guid actorId, EventEnvelope envelope, CancellationToken ct = default)
+    protected override Task SendEventToActorAsync(string actorId, EventEnvelope envelope, CancellationToken ct = default)
     {
         if (!_sentEvents.ContainsKey(actorId))
         {
@@ -61,15 +61,15 @@ public class MockGAgentActor(IGAgent agent) : GAgentActorBase(agent)
     }
 
     // Test helpers to expose hierarchy operations
-    public new Task SetParentAsync(Guid parentId, CancellationToken ct = default)
+    public new Task SetParentAsync(string parentId, CancellationToken ct = default)
         => base.SetParentAsync(parentId, ct);
 
     public new Task ClearParentAsync(CancellationToken ct = default)
         => base.ClearParentAsync(ct);
 
-    public new Task AddChildAsync(Guid childId, CancellationToken ct = default)
+    public new Task AddChildAsync(string childId, CancellationToken ct = default)
         => base.AddChildAsync(childId, ct);
 
-    public new Task RemoveChildAsync(Guid childId, CancellationToken ct = default)
+    public new Task RemoveChildAsync(string childId, CancellationToken ct = default)
         => base.RemoveChildAsync(childId, ct);
 }

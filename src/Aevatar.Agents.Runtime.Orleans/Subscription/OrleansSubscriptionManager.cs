@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Core.Subscription;
+using Aevatar.Agents.Runtime.Orleans.Stream;
 using Microsoft.Extensions.Logging;
 using Orleans.Streams;
 
@@ -28,8 +29,8 @@ public class OrleansSubscriptionManager : BaseSubscriptionManager
     }
 
     protected override async Task<IMessageStreamSubscription?> CreateStreamSubscriptionAsync(
-        Guid parentId,
-        Guid childId,
+        string parentId,
+        string childId,
         Func<EventEnvelope, Task> eventHandler,
         CancellationToken cancellationToken)
     {
@@ -39,7 +40,7 @@ public class OrleansSubscriptionManager : BaseSubscriptionManager
         try
         {
             // 获取父节点的Orleans stream
-            var streamId = StreamId.Create(_streamNamespace, parentId.ToString());
+            var streamId = StreamId.Create(_streamNamespace, parentId);
             var parentStream = _streamProvider.GetStream<byte[]>(streamId);
             
             // 包装为OrleansMessageStream
@@ -49,7 +50,7 @@ public class OrleansSubscriptionManager : BaseSubscriptionManager
             Func<EventEnvelope, bool>? filter = envelope =>
             {
                 // 过滤掉子节点自己发布的事件，避免循环
-                if (envelope.PublisherId == childId.ToString())
+                if (envelope.PublisherId == childId)
                 {
                     Logger.LogTrace("Filtering out self-published event {EventId} for child {ChildId}",
                         envelope.Id, childId);
@@ -61,7 +62,7 @@ public class OrleansSubscriptionManager : BaseSubscriptionManager
                 if (envelope.Direction == EventDirection.Both)
                 {
                     // 如果Publishers列表已包含父节点，说明这是从父stream来的
-                    if (envelope.Publishers.Contains(parentId.ToString()))
+                    if (envelope.Publishers.Contains(parentId))
                     {
                         Logger.LogTrace("BOTH event {EventId} from parent stream, will be converted to DOWN-only",
                             envelope.Id);
@@ -121,7 +122,7 @@ public class OrleansSubscriptionManager : BaseSubscriptionManager
         try
         {
             // 可以尝试获取stream来验证连接
-            var streamId = StreamId.Create(_streamNamespace, subscription.ParentId.ToString());
+            var streamId = StreamId.Create(_streamNamespace, subscription.ParentId);
             var stream = _streamProvider.GetStream<byte[]>(streamId);
             
             // 如果能成功获取stream，认为是健康的
@@ -191,8 +192,8 @@ public class OrleansSubscriptionManager : BaseSubscriptionManager
     /// </summary>
     private Func<EventEnvelope, Task> CreateWrappedEventHandler(
         Func<EventEnvelope, Task> originalHandler,
-        Guid childId,
-        Guid parentId)
+        string childId,
+        string parentId)
     {
         return async (EventEnvelope envelope) =>
         {
@@ -204,7 +205,7 @@ public class OrleansSubscriptionManager : BaseSubscriptionManager
                 // Orleans特定：处理BOTH方向的事件
                 // 如果是从父stream接收的BOTH事件，需要转换为DOWN-only
                 if (envelope.Direction == EventDirection.Both && 
-                    envelope.Publishers.Contains(parentId.ToString()))
+                    envelope.Publishers.Contains(parentId))
                 {
                     Logger.LogDebug(
                         "Converting BOTH event {EventId} to DOWN-only for Orleans child {ChildId}",
@@ -241,7 +242,7 @@ public class OrleansSubscriptionManager : BaseSubscriptionManager
     /// <summary>
     /// 更新最后活动时间
     /// </summary>
-    private void UpdateLastActivity(Guid childId, Guid parentId)
+    private void UpdateLastActivity(string childId, string parentId)
     {
         foreach (var subscription in _subscriptions.Values)
         {
@@ -257,8 +258,8 @@ public class OrleansSubscriptionManager : BaseSubscriptionManager
     /// 创建持久化的订阅（Orleans支持持久化订阅）
     /// </summary>
     public async Task<ISubscriptionHandle> SubscribeWithPersistenceAsync(
-        Guid parentId,
-        Guid childId,
+        string parentId,
+        string childId,
         Func<EventEnvelope, Task> eventHandler,
         string? subscriptionId = null,
         IRetryPolicy? retryPolicy = null,
@@ -280,7 +281,7 @@ public class OrleansSubscriptionManager : BaseSubscriptionManager
     /// 批量创建订阅
     /// </summary>
     public async Task<IReadOnlyList<ISubscriptionHandle>> SubscribeBatchAsync(
-        IReadOnlyList<(Guid ParentId, Guid ChildId)> subscriptions,
+        IReadOnlyList<(string ParentId, string ChildId)> subscriptions,
         Func<EventEnvelope, Task> eventHandler,
         IRetryPolicy? retryPolicy = null,
         CancellationToken cancellationToken = default)

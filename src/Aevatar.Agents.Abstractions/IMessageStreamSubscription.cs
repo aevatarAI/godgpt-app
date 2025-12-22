@@ -14,7 +14,7 @@ public interface IMessageStreamSubscription : IAsyncDisposable
     /// <summary>
     /// 关联的Stream ID
     /// </summary>
-    Guid StreamId { get; }
+    string StreamId { get; }
     
     /// <summary>
     /// 是否已激活

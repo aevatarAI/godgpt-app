@@ -29,7 +29,7 @@ public class SimpleAutoLoggerActor : GAgentActorBase
         return HandleEventAsync(envelope, ct);
     }
 
-    protected override Task SendEventToActorAsync(Guid actorId, EventEnvelope envelope, CancellationToken ct)
+    protected override Task SendEventToActorAsync(string actorId, EventEnvelope envelope, CancellationToken ct)
     {
         // 使用自动注入的 Logger
         Logger.LogInformation("Actor {ActorId} sending event {EventId} to actor {TargetActorId}", 

@@ -21,7 +21,7 @@ public interface IEventStore
     /// <param name="ct">Cancellation token</param>
     /// <returns>New version number</returns>
     Task<long> AppendEventsAsync(
-        Guid agentId,
+        string agentId,
         IEnumerable<AgentStateEvent> events,
         long expectedVersion,
         string? agentTypeName = null,
@@ -38,7 +38,7 @@ public interface IEventStore
     /// <param name="ct">Cancellation token</param>
     /// <returns>Event list</returns>
     Task<IReadOnlyList<AgentStateEvent>> GetEventsAsync(
-        Guid agentId,
+        string agentId,
         long? fromVersion = null,
         long? toVersion = null,
         int? maxCount = null,
@@ -52,7 +52,7 @@ public interface IEventStore
     /// <param name="agentTypeName">Agent type name for per-type collection routing (optional)</param>
     /// <param name="ct">Cancellation token</param>
     Task<long> GetLatestVersionAsync(
-        Guid agentId, 
+        string agentId, 
         string? agentTypeName = null,
         CancellationToken ct = default);
 

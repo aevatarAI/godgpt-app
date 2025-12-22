@@ -10,11 +10,11 @@ namespace Aevatar.Agents.Core.Internal;
 /// </summary>
 internal interface IActorHierarchyOperations
 {
-    Task AddChildAsync(Guid childId, CancellationToken ct = default);
+    Task AddChildAsync(string childId, CancellationToken ct = default);
 
-    Task RemoveChildAsync(Guid childId, CancellationToken ct = default);
+    Task RemoveChildAsync(string childId, CancellationToken ct = default);
 
-    Task SetParentAsync(Guid parentId, CancellationToken ct = default);
+    Task SetParentAsync(string parentId, CancellationToken ct = default);
 
     Task ClearParentAsync(CancellationToken ct = default);
 }

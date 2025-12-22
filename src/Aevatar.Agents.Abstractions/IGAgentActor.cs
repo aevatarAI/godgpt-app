@@ -10,8 +10,11 @@ public interface IGAgentActor : IEventPublisher
 {
     /// <summary>
     /// Actor Identifier (same as the associated Agent Id).
+    /// Format varies by runtime:
+    /// - Orleans: "AgentType:Guid" (e.g., "ChatAgent:12345678-...")
+    /// - Local/Proto: "Guid" (e.g., "12345678-...")
     /// </summary>
-    Guid Id { get; }
+    string Id { get; }
 
     /// <summary>
     /// Get the associated Agent instance.
@@ -31,12 +34,12 @@ public interface IGAgentActor : IEventPublisher
     /// Get all child Agent IDs. Hierarchy mutations should be performed via ActorHierarchyCoordinator
     /// or IGAgentActorManager.LinkParentChildAsync to keep parent/child routers in sync.
     /// </summary>
-    Task<IReadOnlyList<Guid>> GetChildrenAsync();
+    Task<IReadOnlyList<string>> GetChildrenAsync();
 
     /// <summary>
     /// Get the parent Agent ID.
     /// </summary>
-    Task<Guid?> GetParentAsync();
+    Task<string?> GetParentAsync();
 
     // ============ Event Publishing and Routing ============
 

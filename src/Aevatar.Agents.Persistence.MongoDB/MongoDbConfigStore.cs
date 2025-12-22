@@ -35,7 +35,7 @@ public class MongoDbConfigStore<TConfig> : IConfigStore<TConfig>
     /// <summary>
     /// Load configuration from MongoDB
     /// </summary>
-    public async Task<TConfig?> LoadAsync(Type agentType, Guid agentId, CancellationToken ct = default)
+    public async Task<TConfig?> LoadAsync(Type agentType, string agentId, CancellationToken ct = default)
     {
         var agentTypeName = agentType.FullName ?? agentType.Name;
         var doc = await _collection.Find(x => x.AgentType == agentTypeName && x.AgentId == agentId)
@@ -47,7 +47,7 @@ public class MongoDbConfigStore<TConfig> : IConfigStore<TConfig>
     /// <summary>
     /// Save configuration to MongoDB (upsert)
     /// </summary>
-    public async Task SaveAsync(Type agentType, Guid agentId, TConfig config, CancellationToken ct = default)
+    public async Task SaveAsync(Type agentType, string agentId, TConfig config, CancellationToken ct = default)
     {
         var agentTypeName = agentType.FullName ?? agentType.Name;
         var doc = new AgentConfigDocument<TConfig>
@@ -68,7 +68,7 @@ public class MongoDbConfigStore<TConfig> : IConfigStore<TConfig>
     /// <summary>
     /// Delete configuration from MongoDB
     /// </summary>
-    public async Task DeleteAsync(Type agentType, Guid agentId, CancellationToken ct = default)
+    public async Task DeleteAsync(Type agentType, string agentId, CancellationToken ct = default)
     {
         var agentTypeName = agentType.FullName ?? agentType.Name;
         await _collection.DeleteOneAsync(
@@ -79,7 +79,7 @@ public class MongoDbConfigStore<TConfig> : IConfigStore<TConfig>
     /// <summary>
     /// Check if configuration exists
     /// </summary>
-    public async Task<bool> ExistsAsync(Type agentType, Guid agentId, CancellationToken ct = default)
+    public async Task<bool> ExistsAsync(Type agentType, string agentId, CancellationToken ct = default)
     {
         var agentTypeName = agentType.FullName ?? agentType.Name;
         var count = await _collection.CountDocumentsAsync(

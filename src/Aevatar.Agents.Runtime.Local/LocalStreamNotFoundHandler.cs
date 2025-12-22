@@ -22,7 +22,7 @@ public class LocalStreamNotFoundHandler : IStreamNotFoundHandler
         _logger = logger;
     }
 
-    public async Task HandleStreamNotFoundAsync(Guid streamId)
+    public async Task HandleStreamNotFoundAsync(string streamId)
     {
         // 1. Check if actor exists in manager (Double check)
         var exists = await _actorManager.ExistsAsync(streamId);

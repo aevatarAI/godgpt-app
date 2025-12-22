@@ -30,7 +30,7 @@ public static class AevatarActivitySource
     /// <summary>
     /// Start an activity for agent activation.
     /// </summary>
-    public static Activity? StartAgentActivation(Guid agentId, string agentType)
+    public static Activity? StartAgentActivation(string agentId, string agentType)
     {
         return Source.StartActivity("agent.activate", ActivityKind.Internal)?
             .SetTag("agent.id", agentId.ToString())
@@ -40,7 +40,7 @@ public static class AevatarActivitySource
     /// <summary>
     /// Start an activity for agent deactivation.
     /// </summary>
-    public static Activity? StartAgentDeactivation(Guid agentId, string agentType)
+    public static Activity? StartAgentDeactivation(string agentId, string agentType)
     {
         return Source.StartActivity("agent.deactivate", ActivityKind.Internal)?
             .SetTag("agent.id", agentId.ToString())
@@ -55,7 +55,7 @@ public static class AevatarActivitySource
     /// Start an activity for event handling.
     /// </summary>
     public static Activity? StartEventHandling(
-        Guid agentId,
+        string agentId,
         string eventType,
         string? correlationId = null)
     {
@@ -141,7 +141,7 @@ public static class AevatarActivitySource
     /// Start an activity for LLM call.
     /// </summary>
     public static Activity? StartLlmCall(
-        Guid agentId,
+        string agentId,
         string providerName,
         string? model = null)
     {

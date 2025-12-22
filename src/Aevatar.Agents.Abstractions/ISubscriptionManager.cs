@@ -52,8 +52,8 @@ public interface ISubscriptionManager
     /// <param name="cancellationToken">取消令牌</param>
     /// <returns>订阅句柄</returns>
     Task<ISubscriptionHandle> SubscribeWithRetryAsync(
-        Guid parentId,
-        Guid childId,
+        string parentId,
+        string childId,
         Func<EventEnvelope, Task> eventHandler,
         IRetryPolicy? retryPolicy = null,
         CancellationToken cancellationToken = default);
@@ -103,12 +103,12 @@ public interface ISubscriptionHandle
     /// <summary>
     /// 父节点ID
     /// </summary>
-    Guid ParentId { get; }
+    string ParentId { get; }
 
     /// <summary>
     /// 子节点ID
     /// </summary>
-    Guid ChildId { get; }
+    string ChildId { get; }
 
     /// <summary>
     /// 订阅创建时间

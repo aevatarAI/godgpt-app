@@ -26,7 +26,7 @@ public class LocalGAgentActor : GAgentActorBase
     private IMessageStreamSubscription? _parentStreamSubscription;
 
     // Cache for other actors' streams (when using external provider)
-    private readonly ConcurrentDictionary<Guid, IMessageStream> _externalActorStreams = new();
+    private readonly ConcurrentDictionary<string, IMessageStream> _externalActorStreams = new();
 
     public LocalGAgentActor(
         IGAgent agent,
@@ -65,7 +65,7 @@ public class LocalGAgentActor : GAgentActorBase
         }
     }
 
-    private IMessageStream GetActorStream(Guid actorId)
+    private IMessageStream GetActorStream(string actorId)
     {
         // Determine Provider
         var providerType = _providerOptions.Provider;
@@ -105,7 +105,7 @@ public class LocalGAgentActor : GAgentActorBase
     // ... (Hierarchy implementation omitted for brevity, will rely on base or specific local logic)
     // Ideally, SetParentAsync should use GetActorStream(parentId) to subscribe.
 
-    protected override async Task SetParentAsync(Guid parentId, CancellationToken ct = default)
+    protected override async Task SetParentAsync(string parentId, CancellationToken ct = default)
     {
         if (EventRouter.GetParent() != null)
         {
@@ -177,7 +177,7 @@ public class LocalGAgentActor : GAgentActorBase
         }
     }
 
-    protected override async Task SendEventToActorAsync(Guid actorId, EventEnvelope envelope, CancellationToken ct)
+    protected override async Task SendEventToActorAsync(string actorId, EventEnvelope envelope, CancellationToken ct)
     {
         try
         {

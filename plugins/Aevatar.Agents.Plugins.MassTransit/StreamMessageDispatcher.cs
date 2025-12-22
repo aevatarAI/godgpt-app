@@ -6,18 +6,24 @@ using System.Threading.Tasks;
 
 namespace Aevatar.Agents.Plugins.MassTransit;
 
+/// <summary>
+/// MassTransit consumer that dispatches incoming messages to agents.
+/// 
+/// Key design: Uses IMassTransitEventHandler to properly dispatch events to actors.
+/// This ensures callbacks run in the correct actor context (e.g., Grain turn for Orleans).
+/// </summary>
 public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
 {
-    private readonly MassTransitMessageStreamProvider _provider;
+    private readonly IEnumerable<IMassTransitEventHandler> _eventHandlers;
     private readonly IEnumerable<IStreamNotFoundHandler> _notFoundHandlers;
     private readonly ILogger<StreamMessageDispatcher> _logger;
 
     public StreamMessageDispatcher(
-        MassTransitMessageStreamProvider provider,
+        IEnumerable<IMassTransitEventHandler> eventHandlers,
         IEnumerable<IStreamNotFoundHandler> notFoundHandlers,
         ILogger<StreamMessageDispatcher> logger)
     {
-        _provider = provider;
+        _eventHandlers = eventHandlers;
         _notFoundHandlers = notFoundHandlers;
         _logger = logger;
     }
@@ -25,42 +31,93 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
     public async Task Consume(ConsumeContext<ByteArrayMessage> context)
     {
         var streamId = context.Message.StreamId;
+        var data = context.Message.Data;
         
-        // 1. Try to get the stream directly
-        var stream = _provider.GetStreamInternal(streamId);
-
-        if (stream == null)
+        // Skip warmup messages (used for pre-establishing Kafka connections)
+        if (string.IsNullOrEmpty(streamId))
         {
-            // 2. If stream not found, invoke handlers to try to activate the actor
-            _logger.LogWarning("Stream not found for StreamId {StreamId}. Attempting to activate actor via handlers...", streamId);
-            
-            foreach (var handler in _notFoundHandlers)
+            _logger.LogDebug("Skipping warmup message");
+            return;
+        }
+        
+        _logger.LogDebug("Received message for StreamId {StreamId}", streamId);
+        
+        // Parse the envelope first
+        EventEnvelope envelope;
+        try
+        {
+            envelope = EventEnvelope.Parser.ParseFrom(data);
+        }
+        catch (System.Exception ex)
+        {
+            _logger.LogError(ex, "Failed to parse EventEnvelope for StreamId {StreamId}", streamId);
+            throw;
+        }
+        
+        // Try event handlers first (they route to the correct actor context)
+        bool handled = false;
+        foreach (var handler in _eventHandlers)
+        {
+            try
             {
-                try 
+                handled = await handler.HandleEventAsync(streamId, envelope);
+                if (handled)
                 {
-                    await handler.HandleStreamNotFoundAsync(streamId);
+                    _logger.LogDebug("Event {EventId} handled by {HandlerType} for StreamId {StreamId}", 
+                        envelope.Id, handler.GetType().Name, streamId);
+                    return;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                _logger.LogWarning(ex, "Event handler {HandlerType} failed for StreamId {StreamId}", 
+                    handler.GetType().Name, streamId);
+            }
+        }
+        
+        // If no handler could route it, try stream not found handlers (activate actor)
+        if (!handled)
+        {
+            _logger.LogDebug("No event handler found for StreamId {StreamId}, trying activation handlers...", streamId);
+            
+            foreach (var notFoundHandler in _notFoundHandlers)
+            {
+                try
+                {
+                    await notFoundHandler.HandleStreamNotFoundAsync(streamId);
                 }
                 catch (System.Exception ex)
                 {
-                    _logger.LogError(ex, "Error executing StreamNotFoundHandler for StreamId {StreamId}", streamId);
+                    _logger.LogError(ex, "StreamNotFoundHandler failed for StreamId {StreamId}", streamId);
                 }
             }
-
-            // 3. Retry getting the stream
-            stream = _provider.GetStreamInternal(streamId);
+            
+            // Retry with event handlers after activation
+            foreach (var handler in _eventHandlers)
+            {
+                try
+                {
+                    handled = await handler.HandleEventAsync(streamId, envelope);
+                    if (handled)
+                    {
+                        _logger.LogDebug("Event {EventId} handled after activation for StreamId {StreamId}", 
+                            envelope.Id, streamId);
+                        return;
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    _logger.LogWarning(ex, "Event handler failed after activation for StreamId {StreamId}", 
+                        handler.GetType().Name);
+                }
+            }
         }
-
-        if (stream != null)
+        
+        // If still not handled, throw to trigger MassTransit retry
+        if (!handled)
         {
-            await stream.DispatchAsync(context.Message.Data);
-            _logger.LogDebug("Dispatched message to StreamId {StreamId}", streamId);
-        }
-        else
-        {
-            // 4. If still not found, we have to throw exception to trigger MassTransit retry
-            //    This is crucial for ensuring message delivery guarantees
-            _logger.LogWarning("Stream still not found for StreamId {StreamId} after activation attempt. Throwing exception to trigger retry.", streamId);
-            throw new System.InvalidOperationException($"Stream {streamId} not found. Actor might be failing to activate.");
+            _logger.LogWarning("No handler could process event for StreamId {StreamId}. Throwing to trigger retry.", streamId);
+            throw new System.InvalidOperationException($"No handler for StreamId {streamId}. Actor might be failing to activate.");
         }
     }
 }

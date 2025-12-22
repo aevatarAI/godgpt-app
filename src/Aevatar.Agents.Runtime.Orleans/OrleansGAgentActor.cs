@@ -4,6 +4,7 @@ using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.Core.Internal;
 using Aevatar.Agents.Rpc;
+using Aevatar.Agents.Runtime.Orleans.Stream;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -18,8 +19,8 @@ namespace Aevatar.Agents.Runtime.Orleans;
 /// All business logic is executed in the Grain (Silo) side.
 /// 
 /// Responsibilities:
-/// 1. Forward events to Grain via RPC
-/// 2. Manage local stream subscriptions for hierarchy navigation
+/// 1. Forward events to Grain via Stream (non-blocking, async)
+/// 2. Use RPC only for synchronous operations (GetDescription, hierarchy)
 /// 3. Provide IGAgentActor interface for HttpApi layer
 /// </summary>
 public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
@@ -30,20 +31,27 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
     private readonly IMessageStreamProvider? _externalStreamProvider;
     private readonly MessageStreamProviderOptions _providerOptions;
     
-    // Cached Grain reference
+    // Cached Grain reference (for RPC operations only)
     private IGAgentGrain? _grain;
     
+    // Stream for sending events (non-blocking)
+    private IMessageStream? _myStream;
+    
     // Agent metadata (from Grain)
-    private Guid _id;
+    private string _id;
     private string _agentTypeName;
     
     // Logger
     protected ILogger Logger { get; }
 
-    public Guid Id => _id;
+    /// <summary>
+    /// Returns the full GrainKey format (AgentTypeShortName:AgentId).
+    /// This is consistent with how grains are addressed in Orleans.
+    /// </summary>
+    public string Id => $"{GetAgentTypeShortName(_agentTypeName)}:{_id}";
 
     public OrleansGAgentActor(
-        Guid id,
+        string id,
         string agentTypeName,
         IGrainFactory grainFactory,
         IStreamProvider? orleansStreamProvider,
@@ -92,7 +100,50 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
                 $"Failed to initialize Agent {_agentTypeName} in Grain {grainId}");
         }
 
+        // Initialize Stream for async message sending
+        await InitializeStreamAsync(ct);
+
         Logger.LogInformation("✅ Orleans Actor proxy {GrainId} activated, Agent running in Silo", grainId);
+    }
+
+    /// <summary>
+    /// Initialize stream for sending events
+    /// Uses MassTransit if configured, otherwise falls back to Orleans Stream
+    /// </summary>
+    private async Task InitializeStreamAsync(CancellationToken ct)
+    {
+        var providerType = _providerOptions.Provider;
+        if (_providerOptions.Runtime.TryGetValue("Orleans", out var runtimeProvider))
+        {
+            providerType = runtimeProvider;
+        }
+
+        if (providerType == "MassTransit" && _externalStreamProvider != null)
+        {
+            // Use MassTransit stream with full GrainKey format (AgentType:AgentId)
+            // This ensures OrleansMassTransitEventHandler routes to correct Grain
+            var agentTypeShortName = GetAgentTypeShortName(_agentTypeName);
+            var grainKey = $"{agentTypeShortName}:{_id}";
+            _myStream = _externalStreamProvider.GetStream(grainKey, agentTypeShortName);
+            Logger.LogDebug("Using MassTransit stream for Actor {ActorId}, GrainKey: {GrainKey}", _id, grainKey);
+        }
+        else if (_orleansStreamProvider != null)
+        {
+            // Use Orleans stream - use same StreamId format as Grain (AgentType:AgentId)
+            var streamNamespace = _streamingOptions.DefaultStreamNamespace ?? "AevatarAgents";
+            var agentTypeShortName = GetAgentTypeShortName(_agentTypeName);
+            var streamKey = $"{agentTypeShortName}:{_id}";  // Must match Grain's grainKey
+            var orleansStream = _orleansStreamProvider.GetStream<byte[]>(StreamId.Create(streamNamespace, streamKey));
+            _myStream = new OrleansMessageStream(_id, orleansStream);
+            Logger.LogDebug("Using Orleans stream for Actor {ActorId}, StreamKey: {StreamKey}", _id, streamKey);
+        }
+
+        if (_myStream == null)
+        {
+            throw new InvalidOperationException(
+                $"No stream provider available for Actor {_id}. " +
+                "Configure either MassTransit or Orleans stream provider.");
+        }
     }
 
     /// <summary>
@@ -109,7 +160,8 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
     }
 
     /// <summary>
-    /// Publish event - Forward to Grain (broadcast mode)
+    /// Publish event - Send to own stream (Grain subscribes and processes)
+    /// This is async and non-blocking - returns immediately after sending to stream
     /// </summary>
     /// <param name="isInternalCall">If true, keeps PublisherId; if false (default), clears it for external calls</param>
     public async Task<string> PublishEventAsync<TEvent>(
@@ -119,38 +171,39 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
         bool isInternalCall = false) 
         where TEvent : IMessage
     {
-        EnsureGrain();
-
         // Create EventEnvelope
         var envelope = new EventEnvelope
         {
             Id = Guid.NewGuid().ToString(),
             // External calls: empty PublisherId allows Agent to handle the event
             // Internal calls: set to actor ID for self-handling check
-            PublisherId = isInternalCall ? _id.ToString() : "",
+            PublisherId = isInternalCall ? _id : "",
             Payload = Google.Protobuf.WellKnownTypes.Any.Pack(evt),
             Direction = direction,
             Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
             CorrelationId = Guid.NewGuid().ToString()
         };
 
-        // Serialize and forward to Grain
-        using var stream = new MemoryStream();
-        using var codedOutput = new CodedOutputStream(stream);
-        envelope.WriteTo(codedOutput);
-        codedOutput.Flush();
+        // Send via Stream (async, non-blocking)
+        if (_myStream == null)
+        {
+            throw new InvalidOperationException(
+                $"No stream available for Actor {_id}. Stream must be initialized before publishing events.");
+        }
 
-        await _grain!.HandleEventAsync(stream.ToArray());
+        await _myStream.ProduceAsync(envelope, ct);
+        Logger.LogDebug("Published event {EventId} via stream for Actor {ActorId}", envelope.Id, _id);
 
         return envelope.Id;
     }
 
     /// <summary>
-    /// Point-to-point send - Direct delivery to target Grain
+    /// Point-to-point send - Send to target agent's stream
+    /// This is async and non-blocking - returns immediately after sending to stream
     /// </summary>
     /// <param name="isInternalCall">If true, keeps PublisherId; if false (default), clears it for external calls</param>
     public async Task<string> SendToAsync<TEvent>(
-        Guid targetAgentId,
+        string targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
         CancellationToken ct = default,
@@ -161,12 +214,12 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
         var envelope = new EventEnvelope
         {
             Id = Guid.NewGuid().ToString(),
-            PublisherId = isInternalCall ? _id.ToString() : "",
+            PublisherId = isInternalCall ? _id : "",
             Payload = Google.Protobuf.WellKnownTypes.Any.Pack(evt),
             Direction = onArrivalDirection,
             Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
             CorrelationId = Guid.NewGuid().ToString(),
-            TargetAgentId = targetAgentId.ToString(),
+            TargetAgentId = targetAgentId,
             OnArrivalDirection = onArrivalDirection
         };
 
@@ -174,22 +227,48 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
             "Actor {ActorId} sending P2P event {EventId} to {TargetAgentId}, onArrival={OnArrivalDirection}",
             _id, envelope.Id, targetAgentId, onArrivalDirection);
 
-        // Serialize envelope
-        using var stream = new MemoryStream();
-        using var codedOutput = new CodedOutputStream(stream);
-        envelope.WriteTo(codedOutput);
-        codedOutput.Flush();
+        // Get target agent's stream and send
+        var targetStream = GetTargetStream(targetAgentId);
+        if (targetStream == null)
+        {
+            throw new InvalidOperationException(
+                $"No stream available for target Agent {targetAgentId}. Stream provider must be configured.");
+        }
 
-        // Direct RPC to target Grain (no broadcast)
-        // NOTE:
-        // We intentionally route by {CurrentAgentType}:{TargetAgentId} to avoid cross-type collisions.
-        // If you need to send to a different Agent type, create the corresponding actor and call SendToAsync on it.
-        var targetAgentTypeShortName = GetAgentTypeShortName(_agentTypeName);
-        var targetGrainId = $"{targetAgentTypeShortName}:{targetAgentId}";
-        var targetGrain = _grainFactory.GetGrain<IGAgentGrain>(targetGrainId);
-        await targetGrain.HandleEventAsync(stream.ToArray());
+        await targetStream.ProduceAsync(envelope, ct);
+        Logger.LogDebug("Sent P2P event {EventId} via stream to {TargetAgentId}", envelope.Id, targetAgentId);
 
         return envelope.Id;
+    }
+
+    /// <summary>
+    /// Get stream for target agent.
+    /// Expects targetAgentId in full GrainKey format (AgentTypeShortName:AgentId)
+    /// to match Grain's subscription.
+    /// </summary>
+    private IMessageStream? GetTargetStream(string targetAgentId)
+    {
+        var providerType = _providerOptions.Provider;
+        if (_providerOptions.Runtime.TryGetValue("Orleans", out var runtimeProvider))
+        {
+            providerType = runtimeProvider;
+        }
+
+        if (providerType == "MassTransit" && _externalStreamProvider != null)
+        {
+            // targetAgentId is already in full GrainKey format (TypeName:Id)
+            return _externalStreamProvider.GetStream(targetAgentId, null);
+        }
+        else if (_orleansStreamProvider != null)
+        {
+            // targetAgentId is already in full GrainKey format (TypeName:Id)
+            // Use it directly as the StreamKey
+            var streamNamespace = _streamingOptions.DefaultStreamNamespace ?? "AevatarAgents";
+            var orleansStream = _orleansStreamProvider.GetStream<byte[]>(StreamId.Create(streamNamespace, targetAgentId));
+            return new OrleansMessageStream(targetAgentId, orleansStream);
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -223,13 +302,13 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
 
     #region Hierarchy Management
 
-    public async Task SetParentAsync(Guid parentId)
+    public async Task SetParentAsync(string parentId)
     {
         EnsureGrain();
         await _grain!.SetParentAsync(parentId);
     }
 
-    public async Task SetParentAsync(Guid parentId, CancellationToken ct)
+    public async Task SetParentAsync(string parentId, CancellationToken ct)
     {
         EnsureGrain();
         await _grain!.SetParentAsync(parentId);
@@ -247,37 +326,37 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
         await _grain!.ClearParentAsync();
     }
 
-    public async Task AddChildAsync(Guid childId)
+    public async Task AddChildAsync(string childId)
     {
         EnsureGrain();
         await _grain!.AddChildAsync(childId);
     }
 
-    public async Task AddChildAsync(Guid childId, CancellationToken ct)
+    public async Task AddChildAsync(string childId, CancellationToken ct)
     {
         EnsureGrain();
         await _grain!.AddChildAsync(childId);
     }
 
-    public async Task RemoveChildAsync(Guid childId)
+    public async Task RemoveChildAsync(string childId)
     {
         EnsureGrain();
         await _grain!.RemoveChildAsync(childId);
     }
 
-    public async Task RemoveChildAsync(Guid childId, CancellationToken ct)
+    public async Task RemoveChildAsync(string childId, CancellationToken ct)
     {
         EnsureGrain();
         await _grain!.RemoveChildAsync(childId);
     }
 
-    public async Task<Guid?> GetParentAsync()
+    public async Task<string?> GetParentAsync()
     {
         EnsureGrain();
         return await _grain!.GetParentAsync();
     }
 
-    public async Task<IReadOnlyList<Guid>> GetChildrenAsync()
+    public async Task<IReadOnlyList<string>> GetChildrenAsync()
     {
         EnsureGrain();
         return await _grain!.GetChildrenAsync();

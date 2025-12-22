@@ -28,11 +28,11 @@ public class StateTestController : ControllerBase
     /// </summary>
     [HttpPost("calculator")]
     public async Task<IActionResult> TestCalculatorState(
-        [FromQuery] Guid? agentId = null)
+        [FromQuery] string? agentId = null)
     {
         try
         {
-            var id = agentId ?? Guid.NewGuid();
+            var id = agentId ?? Guid.NewGuid().ToString();
             _logger.LogInformation("Testing State persistence for Calculator Agent {AgentId}", id);
 
             // Create Agent
@@ -74,7 +74,7 @@ public class StateTestController : ControllerBase
     /// Check if State was persisted by loading a previously created Agent
     /// </summary>
     [HttpGet("calculator/{agentId}")]
-    public async Task<IActionResult> GetCalculatorState(Guid agentId)
+    public async Task<IActionResult> GetCalculatorState(string agentId)
     {
         try
         {

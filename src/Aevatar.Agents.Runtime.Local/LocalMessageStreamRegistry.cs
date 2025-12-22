@@ -8,12 +8,12 @@ namespace Aevatar.Agents.Runtime.Local;
 /// </summary>
 public class LocalMessageStreamRegistry
 {
-    private readonly ConcurrentDictionary<Guid, LocalMessageStream> _streams = new();
+    private readonly ConcurrentDictionary<string, LocalMessageStream> _streams = new();
 
     /// <summary>
     /// 获取或创建 Agent 的 Stream
     /// </summary>
-    public LocalMessageStream GetOrCreateStream(Guid agentId, int capacity = 1000)
+    public LocalMessageStream GetOrCreateStream(string agentId, int capacity = 1000)
     {
         return _streams.GetOrAdd(agentId, _ => new LocalMessageStream(agentId, capacity));
     }
@@ -21,7 +21,7 @@ public class LocalMessageStreamRegistry
     /// <summary>
     /// 检查 Stream 是否已存在
     /// </summary>
-    public bool StreamExists(Guid agentId)
+    public bool StreamExists(string agentId)
     {
         return _streams.ContainsKey(agentId);
     }
@@ -29,7 +29,7 @@ public class LocalMessageStreamRegistry
     /// <summary>
     /// 移除 Agent 的 Stream
     /// </summary>
-    public void RemoveStream(Guid agentId)
+    public void RemoveStream(string agentId)
     {
         if (_streams.TryRemove(agentId, out var stream))
         {
@@ -40,7 +40,7 @@ public class LocalMessageStreamRegistry
     /// <summary>
     /// 获取 Stream（如果存在）
     /// </summary>
-    public LocalMessageStream? GetStream(Guid agentId)
+    public LocalMessageStream? GetStream(string agentId)
     {
         _streams.TryGetValue(agentId, out var stream);
         return stream;

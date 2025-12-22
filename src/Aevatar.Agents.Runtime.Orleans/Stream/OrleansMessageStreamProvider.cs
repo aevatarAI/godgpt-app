@@ -2,7 +2,7 @@ using System;
 using Orleans.Runtime;
 using Orleans.Streams;
 
-namespace Aevatar.Agents.Runtime.Orleans;
+namespace Aevatar.Agents.Runtime.Orleans.Stream;
 
 /// <summary>
 /// Orleans Message Stream Provider
@@ -22,9 +22,9 @@ public class OrleansMessageStreamProvider
     /// <summary>
     /// 获取 Agent 的 Stream
     /// </summary>
-    public OrleansMessageStream GetStream(Guid agentId)
+    public OrleansMessageStream GetStream(string agentId)
     {
-        var streamId = StreamId.Create(_streamNamespace, agentId.ToString());
+        var streamId = StreamId.Create(_streamNamespace, agentId);
         var stream = _streamProvider.GetStream<byte[]>(streamId);
         return new OrleansMessageStream(agentId, stream);
     }

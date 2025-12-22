@@ -12,7 +12,7 @@ namespace Aevatar.Agents.Core.EventSourcing;
 /// </summary>
 public class InMemoryEventStore : IEventStore, IDisposable
 {
-    private readonly ConcurrentDictionary<Guid, List<AgentStateEvent>> _events = new();
+    private readonly ConcurrentDictionary<string, List<AgentStateEvent>> _events = new();
     private readonly Channel<EventStoreOperation> _operationChannel;
     private readonly Task _processingTask;
     private readonly CancellationTokenSource _cts = new();
@@ -33,7 +33,7 @@ public class InMemoryEventStore : IEventStore, IDisposable
     // ========== Event Operations ==========
 
     public async Task<long> AppendEventsAsync(
-        Guid agentId,
+        string agentId,
         IEnumerable<AgentStateEvent> events,
         long expectedVersion,
         string? agentTypeName = null,
@@ -55,7 +55,7 @@ public class InMemoryEventStore : IEventStore, IDisposable
     }
 
     public Task<IReadOnlyList<AgentStateEvent>> GetEventsAsync(
-        Guid agentId,
+        string agentId,
         long? fromVersion = null,
         long? toVersion = null,
         int? maxCount = null,
@@ -100,7 +100,7 @@ public class InMemoryEventStore : IEventStore, IDisposable
     }
 
     public Task<long> GetLatestVersionAsync(
-        Guid agentId, 
+        string agentId, 
         string? agentTypeName = null,
         CancellationToken ct = default)
     {
@@ -197,7 +197,7 @@ public class InMemoryEventStore : IEventStore, IDisposable
     private abstract record EventStoreOperation;
 
     private record AppendEventsOperation(
-        Guid AgentId,
+        string AgentId,
         List<AgentStateEvent> Events,
         long ExpectedVersion,
         TaskCompletionSource<long> Tcs

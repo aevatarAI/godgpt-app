@@ -95,6 +95,24 @@ public class BillingAgent : GAgentBase<BillingState>
 
 ## 3. Runtime 集成指南
 
+### Producer-only 客户端模式（仅发送/基准压测）
+当客户端只需要“发送、不消费”时，请使用 Producer-only 注册，避免与 Silo 消费者竞争 Kafka 消费：
+
+```csharp
+// 客户端（仅发送，不订阅）
+services.AddMassTransitStreamClient(configuration);
+```
+
+> 需要消费的场景（Silo / 本地双工）继续使用 `AddMassTransitStreamPlugin`。
+
+Producer-only 路径同样会扫描 `[StreamTopic]`，以便 Category→Topic 映射在客户端生效；如果没有注解/配置，则回退到 `TopicPrefix`。
+
+客户端与 Silo **必须使用一致的 Stream Provider**，否则会出现“客户端发 MassTransit，Silo 只收 Orleans Stream”的错配，导致收不到消息：
+
+```json
+"MessageStream": { "Provider": "MassTransit" }   // 或 "Orleans"
+```
+
 ### 通用步骤 (适用于所有 Runtime)
 
 1.  **引用插件**:
@@ -165,7 +183,7 @@ public class BillingAgent : GAgentBase<BillingState>
 ```csharp
 host.ConfigureServices((context, services) =>
 {
-    // 推荐：自动发现所有 Agent 程序集
+    // 推荐：自动发现所有 Agent 程序集（Silo 侧：Producer + Consumer）
     services.AddMassTransitStreamPlugin(context.Configuration);
 
     services.AddAevatarAgentSystem(builder =>
@@ -174,6 +192,13 @@ host.ConfigureServices((context, services) =>
     });
 });
 ```
+
+> Orleans 专有说明：`StreamMessageDispatcher` 会将消息委派给 `IMassTransitEventHandler`（Orleans 侧实现为 `OrleansMassTransitEventHandler`），通过 Orleans RPC 在 Grain turn 中执行，避免 “Grain context missing”。
+
+### 冷启动预热建议
+- 初次启动 MassTransit/Kafka 时，Consumer & Producer 都需要连接、拉取元数据，可能导致首轮调用偏慢。
+- 可以在启动后做一次“创建 Agent + 状态查询”或发送一条空转消息作为预热。
+- 压测/长连场景：保持 Bus 常驻可避免冷启动抖动。
 
 ### Local Runtime 集成
 
@@ -222,7 +247,47 @@ cd apps/Aevatar.App/benchmarks
 
 ---
 
-## 6. 常见问题排查
+## 6. 冷启动优化 (Warmup)
+
+### 问题
+MassTransit + Kafka 首次发送消息时延迟较高（100+ms），因为：
+1. Kafka Producer 首次发送需要获取 Broker metadata
+2. Orleans Client 首次调用需要建立连接
+3. Grain 首次激活需要从存储加载状态
+
+### 解决方案：预热 API
+
+**Kafka Producer 预热**：
+```csharp
+// 在 MassTransit 服务启动后调用
+var streamProvider = serviceProvider.GetService<MassTransitMessageStreamProvider>();
+if (streamProvider != null)
+{
+    await streamProvider.WarmupAsync();  // 发送空消息建立 Kafka 连接
+}
+```
+
+**Orleans Client 预热**：
+```csharp
+// 创建一个临时 Agent 触发 RPC 连接
+var warmupId = Guid.NewGuid();
+var warmupAgent = await manager.CreateAndRegisterAsync<SimpleAgent>(warmupId);
+await warmupAgent.GetDescriptionAsync();  // 触发 RPC
+```
+
+### 预热效果
+
+| 指标 | 无预热冷启动 | 有预热冷启动 | 热运行 |
+|------|-------------|-------------|--------|
+| Agent Creation | ~145ms | **14ms** | 7ms |
+| Message Average | ~100ms | **10ms** | 10ms |
+| State Query | ~2340ms | **69ms** | 24ms |
+
+> **注意**: 预热消息使用 `StreamId = Guid.Empty`，Consumer 会自动忽略。
+
+---
+
+## 7. 常见问题排查
 
 1.  **消息发送到了错误的 Topic？**
     *   检查 `appsettings.json` 中的 `TopicMapping` 是否覆盖了预期配置。

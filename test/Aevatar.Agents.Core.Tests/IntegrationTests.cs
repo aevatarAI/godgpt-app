@@ -318,7 +318,7 @@ public class IntegrationTests(CoreTestFixture fixture) : IClassFixture<CoreTestF
     public async Task Should_Recover_Agent_State_After_Restart()
     {
         // Arrange - Create and setup initial agent
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var agent1 = new StatefulAgent(agentId);
         // Don't inject StateStore to avoid state protection conflicts
         // AgentStateStoreInjector.InjectStateStore(agent1, _serviceProvider);

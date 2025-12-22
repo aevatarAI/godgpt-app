@@ -7,9 +7,12 @@ namespace Aevatar.Agents.Abstractions;
 public interface IGAgent
 {
     /// <summary>
-    /// Agent unique identifier (Guid type, universal identifier)
+    /// Agent unique identifier.
+    /// Format varies by runtime:
+    /// - Orleans: "AgentType:Guid" (e.g., "ChatAgent:12345678-...")
+    /// - Local/Proto: "Guid" (e.g., "12345678-...")
     /// </summary>
-    Guid Id { get; }
+    string Id { get; }
 
     /// <summary>
     /// Get Agent Category (used for Stream routing and grouping).

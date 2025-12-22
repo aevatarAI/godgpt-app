@@ -75,7 +75,7 @@ public sealed class AgentMakerExecutor : IMakerExecutor
         try
         {
             // Step 1: Create Coordinator Actor
-            coordinatorActor = await _actorFactory.CreateGAgentActorAsync<MakerCoordinatorGAgent>(executionId, ct);
+            coordinatorActor = await _actorFactory.CreateGAgentActorAsync<MakerCoordinatorGAgent>(executionId.ToString(), ct);
             _logger.LogDebug("Created coordinator actor {CoordinatorId}", executionId);
 
             // Step 2: Inject dependencies into coordinator via GetAgent()
@@ -114,7 +114,7 @@ public sealed class AgentMakerExecutor : IMakerExecutor
             // Note: Workers automatically benefit from LLM resilience built into Provider
             for (var i = 0; i < workerCount; i++)
             {
-                var workerId = Guid.NewGuid();
+                var workerId = Guid.NewGuid().ToString();
                 var workerActor = await _actorFactory.CreateGAgentActorAsync<MakerWorkerGAgent>(workerId, ct);
                 
                 // Establish parent-child relationship via ActorHierarchyCoordinator

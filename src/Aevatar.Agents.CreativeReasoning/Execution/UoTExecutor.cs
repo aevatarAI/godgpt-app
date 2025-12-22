@@ -84,7 +84,7 @@ public class UoTExecutor : IUoTExecutor
 
         try
         {
-            var coordinatorActor = await _actorFactory.CreateGAgentActorAsync<UoTCoordinatorGAgent>(executionId, ct);
+            var coordinatorActor = await _actorFactory.CreateGAgentActorAsync<UoTCoordinatorGAgent>(executionId.ToString(), ct);
             var coordinator = coordinatorActor.GetAgent() as UoTCoordinatorGAgent
                 ?? throw new InvalidOperationException("Failed to get UoTCoordinatorGAgent");
 
@@ -180,7 +180,7 @@ public class UoTExecutor : IUoTExecutor
 
         try
         {
-            var coordinatorActor = await _actorFactory.CreateGAgentActorAsync<EUoTCoordinatorGAgent>(executionId, ct);
+            var coordinatorActor = await _actorFactory.CreateGAgentActorAsync<EUoTCoordinatorGAgent>(executionId.ToString(), ct);
             var coordinator = coordinatorActor.GetAgent() as EUoTCoordinatorGAgent
                 ?? throw new InvalidOperationException("Failed to get EUoTCoordinatorGAgent");
 
@@ -277,7 +277,7 @@ public class UoTExecutor : IUoTExecutor
 
         try
         {
-            var coordinatorActor = await _actorFactory.CreateGAgentActorAsync<TUoTCoordinatorGAgent>(executionId, ct);
+            var coordinatorActor = await _actorFactory.CreateGAgentActorAsync<TUoTCoordinatorGAgent>(executionId.ToString(), ct);
             var coordinator = coordinatorActor.GetAgent() as TUoTCoordinatorGAgent
                 ?? throw new InvalidOperationException("Failed to get TUoTCoordinatorGAgent");
 

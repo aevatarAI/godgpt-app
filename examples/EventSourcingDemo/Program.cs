@@ -43,7 +43,7 @@ Console.WriteLine("════════════════════�
 
 // 使用 AIGAgentFactory 创建 Agent（自动注入 EventStore）
 var factory = serviceProvider.GetRequiredService<Aevatar.Agents.Abstractions.IGAgentFactory>();
-var agentId = Guid.NewGuid();
+var agentId = Guid.NewGuid().ToString();
 var agent = factory.CreateGAgent<BankAccountAgent>(agentId);
 
 if (agent == null)

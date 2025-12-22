@@ -406,7 +406,7 @@ public class PerformanceTests(CoreTestFixture fixture, ITestOutputHelper output)
         }
 
         public async Task<string> SendToAsync<TEvent>(
-            Guid targetAgentId,
+            string targetAgentId,
             TEvent evt,
             EventDirection onArrivalDirection = EventDirection.Unspecified,
             CancellationToken ct = default,

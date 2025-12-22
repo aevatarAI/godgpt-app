@@ -23,7 +23,7 @@ public class P2PTestAgent : GAgentBase<P2PAgentState>
     /// <summary>
     /// Pure P2P send: only target agent processes
     /// </summary>
-    public async Task<string> SendDirectMessageAsync(Guid targetId, string content)
+    public async Task<string> SendDirectMessageAsync(string targetId, string content)
     {
         var message = new DirectMessage
         {
@@ -41,7 +41,7 @@ public class P2PTestAgent : GAgentBase<P2PAgentState>
     /// <summary>
     /// P2P + group broadcast: target receives then broadcasts to its children
     /// </summary>
-    public async Task<string> SendToGroupAsync(Guid coordinatorId, string content)
+    public async Task<string> SendToGroupAsync(string coordinatorId, string content)
     {
         var message = new DirectMessage
         {
@@ -59,7 +59,7 @@ public class P2PTestAgent : GAgentBase<P2PAgentState>
     /// <summary>
     /// P2P + upward propagation: target receives then continues reporting up
     /// </summary>
-    public async Task<string> SendWithUpPropagationAsync(Guid targetId, string content)
+    public async Task<string> SendWithUpPropagationAsync(string targetId, string content)
     {
         var message = new DirectMessage
         {

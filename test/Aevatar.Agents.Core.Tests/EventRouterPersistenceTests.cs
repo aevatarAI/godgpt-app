@@ -13,8 +13,8 @@ public class EventRouterPersistenceTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         var router = new EventRouter(
             agentId,
@@ -37,8 +37,8 @@ public class EventRouterPersistenceTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         var router = new EventRouter(
             agentId,
@@ -63,8 +63,8 @@ public class EventRouterPersistenceTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var parentId = Guid.NewGuid().ToString();
 
         var router = new EventRouter(
             agentId,
@@ -87,8 +87,8 @@ public class EventRouterPersistenceTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var parentId = Guid.NewGuid().ToString();
 
         var router = new EventRouter(
             agentId,
@@ -113,16 +113,16 @@ public class EventRouterPersistenceTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
-        var child1Id = Guid.NewGuid();
-        var child2Id = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var parentId = Guid.NewGuid().ToString();
+        var child1Id = Guid.NewGuid().ToString();
+        var child2Id = Guid.NewGuid().ToString();
 
         // Pre-populate store
         var hierarchy = new EventRouterHierarchy
         {
             ParentId = parentId,
-            ChildrenIds = new HashSet<Guid> { child1Id, child2Id }
+            ChildrenIds = new HashSet<string> { child1Id, child2Id }
         };
         await store.SaveAsync(agentId, hierarchy);
 
@@ -146,8 +146,8 @@ public class EventRouterPersistenceTests
     public async Task EventRouterWithoutStore_ShouldStillWork()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         var router = new EventRouter(
             agentId,
@@ -169,9 +169,9 @@ public class EventRouterPersistenceTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         // Create first router instance and set up hierarchy
         var router1 = new EventRouter(
@@ -204,12 +204,12 @@ public class EventRouterPersistenceTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
-        var parent1 = Guid.NewGuid();
-        var parent2 = Guid.NewGuid();
-        var child1 = Guid.NewGuid();
-        var child2 = Guid.NewGuid();
-        var child3 = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var parent1 = Guid.NewGuid().ToString();
+        var parent2 = Guid.NewGuid().ToString();
+        var child1 = Guid.NewGuid().ToString();
+        var child2 = Guid.NewGuid().ToString();
+        var child3 = Guid.NewGuid().ToString();
 
         var router = new EventRouter(
             agentId,

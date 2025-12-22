@@ -33,8 +33,8 @@ public class StreamForwardingProjector : IStateProjector
     {
         try
         {
-            // Parse agent ID to get stream
-            if (!Guid.TryParse(wrapper.AgentId, out var agentId))
+            // Validate agent ID
+            if (string.IsNullOrEmpty(wrapper.AgentId))
             {
                 _logger.LogWarning(
                     "Invalid agent ID format: {AgentId}, cannot forward to stream",
@@ -46,7 +46,7 @@ public class StreamForwardingProjector : IStateProjector
             // The actual implementation depends on DI configuration:
             // - LocalMessageStreamProvider (in-memory/Orleans)
             // - MassTransitMessageStreamProvider (RabbitMQ/Kafka)
-            var stream = _streamProvider.GetStream(agentId, StateProjectionCategory);
+            var stream = _streamProvider.GetStream(wrapper.AgentId, StateProjectionCategory);
 
             // Produce the state wrapper to the stream
             await stream.ProduceAsync(wrapper, ct);

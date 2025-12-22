@@ -10,15 +10,15 @@ public class InMemoryEventRouterStoreTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
-        var child1Id = Guid.NewGuid();
-        var child2Id = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var parentId = Guid.NewGuid().ToString();
+        var child1Id = Guid.NewGuid().ToString();
+        var child2Id = Guid.NewGuid().ToString();
 
         var hierarchy = new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy
         {
             ParentId = parentId,
-            ChildrenIds = new HashSet<Guid> { child1Id, child2Id }
+            ChildrenIds = new HashSet<string> { child1Id, child2Id }
         };
 
         // Act
@@ -36,7 +36,7 @@ public class InMemoryEventRouterStoreTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
 
         // Act
         var result = await store.LoadAsync(agentId);
@@ -50,20 +50,20 @@ public class InMemoryEventRouterStoreTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
-        var parent1 = Guid.NewGuid();
-        var parent2 = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var parent1 = Guid.NewGuid().ToString();
+        var parent2 = Guid.NewGuid().ToString();
 
         var hierarchy1 = new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy
         {
             ParentId = parent1,
-            ChildrenIds = new HashSet<Guid>()
+            ChildrenIds = new HashSet<string>()
         };
 
         var hierarchy2 = new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy
         {
             ParentId = parent2,
-            ChildrenIds = new HashSet<Guid>()
+            ChildrenIds = new HashSet<string>()
         };
 
         // Act
@@ -81,11 +81,11 @@ public class InMemoryEventRouterStoreTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var hierarchy = new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy
         {
-            ParentId = Guid.NewGuid(),
-            ChildrenIds = new HashSet<Guid>()
+            ParentId = Guid.NewGuid().ToString(),
+            ChildrenIds = new HashSet<string>()
         };
 
         await store.SaveAsync(agentId, hierarchy);
@@ -103,11 +103,11 @@ public class InMemoryEventRouterStoreTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var hierarchy = new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy
         {
             ParentId = null,
-            ChildrenIds = new HashSet<Guid>()
+            ChildrenIds = new HashSet<string>()
         };
 
         await store.SaveAsync(agentId, hierarchy);
@@ -124,7 +124,7 @@ public class InMemoryEventRouterStoreTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
 
         // Act
         var exists = await store.ExistsAsync(agentId);
@@ -138,21 +138,21 @@ public class InMemoryEventRouterStoreTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        var agent1Id = Guid.NewGuid();
-        var agent2Id = Guid.NewGuid();
-        var parent1 = Guid.NewGuid();
-        var parent2 = Guid.NewGuid();
+        var agent1Id = Guid.NewGuid().ToString();
+        var agent2Id = Guid.NewGuid().ToString();
+        var parent1 = Guid.NewGuid().ToString();
+        var parent2 = Guid.NewGuid().ToString();
 
         var hierarchy1 = new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy
         {
             ParentId = parent1,
-            ChildrenIds = new HashSet<Guid>()
+            ChildrenIds = new HashSet<string>()
         };
 
         var hierarchy2 = new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy
         {
             ParentId = parent2,
-            ChildrenIds = new HashSet<Guid>()
+            ChildrenIds = new HashSet<string>()
         };
 
         // Act
@@ -177,11 +177,11 @@ public class InMemoryEventRouterStoreTests
         // Act - Perform 100 parallel save operations
         for (int i = 0; i < 100; i++)
         {
-            var agentId = Guid.NewGuid();
+            var agentId = Guid.NewGuid().ToString();
             var hierarchy = new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy
             {
-                ParentId = Guid.NewGuid(),
-                ChildrenIds = new HashSet<Guid> { Guid.NewGuid() }
+                ParentId = Guid.NewGuid().ToString(),
+                ChildrenIds = new HashSet<string> { Guid.NewGuid().ToString() }
             };
 
             tasks.Add(store.SaveAsync(agentId, hierarchy));
@@ -199,8 +199,8 @@ public class InMemoryEventRouterStoreTests
     {
         // Arrange
         var store = new InMemoryEventRouterStore();
-        await store.SaveAsync(Guid.NewGuid(), new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy());
-        await store.SaveAsync(Guid.NewGuid(), new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy());
+        await store.SaveAsync(Guid.NewGuid().ToString(), new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy());
+        await store.SaveAsync(Guid.NewGuid().ToString(), new Aevatar.Agents.Abstractions.EventRouting.EventRouterHierarchy());
 
         // Act
         store.Clear();

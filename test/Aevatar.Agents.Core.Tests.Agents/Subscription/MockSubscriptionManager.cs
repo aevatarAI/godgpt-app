@@ -14,7 +14,7 @@ namespace Aevatar.Agents.Core.Tests.Subscription;
 public class MockSubscriptionManager : BaseSubscriptionManager
 {
     private readonly ConcurrentDictionary<Guid, MockStreamSubscription> _mockSubscriptions = new();
-    private readonly ConcurrentDictionary<Guid, Func<EventEnvelope, Task>> _eventHandlers = new();
+    private readonly ConcurrentDictionary<string, Func<EventEnvelope, Task>> _eventHandlers = new();
     
     // 用于测试的控制标志
     public bool ShouldFailOnCreate { get; set; }
@@ -30,8 +30,8 @@ public class MockSubscriptionManager : BaseSubscriptionManager
     }
 
     protected override async Task<IMessageStreamSubscription?> CreateStreamSubscriptionAsync(
-        Guid parentId, 
-        Guid childId, 
+        string parentId, 
+        string childId, 
         Func<EventEnvelope, Task> eventHandler, 
         CancellationToken cancellationToken)
     {
@@ -103,7 +103,7 @@ public class MockSubscriptionManager : BaseSubscriptionManager
     /// <summary>
     /// 模拟发送事件到订阅者（用于测试）
     /// </summary>
-    public async Task SimulateEventAsync(Guid childId, EventEnvelope envelope)
+    public async Task SimulateEventAsync(string childId, EventEnvelope envelope)
     {
         if (_eventHandlers.TryGetValue(childId, out var handler))
         {
@@ -135,12 +135,12 @@ public class MockSubscriptionManager : BaseSubscriptionManager
 public class MockStreamSubscription : IMessageStreamSubscription
 {
     public Guid SubscriptionId { get; }
-    public Guid StreamId { get; }
+    public string StreamId { get; }
     public bool IsActive { get; set; } = true;
     public bool IsUnsubscribed { get; private set; }
     public int UnsubscribeCallCount { get; private set; }
     
-    public MockStreamSubscription(Guid subscriptionId, Guid parentId, Guid childId)
+    public MockStreamSubscription(Guid subscriptionId, string parentId, string childId)
     {
         SubscriptionId = subscriptionId;
         StreamId = parentId; // 使用ParentId作为StreamId

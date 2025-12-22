@@ -16,6 +16,7 @@ using Orleans.Providers.MongoDB.Configuration;
 using Orleans.Providers.MongoDB.StorageProviders.Serializers;
 using Confluent.Kafka;
 using Serilog;
+using Aevatar.Agents.Runtime.Orleans.Stream;
 
 namespace Aevatar.Silo.Extensions;
 
@@ -106,7 +107,7 @@ public static class OrleansHostExtension
             // 6. Configure Streaming (Orleans Memory Stream for now, Kafka later)
             ConfigureStreaming(siloBuilder, configuration);
             
-            // 7. Configure Serializer
+            // 7. Configure Serializer and Stream Factory
             siloBuilder.ConfigureServices(services => 
             {
                 // Orleans internal serializer (for RPC communication)
@@ -118,6 +119,9 @@ public static class OrleansHostExtension
                 // MongoDB GrainStorage serializer: Use Binary (Orleans serializer) instead of JSON
                 // This enables Protobuf binary storage for Grain State, reducing storage size ~30-50%
                 services.AddSingleton<IGrainStateSerializer, BinaryGrainStateSerializer>();
+                
+                // Register OrleansStreamFactory for unified stream creation (Orleans + MassTransit support)
+                services.AddSingleton<OrleansStreamFactory>();
             });
             
             // 8. Logging & Timeouts
@@ -132,20 +136,41 @@ public static class OrleansHostExtension
     }
 
     /// <summary>
-    /// Configure streaming providers (Orleans Memory or Kafka)
+    /// Configure streaming providers based on Streaming.Provider setting
+    /// - "Kafka" → Use Orleans Kafka Stream for agent messaging
+    /// - "MemoryStream" or "OrleansStream" → Use Orleans Memory Stream
+    /// 
+    /// ⚠️ IMPORTANT: MassTransit and Orleans Stream are MUTUALLY EXCLUSIVE!
+    /// When MessageStream.Provider = "MassTransit", Orleans Streaming is completely DISABLED.
+    /// MassTransit handles all message transport via Kafka.
     /// </summary>
     private static void ConfigureStreaming(ISiloBuilder siloBuilder, IConfiguration configuration)
     {
+        // Check if MassTransit is being used for message streaming
+        var messageStreamProvider = configuration.GetSection("MessageStream").GetValue("Provider", "Orleans");
+        var isMassTransitEnabled = messageStreamProvider.Equals("MassTransit", StringComparison.OrdinalIgnoreCase);
+        
+        // ⚠️ MUTUAL EXCLUSION: MassTransit completely replaces Orleans Streaming
+        // When MassTransit is enabled, do NOT configure any Orleans Stream providers
+        if (isMassTransitEnabled)
+        {
+            Log.Information("📡 MessageStream.Provider=MassTransit → Orleans Streaming DISABLED");
+            Log.Information("   MassTransit handles all message transport via Kafka");
+            return; // Skip Orleans Stream configuration entirely
+        }
+        
         var streamConfig = configuration.GetSection("Streaming");
-        var provider = streamConfig.GetValue("Provider", "OrleansStream");
+        var provider = streamConfig.GetValue("Provider", "MemoryStream");
         var providerName = streamConfig.GetValue("ProviderName", "Default");
         
-        if (provider == "Kafka")
+        if (provider.Equals("Kafka", StringComparison.OrdinalIgnoreCase))
         {
+            Log.Information("📡 Streaming.Provider=Kafka → Configuring Orleans Kafka Stream");
             ConfigureKafkaStreaming(siloBuilder, configuration, providerName);
         }
         else
         {
+            Log.Information("📡 Streaming.Provider={Provider} → Configuring Orleans Memory Stream", provider);
             ConfigureOrleansMemoryStreaming(siloBuilder, configuration, providerName);
         }
     }
@@ -208,67 +233,6 @@ public static class OrleansHostExtension
             {
                 options.BrokerList = new List<string> { bootstrapServers };
                 options.ConsumerGroupId = consumerGroupId;
-                
-                // ========== Producer Performance Configuration (Custom Orleans.Streams.Kafka) ==========
-                // NOTE: These properties were removed in Orleans.Streams.Kafka 8.0.3+
-                // Commented out for compatibility with newer versions
-                /*
-                var producerConfig = kafkaConfig.GetSection("Producer");
-                
-                // Acks (None/Leader/All)
-                var acksStr = producerConfig.GetValue<string>("Acks");
-                if (!string.IsNullOrEmpty(acksStr))
-                {
-                    options.ProducerAcks = acksStr.ToLower() switch
-                    {
-                        "none" => Acks.None,
-                        "leader" => Acks.Leader,
-                        "all" => Acks.All,
-                        _ => Acks.Leader
-                    };
-                    Log.Information("   🔧 Producer Acks: {Acks}", options.ProducerAcks);
-                }
-                
-                // LingerMs
-                var lingerMs = producerConfig.GetValue<int?>("LingerMs");
-                if (lingerMs.HasValue)
-                {
-                    options.ProducerLingerMs = lingerMs.Value;
-                    Log.Information("   🔧 Producer LingerMs: {LingerMs}", lingerMs);
-                }
-                
-                // BatchSize
-                var batchSize = producerConfig.GetValue<int?>("BatchSize");
-                if (batchSize.HasValue)
-                {
-                    options.ProducerBatchSize = batchSize.Value;
-                    Log.Information("   🔧 Producer BatchSize: {BatchSize}", batchSize);
-                }
-                
-                // CompressionType
-                var compressionStr = producerConfig.GetValue<string>("CompressionType");
-                if (!string.IsNullOrEmpty(compressionStr))
-                {
-                    options.ProducerCompressionType = compressionStr.ToLower() switch
-                    {
-                        "none" => CompressionType.None,
-                        "gzip" => CompressionType.Gzip,
-                        "snappy" => CompressionType.Snappy,
-                        "lz4" => CompressionType.Lz4,
-                        "zstd" => CompressionType.Zstd,
-                        _ => CompressionType.None
-                    };
-                    Log.Information("   🔧 Producer CompressionType: {CompressionType}", options.ProducerCompressionType);
-                }
-                
-                // MaxInFlight
-                var maxInFlight = producerConfig.GetValue<int?>("MaxInFlight");
-                if (maxInFlight.HasValue)
-                {
-                    options.ProducerMaxInFlight = maxInFlight.Value;
-                    Log.Information("   🔧 Producer MaxInFlight: {MaxInFlight}", maxInFlight);
-                }
-                */
                 
                 // 添加默认 Topic
                 options.AddTopic(defaultNamespace, new Orleans.Streams.Kafka.Config.TopicCreationConfig

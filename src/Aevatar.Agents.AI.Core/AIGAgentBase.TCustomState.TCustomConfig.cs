@@ -22,7 +22,7 @@ public abstract class AIGAgentBase<TCustomState, TCustomConfig> : AIGAgentBase<T
         _customConfigAccessor = new StatePropertyAccessor<TCustomConfig>();
     }
 
-    public AIGAgentBase(Guid id) : base(id)
+    public AIGAgentBase(string id) : base(id)
     {
         _customConfigAccessor = new StatePropertyAccessor<TCustomConfig>();
     }

@@ -5,11 +5,11 @@ namespace Aevatar.Agents.Core.Tests.Agents;
 /// </summary>
 public class ChildTestAgent : GAgentBase<TestAgentState>
 {
-    public Guid? ParentId { get; private set; }
+    public string? ParentId { get; private set; }
     
     public override string GetDescription() => "ChildTestAgent";
     
-    public async Task SetParentIdAsync(Guid parentId)
+    public async Task SetParentIdAsync(string parentId)
     {
         ParentId = parentId;
         await Task.CompletedTask;

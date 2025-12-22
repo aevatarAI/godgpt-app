@@ -26,12 +26,12 @@ public abstract class GAgentActorFactoryBase : IGAgentActorFactory
         _agentFactory = serviceProvider.GetService<IGAgentFactory>();
     }
 
-    public async Task<IGAgentActor> CreateGAgentActorAsync<TAgent>(Guid? id = null, CancellationToken ct = default)
+    public async Task<IGAgentActor> CreateGAgentActorAsync<TAgent>(string? id = null, CancellationToken ct = default)
         where TAgent : IGAgent
     {
-        if (id == null)
+        if (string.IsNullOrEmpty(id))
         {
-            id = Guid.NewGuid();
+            id = Guid.NewGuid().ToString();
         }
 
         var agentType = typeof(TAgent);
@@ -43,7 +43,7 @@ public abstract class GAgentActorFactoryBase : IGAgentActorFactory
             {
                 _logger.LogDebug("Using custom factory for type {AgentType} with id {Id}",
                     agentType.Name, id);
-                return await customFactory(this, id.Value, ct);
+                return await customFactory(this, id, ct);
             }
         }
 
@@ -56,13 +56,13 @@ public abstract class GAgentActorFactoryBase : IGAgentActorFactory
                 $"No IGAgentFactory registered. Cannot create agent of type {agentType.Name}");
         }
 
-        var agent = _agentFactory.CreateGAgent(id.Value, agentType, ct);
+        var agent = _agentFactory.CreateGAgent(id, agentType, ct);
 
         await agent.ActivateAsync(ct);
 
         // Template Method Pattern:
         // 1. Create uninitialized actor instance (implemented by subclasses)
-        var actor = await CreateActorInstanceAsync(agent, id.Value, ct);
+        var actor = await CreateActorInstanceAsync(agent, id, ct);
 
         // 2. Inject dependencies (Logger, EventRouterFactory, StateProjector)
         LoggerInjector.InjectLogger(actor, _serviceProvider);
@@ -79,6 +79,6 @@ public abstract class GAgentActorFactoryBase : IGAgentActorFactory
     /// Create an uninitialized Actor instance for the Agent
     /// Subclasses should only create the instance, dependency injection and activation are handled by the base class
     /// </summary>
-    protected abstract Task<IGAgentActor> CreateActorInstanceAsync(IGAgent agent, Guid id,
+    protected abstract Task<IGAgentActor> CreateActorInstanceAsync(IGAgent agent, string id,
         CancellationToken ct = default);
 }

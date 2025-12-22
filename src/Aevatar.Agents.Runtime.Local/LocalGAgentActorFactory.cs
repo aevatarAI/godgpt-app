@@ -30,7 +30,7 @@ public class LocalGAgentActorFactory : GAgentActorFactoryBase
         _loggerFactory = loggerFactory;
     }
 
-    protected override Task<IGAgentActor> CreateActorInstanceAsync(IGAgent agent, Guid id,
+    protected override Task<IGAgentActor> CreateActorInstanceAsync(IGAgent agent, string id,
         CancellationToken ct = default)
     {
         if (_streamRegistry.StreamExists(id))

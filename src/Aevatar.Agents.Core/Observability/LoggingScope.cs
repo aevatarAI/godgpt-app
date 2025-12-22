@@ -13,7 +13,7 @@ public static class LoggingScope
     /// </summary>
     public static IDisposable CreateAgentScope(
         ILogger logger,
-        Guid agentId,
+        string agentId,
         string operation,
         Dictionary<string, object>? additionalData = null)
     {
@@ -39,7 +39,7 @@ public static class LoggingScope
     /// </summary>
     public static IDisposable CreateEventHandlingScope(
         ILogger logger,
-        Guid agentId,
+        string agentId,
         string eventId,
         string eventType,
         string? correlationId = null)

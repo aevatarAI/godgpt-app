@@ -27,10 +27,13 @@ public abstract class GAgentBase : IGAgent
     // ============ Fields ============
 
     /// <summary>
-    /// Agent unique identifier
-    /// Can be set internally by factories for recovery scenarios
+    /// Agent unique identifier.
+    /// Format varies by runtime:
+    /// - Orleans: "AgentType:Guid" (e.g., "ChatAgent:12345678-...")
+    /// - Local/Proto: "Guid" (e.g., "12345678-...")
+    /// Can be set internally by factories for recovery scenarios.
     /// </summary>
-    public Guid Id { get; internal set; }
+    public string Id { get; internal set; } = string.Empty;
 
     /// <summary>
     /// Event publisher for sending events
@@ -164,13 +167,13 @@ public abstract class GAgentBase : IGAgent
     /// </summary>
     public GAgentBase()
     {
-        Id = Guid.NewGuid();
+        Id = Guid.NewGuid().ToString();
     }
 
     /// <summary>
     /// Constructor with specific ID
     /// </summary>
-    public GAgentBase(Guid id)
+    public GAgentBase(string id)
     {
         Id = id;
     }
@@ -271,17 +274,17 @@ public abstract class GAgentBase : IGAgent
 
             // Record publish metrics
             stopwatch.Stop();
-            AgentMetrics.RecordEventPublished(typeof(TEvent).Name, Id.ToString());
+            AgentMetrics.RecordEventPublished(typeof(TEvent).Name, Id);
             AgentMetrics.EventPublishLatency.Record(stopwatch.ElapsedMilliseconds,
                 new KeyValuePair<string, object?>("event.type", typeof(TEvent).Name),
-                new KeyValuePair<string, object?>("agent.id", Id.ToString()));
+                new KeyValuePair<string, object?>("agent.id", Id));
 
             return eventId;
         }
         catch (Exception ex)
         {
             // Record exception metrics
-            AgentMetrics.RecordException(ex.GetType().Name, Id.ToString(), "PublishEvent");
+            AgentMetrics.RecordException(ex.GetType().Name, Id, "PublishEvent");
             throw;
         }
     }
@@ -290,7 +293,7 @@ public abstract class GAgentBase : IGAgent
     /// Point-to-point send - Direct delivery mode.
     /// Sends directly to specified agent, bypassing hierarchical broadcast.
     /// </summary>
-    /// <param name="targetAgentId">Target agent ID</param>
+    /// <param name="targetAgentId">Target agent ID (format varies by runtime)</param>
     /// <param name="evt">Event message</param>
     /// <param name="onArrivalDirection">
     /// Propagation direction after arrival:
@@ -303,7 +306,7 @@ public abstract class GAgentBase : IGAgent
     /// <typeparam name="TEvent">Event type</typeparam>
     /// <returns>Event ID</returns>
     protected async Task<string> SendToAsync<TEvent>(
-        Guid targetAgentId,
+        string targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
         CancellationToken ct = default)
@@ -322,10 +325,10 @@ public abstract class GAgentBase : IGAgent
 
             // Record send metrics
             stopwatch.Stop();
-            AgentMetrics.RecordEventPublished(typeof(TEvent).Name, Id.ToString());
+            AgentMetrics.RecordEventPublished(typeof(TEvent).Name, Id);
             AgentMetrics.EventPublishLatency.Record(stopwatch.ElapsedMilliseconds,
                 new KeyValuePair<string, object?>("event.type", typeof(TEvent).Name),
-                new KeyValuePair<string, object?>("agent.id", Id.ToString()),
+                new KeyValuePair<string, object?>("agent.id", Id),
                 new KeyValuePair<string, object?>("mode", "point-to-point"));
 
             return eventId;
@@ -333,7 +336,7 @@ public abstract class GAgentBase : IGAgent
         catch (Exception ex)
         {
             // Record exception metrics
-            AgentMetrics.RecordException(ex.GetType().Name, Id.ToString(), "SendToEvent");
+            AgentMetrics.RecordException(ex.GetType().Name, Id, "SendToEvent");
             throw;
         }
     }
@@ -487,7 +490,7 @@ public abstract class GAgentBase : IGAgent
                 Logger.LogError(ex, "Error handling event in {Handler}", handler.Method.Name);
 
                 // Record exception metrics
-                AgentMetrics.RecordException(ex.GetType().Name, Id.ToString(), $"HandleEvent:{handler.Method.Name}");
+                AgentMetrics.RecordException(ex.GetType().Name, Id, $"HandleEvent:{handler.Method.Name}");
 
                 // Publish exception event
                 await PublishExceptionEventAsync(envelope, handler.Method.Name, ex);
@@ -500,14 +503,14 @@ public abstract class GAgentBase : IGAgent
         stopwatch.Stop();
         if (handled)
         {
-            AgentMetrics.RecordEventHandled(eventType, Id.ToString(), stopwatch.ElapsedMilliseconds);
+            AgentMetrics.RecordEventHandled(eventType, Id, stopwatch.ElapsedMilliseconds);
         }
         else
         {
             // No handler processed this event
             AgentMetrics.EventsDropped.Add(1,
                 new KeyValuePair<string, object?>("event.type", eventType),
-                new KeyValuePair<string, object?>("agent.id", Id.ToString()));
+                new KeyValuePair<string, object?>("agent.id", Id));
         }
     }
 
@@ -517,7 +520,7 @@ public abstract class GAgentBase : IGAgent
     private bool ShouldHandleEvent(EventHandlerMetadata handler, EventEnvelope envelope)
     {
         // If self-handling is not allowed and publisher is self, skip
-        if (!handler.AllowSelfHandling && envelope.PublisherId == Id.ToString())
+        if (!handler.AllowSelfHandling && envelope.PublisherId == Id)
         {
             return false;
         }
@@ -597,7 +600,7 @@ public abstract class GAgentBase : IGAgent
 
             var exceptionEvent = new EventHandlerExceptionEvent
             {
-                AgentId = Id.ToString(),
+                AgentId = Id,
                 EventId = originalEnvelope.Id,
                 HandlerName = handlerName,
                 EventType = originalEnvelope.Payload?.TypeUrl ?? "Unknown",
@@ -630,7 +633,7 @@ public abstract class GAgentBase : IGAgent
 
             var exceptionEvent = new GAgentBaseExceptionEvent
             {
-                AgentId = Id.ToString(),
+                AgentId = Id,
                 Operation = operation,
                 ExceptionMessage = ExceptionFormatter.BuildFullExceptionMessage(exception),
                 StackTrace = exception.StackTrace ?? string.Empty,

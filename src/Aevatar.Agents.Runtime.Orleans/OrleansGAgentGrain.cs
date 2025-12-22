@@ -4,6 +4,7 @@ using Aevatar.Agents.Abstractions.CQRS;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.Core.Helpers;
 using Aevatar.Agents.Core.Rpc;
+using Aevatar.Agents.Runtime.Orleans.Stream;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
@@ -36,26 +37,26 @@ public class OrleansAgentState
     /// Agent 的唯一标识
     /// </summary>
     [Id(1)]
-    public Guid AgentId { get; set; }
+    public string AgentId { get; set; } = string.Empty;
 
     /// <summary>
     /// 父节点 ID
     /// </summary>
     [Id(2)]
-    public Guid? ParentId { get; set; }
+    public string? ParentId { get; set; }
 
     /// <summary>
     /// 子节点 ID 列表
     /// </summary>
     [Id(3)]
-    public List<Guid> Children { get; set; } = new();
+    public List<string> Children { get; set; } = new();
 
     public OrleansAgentState() { }
 
-    public OrleansAgentState(Guid? parentId = null)
+    public OrleansAgentState(string? parentId = null)
     {
         ParentId = parentId;
-        Children = new List<Guid>();
+        Children = new List<string>();
     }
 }
 
@@ -77,10 +78,12 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
     private IGAgent? _agent;
     private bool _isInitialized;
 
-    // Orleans Stream
-    private IStreamProvider? _streamProvider;
-    private IAsyncStream<byte[]>? _myStream;
-    private StreamSubscriptionHandle<byte[]>? _streamSubscription;
+    // Unified Message Stream (可以是 Orleans Stream 或 MassTransit Stream)
+    private IMessageStream? _myStream;
+    private IMessageStreamSubscription? _streamSubscription;
+
+    // Stream Factory - 统一管理 Stream 创建逻辑
+    private OrleansStreamFactory? _streamFactory;
 
     // Logger
     private ILogger<OrleansGAgentGrain> _logger = NullLogger<OrleansGAgentGrain>.Instance;
@@ -101,11 +104,16 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
         _logger.LogInformation("🚀 Activating OrleansGAgentGrain {GrainId}", this.GetGrainId());
 
-        // Initialize Stream
+        // Initialize Stream Factory - 统一管理 Orleans/MassTransit Stream 选择逻辑
+        // Factory 会从 DI 获取 IMessageStreamProvider (MassTransit) 和配置
+        _streamFactory = ServiceProvider.GetService<OrleansStreamFactory>()
+            ?? ActivatorUtilities.CreateInstance<OrleansStreamFactory>(ServiceProvider);
+
+        // Initialize Stream (根据配置选择 Orleans Stream 或 MassTransit)
         await InitializeStreamAsync();
 
         // Restore Agent if previously initialized
-        if (!string.IsNullOrEmpty(_grainState.State.AgentTypeName) && _grainState.State.AgentId != Guid.Empty)
+        if (!string.IsNullOrEmpty(_grainState.State.AgentTypeName) && !string.IsNullOrEmpty(_grainState.State.AgentId))
         {
             _logger.LogInformation("Restoring Agent from persisted state: {AgentType}, AgentId: {AgentId}", 
                 _grainState.State.AgentTypeName, _grainState.State.AgentId);
@@ -132,12 +140,13 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
             }
         }
 
-        // Unsubscribe Stream
+        // Unsubscribe from unified Stream
         if (_streamSubscription != null)
         {
             try
             {
                 await _streamSubscription.UnsubscribeAsync();
+                _streamSubscription = null;
             }
             catch (Exception ex)
             {
@@ -148,27 +157,169 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         await base.OnDeactivateAsync(reason, cancellationToken);
     }
 
+    /// <summary>
+    /// Initialize Stream - 根据配置选择 Orleans Stream 或 MassTransit Stream
+    /// 与 LocalGAgentActor 保持一致的配置驱动模式
+    /// 
+    /// StreamId format: Full GrainKey (AgentTypeShortName:AgentId)
+    /// This ensures consistency with Client Actor stream addressing.
+    /// </summary>
     private async Task InitializeStreamAsync()
     {
-        var streamingOptions = ServiceProvider.GetService<IOptions<StreamingOptions>>();
-        var streamNamespace = streamingOptions?.Value?.DefaultStreamNamespace ?? AevatarAgentsOrleansConstants.StreamNamespace;
-        var streamProviderName = streamingOptions?.Value?.StreamProviderName ?? AevatarAgentsOrleansConstants.StreamProviderName;
-
         try
         {
-            _streamProvider = this.GetStreamProvider(streamProviderName);
-            var streamId = StreamId.Create(streamNamespace, this.GetPrimaryKeyString());
-            _myStream = _streamProvider.GetStream<byte[]>(streamId);
+            if (_streamFactory == null)
+            {
+                _logger.LogWarning("StreamFactory not initialized for Grain {GrainId}", this.GetGrainId());
+                return;
+            }
 
-            // Subscribe to stream for event handling
-            _streamSubscription = await _myStream.SubscribeAsync(OnStreamEventReceivedAsync);
+            // Use full GrainKey as StreamId for consistency with Client Actor
+            var grainKey = this.GetPrimaryKeyString();
 
-            _logger.LogDebug("Successfully subscribed to stream for Grain {GrainId}", this.GetGrainId());
+            // 使用 Factory 统一创建 Stream (自动选择 Orleans/MassTransit)
+            // Use full GrainKey (AgentType:AgentId) as streamId
+            _myStream = await _streamFactory.CreateStreamAsync(
+                grainKey,  // Full GrainKey format: AgentTypeShortName:AgentId
+                null,
+                this.GetStreamProvider);
+
+            var providerType = _streamFactory.DetermineProviderType();
+            _logger.LogInformation("📡 Using {ProviderType} Stream for Grain {GrainId}, StreamKey={StreamKey}",
+                providerType, this.GetGrainId(), grainKey);
+
+            // Subscribe to stream for external event handling
+            if (_myStream != null)
+            {
+                _streamSubscription = await _myStream.SubscribeAsync<EventEnvelope>(
+                    OnStreamEventReceivedAsync,
+                    null,
+                    CancellationToken.None);
+                _logger.LogDebug("Successfully subscribed to stream for Grain {GrainId}", this.GetGrainId());
+            }
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to initialize streams for Grain {GrainId}", this.GetGrainId());
         }
+    }
+    #endregion
+
+    #region Stream-based Message Sending
+
+    /// <summary>
+    /// Send event to target Agent via Stream (non-blocking, async)
+    /// 
+    /// 优势（相比 RPC）：
+    /// 1. 非阻塞：发送后立即返回，不等待目标处理
+    /// 2. 顺序保证：Kafka 分区内消息顺序有保证
+    /// 3. 解耦：发送者和接收者完全解耦
+    /// 4. 弹性：接收者不可用时消息在队列中缓存
+    /// </summary>
+    private async Task SendEventToStreamAsync(string targetAgentId, EventEnvelope envelope, CancellationToken ct)
+    {
+        try
+        {
+            var targetStream = GetTargetStream(targetAgentId);
+            if (targetStream == null)
+            {
+                _logger.LogWarning("Cannot get stream for target Agent {TargetId}", targetAgentId);
+                return;
+            }
+
+            _logger.LogDebug("📤 Sending event {EventId} to Agent {TargetId} via Stream", 
+                envelope.Id, targetAgentId);
+            await targetStream.ProduceAsync(envelope, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to send event {EventId} to Agent {TargetId} via Stream", 
+                envelope.Id, targetAgentId);
+        }
+    }
+
+    /// <summary>
+    /// Get target Agent's stream
+    /// 使用 Factory 统一创建（自动选择 MassTransit 或 Orleans Stream）
+    /// </summary>
+    private IMessageStream? GetTargetStream(string targetAgentId)
+    {
+        if (_streamFactory == null)
+        {
+            _logger.LogWarning("StreamFactory not initialized, cannot get target stream for Agent {TargetId}", targetAgentId);
+            return null;
+        }
+
+        try
+        {
+            // Extract category from targetAgentId (format: AgentTypeShortName:AgentId)
+            // Category is needed for MassTransit TopicMapping (e.g., "TypeAAgent" -> "AevatarAgents-TypeA")
+            string? agentCategory = null;
+            var colonIndex = targetAgentId.IndexOf(':');
+            if (colonIndex > 0)
+            {
+                agentCategory = targetAgentId.Substring(0, colonIndex);
+            }
+            
+            // 使用 Factory 创建目标 Agent 的 Stream (同步获取，因为 Factory.CreateStreamAsync 本质上是同步的)
+            return _streamFactory.CreateStreamAsync(targetAgentId, agentCategory, this.GetStreamProvider).GetAwaiter().GetResult();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to get stream for target Agent {TargetId}", targetAgentId);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Propagate event to Parent/Children based on Direction via Stream (non-blocking)
+    /// 
+    /// 所有传播都通过 Stream 完成，不使用 RPC，避免阻塞
+    /// </summary>
+    private async Task PropagateEventAsync(EventEnvelope envelope, CancellationToken ct)
+    {
+        switch (envelope.Direction)
+        {
+            case EventDirection.Down:
+                await SendToChildrenViaStreamAsync(envelope, ct);
+                break;
+            case EventDirection.Up:
+                await SendToParentViaStreamAsync(envelope, ct);
+                break;
+            case EventDirection.Both:
+                // 并行发送，不等待
+                var downTask = SendToChildrenViaStreamAsync(envelope, ct);
+                var upTask = SendToParentViaStreamAsync(envelope, ct);
+                await Task.WhenAll(downTask, upTask);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Send event to all children via Stream (parallel, non-blocking)
+    /// </summary>
+    private async Task SendToChildrenViaStreamAsync(EventEnvelope envelope, CancellationToken ct)
+    {
+        var children = _grainState.State.Children;
+        if (children.Count == 0) return;
+
+        _logger.LogDebug("📤 Broadcasting event {EventId} to {ChildCount} children via Stream", 
+            envelope.Id, children.Count);
+        var tasks = children.Select(childId => SendEventToStreamAsync(childId, envelope, ct));
+        await Task.WhenAll(tasks);
+    }
+
+    /// <summary>
+    /// Send event to parent via Stream (non-blocking)
+    /// </summary>
+    private async Task SendToParentViaStreamAsync(EventEnvelope envelope, CancellationToken ct)
+    {
+        var parentId = _grainState.State.ParentId;
+        if (string.IsNullOrEmpty(parentId)) return;
+
+        _logger.LogDebug("📤 Sending event {EventId} to parent {ParentId} via Stream", 
+            envelope.Id, parentId);
+        await SendEventToStreamAsync(parentId, envelope, ct);
     }
 
     #endregion
@@ -183,7 +334,7 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         //
         // Always extract AgentId from the Grain key for consistency.
         var grainKey = this.GetPrimaryKeyString();
-        var agentId = ExtractAgentIdFromGrainKey(grainKey);
+        var agentId = ExtractAgentIdFromGrainKey(grainKey).ToString();
         return InitializeAgentInternalAsync(agentTypeName, agentId, persistState: true);
     }
 
@@ -203,11 +354,10 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         return Guid.Parse(grainKey);
     }
 
-    private async Task<bool> InitializeAgentInternalAsync(string agentTypeName, Guid agentId, bool persistState = false)
+    private async Task<bool> InitializeAgentInternalAsync(string agentTypeName, string agentId, bool persistState = false)
     {
         if (_isInitialized && _agent != null)
         {
-            _logger.LogDebug("Agent already initialized in Grain {GrainId}", this.GetGrainId());
             return true;
         }
 
@@ -288,7 +438,7 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         return null;
     }
 
-    private IGAgent? CreateAgentInstance(System.Type agentType, Guid agentId)
+    private IGAgent? CreateAgentInstance(System.Type agentType, string agentId)
     {
         try
         {
@@ -324,7 +474,7 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         }
     }
 
-    private void SetAgentId(IGAgent agent, Guid id)
+    private void SetAgentId(IGAgent agent, string id)
     {
         // Find Id property in base class hierarchy
         var type = agent.GetType();
@@ -374,12 +524,12 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         }
 
         // Inject EventPublisher (Grain acts as the publisher)
-        AgentEventPublisherInjector.InjectEventPublisher(agent, new GrainEventPublisher(this, _myStream, _logger, GrainFactory));
+        // 支持广播传播和点对点发送 (全部通过 Stream，非阻塞)
+        AgentEventPublisherInjector.InjectEventPublisher(agent, new GrainEventPublisher(this, _myStream, _streamFactory, _logger));
 
         // Inject ActorFactory (for Agents that need to create child Agents)
         InjectActorFactory(agent);
 
-        _logger.LogDebug("Injected dependencies into Agent {AgentId}", agent.Id);
     }
 
     private void InjectActorFactory(IGAgent agent)
@@ -401,7 +551,6 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         }
 
         actorFactoryProperty.SetValue(agent, actorFactory);
-        _logger.LogDebug("Successfully injected ActorFactory into Agent {AgentType}", agentType.Name);
     }
 
     public Task<bool> IsInitializedAsync()
@@ -424,7 +573,13 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
     #region Event Handling
 
     /// <summary>
-    /// Handle event - Execute business logic in Silo
+    /// Handle event - Execute business logic in Silo and route based on Direction
+    /// 
+    /// 事件流处理流程:
+    /// 1. Agent 处理事件 (唯一调用点)
+    /// 2. 根据 Direction 传播到 Parent/Children (通过 Stream，非阻塞)
+    ///    - 有子节点才发 Down
+    ///    - 有父节点才发 Up
     /// </summary>
     public async Task HandleEventAsync(byte[] envelopeBytes)
     {
@@ -443,17 +598,15 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         try
         {
             var envelope = EventEnvelope.Parser.ParseFrom(envelopeBytes);
-            _logger.LogDebug("🔥 Grain {GrainId} handling event {EventId} in Silo", 
-                this.GetGrainId(), envelope.Id);
+            _logger.LogInformation("🔥 Grain {GrainId} handling event {EventId} with Direction {Direction}", 
+                this.GetGrainId(), envelope.Id, envelope.Direction);
 
-            // ✅ Execute business logic in Silo!
+            // ✅ Step 1: Execute business logic in Silo (唯一调用点)
             await _agent.HandleEventAsync(envelope, CancellationToken.None);
-
-            // Broadcast to stream (for children)
-            if (_myStream != null)
-            {
-                await _myStream.OnNextAsync(envelopeBytes);
-            }
+            
+            // ✅ Step 2: Direction-based propagation via Stream (非阻塞)
+            // 只有当有订阅者（Parent/Children）时才传播
+            await PropagateEventAsync(envelope, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -463,24 +616,43 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
     }
 
     /// <summary>
-    /// Stream callback - Handle events from stream subscription
+    /// Stream callback - Handle events from Stream (MassTransit/Orleans Stream)
+    /// 
+    /// 用于接收来自 Stream 的事件：
+    /// 1. 外部系统的事件输入 (如 MassTransit Kafka)
+    /// 2. 其他 Agent 通过 Stream 发送的事件
     /// </summary>
-    private async Task OnStreamEventReceivedAsync(byte[] envelopeBytes, StreamSequenceToken? token)
+    private async Task OnStreamEventReceivedAsync(EventEnvelope envelope)
     {
-        // Events from stream are already handled by HandleEventAsync via RPC
-        // This callback is for child agents subscribing to parent's stream
-        if (_logger.IsEnabled(LogLevel.Debug))
+        if (_agent == null)
         {
-            try
+            _logger.LogDebug("Agent not initialized, skipping stream event in Grain {GrainId}", this.GetGrainId());
+            return;
+        }
+
+        try
+        {
+            // 跳过自己发布的事件 (避免重复处理)
+            var grainKey = this.GetPrimaryKeyString();
+            if (envelope.PublisherId == grainKey)
             {
-                var envelope = EventEnvelope.Parser.ParseFrom(envelopeBytes);
-                _logger.LogDebug("Grain {GrainId} stream received event {EventId}", 
-                    this.GetGrainId(), envelope.Id);
+                _logger.LogDebug("Skipping self-published event {EventId} from stream in Grain {GrainId}", 
+                    envelope.Id, this.GetGrainId());
+                return;
             }
-            catch
-            {
-                // Ignore parse errors in debug logging
-            }
+            
+            _logger.LogDebug("Grain {GrainId} processing external event {EventId} from stream", 
+                this.GetGrainId(), envelope.Id);
+
+            // 外部事件：执行业务逻辑并传播
+            await _agent.HandleEventAsync(envelope, CancellationToken.None);
+            
+            // 如果有 Direction，继续传播
+            await PropagateEventAsync(envelope, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error processing stream event in Grain {GrainId}", this.GetGrainId());
         }
     }
 
@@ -488,21 +660,21 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
     #region Hierarchy Management
 
-    public Task<Guid> GetIdAsync()
+    public Task<string> GetIdAsync()
     {
         var grainKey = this.GetPrimaryKeyString();
         try
         {
-            return Task.FromResult(ExtractAgentIdFromGrainKey(grainKey));
+            return Task.FromResult(ExtractAgentIdFromGrainKey(grainKey).ToString());
         }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Failed to parse AgentId from Grain key '{GrainKey}'", grainKey);
-            return Task.FromResult(Guid.Empty);
+            return Task.FromResult(string.Empty);
         }
     }
 
-    public async Task AddChildAsync(Guid childId)
+    public async Task AddChildAsync(string childId)
     {
         if (!_grainState.State.Children.Contains(childId))
         {
@@ -512,7 +684,7 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         }
     }
 
-    public async Task RemoveChildAsync(Guid childId)
+    public async Task RemoveChildAsync(string childId)
     {
         if (_grainState.State.Children.Remove(childId))
         {
@@ -521,7 +693,7 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         }
     }
 
-    public async Task SetParentAsync(Guid parentId)
+    public async Task SetParentAsync(string parentId)
     {
         if (_grainState.State.ParentId != parentId)
         {
@@ -533,7 +705,7 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
     public async Task ClearParentAsync()
     {
-        if (_grainState.State.ParentId.HasValue)
+        if (!string.IsNullOrEmpty(_grainState.State.ParentId))
         {
             _grainState.State.ParentId = null;
             await _grainState.WriteStateAsync();
@@ -541,36 +713,25 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         }
     }
 
-    public Task<IReadOnlyList<Guid>> GetChildrenAsync()
+    public Task<IReadOnlyList<string>> GetChildrenAsync()
     {
-        return Task.FromResult<IReadOnlyList<Guid>>(_grainState.State.Children.AsReadOnly());
+        return Task.FromResult<IReadOnlyList<string>>(_grainState.State.Children.AsReadOnly());
     }
 
-    public Task<Guid?> GetParentAsync()
+    public Task<string?> GetParentAsync()
     {
         return Task.FromResult(_grainState.State.ParentId);
     }
 
     #endregion
 
-    #region Legacy Methods
+    #region Interface Required Methods
 
-    [Obsolete("Use InitializeAgentAsync(agentTypeName) instead")]
+    [Obsolete("Use InitializeAgentAsync instead")]
     public Task ActivateAsync(string? agentTypeName = null, string? stateTypeName = null)
-    {
-        throw new NotSupportedException(
-            "ActivateAsync is obsolete. Use InitializeAgentAsync(agentTypeName) instead.");
-    }
+        => throw new NotSupportedException("Use InitializeAgentAsync instead");
 
-    public Task DeactivateAsync()
-    {
-        _logger.LogInformation("Grain {GrainId} deactivate requested", this.GetGrainId());
-        return Task.CompletedTask;
-    }
-
-    #endregion
-
-    #region RPC Method Invocation
+    public Task DeactivateAsync() => Task.CompletedTask;
 
     /// <summary>
     /// Protobuf RPC method invocation - delegates to shared RpcInvoker
@@ -588,25 +749,28 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
 /// <summary>
 /// IEventPublisher implementation for Grain
-/// Publishes events through Orleans Stream
+/// 
+/// 支持两种发送方式 (全部通过 Stream，非阻塞):
+/// 1. 广播传播: PublishEventAsync(event, Direction) - 基于层级关系
+/// 2. 点对点:   SendToAsync(targetId, event) - 直接发给指定 Agent
 /// </summary>
 internal class GrainEventPublisher : IEventPublisher
 {
     private readonly OrleansGAgentGrain _grain;
-    private readonly IAsyncStream<byte[]>? _stream;
+    private readonly IMessageStream? _stream;
+    private readonly OrleansStreamFactory? _streamFactory;
     private readonly ILogger _logger;
-    private readonly IGrainFactory _grainFactory;
 
     public GrainEventPublisher(
         OrleansGAgentGrain grain, 
-        IAsyncStream<byte[]>? stream, 
-        ILogger logger,
-        IGrainFactory grainFactory)
+        IMessageStream? stream,
+        OrleansStreamFactory? streamFactory,
+        ILogger logger)
     {
         _grain = grain;
         _stream = stream;
+        _streamFactory = streamFactory;
         _logger = logger;
-        _grainFactory = grainFactory;
     }
 
     public async Task<string> PublishEventAsync<TEvent>(
@@ -635,12 +799,8 @@ internal class GrainEventPublisher : IEventPublisher
 
         if (_stream != null)
         {
-            // Serialize and publish to stream
-            using var memStream = new MemoryStream();
-            using var codedOutput = new CodedOutputStream(memStream);
-            envelope.WriteTo(codedOutput);
-            codedOutput.Flush();
-            await _stream.OnNextAsync(memStream.ToArray());
+            // Publish through unified IMessageStream (handles serialization internally)
+            await _stream.ProduceAsync(envelope, ct);
         }
         else
         {
@@ -651,8 +811,11 @@ internal class GrainEventPublisher : IEventPublisher
         return envelope.Id;
     }
 
+    /// <summary>
+    /// 点对点发送 - 直接发送到指定 Agent 的 Stream (非阻塞)
+    /// </summary>
     public async Task<string> SendToAsync<TEvent>(
-        Guid targetAgentId,
+        string targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
         CancellationToken ct = default,
@@ -662,51 +825,40 @@ internal class GrainEventPublisher : IEventPublisher
         var grainId = _grain.GetPrimaryKeyString();
 
         // Create EventEnvelope for P2P
-        // GrainEventPublisher is always used for internal Agent calls
         var envelope = new EventEnvelope
         {
             Id = Guid.NewGuid().ToString(),
-            PublisherId = grainId,  // Always set for internal Grain publishing
+            PublisherId = grainId,
             Payload = Google.Protobuf.WellKnownTypes.Any.Pack(evt),
             Direction = onArrivalDirection,
             Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
             CorrelationId = Guid.NewGuid().ToString(),
-            TargetAgentId = targetAgentId.ToString(),
+            TargetAgentId = targetAgentId,
             OnArrivalDirection = onArrivalDirection
         };
 
         _logger.LogDebug(
-            "Grain {GrainId} sending P2P event {EventId} to {TargetAgentId}, onArrival={OnArrivalDirection}",
-            grainId, envelope.Id, targetAgentId, onArrivalDirection);
+            "Grain {GrainId} sending P2P event {EventId} to {TargetAgentId} via Stream (non-blocking)",
+            grainId, envelope.Id, targetAgentId);
 
-        // Serialize envelope
-        using var memStream = new MemoryStream();
-        using var codedOutput = new CodedOutputStream(memStream);
-        envelope.WriteTo(codedOutput);
-        codedOutput.Flush();
-        var envelopeBytes = memStream.ToArray();
-
-        // Direct RPC to target Grain (no stream broadcast)
-        var targetGrainId = BuildTargetGrainId(grainId, targetAgentId);
-        var targetGrain = _grainFactory.GetGrain<IGAgentGrain>(targetGrainId);
-        await targetGrain.HandleEventAsync(envelopeBytes);
-
-        return envelope.Id;
-    }
-
-    private static string BuildTargetGrainId(string currentGrainId, Guid targetAgentId)
-    {
-        // Preferred Grain key format: "{AgentTypeShortName}:{AgentId}"
-        // If current grain uses the typed format, default P2P routing to the same agent type.
-        // Cross-type routing is intentionally not supported by this overload because target type is unknown.
-        var colonIndex = currentGrainId.LastIndexOf(':');
-        if (colonIndex > 0)
+        // Get target Agent's stream using Factory (supports both Orleans/MassTransit)
+        if (_streamFactory != null)
         {
-            var typePrefix = currentGrainId.Substring(0, colonIndex);
-            return $"{typePrefix}:{targetAgentId}";
+            try
+            {
+                var targetStream = await _streamFactory.CreateStreamAsync(targetAgentId, null, _grain.GetStreamProvider);
+                await targetStream.ProduceAsync(envelope, ct);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to send P2P event to Agent {TargetId}", targetAgentId);
+            }
+        }
+        else
+        {
+            _logger.LogWarning("StreamFactory not available, cannot send P2P event to Agent {TargetId}", targetAgentId);
         }
 
-        // Backward compatible: untyped grain key format "{AgentId}"
-        return targetAgentId.ToString();
+        return envelope.Id;
     }
 }

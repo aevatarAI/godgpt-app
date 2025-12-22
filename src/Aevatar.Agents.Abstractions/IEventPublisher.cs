@@ -33,7 +33,7 @@ public interface IEventPublisher
     /// Point-to-point send (direct delivery mode).
     /// Sends directly to the specified agent, bypassing hierarchical broadcast.
     /// </summary>
-    /// <param name="targetAgentId">Target agent ID</param>
+    /// <param name="targetAgentId">Target agent ID (format varies by runtime)</param>
     /// <param name="evt">Event message</param>
     /// <param name="onArrivalDirection">
     /// Propagation direction after arrival:
@@ -50,7 +50,7 @@ public interface IEventPublisher
     /// <typeparam name="TEvent">Event type</typeparam>
     /// <returns>Event ID</returns>
     Task<string> SendToAsync<TEvent>(
-        Guid targetAgentId,
+        string targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
         CancellationToken ct = default,
@@ -75,7 +75,7 @@ public sealed class NullEventPublisher : IEventPublisher
     }
 
     public Task<string> SendToAsync<TEvent>(
-        Guid targetAgentId,
+        string targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
         CancellationToken ct = default,

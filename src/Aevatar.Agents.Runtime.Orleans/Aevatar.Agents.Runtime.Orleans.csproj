@@ -6,6 +6,11 @@
         <Nullable>enable</Nullable>
     </PropertyGroup>
 
+    <!-- Allow tests to access internal types -->
+    <ItemGroup>
+        <InternalsVisibleTo Include="Aevatar.Agents.Orleans.Tests" />
+    </ItemGroup>
+
     <ItemGroup>
         <PackageReference Include="Microsoft.Orleans.Core" />
         <PackageReference Include="Microsoft.Orleans.Runtime" />

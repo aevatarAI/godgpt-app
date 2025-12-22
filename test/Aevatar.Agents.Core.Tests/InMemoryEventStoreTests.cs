@@ -6,7 +6,7 @@ namespace Aevatar.Agents.Core.Tests;
 
 public class InMemoryEventStoreTests
 {
-    private static AgentStateEvent CreateTestEvent(Guid agentId, long version, string eventType)
+    private static AgentStateEvent CreateTestEvent(string agentId, long version, string eventType)
     {
         return new AgentStateEvent
         {
@@ -24,7 +24,7 @@ public class InMemoryEventStoreTests
     {
         // Arrange
         var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new[]
         {
             CreateTestEvent(agentId, 0, "Event1"),
@@ -47,7 +47,7 @@ public class InMemoryEventStoreTests
     {
         // Arrange
         var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var event1 = CreateTestEvent(agentId, 0, "Event1");
 
         await store.AppendEventsAsync(agentId, new[] { event1 }, 0);
@@ -65,7 +65,7 @@ public class InMemoryEventStoreTests
     {
         // Arrange
         var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new[]
         {
             CreateTestEvent(agentId, 0, "Event1"),
@@ -90,7 +90,7 @@ public class InMemoryEventStoreTests
     {
         // Arrange
         var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new[]
         {
             CreateTestEvent(agentId, 0, "Event1"),
@@ -114,7 +114,7 @@ public class InMemoryEventStoreTests
     {
         // Arrange
         var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new[]
         {
             CreateTestEvent(agentId, 0, "Event1"),
@@ -138,7 +138,7 @@ public class InMemoryEventStoreTests
     {
         // Arrange
         var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new[]
         {
             CreateTestEvent(agentId, 0, "Event1"),
@@ -162,7 +162,7 @@ public class InMemoryEventStoreTests
     {
         // Arrange
         var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new[]
         {
             CreateTestEvent(agentId, 0, "Event1"),
@@ -184,7 +184,7 @@ public class InMemoryEventStoreTests
     {
         // Arrange
         var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
 
         // Act
         var latestVersion = await store.GetLatestVersionAsync(agentId);
@@ -200,8 +200,8 @@ public class InMemoryEventStoreTests
     {
         // Arrange
         var store = new InMemoryEventStore();
-        var agent1Id = Guid.NewGuid();
-        var agent2Id = Guid.NewGuid();
+        var agent1Id = Guid.NewGuid().ToString();
+        var agent2Id = Guid.NewGuid().ToString();
 
         var agent1Events = new[] { CreateTestEvent(agent1Id, 0, "Agent1Event") };
         var agent2Events = new[] { CreateTestEvent(agent2Id, 0, "Agent2Event") };
@@ -225,7 +225,7 @@ public class InMemoryEventStoreTests
     {
         // Arrange
         var store = new InMemoryEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new[]
         {
             CreateTestEvent(agentId, 0, "Event1"),

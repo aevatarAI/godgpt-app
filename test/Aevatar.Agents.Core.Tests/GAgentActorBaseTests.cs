@@ -77,7 +77,7 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
         var agent = new SimpleTestAgent();
         AgentStateStoreInjector.InjectStateStore(agent, _serviceProvider);
         var actor = new MockGAgentActor(agent);
-        var parentId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
 
         // Act
         await actor.SetParentAsync(parentId);
@@ -95,7 +95,7 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
         var agent = new SimpleTestAgent();
         AgentStateStoreInjector.InjectStateStore(agent, _serviceProvider);
         var actor = new MockGAgentActor(agent);
-        var parentId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
         await actor.SetParentAsync(parentId);
 
         // Act
@@ -114,8 +114,8 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
         var agent = new SimpleTestAgent();
         AgentStateStoreInjector.InjectStateStore(agent, _serviceProvider);
         var actor = new MockGAgentActor(agent);
-        var childId1 = Guid.NewGuid();
-        var childId2 = Guid.NewGuid();
+        var childId1 = Guid.NewGuid().ToString();
+        var childId2 = Guid.NewGuid().ToString();
 
         // Act
         await actor.AddChildAsync(childId1);
@@ -135,8 +135,8 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
         var agent = new SimpleTestAgent();
         AgentStateStoreInjector.InjectStateStore(agent, _serviceProvider);
         var actor = new MockGAgentActor(agent);
-        var childId1 = Guid.NewGuid();
-        var childId2 = Guid.NewGuid();
+        var childId1 = Guid.NewGuid().ToString();
+        var childId2 = Guid.NewGuid().ToString();
         await actor.AddChildAsync(childId1);
         await actor.AddChildAsync(childId2);
 
@@ -161,7 +161,7 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
         var agent = new SimpleTestAgent();
         AgentStateStoreInjector.InjectStateStore(agent, _serviceProvider);
         var actor = new MockGAgentActor(agent);
-        var parentId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
         await actor.SetParentAsync(parentId);
 
         var testEvent = new TestEvent { EventId = "test-up" };
@@ -186,8 +186,8 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
         var agent = new SimpleTestAgent();
         AgentStateStoreInjector.InjectStateStore(agent, _serviceProvider);
         var actor = new MockGAgentActor(agent);
-        var childId1 = Guid.NewGuid();
-        var childId2 = Guid.NewGuid();
+        var childId1 = Guid.NewGuid().ToString();
+        var childId2 = Guid.NewGuid().ToString();
         await actor.AddChildAsync(childId1);
         await actor.AddChildAsync(childId2);
 
@@ -217,8 +217,8 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
         var agent = new SimpleTestAgent();
         AgentStateStoreInjector.InjectStateStore(agent, _serviceProvider);
         var actor = new MockGAgentActor(agent);
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         await actor.SetParentAsync(parentId);
         await actor.AddChildAsync(childId);
 
@@ -395,8 +395,8 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
         var agent = new SimpleTestAgent();
         AgentStateStoreInjector.InjectStateStore(agent, _serviceProvider);
         var actor = new MockGAgentActor(agent);
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         await actor.SetParentAsync(parentId);
         await actor.AddChildAsync(childId);
@@ -417,7 +417,7 @@ public class GAgentActorBaseTests : IClassFixture<CoreTestFixture>
         var agent = new SimpleTestAgent();
         AgentStateStoreInjector.InjectStateStore(agent, _serviceProvider);
         var actor = new MockGAgentActor(agent);
-        var parentId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
         await actor.SetParentAsync(parentId);
 
         var testEvent = new TestEvent { EventId = "publisher-tracking" };

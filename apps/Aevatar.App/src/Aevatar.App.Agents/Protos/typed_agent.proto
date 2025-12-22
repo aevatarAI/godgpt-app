@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Aevatar.App.Agents.Agents";
+
+// State for TypedAgent used in multi-topic benchmark
+message TypedAgentState {
+  string agent_id = 1;
+  string agent_type = 2;
+  int32 processed_count = 3;
+  string last_message = 4;
+  google.protobuf.Timestamp last_updated = 5;
+  string stream_namespace = 6;  // Custom stream namespace for this agent
+}
+

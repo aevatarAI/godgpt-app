@@ -28,7 +28,7 @@ var serviceProvider = services.BuildServiceProvider();
 var factory = serviceProvider.GetRequiredService<IGAgentActorFactory>();
 
 Console.WriteLine("📊 创建 Calculator Agent...");
-var calculatorId = Guid.NewGuid();
+var calculatorId = Guid.NewGuid().ToString();
 var calculatorActor = await factory.CreateGAgentActorAsync<CalculatorAgent>(calculatorId);
 Console.WriteLine($"✅ Calculator Agent 创建成功! ID: {calculatorActor.Id}\n");
 
@@ -66,7 +66,7 @@ Console.WriteLine($"📈 操作次数: {calculator.GetState().OperationCount}");
 
 // 测试Weather Agent
 Console.WriteLine("\n\n🌤️  创建 Weather Agent...");
-var weatherId = Guid.NewGuid();
+var weatherId = Guid.NewGuid().ToString();
 var weatherActor = await factory.CreateGAgentActorAsync<WeatherAgent>(weatherId);
 Console.WriteLine($"✅ Weather Agent 创建成功! ID: {weatherActor.Id}\n");
 

@@ -55,7 +55,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         // Arrange
         var factory = CreateFactory(out _);
 
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
 
         // Act
         var actor = await factory.CreateGAgentActorAsync<OrleansTestAgent>(agentId);
@@ -73,7 +73,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         // Arrange
         var factory = CreateFactory(out _);
 
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
 
         // Act
         var actor = await factory.CreateGAgentActorAsync<OrleansTestAgent>(agentId);
@@ -96,8 +96,8 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         // Arrange
         var factory = CreateFactory(out _);
 
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         // Act
         var parent = await factory.CreateGAgentActorAsync<OrleansTestAgent>(parentId);
@@ -119,7 +119,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         // Arrange
         var factory = CreateFactory(out _);
 
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var actor = await factory.CreateGAgentActorAsync<OrleansTestAgent>(agentId);
 
         // Act - Publish events with different directions (should not throw)
@@ -143,17 +143,17 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         // Arrange
         var factory = CreateFactory(out _);
 
-        var agentId1 = Guid.NewGuid();
-        var agentId2 = Guid.NewGuid();
+        var agentId1 = Guid.NewGuid().ToString();
+        var agentId2 = Guid.NewGuid().ToString();
 
         // Act
         var actor1 = await factory.CreateGAgentActorAsync<OrleansTestAgent>(agentId1);
         var actor2 = await factory.CreateGAgentActorAsync<OrleansTestAgent>(agentId2);
 
         // Add different children to each
-        var child1 = Guid.NewGuid();
-        var child2 = Guid.NewGuid();
-        var child3 = Guid.NewGuid();
+        var child1 = Guid.NewGuid().ToString();
+        var child2 = Guid.NewGuid().ToString();
+        var child3 = Guid.NewGuid().ToString();
 
         var childActor1 = await factory.CreateGAgentActorAsync<OrleansTestAgent>(child1);
         var childActor2 = await factory.CreateGAgentActorAsync<OrleansTestAgent>(child2);
@@ -185,7 +185,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         var tasks = new Task<IGAgentActor>[5];
         for (int i = 0; i < 5; i++)
         {
-            var id = Guid.NewGuid();
+            var id = Guid.NewGuid().ToString();
             tasks[i] = factory.CreateGAgentActorAsync<OrleansTestAgent>(id);
         }
 
@@ -200,7 +200,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         }
 
         // Verify all actors have unique IDs
-        var ids = new HashSet<Guid>();
+        var ids = new HashSet<string>();
         foreach (var actor in actors)
         {
             Assert.True(ids.Add(actor.Id), $"Duplicate actor ID found: {actor.Id}");
@@ -214,7 +214,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
     {
         // Arrange
         var factory = CreateFactory(out _);
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var actor = await factory.CreateGAgentActorAsync<OrleansRpcTestAgent>(agentId);
 
         // Act - Use type-safe proxy
@@ -235,7 +235,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
     {
         // Arrange
         var factory = CreateFactory(out _);
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var actor = await factory.CreateGAgentActorAsync<OrleansRpcTestAgent>(agentId);
 
         // Act - Multiple increments via proxy
@@ -255,7 +255,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
     {
         // Arrange
         var factory = CreateFactory(out _);
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var actor = await factory.CreateGAgentActorAsync<OrleansRpcTestAgent>(agentId);
 
         // Act & Assert - Non-existent method should throw (using dynamic API)
@@ -270,7 +270,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
     {
         // Arrange
         var factory = CreateFactory(out _);
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var actor = await factory.CreateGAgentActorAsync<OrleansRpcTestAgent>(agentId);
 
         // Act - Concurrent RPC calls via proxy
@@ -299,7 +299,7 @@ public class OrleansTestAgent : GAgentBase<OrleansTestState>
     }
 
     // Constructor with ID parameter for dependency injection
-    public OrleansTestAgent(Guid id) : base(id)
+    public OrleansTestAgent(string id) : base(id)
     {
     }
 
@@ -354,7 +354,7 @@ public interface IOrleansRpcTestAgent : IGAgent
 public class OrleansRpcTestAgent : GAgentBase<OrleansTestState>, IOrleansRpcTestAgent
 {
     public OrleansRpcTestAgent() : base() { }
-    public OrleansRpcTestAgent(Guid id) : base(id) { }
+    public OrleansRpcTestAgent(string id) : base(id) { }
 
     public Task<int> GetCountAsync() => Task.FromResult(State.ProcessedCount);
     

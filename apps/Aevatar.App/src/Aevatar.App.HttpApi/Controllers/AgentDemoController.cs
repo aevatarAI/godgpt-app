@@ -40,7 +40,7 @@ public class AgentDemoController : AbpControllerBase
     [HttpPost("agents")]
     public async Task<ActionResult<AgentCreatedResponse>> CreateAgent()
     {
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         
         _logger.LogInformation("🚀 Creating agent with ID: {AgentId}", agentId);
 
@@ -90,10 +90,10 @@ public class AgentDemoController : AbpControllerBase
         try
         {
             // Get existing agent or create if not exists
-            var actor = await _actorManager.GetActorAsync(id);
+            var actor = await _actorManager.GetActorAsync(agentId);
             if (actor == null)
             {
-                actor = await _actorManager.CreateAndRegisterAsync<SimpleBusinessAgent>(id);
+                actor = await _actorManager.CreateAndRegisterAsync<SimpleBusinessAgent>(agentId);
             }
 
             // Send event to Agent for processing (in Silo/Grain)
@@ -143,7 +143,7 @@ public class AgentDemoController : AbpControllerBase
         try
         {
             // Get existing agent
-            var actor = await _actorManager.GetActorAsync(id);
+            var actor = await _actorManager.GetActorAsync(agentId);
             if (actor == null)
             {
                 return NotFound($"Agent {agentId} not found");
@@ -180,10 +180,10 @@ public class AgentDemoController : AbpControllerBase
 
         try
         {
-            var childActor = await _actorManager.GetActorAsync(cId);
+            var childActor = await _actorManager.GetActorAsync(childId);
             if (childActor == null) return NotFound($"Child agent {childId} not found");
 
-            var parentActor = await _actorManager.GetActorAsync(pId);
+            var parentActor = await _actorManager.GetActorAsync(parentId);
             if (parentActor == null) return NotFound($"Parent agent {parentId} not found");
 
             // Establish bidirectional relationship using ActorHierarchyCoordinator
@@ -214,7 +214,7 @@ public class AgentDemoController : AbpControllerBase
 
         try
         {
-            var actor = await _actorManager.GetActorAsync(id);
+            var actor = await _actorManager.GetActorAsync(agentId);
             if (actor == null) return NotFound($"Agent {agentId} not found");
 
             // Create event and publish via Actor proxy (processed in Silo/Grain)
@@ -253,7 +253,7 @@ public class AgentDemoController : AbpControllerBase
     [HttpPost("complex-agent")]
     public async Task<ActionResult<ComplexAgentCreatedResponse>> CreateComplexAgent()
     {
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         
         _logger.LogInformation("🧪 Creating ComplexStateAgent with ID: {AgentId}", agentId);
 
@@ -309,7 +309,7 @@ public class AgentDemoController : AbpControllerBase
 
         try
         {
-            var actor = await _actorManager.GetActorAsync(id);
+            var actor = await _actorManager.GetActorAsync(agentId);
             if (actor == null)
             {
                 return NotFound($"Agent {agentId} not found");
@@ -346,7 +346,7 @@ public class AgentDemoController : AbpControllerBase
 
         try
         {
-            var actor = await _actorManager.GetActorAsync(id);
+            var actor = await _actorManager.GetActorAsync(agentId);
             if (actor == null)
             {
                 return NotFound($"Agent {agentId} not found");

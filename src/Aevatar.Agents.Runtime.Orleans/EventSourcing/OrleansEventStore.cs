@@ -32,7 +32,7 @@ public class OrleansEventStore : IEventStore
     // ========== Event Operations ==========
 
     public async Task<long> AppendEventsAsync(
-        Guid agentId,
+        string agentId,
         IEnumerable<AgentStateEvent> events,
         long expectedVersion,
         string? agentTypeName = null,
@@ -71,7 +71,7 @@ public class OrleansEventStore : IEventStore
     }
 
     public async Task<IReadOnlyList<AgentStateEvent>> GetEventsAsync(
-        Guid agentId,
+        string agentId,
         long? fromVersion = null,
         long? toVersion = null,
         int? maxCount = null,
@@ -88,7 +88,7 @@ public class OrleansEventStore : IEventStore
     }
 
     public async Task<long> GetLatestVersionAsync(
-        Guid agentId, 
+        string agentId, 
         string? agentTypeName = null,
         CancellationToken ct = default)
     {

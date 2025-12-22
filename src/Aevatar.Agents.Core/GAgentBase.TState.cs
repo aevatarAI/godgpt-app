@@ -127,7 +127,7 @@ public abstract class GAgentBase<TState> : GAgentBase, IStateGAgent<TState>
     {
     }
 
-    public GAgentBase(Guid id) : base(id)
+    public GAgentBase(string id) : base(id)
     {
     }
 

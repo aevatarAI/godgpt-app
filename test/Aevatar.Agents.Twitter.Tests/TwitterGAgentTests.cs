@@ -35,7 +35,7 @@ public class TwitterGAgentTests
         await agent.ActivateAsync();
 
         // Assert
-        agent.Id.Should().NotBe(Guid.Empty);
+        agent.Id.Should().NotBeNullOrEmpty();
         var state = agent.GetState();
         state.Should().NotBeNull();
         state.AgentId.Should().Be(agent.Id.ToString());

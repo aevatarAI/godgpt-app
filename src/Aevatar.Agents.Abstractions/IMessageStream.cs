@@ -10,8 +10,11 @@ public interface IMessageStream
 {
     /// <summary>
     /// Stream唯一标识符
+    /// Format varies by runtime:
+    /// - Orleans: "AgentType:Guid" (e.g., "ChatAgent:12345678-...")
+    /// - Local/Proto: "Guid" (e.g., "12345678-...")
     /// </summary>
-    Guid StreamId { get; }
+    string StreamId { get; }
 
     /// <summary>
     /// 发布消息到stream

@@ -38,7 +38,7 @@ public class HierarchyController : ControllerBase
         try
         {
             // 创建CEO
-            var ceoId = Guid.NewGuid();
+            var ceoId = Guid.NewGuid().ToString();
             var ceo = await _agentFactory.CreateGAgentActorAsync<ManagerAgent>(ceoId);
             
             _logger.LogInformation("Created CEO {CeoId} on {Runtime}", ceoId, runtime);
@@ -52,7 +52,7 @@ public class HierarchyController : ControllerBase
             // 创建部门
             for (int d = 0; d < departmentCount; d++)
             {
-                var managerId = Guid.NewGuid();
+                var managerId = Guid.NewGuid().ToString();
                 var manager = await _agentFactory.CreateGAgentActorAsync<ManagerAgent>(managerId);
                 
                 // 设置CEO为父级
@@ -61,19 +61,19 @@ public class HierarchyController : ControllerBase
                 var department = new
                 {
                     ManagerId = managerId,
-                    Employees = new List<Guid>()
+                    Employees = new List<string>()
                 };
 
                 // 创建员工
                 for (int e = 0; e < employeesPerDept; e++)
                 {
-                    var employeeId = Guid.NewGuid();
+                    var employeeId = Guid.NewGuid().ToString();
                     var employee = await _agentFactory.CreateGAgentActorAsync<EmployeeAgent>(employeeId);
                     
                     // 设置经理为父级
                     await ActorHierarchyCoordinator.LinkAsync(manager, employee, _logger);
                     
-                    ((List<Guid>)department.Employees).Add(employeeId);
+                    ((List<string>)department.Employees).Add(employeeId);
                 }
 
                 ((List<object>)organization.Departments).Add(department);
@@ -99,7 +99,7 @@ public class HierarchyController : ControllerBase
     /// </summary>
     [HttpPost("propagate/{agentId}")]
     public async Task<IActionResult> PropagateEvent(
-        Guid agentId,
+        string agentId,
         [FromQuery] string direction = "down",
         [FromQuery] string runtime = "local")
     {
@@ -172,8 +172,8 @@ public class HierarchyController : ControllerBase
         {
             // 创建或获取涉及的Agent (使用HierarchyAgent作为默认类型)
             var child = await _agentFactory.CreateGAgentActorAsync<HierarchyAgent>(request.ChildId);
-            var oldParent = request.OldParentId.HasValue ? 
-                await _agentFactory.CreateGAgentActorAsync<HierarchyAgent>(request.OldParentId.Value) : null;
+            var oldParent = !string.IsNullOrEmpty(request.OldParentId) ? 
+                await _agentFactory.CreateGAgentActorAsync<HierarchyAgent>(request.OldParentId) : null;
             var newParent = await _agentFactory.CreateGAgentActorAsync<HierarchyAgent>(request.NewParentId);
 
             if (child == null || newParent == null)
@@ -214,9 +214,9 @@ public class HierarchyController : ControllerBase
 // 请求定义
 public class RestructureRequest
 {
-    public Guid ChildId { get; set; }
-    public Guid? OldParentId { get; set; }
-    public Guid NewParentId { get; set; }
+    public string ChildId { get; set; } = string.Empty;
+    public string? OldParentId { get; set; }
+    public string NewParentId { get; set; } = string.Empty;
 }
 
 // 消息类型已在 demo_messages.proto 中定义

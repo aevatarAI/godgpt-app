@@ -27,7 +27,7 @@ internal class AgentConfigDocument<TConfig>
     /// Agent ID
     /// </summary>
     [BsonRequired]
-    public Guid AgentId { get; set; }
+    public string AgentId { get; set; } = string.Empty;
 
     /// <summary>
     /// Configuration object

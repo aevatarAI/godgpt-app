@@ -8,7 +8,7 @@ public class ByteArrayMessage
     /// <summary>
     /// The Stream ID this message belongs to.
     /// </summary>
-    public Guid StreamId { get; set; }
+    public string StreamId { get; set; } = string.Empty;
 
     /// <summary>
     /// The raw byte data.

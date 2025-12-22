@@ -25,7 +25,7 @@ public class ParentChildRelationshipTests(CoreTestFixture fixture) : IClassFixtu
     {
         // Arrange
         var childAgent = new ChildTestAgent();
-        var parentId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
         AgentStateStoreInjector.InjectStateStore(childAgent, _serviceProvider);
 
         // Act
@@ -40,8 +40,8 @@ public class ParentChildRelationshipTests(CoreTestFixture fixture) : IClassFixtu
     {
         // Arrange
         var parentAgent = new ParentTestAgent();
-        var childId1 = Guid.NewGuid();
-        var childId2 = Guid.NewGuid();
+        var childId1 = Guid.NewGuid().ToString();
+        var childId2 = Guid.NewGuid().ToString();
         AgentStateStoreInjector.InjectStateStore(parentAgent, _serviceProvider);
 
         // Act
@@ -59,8 +59,8 @@ public class ParentChildRelationshipTests(CoreTestFixture fixture) : IClassFixtu
     {
         // Arrange
         var parentAgent = new ParentTestAgent();
-        var childId1 = Guid.NewGuid();
-        var childId2 = Guid.NewGuid();
+        var childId1 = Guid.NewGuid().ToString();
+        var childId2 = Guid.NewGuid().ToString();
         AgentStateStoreInjector.InjectStateStore(parentAgent, _serviceProvider);
 
         await parentAgent.AddChildAsync(childId1);
@@ -80,7 +80,7 @@ public class ParentChildRelationshipTests(CoreTestFixture fixture) : IClassFixtu
     {
         // Arrange
         var childAgent = new ChildTestAgent();
-        var parentId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
         AgentStateStoreInjector.InjectStateStore(childAgent, _serviceProvider);
 
         await childAgent.SetParentIdAsync(parentId);

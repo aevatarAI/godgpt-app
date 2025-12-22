@@ -13,7 +13,7 @@ public class OrleansGAgentActorManager : IGAgentActorManager
     private readonly IGAgentActorFactory _factory;
     private readonly IGrainFactory _grainFactory;
     private readonly ILogger<OrleansGAgentActorManager> _logger;
-    private readonly Dictionary<Guid, IGAgentActor> _actors = new();
+    private readonly Dictionary<string, IGAgentActor> _actors = new();
     private readonly object _lock = new();
 
     public OrleansGAgentActorManager(
@@ -27,7 +27,7 @@ public class OrleansGAgentActorManager : IGAgentActorManager
     }
 
     public async Task<IGAgentActor> CreateAndRegisterAsync<TAgent>(
-        Guid id,
+        string id,
         CancellationToken ct = default)
         where TAgent : IGAgent
     {
@@ -36,17 +36,20 @@ public class OrleansGAgentActorManager : IGAgentActorManager
 
         var actor = await _factory.CreateGAgentActorAsync<TAgent>(id, ct);
 
+        // Use actor.Id (full GrainKey format) as storage key to avoid collisions
+        // when same raw Guid is used for different Agent types
         lock (_lock)
         {
-            _actors[id] = actor;
+            _actors[actor.Id] = actor;
         }
 
-        _logger.LogInformation("Agent actor {Id} created and registered", id);
+        _logger.LogInformation("Agent actor {ActorId} created and registered (input: {InputId})", 
+            actor.Id, id);
 
         return actor;
     }
 
-    public Task<IGAgentActor?> GetActorAsync(Guid id)
+    public Task<IGAgentActor?> GetActorAsync(string id)
     {
         lock (_lock)
         {
@@ -63,7 +66,7 @@ public class OrleansGAgentActorManager : IGAgentActorManager
         }
     }
 
-    public async Task DeactivateAndUnregisterAsync(Guid id, CancellationToken ct = default)
+    public async Task DeactivateAndUnregisterAsync(string id, CancellationToken ct = default)
     {
         IGAgentActor? actor;
 
@@ -97,7 +100,7 @@ public class OrleansGAgentActorManager : IGAgentActorManager
         await Task.WhenAll(actorsToDeactivate.Select(a => a.DeactivateAsync(ct)));
     }
 
-    public Task<bool> ExistsAsync(Guid id)
+    public Task<bool> ExistsAsync(string id)
     {
         lock (_lock)
         {
@@ -115,7 +118,7 @@ public class OrleansGAgentActorManager : IGAgentActorManager
 
     #region 层级关系协调
 
-    public async Task LinkParentChildAsync(Guid parentId, Guid childId, CancellationToken ct = default)
+    public async Task LinkParentChildAsync(string parentId, string childId, CancellationToken ct = default)
     {
         var parent = GetRequiredActor(parentId);
         var child = GetRequiredActor(childId);
@@ -124,24 +127,24 @@ public class OrleansGAgentActorManager : IGAgentActorManager
         await ActorHierarchyCoordinator.LinkAsync(parent, child, _logger, ct);
     }
 
-    public async Task UnlinkParentChildAsync(Guid childId, Guid? parentId = null, CancellationToken ct = default)
+    public async Task UnlinkParentChildAsync(string childId, string? parentId = null, CancellationToken ct = default)
     {
         var child = GetRequiredActor(childId);
 
-        Guid? resolvedParentId = parentId;
-        if (!resolvedParentId.HasValue)
+        var resolvedParentId = parentId;
+        if (string.IsNullOrEmpty(resolvedParentId))
         {
             resolvedParentId = await child.GetParentAsync();
         }
 
         IGAgentActor? parent = null;
-        if (resolvedParentId.HasValue)
+        if (!string.IsNullOrEmpty(resolvedParentId))
         {
-            parent = await GetActorAsync(resolvedParentId.Value);
+            parent = await GetActorAsync(resolvedParentId);
             if (parent == null)
             {
                 _logger.LogWarning("Parent actor {ParentId} not found when unlinking child {ChildId}",
-                    resolvedParentId.Value, childId);
+                    resolvedParentId, childId);
             }
         }
 
@@ -153,7 +156,7 @@ public class OrleansGAgentActorManager : IGAgentActorManager
     #region 新增接口实现
 
     public async Task<IReadOnlyList<IGAgentActor>> CreateBatchAsync<TAgent>(
-        IEnumerable<Guid> ids,
+        IEnumerable<string> ids,
         CancellationToken ct = default)
         where TAgent : IGAgent
     {
@@ -162,13 +165,13 @@ public class OrleansGAgentActorManager : IGAgentActorManager
         return actors;
     }
 
-    public async Task DeactivateBatchAsync(IEnumerable<Guid> ids, CancellationToken ct = default)
+    public async Task DeactivateBatchAsync(IEnumerable<string> ids, CancellationToken ct = default)
     {
         var tasks = ids.Select(id => DeactivateAndUnregisterAsync(id, ct));
         await Task.WhenAll(tasks);
     }
 
-    public Task<IReadOnlyList<IGAgentActor>> GetActorsAsync(IEnumerable<Guid> ids)
+    public Task<IReadOnlyList<IGAgentActor>> GetActorsAsync(IEnumerable<string> ids)
     {
         var actors = new List<IGAgentActor>();
 
@@ -221,7 +224,7 @@ public class OrleansGAgentActorManager : IGAgentActorManager
         }
     }
 
-    public Task<ActorHealthStatus> GetHealthStatusAsync(Guid id)
+    public Task<ActorHealthStatus> GetHealthStatusAsync(string id)
     {
         lock (_lock)
         {
@@ -264,7 +267,7 @@ public class OrleansGAgentActorManager : IGAgentActorManager
 
     #endregion
 
-    private IGAgentActor GetRequiredActor(Guid id)
+    private IGAgentActor GetRequiredActor(string id)
     {
         lock (_lock)
         {

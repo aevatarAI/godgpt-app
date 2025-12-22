@@ -32,8 +32,8 @@ public class BaseSubscriptionManagerTests : IDisposable
     public async Task Should_Manage_Subscription_Handles()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         var eventReceived = false;
 
         Func<EventEnvelope, Task> handler = async (envelope) =>
@@ -63,8 +63,8 @@ public class BaseSubscriptionManagerTests : IDisposable
     public async Task Should_Track_Subscription_Health_Status()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         var subscription = await _manager.SubscribeWithRetryAsync(
             parentId, childId, async (_) => await Task.CompletedTask);
@@ -89,8 +89,8 @@ public class BaseSubscriptionManagerTests : IDisposable
     public async Task Should_Cleanup_Subscriptions_Properly()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         var subscription = await _manager.SubscribeWithRetryAsync(
             parentId, childId, async (_) => await Task.CompletedTask);
@@ -119,8 +119,8 @@ public class BaseSubscriptionManagerTests : IDisposable
     public async Task Should_Retry_On_Subscription_Creation_Failure()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         _manager.ShouldFailOnCreate = true;
 
         var retryPolicy = new ExponentialBackoffRetryPolicy(
@@ -149,8 +149,8 @@ public class BaseSubscriptionManagerTests : IDisposable
     public async Task Should_Succeed_After_Retry()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         var attemptCount = 0;
 
         // 创建自定义的MockManager，前两次失败，第三次成功
@@ -165,7 +165,7 @@ public class BaseSubscriptionManagerTests : IDisposable
 
         // 监听创建调用，第3次时取消失败标志
         Task<IMessageStreamSubscription?> CreateWithRetry(
-            Guid pId, Guid cId, Func<EventEnvelope, Task> handler, CancellationToken ct)
+            string pId, string cId, Func<EventEnvelope, Task> handler, CancellationToken ct)
         {
             attemptCount++;
             if (attemptCount >= 3)
@@ -198,8 +198,8 @@ public class BaseSubscriptionManagerTests : IDisposable
     public async Task Should_Reconnect_Unhealthy_Subscription()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         var subscription = await _manager.SubscribeWithRetryAsync(
             parentId, childId, async (_) => await Task.CompletedTask);
@@ -219,8 +219,8 @@ public class BaseSubscriptionManagerTests : IDisposable
     public async Task Should_Handle_Reconnection_Failure()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         var subscription = await _manager.SubscribeWithRetryAsync(
             parentId, childId, async (_) => await Task.CompletedTask);
@@ -257,8 +257,8 @@ public class BaseSubscriptionManagerTests : IDisposable
     public async Task Should_Update_Last_Activity_Time()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         var subscription = await _manager.SubscribeWithRetryAsync(
             parentId, childId, async (_) => await Task.CompletedTask);
@@ -280,10 +280,10 @@ public class BaseSubscriptionManagerTests : IDisposable
     {
         // Arrange - 创建两个订阅
         var subscription1 = await _manager.SubscribeWithRetryAsync(
-            Guid.NewGuid(), Guid.NewGuid(), async (_) => await Task.CompletedTask);
+            Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), async (_) => await Task.CompletedTask);
 
         var subscription2 = await _manager.SubscribeWithRetryAsync(
-            Guid.NewGuid(), Guid.NewGuid(), async (_) => await Task.CompletedTask);
+            Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), async (_) => await Task.CompletedTask);
 
         // 验证两个都是活跃的
         var activeSubscriptions = await _manager.GetActiveSubscriptionsAsync();

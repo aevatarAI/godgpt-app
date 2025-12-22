@@ -57,9 +57,9 @@ public class ProtoActorStreamTests : IDisposable
     public async Task ProtoActor_Parent_Child_Subscription_Works()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var child1Id = Guid.NewGuid();
-        var child2Id = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var child1Id = Guid.NewGuid().ToString();
+        var child2Id = Guid.NewGuid().ToString();
         
         var parentActor = await _manager.CreateAndRegisterAsync<ProtoTestParentAgent>(
             parentId, CancellationToken.None);
@@ -68,9 +68,9 @@ public class ProtoActorStreamTests : IDisposable
         var child2Actor = await _manager.CreateAndRegisterAsync<ProtoTestChildAgent>(
             child2Id, CancellationToken.None);
         
-        // Act - 建立父子关系
-        await _manager.LinkParentChildAsync(parentId, child1Id);
-        await _manager.LinkParentChildAsync(parentId, child2Id);
+        // Act - 建立父子关系 (use actor.Id for Manager operations)
+        await _manager.LinkParentChildAsync(parentActor.Id, child1Actor.Id);
+        await _manager.LinkParentChildAsync(parentActor.Id, child2Actor.Id);
         
         // Child1发送UP事件（应该广播给所有siblings）
         var child1Agent = child1Actor.GetAgent() as ProtoTestChildAgent;
@@ -103,8 +103,8 @@ public class ProtoActorStreamTests : IDisposable
         var parentPid = rootContext.Spawn(Props.FromFunc(ctx => Task.CompletedTask));
         var childPid = rootContext.Spawn(Props.FromFunc(ctx => Task.CompletedTask));
         
-        var parentStream = new ProtoActorMessageStream(Guid.NewGuid(), parentPid, rootContext);
-        var childStream = new ProtoActorMessageStream(Guid.NewGuid(), childPid, rootContext);
+        var parentStream = new ProtoActorMessageStream(Guid.NewGuid().ToString(), parentPid, rootContext);
+        var childStream = new ProtoActorMessageStream(Guid.NewGuid().ToString(), childPid, rootContext);
         
         var receivedMessages = new List<string>();
         
@@ -137,7 +137,7 @@ public class ProtoActorStreamTests : IDisposable
         // Arrange
         var rootContext = _actorSystem.Root;
         var pid = rootContext.Spawn(Props.FromFunc(ctx => Task.CompletedTask));
-        var stream = new ProtoActorMessageStream(Guid.NewGuid(), pid, rootContext);
+        var stream = new ProtoActorMessageStream(Guid.NewGuid().ToString(), pid, rootContext);
         
         var receivedMessages = new List<string>();
         var subscription = await stream.SubscribeAsync<EventEnvelope>(
@@ -176,9 +176,9 @@ public class ProtoActorStreamTests : IDisposable
     public async Task ProtoActor_Multi_Level_Propagation_Works()
     {
         // Arrange - 创建三层结构
-        var grandparentId = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var grandparentId = Guid.NewGuid().ToString();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         
         var grandparent = await _manager.CreateAndRegisterAsync<ProtoTestParentAgent>(
             grandparentId, CancellationToken.None);
@@ -187,9 +187,9 @@ public class ProtoActorStreamTests : IDisposable
         var child = await _manager.CreateAndRegisterAsync<ProtoTestChildAgent>(
             childId, CancellationToken.None);
         
-        // 建立层级关系
-        await _manager.LinkParentChildAsync(grandparentId, parentId);
-        await _manager.LinkParentChildAsync(parentId, childId);
+        // 建立层级关系 (use actor.Id for Manager operations)
+        await _manager.LinkParentChildAsync(grandparent.Id, parent.Id);
+        await _manager.LinkParentChildAsync(parent.Id, child.Id);
         
         // Act - child发送UP事件
         var childAgent = child.GetAgent() as ProtoTestChildAgent;
@@ -223,7 +223,7 @@ public class ProtoTestParentAgent : GAgentBase<Messages.TestState>
 {
     public List<string> ReceivedMessages { get; } = new();
     
-    public ProtoTestParentAgent(Guid id) : base(id) { }
+    public ProtoTestParentAgent(string id) : base(id) { }
     public ProtoTestParentAgent() : base() { }
     
     public override Task<string> GetDescriptionAsync() => 
@@ -251,7 +251,7 @@ public class ProtoTestChildAgent : GAgentBase<Messages.TestState>
 {
     public List<string> ReceivedMessages { get; } = new();
 
-    public ProtoTestChildAgent(Guid id) : base(id)
+    public ProtoTestChildAgent(string id) : base(id)
     {
     }
 

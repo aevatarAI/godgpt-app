@@ -9,12 +9,12 @@ namespace Aevatar.Agents.Core.EventRouting;
 /// </summary>
 public class InMemoryEventRouterStore : IEventRouterStore
 {
-    private readonly ConcurrentDictionary<Guid, EventRouterHierarchy> _hierarchies = new();
+    private readonly ConcurrentDictionary<string, EventRouterHierarchy> _hierarchies = new();
 
     /// <summary>
     /// Load hierarchy from memory
     /// </summary>
-    public Task<EventRouterHierarchy?> LoadAsync(Guid agentId, CancellationToken ct = default)
+    public Task<EventRouterHierarchy?> LoadAsync(string agentId, CancellationToken ct = default)
     {
         _hierarchies.TryGetValue(agentId, out var hierarchy);
         return Task.FromResult(hierarchy);
@@ -23,7 +23,7 @@ public class InMemoryEventRouterStore : IEventRouterStore
     /// <summary>
     /// Save hierarchy to memory
     /// </summary>
-    public Task SaveAsync(Guid agentId, EventRouterHierarchy hierarchy, CancellationToken ct = default)
+    public Task SaveAsync(string agentId, EventRouterHierarchy hierarchy, CancellationToken ct = default)
     {
         _hierarchies[agentId] = hierarchy;
         return Task.CompletedTask;
@@ -32,7 +32,7 @@ public class InMemoryEventRouterStore : IEventRouterStore
     /// <summary>
     /// Delete hierarchy from memory
     /// </summary>
-    public Task DeleteAsync(Guid agentId, CancellationToken ct = default)
+    public Task DeleteAsync(string agentId, CancellationToken ct = default)
     {
         _hierarchies.TryRemove(agentId, out _);
         return Task.CompletedTask;
@@ -41,7 +41,7 @@ public class InMemoryEventRouterStore : IEventRouterStore
     /// <summary>
     /// Check if hierarchy exists in memory
     /// </summary>
-    public Task<bool> ExistsAsync(Guid agentId, CancellationToken ct = default)
+    public Task<bool> ExistsAsync(string agentId, CancellationToken ct = default)
     {
         return Task.FromResult(_hierarchies.ContainsKey(agentId));
     }
@@ -49,7 +49,7 @@ public class InMemoryEventRouterStore : IEventRouterStore
     /// <summary>
     /// Get all stored hierarchies (for testing/debugging)
     /// </summary>
-    public IReadOnlyDictionary<Guid, EventRouterHierarchy> GetAllHierarchies()
+    public IReadOnlyDictionary<string, EventRouterHierarchy> GetAllHierarchies()
     {
         return _hierarchies;
     }

@@ -27,7 +27,7 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
 
     private OrleansEventStore CreateEventStore() => new OrleansEventStore(_eventRepository, _logger);
 
-    private AgentStateEvent CreateTestEvent(Guid agentId, long version, string eventType)
+    private AgentStateEvent CreateTestEvent(string agentId, long version, string eventType)
     {
         return new AgentStateEvent
         {
@@ -36,7 +36,7 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
             Version = version,
             EventType = eventType,
             EventData = Google.Protobuf.WellKnownTypes.Any.Pack(new ChildAddedEvent { ChildId = $"child-{version}" }),
-            AgentId = agentId.ToString(),
+            AgentId = agentId,
             CorrelationId = Guid.NewGuid().ToString(),
             Metadata = { { "testKey", $"testValue-{version}" } }
         };
@@ -47,7 +47,7 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
     {
         // Arrange
         var eventStore = CreateEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new List<AgentStateEvent>
         {
             CreateTestEvent(agentId, 1, "Event1"),
@@ -69,7 +69,7 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
     {
         // Arrange
         var eventStore = CreateEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         // First append: version 0 -> 1
         var firstVersion = await eventStore.AppendEventsAsync(agentId, new[] { CreateTestEvent(agentId, 1, "Event1") }, 0);
         Assert.Equal(1, firstVersion);
@@ -87,7 +87,7 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
     {
         // Arrange
         var eventStore = CreateEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new List<AgentStateEvent>
         {
             CreateTestEvent(agentId, 1, "Event1"),
@@ -111,7 +111,7 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
     {
         // Arrange
         var eventStore = CreateEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new List<AgentStateEvent>
         {
             CreateTestEvent(agentId, 1, "Event1"),
@@ -134,7 +134,7 @@ public class OrleansEventStoreTests : AevatarAgentsTestBase
     {
         // Arrange
         var eventStore = CreateEventStore();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
 
         // Act
         var version = await eventStore.GetLatestVersionAsync(agentId);

@@ -24,6 +24,12 @@ using Orleans;
 using MassTransit;
 using Aevatar.Agents;
 using Aevatar.App.Agents.Agents;
+using TypedAgent = Aevatar.App.Agents.Agents.TypedAgent;
+using TypeAAgent = Aevatar.App.Agents.Agents.TypeAAgent;
+using TypeBAgent = Aevatar.App.Agents.Agents.TypeBAgent;
+using TypeCAgent = Aevatar.App.Agents.Agents.TypeCAgent;
+using TypeDAgent = Aevatar.App.Agents.Agents.TypeDAgent;
+using TypeEAgent = Aevatar.App.Agents.Agents.TypeEAgent;
 
 namespace Aevatar.App.PerformanceTests;
 
@@ -161,10 +167,10 @@ public class MultiTopicBenchmark
         services.AddSingleton<IGrainFactory>(_clusterClient);
         services.AddSingleton<IClusterClient>(_clusterClient);
 
-        // Default Orleans Stream configuration
+        // Orleans Stream configuration - must match Silo's StreamProviderName
         services.Configure<Aevatar.Agents.StreamingOptions>(options =>
         {
-            options.StreamProviderName = "Default";
+            options.StreamProviderName = "AevatarAgents";  // Match Silo's ProviderName
             options.DefaultStreamNamespace = streamNamespace;  // Type-specific namespace!
         });
 
@@ -253,18 +259,15 @@ public class MultiTopicBenchmark
             
             for (int i = 0; i < AGENTS_PER_TYPE; i++)
             {
-                var agentId = Guid.NewGuid();
+                var agentId = Guid.NewGuid().ToString();
                 IGAgentActor actor;
 
                 // Use specific sub-types even for Shared Test to be consistent
+                // Agent properties are set in OnActivateAsync, no need to set here
                 if (typeName == "TypeA") actor = await sharedManager.CreateAndRegisterAsync<TypeAAgent>(agentId);
                 else actor = await sharedManager.CreateAndRegisterAsync<TypeBAgent>(agentId);
-
-                var agent = (TypedAgent)actor.GetAgent();
-                agent.AgentType = typeName;
-                agent.StreamNamespace = "AevatarAgents-Shared";
                 
-                typeAgents.Add(new TypedAgentInfo { AgentId = agentId, Actor = actor, Agent = agent, TypeName = typeName });
+                typeAgents.Add(new TypedAgentInfo { AgentId = agentId, Actor = actor, TypeName = typeName });
             }
             results.AgentsByType[typeName] = typeAgents;
             results.TotalAgentsCreated += typeAgents.Count;
@@ -275,15 +278,11 @@ public class MultiTopicBenchmark
         sw.Restart();
         Console.WriteLine("📡 Step 2: Creating publisher agents...");
         
-        var publisherA_Id = Guid.NewGuid();
+        var publisherA_Id = Guid.NewGuid().ToString();
         var publisherA = await sharedManager.CreateAndRegisterAsync<TypedAgent>(publisherA_Id); // Use base TypedAgent for publisher
-        var publisherA_Agent = (TypedAgent)publisherA.GetAgent();
-        publisherA_Agent.AgentType = "PublisherA";
         
-        var publisherB_Id = Guid.NewGuid();
+        var publisherB_Id = Guid.NewGuid().ToString();
         var publisherB = await sharedManager.CreateAndRegisterAsync<TypedAgent>(publisherB_Id);
-        var publisherB_Agent = (TypedAgent)publisherB.GetAgent();
-        publisherB_Agent.AgentType = "PublisherB";
         
         // Step 3: Subscriptions
         sw.Restart();
@@ -364,10 +363,11 @@ public class MultiTopicBenchmark
             
             for (int i = 0; i < AGENTS_PER_TYPE; i++)
             {
-                var agentId = Guid.NewGuid();
+                var agentId = Guid.NewGuid().ToString();
                 IGAgentActor actor = null!;
                 
                 // Use specific sub-types for dynamic routing
+                // Agent properties are set in OnActivateAsync, no need to set here
                 switch (typeName)
                 {
                     case "TypeA": actor = await manager.CreateAndRegisterAsync<TypeAAgent>(agentId); break;
@@ -377,11 +377,7 @@ public class MultiTopicBenchmark
                     case "TypeE": actor = await manager.CreateAndRegisterAsync<TypeEAgent>(agentId); break;
                 }
                 
-                var agent = (TypedAgent)actor.GetAgent();
-                agent.AgentType = typeName;
-                agent.StreamNamespace = TypeNamespaces[typeName];
-                
-                typeAgents.Add(new TypedAgentInfo { AgentId = agentId, Actor = actor, Agent = agent, TypeName = typeName });
+                typeAgents.Add(new TypedAgentInfo { AgentId = agentId, Actor = actor, TypeName = typeName });
             }
             results.AgentsByType[typeName] = typeAgents;
             results.TotalAgentsCreated += typeAgents.Count;
@@ -445,19 +441,15 @@ public class MultiTopicBenchmark
         sw.Restart();
         Console.WriteLine("📡 Step 2: Creating publisher agents...");
         
-        // Use TypedAgent base for publishers (they just publish)
-        // Or should we use specific types? Doesn't matter for publishing, only for subscribing (consuming)
-        var publisherA_Id = Guid.NewGuid();
+        // Use specific TypeAAgent/TypeBAgent for publishers to ensure correct topic routing
+        // MassTransit TopicMapping routes based on Agent class name
+        var publisherA_Id = Guid.NewGuid().ToString();
         var publisherA_Manager = _actorManagersByType["TypeA"]; 
-        var publisherA = await publisherA_Manager.CreateAndRegisterAsync<TypedAgent>(publisherA_Id); 
-        var publisherA_Agent = (TypedAgent)publisherA.GetAgent();
-        publisherA_Agent.AgentType = "PublisherA";
+        var publisherA = await publisherA_Manager.CreateAndRegisterAsync<TypeAAgent>(publisherA_Id); 
         
-        var publisherB_Id = Guid.NewGuid();
+        var publisherB_Id = Guid.NewGuid().ToString();
         var publisherB_Manager = _actorManagersByType["TypeB"];
-        var publisherB = await publisherB_Manager.CreateAndRegisterAsync<TypedAgent>(publisherB_Id);
-        var publisherB_Agent = (TypedAgent)publisherB.GetAgent();
-        publisherB_Agent.AgentType = "PublisherB";
+        var publisherB = await publisherB_Manager.CreateAndRegisterAsync<TypeBAgent>(publisherB_Id);
         
         // Step 3: Subscribe Type A to PublisherA, Type B to PublisherB
         sw.Restart();
@@ -475,6 +467,9 @@ public class MultiTopicBenchmark
         sw.Restart();
         Console.WriteLine($"📤 Step 4: Publishing...");
         
+        var sentCountA = 0;
+        var sentCountB = 0;
+        
         var publishTaskA = Task.Run(async () =>
         {
              if (_providerName == "MassTransit")
@@ -483,8 +478,10 @@ public class MultiTopicBenchmark
                  for(int i=1; i<=messagesPerType; i++) {
                      var msg = new BusinessMessageEvent { Message = $"Test message {i} for TypeA", Timestamp = Timestamp.FromDateTime(DateTime.UtcNow) };
                      tasks.Add(publisherA.PublishEventAsync(msg, EventDirection.Down));
+                     sentCountA++;
                  }
                  await Task.WhenAll(tasks);
+                 Console.WriteLine($"      Published TypeA: {sentCountA}/{messagesPerType}");
             }
             else
             {
@@ -500,8 +497,10 @@ public class MultiTopicBenchmark
                  for(int i=1; i<=messagesPerType; i++) {
                      var msg = new BusinessMessageEvent { Message = $"Test message {i} for TypeB", Timestamp = Timestamp.FromDateTime(DateTime.UtcNow) };
                      tasks.Add(publisherB.PublishEventAsync(msg, EventDirection.Down));
+                     sentCountB++;
                  }
                  await Task.WhenAll(tasks);
+                 Console.WriteLine($"      Published TypeB: {sentCountB}/{messagesPerType}");
             }
             else
             {
@@ -511,6 +510,12 @@ public class MultiTopicBenchmark
         
         await Task.WhenAll(publishTaskA, publishTaskB);
         results.PublishDurationMs = (int)sw.ElapsedMilliseconds;
+        
+        // Update MessagesSent for MassTransit mode
+        if (_providerName == "MassTransit")
+        {
+            results.MessagesSent = sentCountA + sentCountB;
+        }
         
         Console.WriteLine("⏳ Waiting 5s...");
         await Task.Delay(5000);
@@ -535,8 +540,9 @@ public class MultiTopicBenchmark
             
             foreach (var agentInfo in agents)
             {
-                var state = agentInfo.Agent.GetState();
-                var processedCount = state.ProcessedCount;
+                // Use RPC call to get description, then parse ProcessedCount
+                var description = await agentInfo.Actor.GetDescriptionAsync();
+                var processedCount = ExtractProcessedCount(description);
                 
                 typeStats.TotalMessagesReceived += processedCount;
                 
@@ -558,6 +564,16 @@ public class MultiTopicBenchmark
             
             results.StatisticsByType[typeName] = typeStats;
         }
+    }
+    
+    /// <summary>
+    /// Extract ProcessedCount from Agent description string
+    /// </summary>
+    private static int ExtractProcessedCount(string description)
+    {
+        // Description format: "TypedAgent [TypeA] - Processed: 5"
+        var match = System.Text.RegularExpressions.Regex.Match(description, @"Processed:\s*(\d+)");
+        return match.Success ? int.Parse(match.Groups[1].Value) : 0;
     }
     
     private double CalculateMedian(List<int> values)
@@ -746,9 +762,8 @@ public class MultiTopicResults
 
 public class TypedAgentInfo
 {
-    public Guid AgentId { get; set; }
+    public string AgentId { get; set; } = "";
     public IGAgentActor Actor { get; set; } = null!;
-    public TypedAgent Agent { get; set; } = null!;
     public string TypeName { get; set; } = "";
 }
 

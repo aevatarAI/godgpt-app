@@ -20,8 +20,8 @@ public abstract class BaseSubscriptionManager : ISubscriptionManager
     }
 
     public async Task<ISubscriptionHandle> SubscribeWithRetryAsync(
-        Guid parentId,
-        Guid childId,
+        string parentId,
+        string childId,
         Func<EventEnvelope, Task> eventHandler,
         IRetryPolicy? retryPolicy = null,
         CancellationToken cancellationToken = default)
@@ -205,8 +205,8 @@ public abstract class BaseSubscriptionManager : ISubscriptionManager
     /// Create stream subscription (implemented by specific runtime)
     /// </summary>
     protected abstract Task<IMessageStreamSubscription?> CreateStreamSubscriptionAsync(
-        Guid parentId,
-        Guid childId,
+        string parentId,
+        string childId,
         Func<EventEnvelope, Task> eventHandler,
         CancellationToken cancellationToken);
 
@@ -227,7 +227,7 @@ public abstract class BaseSubscriptionManager : ISubscriptionManager
     /// </summary>
     protected class SubscriptionHandle : ISubscriptionHandle
     {
-        public SubscriptionHandle(Guid subscriptionId, Guid parentId, Guid childId)
+        public SubscriptionHandle(Guid subscriptionId, string parentId, string childId)
         {
             SubscriptionId = subscriptionId;
             ParentId = parentId;
@@ -237,8 +237,8 @@ public abstract class BaseSubscriptionManager : ISubscriptionManager
         }
 
         public Guid SubscriptionId { get; }
-        public Guid ParentId { get; }
-        public Guid ChildId { get; }
+        public string ParentId { get; }
+        public string ChildId { get; }
         public DateTime CreatedAt { get; }
         public DateTime LastActivityAt { get; set; }
         public bool IsHealthy { get; set; }
@@ -257,8 +257,8 @@ public static class SubscriptionManagerExtensions
     /// </summary>
     public static async Task<ISubscriptionHandle> SubscribeWithHealthCheckAsync(
         this ISubscriptionManager manager,
-        Guid parentId,
-        Guid childId,
+        string parentId,
+        string childId,
         Func<EventEnvelope, Task> eventHandler,
         TimeSpan healthCheckInterval,
         CancellationToken cancellationToken = default)

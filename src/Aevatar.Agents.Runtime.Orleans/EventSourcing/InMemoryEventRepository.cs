@@ -17,10 +17,10 @@ namespace Aevatar.Agents.Runtime.Orleans.EventSourcing;
 /// </remarks>
 public class InMemoryEventRepository : IEventRepository
 {
-    private readonly ConcurrentDictionary<Guid, ConcurrentBag<AgentStateEvent>> _events = new();
+    private readonly ConcurrentDictionary<string, ConcurrentBag<AgentStateEvent>> _events = new();
 
     public Task<long> AppendEventsAsync(
-        Guid agentId,
+        string agentId,
         IEnumerable<AgentStateEvent> events,
         string? agentTypeName = null,
         CancellationToken ct = default)
@@ -39,7 +39,7 @@ public class InMemoryEventRepository : IEventRepository
     }
 
     public Task<IReadOnlyList<AgentStateEvent>> GetEventsAsync(
-        Guid agentId,
+        string agentId,
         long? fromVersion = null,
         long? toVersion = null,
         int? maxCount = null,
@@ -75,7 +75,7 @@ public class InMemoryEventRepository : IEventRepository
     }
 
     public Task<long> GetLatestVersionAsync(
-        Guid agentId,
+        string agentId,
         string? agentTypeName = null,
         CancellationToken ct = default)
     {
@@ -89,7 +89,7 @@ public class InMemoryEventRepository : IEventRepository
     }
 
     public Task DeleteEventsBeforeVersionAsync(
-        Guid agentId,
+        string agentId,
         long version,
         string? agentTypeName = null,
         CancellationToken ct = default)

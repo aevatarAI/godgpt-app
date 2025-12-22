@@ -69,7 +69,6 @@ public static class ServiceCollectionExtensions
                     if (hasAgents)
                     {
                         agentAssemblies.Add(assembly);
-                        Console.WriteLine($"DEBUG: Auto-discovered agent assembly: {assembly.GetName().Name}");
                     }
                 }
                 catch (ReflectionTypeLoadException)
@@ -82,8 +81,6 @@ public static class ServiceCollectionExtensions
         {
             Console.WriteLine($"WARNING: Failed to auto-discover agent assemblies: {ex.Message}");
         }
-        
-        Console.WriteLine($"DEBUG: Auto-discovered {agentAssemblies.Count} agent assemblies");
         return agentAssemblies.ToArray();
     }
     
@@ -117,7 +114,6 @@ public static class ServiceCollectionExtensions
                         if (hasAgents)
                         {
                             agentAssemblies.Add(assembly);
-                            Console.WriteLine($"DEBUG: Pattern-matched agent assembly: {assemblyName} (pattern: {pattern})");
                             break;
                         }
                     }
@@ -128,8 +124,6 @@ public static class ServiceCollectionExtensions
                 }
             }
         }
-        
-        Console.WriteLine($"DEBUG: Pattern-discovered {agentAssemblies.Count} agent assemblies");
         return agentAssemblies.ToArray();
     }
     
@@ -189,7 +183,6 @@ public static class ServiceCollectionExtensions
         // 1.1 Scan Assemblies for [StreamTopic]
         if (agentAssemblies != null && agentAssemblies.Length > 0)
         {
-            System.Console.WriteLine($"DEBUG: Scanning {agentAssemblies.Length} assemblies for [StreamTopic]...");
             foreach (var assembly in agentAssemblies)
             {
                 try 
@@ -204,8 +197,6 @@ public static class ServiceCollectionExtensions
                         {
                             var category = type.Name;
                             var topic = attr.Topic;
-                            
-                            System.Console.WriteLine($"DEBUG: Found [StreamTopic] for Agent {category} -> {topic}");
 
                             // Add to Mapping (for Producer routing)
                             // Note: This modifies the local 'options' object used for setup, 
@@ -241,11 +232,6 @@ public static class ServiceCollectionExtensions
             }
         });
 
-        System.Console.WriteLine($"DEBUG: [AddMassTransitStreamPlugin] Final Configuration:");
-        System.Console.WriteLine($"DEBUG: - TransportType: {options.TransportType}");
-        System.Console.WriteLine($"DEBUG: - Total Topics: {allTopics.Count}");
-        System.Console.WriteLine($"DEBUG: - Mapped Categories: {options.TopicMapping.Count}");
-
         // 2. Register Provider (both concrete and interface)
         services.AddSingleton<MassTransitMessageStreamProvider>();
         services.AddSingleton<IMessageStreamProvider>(sp => sp.GetRequiredService<MassTransitMessageStreamProvider>());
@@ -273,19 +259,18 @@ public static class ServiceCollectionExtensions
 
                     x.AddRider(rider =>
                     {
-                        System.Console.WriteLine("DEBUG: Adding Kafka Rider...");
                         rider.AddConsumer<StreamMessageDispatcher>();
                         
                         // Register Producers for ALL topics
                         // This allows MassTransitMessageStream to dynamically produce to any configured topic
+                        // Use string key to match StreamId format (AgentTypeShortName:AgentId)
                         foreach (var topic in allTopics)
                         {
-                            rider.AddProducer<Guid, ByteArrayMessage>(topic);
+                            rider.AddProducer<string, ByteArrayMessage>(topic);
                         }
                         
                         rider.UsingKafka((context, k) =>
                         {
-                            System.Console.WriteLine($"DEBUG: Configuring Kafka Host: {options.Kafka?.BootstrapServers ?? "null"}");
                             if (options.Kafka != null)
                             {
                                 k.Host(options.Kafka.BootstrapServers);
@@ -293,8 +278,6 @@ public static class ServiceCollectionExtensions
                             
                             // Explicitly set security protocol to Plaintext to avoid SASL warnings/errors on local dev
                             k.SecurityProtocol = Confluent.Kafka.SecurityProtocol.Plaintext;
-
-                            System.Console.WriteLine($"DEBUG: Subscribing to {allTopics.Count} topics: {string.Join(", ", allTopics)}");
 
                             foreach (var topic in allTopics)
                             {
@@ -304,7 +287,6 @@ public static class ServiceCollectionExtensions
                                     options.Kafka?.ConsumerGroupId ?? "aevatar-agents-group", 
                                     e =>
                                     {
-                                        System.Console.WriteLine($"DEBUG: Configuring Topic Endpoint: {topic} for Group: {options.Kafka?.ConsumerGroupId ?? "aevatar-agents-group"}");
                                         e.AutoOffsetReset = Confluent.Kafka.AutoOffsetReset.Earliest;
                                         
                                         // Optimize Concurrency & Prefetch (Phase 2 Optimization)
@@ -349,6 +331,172 @@ public static class ServiceCollectionExtensions
                         {
                             e.ConfigureConsumer<StreamMessageDispatcher>(context);
                         });
+                    });
+                    break;
+            }
+        });
+
+        return services;
+    }
+    
+    /// <summary>
+    /// Adds MassTransit Message Stream Client (Producer-only mode).
+    /// Use this for Orleans Clients that only need to send messages to Kafka,
+    /// while Silo handles consumption. This avoids Consumer Group competition.
+    /// </summary>
+    /// <param name="services">The service collection</param>
+    /// <param name="configuration">The configuration</param>
+    /// <returns>The service collection</returns>
+    public static IServiceCollection AddMassTransitStreamClient(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        var agentAssemblies = DiscoverAgentAssemblies();
+        return services.AddMassTransitStreamClient(configuration, agentAssemblies);
+    }
+    
+    /// <summary>
+    /// Adds MassTransit Message Stream Client (Producer-only mode) with explicit assemblies.
+    /// </summary>
+    public static IServiceCollection AddMassTransitStreamClient(
+        this IServiceCollection services,
+        IConfiguration configuration,
+        params Assembly[] agentAssemblies)
+    {
+        // 1. Configure Options
+        var section = configuration.GetSection("MassTransit:Stream");
+        services.Configure<MassTransitStreamOptions>(section);
+
+        var options = section.Get<MassTransitStreamOptions>() ?? new MassTransitStreamOptions();
+        
+        // Collect all topics to produce to
+        var allTopics = new HashSet<string>();
+        
+        if (!string.IsNullOrEmpty(options.TopicPrefix))
+        {
+            allTopics.Add(options.TopicPrefix);
+        }
+        
+        if (options.Topics != null)
+        {
+            foreach (var t in options.Topics)
+            {
+                if (!string.IsNullOrEmpty(t)) allTopics.Add(t);
+            }
+        }
+
+        if (options.TopicMapping != null)
+        {
+            foreach (var t in options.TopicMapping.Values)
+            {
+                if (!string.IsNullOrEmpty(t)) allTopics.Add(t);
+            }
+        }
+
+        // Scan for [StreamTopic] annotations
+        if (agentAssemblies != null && agentAssemblies.Length > 0)
+        {
+            foreach (var assembly in agentAssemblies)
+            {
+                try 
+                {
+                    var agentTypes = assembly.GetTypes()
+                        .Where(t => typeof(IGAgent).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface);
+
+                    foreach (var type in agentTypes)
+                    {
+                        var attr = type.GetCustomAttribute<StreamTopicAttribute>();
+                        if (attr != null)
+                        {
+                            var category = type.Name;
+                            var topic = attr.Topic;
+                            
+                            if (!options.TopicMapping.ContainsKey(category))
+                            {
+                                options.TopicMapping[category] = topic;
+                            }
+                            allTopics.Add(topic);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    System.Console.WriteLine($"WARNING: Failed to scan assembly {assembly.FullName}: {ex.Message}");
+                }
+            }
+        }
+        
+        // Update registered options with merged mapping
+        services.PostConfigure<MassTransitStreamOptions>(o => 
+        {
+            foreach (var kvp in options.TopicMapping)
+            {
+                if (!o.TopicMapping.ContainsKey(kvp.Key))
+                {
+                    o.TopicMapping[kvp.Key] = kvp.Value;
+                }
+            }
+        });
+
+        // 2. Register Provider
+        services.AddSingleton<MassTransitMessageStreamProvider>();
+        services.AddSingleton<IMessageStreamProvider>(sp => sp.GetRequiredService<MassTransitMessageStreamProvider>());
+        
+        // 3. Register MassTransit (Producer-only, NO Consumer)
+        services.AddMassTransit(x =>
+        {
+            switch (options.TransportType)
+            {
+                case MassTransitTransportType.InMemory:
+                    // InMemory mode - no consumer needed for client
+                    x.UsingInMemory((context, cfg) =>
+                    {
+                        cfg.ConfigureEndpoints(context);
+                    });
+                    break;
+
+                case MassTransitTransportType.Kafka:
+                    // Host Bus is In-Memory
+                    x.UsingInMemory((context, cfg) =>
+                    {
+                        cfg.ConfigureEndpoints(context);
+                    });
+
+                    x.AddRider(rider =>
+                    {
+                        // Register Producers for ALL topics (NO Consumer registration)
+                        // Use string key to match MassTransitMessageStream.ProduceAsync
+                        foreach (var topic in allTopics)
+                        {
+                            rider.AddProducer<string, ByteArrayMessage>(topic);
+                        }
+                        
+                        rider.UsingKafka((context, k) =>
+                        {
+                            if (options.Kafka != null)
+                            {
+                                k.Host(options.Kafka.BootstrapServers);
+                            }
+                            
+                            k.SecurityProtocol = Confluent.Kafka.SecurityProtocol.Plaintext;
+                            // NO TopicEndpoint subscription - Producer only!
+                        });
+                    });
+                    break;
+
+                case MassTransitTransportType.RabbitMQ:
+                    // RabbitMQ mode - no consumer for client
+                    x.UsingRabbitMq((context, cfg) =>
+                    {
+                        if (options.RabbitMQ != null)
+                        {
+                            cfg.Host(options.RabbitMQ.Host, h =>
+                            {
+                                h.Username(options.RabbitMQ.Username);
+                                h.Password(options.RabbitMQ.Password);
+                            });
+                        }
+                        // No ReceiveEndpoint - Producer only!
                     });
                     break;
             }

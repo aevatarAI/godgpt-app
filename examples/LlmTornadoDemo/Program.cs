@@ -67,7 +67,7 @@ try
     // 1. Create AI Assistant Actor
     // ========================================================================
     logger.LogInformation("▶ Creating AI Assistant Agent...");
-    var assistantId = Guid.NewGuid();
+    var assistantId = Guid.NewGuid().ToString();
     var assistantActor = await actorFactory.CreateGAgentActorAsync<AIAssistantAgent>(assistantId);
     var assistant = (AIAssistantAgent)assistantActor.GetAgent();
 

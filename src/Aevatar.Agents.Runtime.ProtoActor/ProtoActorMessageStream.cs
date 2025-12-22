@@ -15,9 +15,9 @@ public class ProtoActorMessageStream : IMessageStream
     private readonly IRootContext _rootContext;
     private readonly ConcurrentDictionary<Guid, ProtoActorStreamSubscription> _subscriptions = new();
 
-    public Guid StreamId { get; }
+    public string StreamId { get; }
 
-    public ProtoActorMessageStream(Guid streamId, PID targetPid, IRootContext rootContext)
+    public ProtoActorMessageStream(string streamId, PID targetPid, IRootContext rootContext)
     {
         StreamId = streamId;
         _targetPid = targetPid;

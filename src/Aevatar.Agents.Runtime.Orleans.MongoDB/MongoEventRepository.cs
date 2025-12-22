@@ -20,8 +20,7 @@ public class EventDocument
     public string Id { get; set; } = string.Empty; // Format: "{agentId}_{version}"
     
     [BsonElement("agentId")]
-    [BsonRepresentation(BsonType.String)]
-    public Guid AgentId { get; set; }
+    public string AgentId { get; set; } = string.Empty;
     
     [BsonElement("version")]
     public long Version { get; set; }
@@ -240,7 +239,7 @@ public class MongoEventRepository : IEventRepository
     }
 
     public async Task<long> AppendEventsAsync(
-        Guid agentId,
+        string agentId,
         IEnumerable<AgentStateEvent> events,
         string? agentTypeName = null,
         CancellationToken ct = default)
@@ -276,7 +275,7 @@ public class MongoEventRepository : IEventRepository
     }
 
     public async Task<IReadOnlyList<AgentStateEvent>> GetEventsAsync(
-        Guid agentId,
+        string agentId,
         long? fromVersion = null,
         long? toVersion = null,
         int? maxCount = null,
@@ -320,7 +319,7 @@ public class MongoEventRepository : IEventRepository
     }
 
     public async Task<long> GetLatestVersionAsync(
-        Guid agentId,
+        string agentId,
         string? agentTypeName = null,
         CancellationToken ct = default)
     {
@@ -338,7 +337,7 @@ public class MongoEventRepository : IEventRepository
     }
 
     public async Task DeleteEventsBeforeVersionAsync(
-        Guid agentId,
+        string agentId,
         long version,
         string? agentTypeName = null,
         CancellationToken ct = default)

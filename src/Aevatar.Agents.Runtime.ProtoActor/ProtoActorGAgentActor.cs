@@ -42,7 +42,7 @@ public class ProtoActorGAgentActor : GAgentActorBase
 
     // ============ 层级关系管理（重写基类方法） ============
 
-    protected override async Task SetParentAsync(Guid parentId, CancellationToken ct = default)
+    protected override async Task SetParentAsync(string parentId, CancellationToken ct = default)
     {
         // 如果已有父节点，先清除
         if (EventRouter.GetParent() != null)
@@ -119,7 +119,7 @@ public class ProtoActorGAgentActor : GAgentActorBase
     /// <summary>
     /// 发送事件到指定的 Actor（通过目标 Actor 的 Stream）
     /// </summary>
-    protected override async Task SendEventToActorAsync(Guid actorId, EventEnvelope envelope, CancellationToken ct)
+    protected override async Task SendEventToActorAsync(string actorId, EventEnvelope envelope, CancellationToken ct)
     {
         var targetStream = _streamRegistry.GetStream(actorId);
         if (targetStream != null)

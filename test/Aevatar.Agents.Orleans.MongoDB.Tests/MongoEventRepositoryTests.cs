@@ -41,7 +41,7 @@ public class MongoEventRepositoryTests
     public async Task AppendEventsAsync_ShouldInsertEvents()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new List<AgentStateEvent>
         {
             CreateTestEvent(agentId, 1),
@@ -71,7 +71,7 @@ public class MongoEventRepositoryTests
     public async Task AppendEventsAsync_ShouldReturnLastEventVersion()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new List<AgentStateEvent>
         {
             CreateTestEvent(agentId, 1),
@@ -97,7 +97,7 @@ public class MongoEventRepositoryTests
     public async Task GetLatestVersionAsync_ShouldReturnMaxVersion()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var events = new[]
         {
             CreateEventDocument(agentId, 1),
@@ -132,7 +132,7 @@ public class MongoEventRepositoryTests
     public async Task GetLatestVersionAsync_ShouldReturn0_WhenNoEvents()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
 
         var mockCursor = new Mock<IAsyncCursor<EventDocument>>();
         mockCursor
@@ -160,7 +160,7 @@ public class MongoEventRepositoryTests
     public async Task GetEventsAsync_ShouldReturnAllEvents_WhenNoFilters()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var eventDocs = new[]
         {
             CreateEventDocument(agentId, 1),
@@ -195,7 +195,7 @@ public class MongoEventRepositoryTests
     public async Task DeleteEventsBeforeVersionAsync_ShouldCallDeleteMany()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var version = 5L;
 
         _mockCollection
@@ -239,7 +239,7 @@ public class MongoEventRepositoryTests
     public async Task AppendEventsAsync_ShouldReturnZero_WhenNoEvents()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var emptyEvents = new List<AgentStateEvent>();
 
         // Act
@@ -253,11 +253,11 @@ public class MongoEventRepositoryTests
             default), Times.Never);
     }
 
-    private AgentStateEvent CreateTestEvent(Guid agentId, long version)
+    private AgentStateEvent CreateTestEvent(string agentId, long version)
     {
         return new AgentStateEvent
         {
-            AgentId = agentId.ToString(),
+            AgentId = agentId,
             Version = version,
             Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
             EventId = Guid.NewGuid().ToString(),
@@ -265,7 +265,7 @@ public class MongoEventRepositoryTests
         };
     }
 
-    private EventDocument CreateEventDocument(Guid agentId, long version)
+    private EventDocument CreateEventDocument(string agentId, long version)
     {
         var evt = CreateTestEvent(agentId, version);
         return new EventDocument

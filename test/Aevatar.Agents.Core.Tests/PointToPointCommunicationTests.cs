@@ -28,7 +28,7 @@ public class PointToPointCommunicationTests(CoreTestFixture fixture) : IClassFix
         // Arrange
         _eventPublisher.Clear();
         var senderAgent = CreateAgent();
-        var targetId = Guid.NewGuid();
+        var targetId = Guid.NewGuid().ToString();
 
         // Act
         await senderAgent.SendDirectMessageAsync(targetId, "Hello Target");
@@ -48,7 +48,7 @@ public class PointToPointCommunicationTests(CoreTestFixture fixture) : IClassFix
         // Arrange
         _eventPublisher.Clear();
         var senderAgent = CreateAgent();
-        var targetId = Guid.NewGuid();
+        var targetId = Guid.NewGuid().ToString();
 
         // Act
         await senderAgent.SendDirectMessageAsync(targetId, "Private message");
@@ -68,7 +68,7 @@ public class PointToPointCommunicationTests(CoreTestFixture fixture) : IClassFix
         // Arrange
         _eventPublisher.Clear();
         var senderAgent = CreateAgent();
-        var coordinatorId = Guid.NewGuid();
+        var coordinatorId = Guid.NewGuid().ToString();
 
         // Act
         await senderAgent.SendToGroupAsync(coordinatorId, "Task for the group");
@@ -86,7 +86,7 @@ public class PointToPointCommunicationTests(CoreTestFixture fixture) : IClassFix
         // Arrange
         _eventPublisher.Clear();
         var senderAgent = CreateAgent();
-        var targetId = Guid.NewGuid();
+        var targetId = Guid.NewGuid().ToString();
 
         // Act
         await senderAgent.SendWithUpPropagationAsync(targetId, "Report to chain");
@@ -108,7 +108,7 @@ public class PointToPointCommunicationTests(CoreTestFixture fixture) : IClassFix
         // Arrange
         _eventPublisher.Clear();
         var agent = CreateAgent();
-        var targetId = Guid.NewGuid();
+        var targetId = Guid.NewGuid().ToString();
 
         // Act - Send P2P message first
         await agent.SendDirectMessageAsync(targetId, "P2P message");
@@ -225,7 +225,7 @@ public class PointToPointCommunicationTests(CoreTestFixture fixture) : IClassFix
         // Arrange
         _eventPublisher.Clear();
         var agent = CreateAgent();
-        var targetId = Guid.NewGuid();
+        var targetId = Guid.NewGuid().ToString();
 
         // Act
         var eventId = await agent.SendDirectMessageAsync(targetId, "Test");
@@ -241,7 +241,7 @@ public class PointToPointCommunicationTests(CoreTestFixture fixture) : IClassFix
         // Arrange
         _eventPublisher.Clear();
         var agent = CreateAgent();
-        var targets = new[] { Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid() };
+        var targets = new[] { Guid.NewGuid().ToString(), Guid.NewGuid().ToString(), Guid.NewGuid().ToString() };
 
         // Act
         foreach (var targetId in targets)
@@ -268,7 +268,7 @@ public class PointToPointCommunicationTests(CoreTestFixture fixture) : IClassFix
         _eventPublisher.ExceptionMessage = "P2P send failed";
         
         var agent = CreateAgent();
-        var targetId = Guid.NewGuid();
+        var targetId = Guid.NewGuid().ToString();
 
         // Act & Assert
         var exception = await Should.ThrowAsync<InvalidOperationException>(

@@ -41,7 +41,7 @@ public abstract class AIGAgentBase : GAgentBase<AevatarAIAgentState, AevatarAIAg
     {
     }
 
-    public AIGAgentBase(Guid id) : base(id)
+    public AIGAgentBase(string id) : base(id)
     {
     }
 

@@ -15,7 +15,7 @@ public interface IEventRepository
     /// <param name="agentTypeName">Agent type name for collection routing (optional)</param>
     /// <param name="ct">Cancellation token</param>
     Task<long> AppendEventsAsync(
-        Guid agentId, 
+        string agentId, 
         IEnumerable<AgentStateEvent> events,
         string? agentTypeName = null,
         CancellationToken ct = default);
@@ -30,7 +30,7 @@ public interface IEventRepository
     /// <param name="agentTypeName">Agent type name for collection routing (optional)</param>
     /// <param name="ct">Cancellation token</param>
     Task<IReadOnlyList<AgentStateEvent>> GetEventsAsync(
-        Guid agentId,
+        string agentId,
         long? fromVersion = null,
         long? toVersion = null,
         int? maxCount = null,
@@ -44,7 +44,7 @@ public interface IEventRepository
     /// <param name="agentTypeName">Agent type name for collection routing (optional)</param>
     /// <param name="ct">Cancellation token</param>
     Task<long> GetLatestVersionAsync(
-        Guid agentId,
+        string agentId,
         string? agentTypeName = null,
         CancellationToken ct = default);
 
@@ -56,7 +56,7 @@ public interface IEventRepository
     /// <param name="agentTypeName">Agent type name for collection routing (optional)</param>
     /// <param name="ct">Cancellation token</param>
     Task DeleteEventsBeforeVersionAsync(
-        Guid agentId, 
+        string agentId, 
         long version,
         string? agentTypeName = null,
         CancellationToken ct = default);

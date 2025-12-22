@@ -21,18 +21,18 @@ public class LocalTestGAgentActorFactoryProvider : IGAgentActorFactoryProvider
                           ?? new LocalMessageStreamRegistry();
     }
 
-    public void RegisterFactory<TAgent>(Func<IGAgentActorFactory, Guid, CancellationToken, Task<IGAgentActor>> factory)
+    public void RegisterFactory<TAgent>(Func<IGAgentActorFactory, string, CancellationToken, Task<IGAgentActor>> factory)
         where TAgent : IGAgent
     {
         // 测试中不需要注册，自动创建
     }
 
-    public void RegisterFactory(Type agentType, Func<IGAgentActorFactory, Guid, CancellationToken, Task<IGAgentActor>> factory)
+    public void RegisterFactory(Type agentType, Func<IGAgentActorFactory, string, CancellationToken, Task<IGAgentActor>> factory)
     {
         // 测试中不需要注册，自动创建
     }
 
-    public Func<IGAgentActorFactory, Guid, CancellationToken, Task<IGAgentActor>>? GetFactory(Type agentType)
+    public Func<IGAgentActorFactory, string, CancellationToken, Task<IGAgentActor>>? GetFactory(Type agentType)
     {
         // 为所有测试Agent提供简单的工厂实现
         return async (factory, id, ct) =>

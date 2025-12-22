@@ -23,7 +23,7 @@ public class OrleansStreamNotFoundHandler : IStreamNotFoundHandler
         _logger = logger;
     }
 
-    public async Task HandleStreamNotFoundAsync(Guid streamId)
+    public async Task HandleStreamNotFoundAsync(string streamId)
     {
         try
         {
@@ -31,7 +31,7 @@ public class OrleansStreamNotFoundHandler : IStreamNotFoundHandler
             
             // Get the Grain using the Agent ID
             // Using IGAgentGrain which is the standard grain interface for agents
-            var grain = _grainFactory.GetGrain<IGAgentGrain>(streamId.ToString());
+            var grain = _grainFactory.GetGrain<IGAgentGrain>(streamId);
             
             // Invoke a method to force activation
             // GetDescriptionAsync will trigger grain activation if not already activated

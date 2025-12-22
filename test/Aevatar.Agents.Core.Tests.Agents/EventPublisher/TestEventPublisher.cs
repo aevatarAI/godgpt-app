@@ -23,7 +23,7 @@ public class TestEventPublisher : IEventPublisher
     /// </summary>
     public class SentEventInfo
     {
-        public Guid TargetAgentId { get; set; }
+        public string TargetAgentId { get; set; } = string.Empty;
         public IMessage Event { get; set; } = null!;
         public EventDirection OnArrivalDirection { get; set; }
         public string EventType { get; set; } = string.Empty;
@@ -66,7 +66,7 @@ public class TestEventPublisher : IEventPublisher
     }
 
     public Task<string> SendToAsync<TEvent>(
-        Guid targetAgentId,
+        string targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
         CancellationToken ct = default,

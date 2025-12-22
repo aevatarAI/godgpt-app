@@ -252,7 +252,7 @@ public class TreeNodeAgent : GAgentBase<TreeNodeState>
 /// <summary>
 /// Stateful agent for state recovery testing
 /// </summary>
-public class StatefulAgent(Guid agentId) : GAgentBase<TestAgentState>(agentId)
+public class StatefulAgent(string agentId) : GAgentBase<TestAgentState>(agentId)
 {
     [EventHandler]
     public async Task HandleTestEvent(TestEvent evt)

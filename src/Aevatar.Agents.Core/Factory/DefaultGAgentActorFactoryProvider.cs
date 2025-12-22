@@ -13,29 +13,29 @@ public class DefaultGAgentActorFactoryProvider : IGAgentActorFactoryProvider
 {
     private readonly ILogger<DefaultGAgentActorFactoryProvider>? _logger;
 
-    private readonly ConcurrentDictionary<Type, Func<IGAgentActorFactory, Guid, CancellationToken, Task<IGAgentActor>>>
+    private readonly ConcurrentDictionary<Type, Func<IGAgentActorFactory, string, CancellationToken, Task<IGAgentActor>>>
         _factories;
 
     public DefaultGAgentActorFactoryProvider(IServiceProvider serviceProvider)
     {
         _logger = serviceProvider.GetService<ILogger<DefaultGAgentActorFactoryProvider>>();
         _factories =
-            new ConcurrentDictionary<Type, Func<IGAgentActorFactory, Guid, CancellationToken, Task<IGAgentActor>>>();
+            new ConcurrentDictionary<Type, Func<IGAgentActorFactory, string, CancellationToken, Task<IGAgentActor>>>();
     }
 
-    public void RegisterFactory<TAgent>(Func<IGAgentActorFactory, Guid, CancellationToken, Task<IGAgentActor>> factory)
+    public void RegisterFactory<TAgent>(Func<IGAgentActorFactory, string, CancellationToken, Task<IGAgentActor>> factory)
         where TAgent : IGAgent
     {
         _factories[typeof(TAgent)] = factory;
     }
 
     public void RegisterFactory(Type agentType,
-        Func<IGAgentActorFactory, Guid, CancellationToken, Task<IGAgentActor>> factory)
+        Func<IGAgentActorFactory, string, CancellationToken, Task<IGAgentActor>> factory)
     {
         _factories[agentType] = factory;
     }
 
-    public Func<IGAgentActorFactory, Guid, CancellationToken, Task<IGAgentActor>>? GetFactory(Type agentType)
+    public Func<IGAgentActorFactory, string, CancellationToken, Task<IGAgentActor>>? GetFactory(Type agentType)
     {
         return _factories.GetValueOrDefault(agentType);
     }

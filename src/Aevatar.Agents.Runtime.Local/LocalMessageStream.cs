@@ -15,9 +15,9 @@ public class LocalMessageStream : IMessageStream
     private readonly ConcurrentDictionary<Guid, LocalMessageStreamSubscription> _subscriptions = new();
     private readonly CancellationTokenSource _cts = new();
 
-    public Guid StreamId { get; }
+    public string StreamId { get; }
 
-    public LocalMessageStream(Guid streamId, int capacity = 1000)
+    public LocalMessageStream(string streamId, int capacity = 1000)
     {
         StreamId = streamId;
         _channel = Channel.CreateBounded<EventEnvelope>(new BoundedChannelOptions(capacity)

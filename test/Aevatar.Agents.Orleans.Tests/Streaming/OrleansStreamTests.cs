@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Runtime.Orleans;
+using Aevatar.Agents.Runtime.Orleans.Stream;
 using Google.Protobuf;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -39,8 +40,8 @@ public class OrleansStreamTests : IClassFixture<OrleansStreamTests.ClusterFixtur
     public async Task Orleans_SetParent_Should_Subscribe_To_Parent_Stream()
     {
         // Arrange
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         var parentGrain = _grainFactory.GetGrain<IGAgentGrain>(parentId.ToString());
         var childGrain = _grainFactory.GetGrain<IGAgentGrain>(childId.ToString());
@@ -86,7 +87,7 @@ public class OrleansStreamTests : IClassFixture<OrleansStreamTests.ClusterFixtur
         var stream = streamProvider.GetStream<byte[]>(streamId);
 
         var receivedMessages = new List<string>();
-        var orleansStream = new OrleansMessageStream(Guid.NewGuid(), stream);
+        var orleansStream = new OrleansMessageStream(Guid.NewGuid().ToString(), stream);
 
         // Act - 订阅
         var subscription = await orleansStream.SubscribeAsync<EventEnvelope>(async envelope =>
@@ -125,7 +126,7 @@ public class OrleansStreamTests : IClassFixture<OrleansStreamTests.ClusterFixtur
             Guid.NewGuid().ToString());
         var stream = streamProvider.GetStream<byte[]>(streamId);
 
-        var orleansStream = new OrleansMessageStream(Guid.NewGuid(), stream);
+        var orleansStream = new OrleansMessageStream(Guid.NewGuid().ToString(), stream);
         var filteredMessages = new List<string>();
 
         // Act - 带过滤器订阅
@@ -188,6 +189,8 @@ public class OrleansStreamTests : IClassFixture<OrleansStreamTests.ClusterFixtur
                 .ConfigureServices(services =>
                 {
                     services.AddSerializer(serializerBuilder => { serializerBuilder.AddProtobufSerializer(); });
+                    // Register OrleansStreamFactory for unified stream support
+                    services.AddSingleton<OrleansStreamFactory>();
                 })
                 .ConfigureLogging(logging => logging.AddConsole())
                 .AddMemoryStreams("StreamProvider")

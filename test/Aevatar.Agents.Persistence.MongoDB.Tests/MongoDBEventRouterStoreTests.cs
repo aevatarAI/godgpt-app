@@ -52,7 +52,7 @@ public class MongoDBEventRouterStoreTests
     public async Task LoadAsync_ShouldReturnNull_WhenNoDocument()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var mockCursor = CreateEmptyCursor();
 
         _mockCollection
@@ -73,15 +73,15 @@ public class MongoDBEventRouterStoreTests
     public async Task LoadAsync_ShouldReturnHierarchy_WhenDocumentExists()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
 
         var doc = new EventRouterHierarchyDocument
         {
             AgentId = agentId,
             ParentId = parentId,
-            ChildrenIds = new List<Guid> { childId },
+            ChildrenIds = new List<string> { childId },
             UpdatedAt = DateTime.UtcNow
         };
 
@@ -107,11 +107,11 @@ public class MongoDBEventRouterStoreTests
     public async Task SaveAsync_ShouldCallReplaceOne()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var hierarchy = new EventRouterHierarchy
         {
-            ParentId = Guid.NewGuid(),
-            ChildrenIds = new HashSet<Guid> { Guid.NewGuid() }
+            ParentId = Guid.NewGuid().ToString(),
+            ChildrenIds = new HashSet<string> { Guid.NewGuid().ToString() }
         };
 
         _mockCollection
@@ -140,7 +140,7 @@ public class MongoDBEventRouterStoreTests
     public async Task DeleteAsync_ShouldCallDeleteOne()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
 
         _mockCollection
             .Setup(c => c.DeleteOneAsync(
@@ -161,7 +161,7 @@ public class MongoDBEventRouterStoreTests
     public async Task ExistsAsync_ShouldReturnTrue_WhenDocumentExists()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
 
         _mockCollection
             .Setup(c => c.CountDocumentsAsync(
@@ -181,7 +181,7 @@ public class MongoDBEventRouterStoreTests
     public async Task ExistsAsync_ShouldReturnFalse_WhenDocumentNotExists()
     {
         // Arrange
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
 
         _mockCollection
             .Setup(c => c.CountDocumentsAsync(

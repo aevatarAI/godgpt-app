@@ -18,7 +18,7 @@ public class AIGAgentFactory : IGAgentFactory
         _logger = serviceProvider.GetService<ILogger<AIGAgentFactory>>();
     }
 
-    public IGAgent CreateGAgent(Guid id, Type agentType, CancellationToken ct = default)
+    public IGAgent CreateGAgent(string id, Type agentType, CancellationToken ct = default)
     {
         // 创建 Agent 实例，支持多种构造函数模式
         IGAgent agent;
@@ -26,26 +26,26 @@ public class AIGAgentFactory : IGAgentFactory
         // 尝试找到合适的构造函数
         var constructors = agentType.GetConstructors();
 
-        var ctorWithOptionalGuid = constructors.FirstOrDefault(c =>
+        var ctorWithOptionalString = constructors.FirstOrDefault(c =>
         {
             var parameters = c.GetParameters();
             return parameters.Length == 1 &&
-                   parameters[0].ParameterType == typeof(Guid?) &&
+                   parameters[0].ParameterType == typeof(string) &&
                    parameters[0].HasDefaultValue;
         });
 
-        if (ctorWithOptionalGuid != null)
+        if (ctorWithOptionalString != null)
         {
-            agent = (IGAgent)ctorWithOptionalGuid.Invoke([id]);
+            agent = (IGAgent)ctorWithOptionalString.Invoke([id]);
         }
         else if (constructors.Any(c =>
                  {
                      var parameters = c.GetParameters();
-                     return parameters.Length == 1 && parameters[0].ParameterType == typeof(Guid);
+                     return parameters.Length == 1 && parameters[0].ParameterType == typeof(string);
                  }))
         {
-            var ctorWithGuid = agentType.GetConstructor([typeof(Guid)]);
-            agent = (IGAgent)ctorWithGuid!.Invoke([id]);
+            var ctorWithString = agentType.GetConstructor([typeof(string)]);
+            agent = (IGAgent)ctorWithString!.Invoke([id]);
         }
         else
         {
@@ -86,13 +86,13 @@ public class AIGAgentFactory : IGAgentFactory
         return agent;
     }
 
-    public TAgent CreateGAgent<TAgent>(Guid id, CancellationToken ct = default) where TAgent : IGAgent
+    public TAgent CreateGAgent<TAgent>(string id, CancellationToken ct = default) where TAgent : IGAgent
     {
         return (TAgent)CreateGAgent(id, typeof(TAgent), ct);
     }
 
     public TAgent CreateGAgent<TAgent>(CancellationToken ct = default) where TAgent : IGAgent
     {
-        return CreateGAgent<TAgent>(Guid.NewGuid(), ct);
+        return CreateGAgent<TAgent>(Guid.NewGuid().ToString(), ct);
     }
 }

@@ -8,10 +8,10 @@ public class EventRouterHierarchy
     /// <summary>
     /// Parent agent ID (null if this is a root agent)
     /// </summary>
-    public Guid? ParentId { get; set; }
+    public string? ParentId { get; set; }
 
     /// <summary>
     /// Collection of child agent IDs
     /// </summary>
-    public HashSet<Guid> ChildrenIds { get; set; } = new();
+    public HashSet<string> ChildrenIds { get; set; } = new();
 }

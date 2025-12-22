@@ -11,7 +11,7 @@ public class LocalSubscriptionManager : BaseSubscriptionManager
 {
     private readonly LocalMessageStreamRegistry _streamRegistry;
     // 保存原始事件处理器以支持重连
-    private readonly Dictionary<Guid, Func<EventEnvelope, Task>> _eventHandlers = new();
+    private readonly Dictionary<string, Func<EventEnvelope, Task>> _eventHandlers = new();
     
     public LocalSubscriptionManager(
         LocalMessageStreamRegistry streamRegistry,
@@ -22,8 +22,8 @@ public class LocalSubscriptionManager : BaseSubscriptionManager
     }
 
     protected override async Task<IMessageStreamSubscription?> CreateStreamSubscriptionAsync(
-        Guid parentId,
-        Guid childId,
+        string parentId,
+        string childId,
         Func<EventEnvelope, Task> eventHandler,
         CancellationToken cancellationToken)
     {
@@ -48,7 +48,7 @@ public class LocalSubscriptionManager : BaseSubscriptionManager
         Func<EventEnvelope, bool>? filter = envelope =>
         {
             // 过滤掉子节点自己发布的事件，避免循环
-            if (envelope.PublisherId == childId.ToString())
+            if (envelope.PublisherId == childId)
             {
                 Logger.LogTrace("Filtering out self-published event {EventId} for child {ChildId}",
                     envelope.Id, childId);
@@ -131,7 +131,7 @@ public class LocalSubscriptionManager : BaseSubscriptionManager
         // 创建过滤器（与创建时相同）
         Func<EventEnvelope, bool>? filter = envelope =>
         {
-            if (envelope.PublisherId == handle.ChildId.ToString())
+            if (envelope.PublisherId == handle.ChildId)
             {
                 Logger.LogTrace("Filtering out self-published event {EventId} for child {ChildId}",
                     envelope.Id, handle.ChildId);
@@ -158,7 +158,7 @@ public class LocalSubscriptionManager : BaseSubscriptionManager
     /// <summary>
     /// 清理保存的事件处理器
     /// </summary>
-    public void CleanupEventHandler(Guid childId)
+    public void CleanupEventHandler(string childId)
     {
         if (_eventHandlers.Remove(childId))
         {
@@ -171,8 +171,8 @@ public class LocalSubscriptionManager : BaseSubscriptionManager
     /// </summary>
     private Func<EventEnvelope, Task> CreateWrappedEventHandler(
         Func<EventEnvelope, Task> originalHandler,
-        Guid childId,
-        Guid parentId)
+        string childId,
+        string parentId)
     {
         return async (EventEnvelope envelope) =>
         {
@@ -201,7 +201,7 @@ public class LocalSubscriptionManager : BaseSubscriptionManager
     /// <summary>
     /// 更新最后活动时间
     /// </summary>
-    private void UpdateLastActivity(Guid childId, Guid parentId)
+    private void UpdateLastActivity(string childId, string parentId)
     {
         foreach (var subscription in _subscriptions.Values)
         {
@@ -217,8 +217,8 @@ public class LocalSubscriptionManager : BaseSubscriptionManager
     /// 创建带健康检查的订阅
     /// </summary>
     public async Task<ISubscriptionHandle> SubscribeWithHealthMonitoringAsync(
-        Guid parentId,
-        Guid childId,
+        string parentId,
+        string childId,
         Func<EventEnvelope, Task> eventHandler,
         TimeSpan healthCheckInterval,
         IRetryPolicy? retryPolicy = null,

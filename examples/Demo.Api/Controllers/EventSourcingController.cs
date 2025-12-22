@@ -40,7 +40,7 @@ public class EventSourcingController : ControllerBase
         try
         {
             // 创建银行账户Agent
-            var accountId = Guid.NewGuid();
+            var accountId = Guid.NewGuid().ToString();
             var agent = await _agentFactory.CreateGAgentActorAsync<BankAccountAgent>(accountId);
             
             _logger.LogInformation("Created BankAccountAgent {AccountId} on {Runtime}", accountId, runtime);
@@ -125,7 +125,7 @@ public class EventSourcingController : ControllerBase
     /// 重放事件以重建状态
     /// </summary>
     [HttpPost("replay/{agentId}")]
-    public async Task<IActionResult> ReplayEvents(Guid agentId, [FromQuery] string runtime = "local")
+    public async Task<IActionResult> ReplayEvents(string agentId, [FromQuery] string runtime = "local")
     {
         try
         {
@@ -175,7 +175,7 @@ public class EventSourcingController : ControllerBase
     /// 获取Agent的事件历史
     /// </summary>
     [HttpGet("history/{agentId}")]
-    public async Task<IActionResult> GetEventHistory(Guid agentId)
+    public async Task<IActionResult> GetEventHistory(string agentId)
     {
         try
         {
@@ -210,7 +210,7 @@ public class EventSourcingController : ControllerBase
     /// 创建状态快照
     /// </summary>
     [HttpPost("snapshot/{agentId}")]
-    public async Task<IActionResult> CreateSnapshot(Guid agentId, [FromQuery] string runtime = "local")
+    public async Task<IActionResult> CreateSnapshot(string agentId, [FromQuery] string runtime = "local")
     {
         try
         {

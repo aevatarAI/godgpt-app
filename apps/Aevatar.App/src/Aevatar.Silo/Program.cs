@@ -118,8 +118,19 @@ public class Program
                 // Configure MessageStreamProviderOptions
                 services.Configure<MessageStreamProviderOptions>(context.Configuration.GetSection("MessageStream"));
 
-                // MassTransit Stream Plugin
-                services.AddMassTransitStreamPlugin(context.Configuration);
+                // MassTransit Stream Plugin - ONLY if MessageStream.Provider is "MassTransit"
+                var messageStreamProvider = context.Configuration.GetSection("MessageStream").GetValue("Provider", "Orleans");
+                Log.Information("  MessageStream Provider: {Provider}", messageStreamProvider);
+                
+                if (messageStreamProvider == "MassTransit")
+                {
+                    Log.Information("🔌 Registering MassTransit Stream Plugin (Kafka Consumer + Producer)");
+                    services.AddMassTransitStreamPlugin(context.Configuration);
+                }
+                else
+                {
+                    Log.Information("📡 Using Orleans Kafka Stream (no MassTransit)");
+                }
 
                 // Aevatar Agent System with MongoDB stores
                 services.AddAevatarAgentSystem(options =>

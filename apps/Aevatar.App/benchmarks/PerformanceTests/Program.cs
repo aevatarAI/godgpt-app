@@ -8,9 +8,12 @@ using Aevatar.Agents.Core.Extensions;
 using Aevatar.Agents.Core.Hierarchy;
 using Aevatar.Agents.Runtime.Orleans;
 using Aevatar.Agents.Runtime.Orleans.Extensions;
+using Aevatar.Agents.Plugins.MassTransit;
+using Aevatar.Agents.Plugins.MassTransit.DependencyInjection;
 using Aevatar.App.Agents.Agents;
 using Business.Server;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -80,6 +83,7 @@ class Program
                 await TestMessagePublishing(actorManager, results);
                 await TestStateQuery(actorManager, results);
                 await TestParentChildPropagation(actorManager, results);
+                await TestPointToPointSending(actorManager, results);
 
                 PrintSummary(results);
             }
@@ -111,7 +115,8 @@ class Program
                 if (provider == "Orleans")
                 {
                     Console.WriteLine("   • Configuring Orleans Kafka Stream Client...");
-                    clientBuilder.AddKafka("Default")
+                    // Use "AevatarAgents" to match Silo's StreamProviderName
+                    clientBuilder.AddKafka("AevatarAgents")
                         .WithOptions(kafkaOptions =>
                         {
                             kafkaOptions.BrokerList = new List<string> { "localhost:9092" };
@@ -183,17 +188,86 @@ class Program
         services.AddSingleton<IGrainFactory>(client);
         services.AddSingleton<IClusterClient>(client);
 
+        // Configure Orleans Stream options - must match Silo's configuration
         services.Configure<Aevatar.Agents.StreamingOptions>(options =>
         {
-            options.StreamProviderName = "Default";
+            options.StreamProviderName = "AevatarAgents";  // Match Silo's ProviderName
             options.DefaultStreamNamespace = "AevatarAgents";
         });
+
+        // Configure MessageStreamProviderOptions based on provider argument
+        services.Configure<Aevatar.Agents.Abstractions.MessageStreamProviderOptions>(options =>
+        {
+            options.Provider = provider; // "MassTransit" or "Orleans"
+            options.Runtime["Orleans"] = provider;
+        });
+
+        // If using MassTransit, configure it
+        if (provider == "MassTransit")
+        {
+            Console.WriteLine("   • Configuring MassTransit Kafka Stream Client (Producer-only)...");
+            
+            // Build in-memory configuration matching Silo's appsettings.json
+            var configDict = new Dictionary<string, string?>
+            {
+                {"MassTransit:Stream:TopicPrefix", "agent-events"},
+                {"MassTransit:Stream:TransportType", "Kafka"},
+                {"MassTransit:Stream:RuntimeName", "Orleans"},
+                {"MassTransit:Stream:Kafka:BootstrapServers", "localhost:9092"}
+                // No ConsumerGroupId needed - Client is producer-only!
+            };
+            
+            var configuration = new ConfigurationBuilder()
+                .AddInMemoryCollection(configDict)
+                .Build();
+            
+            // Add MassTransit Stream Client (Producer-only mode)
+            // This ensures Client only sends to Kafka, Silo handles consumption
+            // Avoids Consumer Group competition between Client and Silo
+            services.AddMassTransitStreamClient(configuration);
+        }
 
         // Use new AddAevatarAgentSystem with Orleans runtime
         services.AddAevatarAgentSystem(builder => builder.UseOrleansRuntime());
 
         var serviceProvider = services.BuildServiceProvider();
-        return serviceProvider.GetRequiredService<IGAgentActorManager>();
+        
+        // IMPORTANT: Start MassTransit hosted services (Bus, Riders)
+        if (provider == "MassTransit")
+        {
+            Console.WriteLine("   • Starting MassTransit services...");
+            var hostedServices = serviceProvider.GetServices<IHostedService>();
+            foreach (var hostedService in hostedServices)
+            {
+                await hostedService.StartAsync(default);
+            }
+            
+            // Warm up Kafka producer to avoid cold-start latency
+            Console.WriteLine("   • Warming up Kafka producer...");
+            var streamProvider = serviceProvider.GetService<MassTransitMessageStreamProvider>();
+            if (streamProvider != null)
+            {
+                await streamProvider.WarmupAsync();
+            }
+            Console.WriteLine("   ✅ MassTransit services started and warmed up");
+        }
+
+        // Warm up Orleans Client connection by creating a dummy agent
+        Console.WriteLine("   • Warming up Orleans Client connection...");
+        var warmupManager = serviceProvider.GetRequiredService<IGAgentActorManager>();
+        try
+        {
+            var warmupId = Guid.NewGuid().ToString();
+            var warmupAgent = await warmupManager.CreateAndRegisterAsync<SimpleBusinessAgent>(warmupId);
+            await warmupAgent.GetDescriptionAsync();  // Force RPC to establish connection
+            Console.WriteLine("   ✅ Orleans Client warmed up");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"   ⚠️ Orleans warmup failed (non-fatal): {ex.Message}");
+        }
+        
+        return warmupManager;
     }
 
     static async Task TestAgentCreation(IGAgentActorManager manager, PerformanceResults results)
@@ -201,7 +275,7 @@ class Program
         Console.WriteLine("1️⃣  Agent Creation Time:");
         
         var sw = Stopwatch.StartNew();
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         results.Agent1 = await manager.CreateAndRegisterAsync<SimpleBusinessAgent>(agentId);
         sw.Stop();
         
@@ -241,14 +315,30 @@ class Program
         Console.WriteLine();
         Console.WriteLine("3️⃣  Agent Info Query Time:");
         
-        var sw = Stopwatch.StartNew();
-        var agent = results.Agent1!.GetAgent();
-        var description = await agent.GetDescriptionAsync();
-        sw.Stop();
+        // Wait for previous messages to be processed (avoid queue blocking)
+        Console.WriteLine("   • Waiting 2s for message queue to clear...");
+        await Task.Delay(2000);
         
-        results.StateQueryMs = (int)sw.ElapsedMilliseconds;
+        // Run multiple queries and take average for more accurate measurement
+        var times = new List<double>();
+        var iterations = 10;
+        string description = "";
         
-        Console.WriteLine($"   ✅ {results.StateQueryMs} ms");
+        for (int i = 0; i < iterations; i++)
+        {
+            var sw = Stopwatch.StartNew();
+            description = await results.Agent1!.GetDescriptionAsync();
+            sw.Stop();
+            times.Add(sw.Elapsed.TotalMilliseconds);
+        }
+        
+        // Calculate statistics
+        var avgMs = times.Average();
+        var minMs = times.Min();
+        var maxMs = times.Max();
+        results.StateQueryMs = (int)Math.Ceiling(avgMs);
+        
+        Console.WriteLine($"   ✅ Avg: {avgMs:F2} ms | Min: {minMs:F2} ms | Max: {maxMs:F2} ms ({iterations} calls)");
         Console.WriteLine($"   Info: {description}");
     }
 
@@ -258,8 +348,8 @@ class Program
         Console.WriteLine("4️⃣  Parent-Child Event Propagation:");
         
         // Create parent and child
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         var parent = await manager.CreateAndRegisterAsync<SimpleBusinessAgent>(parentId);
         var child = await manager.CreateAndRegisterAsync<SimpleBusinessAgent>(childId);
         
@@ -273,9 +363,8 @@ class Program
         Console.WriteLine($"   Waiting for stream subscription...");
         await Task.Delay(1000); // Wait for subscription to establish
         
-        // Get initial child state
-        var childAgent = child.GetAgent();
-        var initialDesc = await childAgent.GetDescriptionAsync();
+        // Get initial child state using RPC
+        var initialDesc = await child.GetDescriptionAsync();
         var initialCount = ExtractProcessedCount(initialDesc);
         
         // Test pure publish latency (no wait)
@@ -290,23 +379,24 @@ class Program
         var publishMs = sw.ElapsedMilliseconds;
         Console.WriteLine($"   ✓ Message published (Direction: DOWN)");
         
-        // Wait and verify child received it (try multiple times)
+        // Wait and verify child received it (try multiple times) using RPC
+        // Use smaller interval for more accurate timing
         var finalCount = initialCount;
-        var maxWaitMs = 2000;
-        var checkIntervalMs = 100;
-        var totalWait = 0;
+        var maxWaitMs = 3000;
+        var checkIntervalMs = 50;  // Reduced for better precision
         
-        while (totalWait < maxWaitMs && finalCount == initialCount)
+        while (sw.ElapsedMilliseconds < maxWaitMs && finalCount == initialCount)
         {
             await Task.Delay(checkIntervalMs);
-            totalWait += checkIntervalMs;
-            var currentDesc = await childAgent.GetDescriptionAsync();
+            var currentDesc = await child.GetDescriptionAsync();
             finalCount = ExtractProcessedCount(currentDesc);
         }
+        sw.Stop();
         
         results.PropagationMs = (int)publishMs;
         results.MessageReceived = finalCount > initialCount;
-        results.EndToEndMs = totalWait;
+        // E2E = total time from publish start to message received
+        results.EndToEndMs = results.MessageReceived ? (int)sw.ElapsedMilliseconds : -1;
         
         Console.WriteLine($"   ✅ Publish latency: {results.PropagationMs} ms");
         Console.WriteLine($"   ✅ Child received: {results.MessageReceived} (processed: {initialCount} → {finalCount})");
@@ -325,6 +415,73 @@ class Program
         // Extract "Processed: X" from description like "Simple Business Agent xxx - Processed: 5"
         var match = System.Text.RegularExpressions.Regex.Match(description, @"Processed:\s*(\d+)");
         return match.Success ? int.Parse(match.Groups[1].Value) : 0;
+    }
+
+    static async Task TestPointToPointSending(IGAgentActorManager manager, PerformanceResults results)
+    {
+        Console.WriteLine();
+        Console.WriteLine("5️⃣  Point-to-Point Sending (SendToAsync):");
+        
+        // Create sender and receiver (no parent-child relationship)
+        var senderId = Guid.NewGuid().ToString();
+        var receiverId = Guid.NewGuid().ToString();
+        var sender = await manager.CreateAndRegisterAsync<SimpleBusinessAgent>(senderId);
+        var receiver = await manager.CreateAndRegisterAsync<SimpleBusinessAgent>(receiverId);
+        
+        Console.WriteLine($"   Sender:   {sender.Id}");
+        Console.WriteLine($"   Receiver: {receiver.Id}");
+        Console.WriteLine($"   (No hierarchy relationship - pure point-to-point)");
+        
+        // Wait for agents to initialize
+        await Task.Delay(500);
+        
+        // Get initial receiver state
+        var initialDesc = await receiver.GetDescriptionAsync();
+        var initialCount = ExtractProcessedCount(initialDesc);
+        Console.WriteLine($"   Initial receiver processed count: {initialCount}");
+        
+        // Test point-to-point send
+        // Use receiver.Id (full GrainKey format: AgentType:AgentId) for correct routing
+        Console.WriteLine($"   Sending message directly to receiver...");
+        var sw = Stopwatch.StartNew();
+        var message = new BusinessMessageEvent
+        {
+            Message = "Point-to-point direct message",
+            Timestamp = Timestamp.FromDateTime(DateTime.UtcNow)
+        };
+        await sender.SendToAsync(receiver.Id, message);
+        var sendMs = sw.ElapsedMilliseconds;
+        Console.WriteLine($"   ✓ Message sent via SendToAsync");
+        
+        // Wait and verify receiver got it
+        // Use smaller interval for more accurate timing
+        var finalCount = initialCount;
+        var maxWaitMs = 3000;
+        var checkIntervalMs = 50;  // Reduced for better precision
+        
+        while (sw.ElapsedMilliseconds < maxWaitMs && finalCount == initialCount)
+        {
+            await Task.Delay(checkIntervalMs);
+            var currentDesc = await receiver.GetDescriptionAsync();
+            finalCount = ExtractProcessedCount(currentDesc);
+        }
+        sw.Stop();
+        
+        results.PointToPointSendMs = (int)sendMs;
+        results.PointToPointReceived = finalCount > initialCount;
+        // E2E = total time from send start to message received
+        results.PointToPointE2EMs = results.PointToPointReceived ? (int)sw.ElapsedMilliseconds : -1;
+        
+        Console.WriteLine($"   ✅ Send latency: {results.PointToPointSendMs} ms");
+        Console.WriteLine($"   ✅ Receiver got message: {results.PointToPointReceived} (processed: {initialCount} → {finalCount})");
+        if (results.PointToPointReceived)
+        {
+            Console.WriteLine($"   ✅ End-to-end time: {results.PointToPointE2EMs} ms");
+        }
+        else
+        {
+            Console.WriteLine($"   ⚠️  Message not received after {maxWaitMs}ms wait");
+        }
     }
 
     static void PrintComparison(MultiTopicResults results1, MultiTopicResults results2)
@@ -380,15 +537,22 @@ class Program
         Console.WriteLine($"Environment:");
         Console.WriteLine($"  • .NET: {Environment.Version}");
         Console.WriteLine($"  • OS: {Environment.OSVersion}");
-        Console.WriteLine($"  • Orleans: Memory Stream + MongoDB");
+        Console.WriteLine($"  • Orleans + Kafka Stream");
         Console.WriteLine();
         Console.WriteLine($"Results:");
-        Console.WriteLine($"  • Agent Creation:     {results.AgentCreationMs} ms");
-        Console.WriteLine($"  • Message Average:    {results.MessageAverageMs} ms");
-        Console.WriteLine($"  • State Query:        {results.StateQueryMs} ms");
-        Console.WriteLine($"  • Publish Latency:    {results.PropagationMs} ms");
-        Console.WriteLine($"  • End-to-End:         {(results.MessageReceived ? $"{results.EndToEndMs} ms ✅" : "N/A ❌")}");
-        Console.WriteLine($"  • Throughput:         ~{results.ThroughputMsgPerSec} msg/sec");
+        Console.WriteLine($"  • Agent Creation:        {results.AgentCreationMs} ms");
+        Console.WriteLine($"  • Message Average:       {results.MessageAverageMs} ms");
+        Console.WriteLine($"  • State Query:           {results.StateQueryMs} ms");
+        Console.WriteLine();
+        Console.WriteLine($"Broadcast Propagation (Parent→Child via Direction.Down):");
+        Console.WriteLine($"  • Publish Latency:       {results.PropagationMs} ms");
+        Console.WriteLine($"  • E2E Delivery:          {(results.MessageReceived ? $"{results.EndToEndMs} ms ✅" : "N/A ❌")}");
+        Console.WriteLine();
+        Console.WriteLine($"Point-to-Point (SendToAsync - no hierarchy):");
+        Console.WriteLine($"  • Send Latency:          {results.PointToPointSendMs} ms");
+        Console.WriteLine($"  • E2E Delivery:          {(results.PointToPointReceived ? $"{results.PointToPointE2EMs} ms ✅" : "N/A ❌")}");
+        Console.WriteLine();
+        Console.WriteLine($"Throughput:                ~{results.ThroughputMsgPerSec} msg/sec");
         Console.WriteLine();
         Console.WriteLine("✅ Performance tests completed!");
     }
@@ -404,5 +568,10 @@ class Program
         public bool MessageReceived { get; set; }
         public int EndToEndMs { get; set; }
         public int ThroughputMsgPerSec { get; set; }
+        
+        // Point-to-Point results
+        public int PointToPointSendMs { get; set; }
+        public bool PointToPointReceived { get; set; }
+        public int PointToPointE2EMs { get; set; }
     }
 }

@@ -26,8 +26,8 @@ public class EventRouterFactory
     /// <param name="logger">Logger instance</param>
     /// <returns>EventRouter instance with injected store</returns>
     public EventRouter CreateEventRouter(
-        Guid agentId,
-        Func<Guid, EventEnvelope, CancellationToken, Task> sendToActorAsync,
+        string agentId,
+        Func<string, EventEnvelope, CancellationToken, Task> sendToActorAsync,
         Func<EventEnvelope, CancellationToken, Task> sendToSelfAsync,
         ILogger? logger)
     {

@@ -177,34 +177,35 @@ public static class HierarchicalStreamingTestScenario
         logger.LogInformation("\n=== Hierarchical Streaming Demo ===\n");
         
         // 创建团队领导
-        var leaderId = Guid.NewGuid();
+        var leaderId = Guid.NewGuid().ToString();
         var leaderActor = await actorManager.CreateAndRegisterAsync<TeamLeaderAgent>(
             leaderId, 
             ct: default);
         
         // 创建3个团队成员
-        var member1Id = Guid.NewGuid();
+        var member1Id = Guid.NewGuid().ToString();
         var member1Actor = await actorManager.CreateAndRegisterAsync<TeamMemberAgent>(
             member1Id,
             ct: default);
         (member1Actor.GetAgent() as TeamMemberAgent)?.SetName("Alice");
             
-        var member2Id = Guid.NewGuid();  
+        var member2Id = Guid.NewGuid().ToString();  
         var member2Actor = await actorManager.CreateAndRegisterAsync<TeamMemberAgent>(
             member2Id,
             ct: default);
         (member2Actor.GetAgent() as TeamMemberAgent)?.SetName("Bob");
             
-        var member3Id = Guid.NewGuid();
+        var member3Id = Guid.NewGuid().ToString();
         var member3Actor = await actorManager.CreateAndRegisterAsync<TeamMemberAgent>(
             member3Id,
             ct: CancellationToken.None);
         (member3Actor.GetAgent() as TeamMemberAgent)?.SetName("Charlie");
         
         // 建立父子关系（关键：这会触发子节点订阅父节点的stream）
-        await actorManager.LinkParentChildAsync(leaderId, member1Id);
-        await actorManager.LinkParentChildAsync(leaderId, member2Id);
-        await actorManager.LinkParentChildAsync(leaderId, member3Id);
+        // Use actor.Id (full GrainKey format) for Manager operations
+        await actorManager.LinkParentChildAsync(leaderActor.Id, member1Actor.Id);
+        await actorManager.LinkParentChildAsync(leaderActor.Id, member2Actor.Id);
+        await actorManager.LinkParentChildAsync(leaderActor.Id, member3Actor.Id);
         
         logger.LogInformation("Team structure established: 1 leader, 3 members\n");
         

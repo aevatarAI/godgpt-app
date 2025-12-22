@@ -13,9 +13,16 @@ public static class ServiceCollectionExtensions
     /// </summary>
     public static IServiceCollection AddAevatarOrleansRuntime(this IServiceCollection services)
     {
+        // Core Orleans runtime services
         services.AddSingleton<IGAgentActorFactory, OrleansGAgentActorFactory>();
         services.AddSingleton<IGAgentActorManager, OrleansGAgentActorManager>();
         services.TryAddSingleton<IGAgentFactory, AIGAgentFactory>();
+        
+        // MassTransit integration handlers (required for MassTransit stream routing)
+        // These enable StreamMessageDispatcher to route events to Orleans Grains
+        services.TryAddSingleton<IMassTransitEventHandler, OrleansMassTransitEventHandler>();
+        services.TryAddSingleton<IStreamNotFoundHandler, OrleansStreamNotFoundHandler>();
+        
         return services;
     }
 }

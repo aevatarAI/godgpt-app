@@ -8,7 +8,7 @@ namespace Aevatar.Agents.AI.Core.Tests.TestAgents;
 /// Simplified test implementation of AIGAgentBase for unit testing
 /// </summary>
 // ReSharper disable InconsistentNaming
-public class TestAIGAgent(Guid? id = null) : AIGAgentBase<TestAIGAgentState, TestAIGAgentConfig>(id ?? Guid.NewGuid())
+public class TestAIGAgent(string? id = null) : AIGAgentBase<TestAIGAgentState, TestAIGAgentConfig>(id ?? Guid.NewGuid().ToString())
 {
     /// <summary>
     /// Track initialization calls for testing

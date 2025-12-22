@@ -1,5 +1,6 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Runtime.Orleans;
+using Aevatar.Agents.Runtime.Orleans.Stream;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -21,6 +22,9 @@ public static class ServiceCollectionExtensions
         
         // 注册 Stream Not Found Handler
         services.AddSingleton<IStreamNotFoundHandler, OrleansStreamNotFoundHandler>();
+
+        // 注册 Stream Factory (统一 Stream 创建)
+        services.TryAddSingleton<OrleansStreamFactory>();
 
         return services;
     }

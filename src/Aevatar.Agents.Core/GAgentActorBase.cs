@@ -93,7 +93,7 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
 
     // ============ IGAgentActor Implementation ============
 
-    public Guid Id => Agent.Id;
+    public string Id => Agent.Id;
 
     public IGAgent GetAgent() => Agent;
 
@@ -101,23 +101,23 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
 
     // ============ Hierarchy Management ============
 
-    protected internal virtual async Task AddChildAsync(Guid childId, CancellationToken ct = default)
+    protected internal virtual async Task AddChildAsync(string childId, CancellationToken ct = default)
     {
         await EventRouter.AddChildAsync(childId, ct);
     }
 
-    public async Task RegisterAsync(Guid childId, CancellationToken ct = default)
+    public async Task RegisterAsync(string childId, CancellationToken ct = default)
     {
         await EventRouter.AddChildAsync(childId, ct);
         
     }
 
-    protected internal virtual async Task RemoveChildAsync(Guid childId, CancellationToken ct = default)
+    protected internal virtual async Task RemoveChildAsync(string childId, CancellationToken ct = default)
     {
         await EventRouter.RemoveChildAsync(childId, ct);
     }
 
-    protected internal virtual async Task SetParentAsync(Guid parentId, CancellationToken ct = default)
+    protected internal virtual async Task SetParentAsync(string parentId, CancellationToken ct = default)
     {
         await EventRouter.SetParentAsync(parentId, ct);
     }
@@ -127,25 +127,25 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
         await EventRouter.ClearParentAsync(ct);
     }
 
-    public virtual Task<IReadOnlyList<Guid>> GetChildrenAsync()
+    public virtual Task<IReadOnlyList<string>> GetChildrenAsync()
     {
         return Task.FromResult(EventRouter.GetChildren());
     }
 
-    public virtual Task<Guid?> GetParentAsync()
+    public virtual Task<string?> GetParentAsync()
     {
         return Task.FromResult(EventRouter.GetParent());
     }
 
     #region IActorHierarchyOperations Explicit Implementation
 
-    async Task IActorHierarchyOperations.AddChildAsync(Guid childId, CancellationToken ct)
+    async Task IActorHierarchyOperations.AddChildAsync(string childId, CancellationToken ct)
         => await AddChildAsync(childId, ct);
 
-    async Task IActorHierarchyOperations.RemoveChildAsync(Guid childId, CancellationToken ct)
+    async Task IActorHierarchyOperations.RemoveChildAsync(string childId, CancellationToken ct)
         => await RemoveChildAsync(childId, ct);
 
-    async Task IActorHierarchyOperations.SetParentAsync(Guid parentId, CancellationToken ct)
+    async Task IActorHierarchyOperations.SetParentAsync(string parentId, CancellationToken ct)
         => await SetParentAsync(parentId, ct);
 
     async Task IActorHierarchyOperations.ClearParentAsync(CancellationToken ct)
@@ -165,7 +165,7 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
     }
 
     async Task<string> IEventPublisher.SendToAsync<TEvent>(
-        Guid targetAgentId,
+        string targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection,
         CancellationToken ct,
@@ -238,7 +238,7 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
     /// </summary>
     /// <param name="isInternalCall">If true (Agent internal), keeps PublisherId; if false (external), clears it</param>
     public virtual async Task<string> SendToAsync<TEvent>(
-        Guid targetAgentId,
+        string targetAgentId,
         TEvent evt,
         EventDirection onArrivalDirection = EventDirection.Unspecified,
         CancellationToken ct = default,
@@ -444,7 +444,7 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
     /// <summary>
     /// Send event to specified Actor (subclass implements specific transport mechanism)
     /// </summary>
-    protected abstract Task SendEventToActorAsync(Guid actorId, EventEnvelope envelope, CancellationToken ct);
+    protected abstract Task SendEventToActorAsync(string actorId, EventEnvelope envelope, CancellationToken ct);
 
     /// <summary>
     /// Activate Actor

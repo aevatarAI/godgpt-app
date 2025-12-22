@@ -37,7 +37,7 @@ public class StreamingController : ControllerBase
         try
         {
             // 创建流处理Agent
-            var agentId = Guid.NewGuid();
+            var agentId = Guid.NewGuid().ToString();
             var agent = await _agentFactory.CreateGAgentActorAsync<StreamProcessorAgent>(agentId);
             
             _logger.LogInformation("Created StreamProcessorAgent {AgentId} on {Runtime}", agentId, runtime);
@@ -98,16 +98,16 @@ public class StreamingController : ControllerBase
         try
         {
             // 创建发布者
-            var publisherId = Guid.NewGuid();
+            var publisherId = Guid.NewGuid().ToString();
             var publisher = await _agentFactory.CreateGAgentActorAsync<PublisherAgent>(publisherId);
             
             // 创建订阅者
             var subscribers = new List<IGAgentActor>();
-            var subscriberIds = new List<Guid>();
+            var subscriberIds = new List<string>();
             
             for (int i = 0; i < subscriberCount; i++)
             {
-                var subscriberId = Guid.NewGuid();
+                var subscriberId = Guid.NewGuid().ToString();
                 subscriberIds.Add(subscriberId);
                 var subscriber = await _agentFactory.CreateGAgentActorAsync<SubscriberAgent>(subscriberId);
                 subscribers.Add(subscriber);
@@ -168,9 +168,9 @@ public class StreamingController : ControllerBase
         try
         {
             // 创建三层Agent结构
-            var rootId = Guid.NewGuid();
-            var middleId = Guid.NewGuid();
-            var leafId = Guid.NewGuid();
+            var rootId = Guid.NewGuid().ToString();
+            var middleId = Guid.NewGuid().ToString();
+            var leafId = Guid.NewGuid().ToString();
 
             var root = await _agentFactory.CreateGAgentActorAsync<StreamProcessorAgent>(rootId);
             var middle = await _agentFactory.CreateGAgentActorAsync<StreamProcessorAgent>(middleId);

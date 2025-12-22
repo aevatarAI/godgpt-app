@@ -53,7 +53,7 @@ public static class MultiRuntimeEventSourcingDemo
         Console.WriteLine("📍 Local Runtime EventSourcing");
         Console.WriteLine("════════════════════════════════════════");
         
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         Console.WriteLine($"Agent ID: {agentId:N}");
         
         // 创建工厂
@@ -272,7 +272,7 @@ public static class MultiRuntimeEventSourcingDemo
             var logger = host.Services.GetRequiredService<ILogger<OrleansGAgentActorFactory>>();
             var factory = new OrleansGAgentActorFactory(host.Services, clusterClient, logger);
             
-            var agentId = Guid.NewGuid();
+            var agentId = Guid.NewGuid().ToString();
             Console.WriteLine($"Agent ID: {agentId:N}");
             
             // 创建 Orleans Actor

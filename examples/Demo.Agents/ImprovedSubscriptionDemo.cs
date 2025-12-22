@@ -146,8 +146,8 @@ public static class ImprovedSubscriptionDemo
         var streamRegistry = new LocalMessageStreamRegistry();
         var subscriptionManager = new LocalSubscriptionManager(streamRegistry);
         
-        var parentId = Guid.NewGuid();
-        var childId = Guid.NewGuid();
+        var parentId = Guid.NewGuid().ToString();
+        var childId = Guid.NewGuid().ToString();
         
         // 模拟事件处理器
         var eventCount = 0;

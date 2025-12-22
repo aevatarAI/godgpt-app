@@ -41,7 +41,7 @@ public class Program
 
         // Create a counter agent
         Console.WriteLine("Creating Counter Agent...");
-        var agentId = Guid.NewGuid();
+        var agentId = Guid.NewGuid().ToString();
         var agentActor = await factory.CreateGAgentActorAsync<CounterAgent>(agentId);
         var agent = agentActor.GetAgent() as CounterAgent;
         Console.WriteLine($"Agent created with ID: {agentId}\n");

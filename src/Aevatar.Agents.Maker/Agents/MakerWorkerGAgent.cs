@@ -75,7 +75,7 @@ public class MakerWorkerGAgent : AIGAgentBase<MakerWorkerState, MakerWorkerConfi
                 Id, request.ProviderName);
 
             // Setup state
-            CustomState.WorkerId = Id.ToString("N")[..8];
+            CustomState.WorkerId = Id.Length > 8 ? Id[..8] : Id;
             CustomState.CoordinatorId = request.CoordinatorId;
             CustomState.TotalProposals = 0;
             CustomState.SuccessfulProposals = 0;

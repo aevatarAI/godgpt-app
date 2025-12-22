@@ -18,12 +18,12 @@ internal class ProtoActorStreamSubscription : IMessageStreamSubscription
     private bool _isActive;
 
     public Guid SubscriptionId { get; }
-    public Guid StreamId { get; }
+    public string StreamId { get; }
     public bool IsActive => _isActive;
 
     public ProtoActorStreamSubscription(
         Guid subscriptionId,
-        Guid streamId,
+        string streamId,
         Func<IMessage, Task> handler,
         Func<IMessage, bool>? filter,
         PID targetPid,

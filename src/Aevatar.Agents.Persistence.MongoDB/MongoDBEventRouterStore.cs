@@ -33,7 +33,7 @@ public class MongoDBEventRouterStore : IEventRouterStore
     /// <summary>
     /// Load hierarchy from MongoDB
     /// </summary>
-    public async Task<EventRouterHierarchy?> LoadAsync(Guid agentId, CancellationToken ct = default)
+    public async Task<EventRouterHierarchy?> LoadAsync(string agentId, CancellationToken ct = default)
     {
         var doc = await _collection.Find(x => x.AgentId == agentId)
             .FirstOrDefaultAsync(ct)
@@ -52,7 +52,7 @@ public class MongoDBEventRouterStore : IEventRouterStore
     /// <summary>
     /// Save hierarchy to MongoDB (upsert)
     /// </summary>
-    public async Task SaveAsync(Guid agentId, EventRouterHierarchy hierarchy, CancellationToken ct = default)
+    public async Task SaveAsync(string agentId, EventRouterHierarchy hierarchy, CancellationToken ct = default)
     {
         var doc = new EventRouterHierarchyDocument
         {
@@ -72,7 +72,7 @@ public class MongoDBEventRouterStore : IEventRouterStore
     /// <summary>
     /// Delete hierarchy from MongoDB
     /// </summary>
-    public async Task DeleteAsync(Guid agentId, CancellationToken ct = default)
+    public async Task DeleteAsync(string agentId, CancellationToken ct = default)
     {
         await _collection.DeleteOneAsync(x => x.AgentId == agentId, ct).ConfigureAwait(false);
     }
@@ -80,7 +80,7 @@ public class MongoDBEventRouterStore : IEventRouterStore
     /// <summary>
     /// Check if hierarchy exists
     /// </summary>
-    public async Task<bool> ExistsAsync(Guid agentId, CancellationToken ct = default)
+    public async Task<bool> ExistsAsync(string agentId, CancellationToken ct = default)
     {
         var count = await _collection.CountDocumentsAsync(x => x.AgentId == agentId, cancellationToken: ct)
             .ConfigureAwait(false);

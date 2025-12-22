@@ -126,7 +126,7 @@ public sealed class CognitiveStrategy : IReasoningStrategy
                 ProgressPercent = 0.1f
             });
             
-            var coordinatorId = Guid.NewGuid();
+            var coordinatorId = Guid.NewGuid().ToString();
             var coordinatorActor = await _actorManager.CreateAndRegisterAsync<CognitiveCoordinatorGAgent>(coordinatorId, ct);
             var coordinator = coordinatorActor.GetAgent() as CognitiveCoordinatorGAgent;
             

@@ -19,7 +19,7 @@ internal class AgentStateDocument
     /// Agent ID (MongoDB _id)
     /// </summary>
     [BsonId]
-    public Guid AgentId { get; set; }
+    public string AgentId { get; set; } = string.Empty;
 
     /// <summary>
     /// State data serialized as Protobuf bytes
