@@ -98,7 +98,7 @@ public class Program
                 MongoDBServiceCollectionExtensions.ConfigureBsonSerializers();
                 
                 // MongoDB configuration
-                var mongoConnectionString = context.Configuration.GetConnectionString("MongoDB") 
+                var mongoConnectionString = context.Configuration.GetConnectionString("Orleans") 
                     ?? "mongodb://localhost:27017/AevatarBusiness";
                 var databaseName = context.Configuration.GetSection("Storage")
                     .GetValue("DatabaseName", "AevatarBusiness");

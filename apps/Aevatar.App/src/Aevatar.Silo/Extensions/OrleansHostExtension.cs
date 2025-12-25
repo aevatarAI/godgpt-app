@@ -55,7 +55,7 @@ public static class OrleansHostExtension
             );
             
             // 2. Configure MongoDB Client (Shared)
-            var connectionString = configuration.GetConnectionString("MongoDB") 
+            var connectionString = configuration.GetConnectionString("Orleans") 
                 ?? "mongodb://localhost:27017/AevatarBusiness";
             var databaseName = configuration.GetSection("Storage")
                 .GetValue("DatabaseName", "AevatarBusiness");

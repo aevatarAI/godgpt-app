@@ -87,8 +87,8 @@ public class Program
         builder.Host.UseOrleansClient((context, clientBuilder) =>
         {
             var config = context.Configuration;
-            // Use Default connection string for MongoDB
-            var connectionString = config.GetConnectionString("Default") ?? "mongodb://localhost:27017/AevatarBusiness";
+            // Use Orleans connection string for MongoDB clustering
+            var connectionString = config.GetConnectionString("Orleans") ?? "mongodb://localhost:27017/AevatarBusiness";
             var databaseName = "AevatarBusiness"; // Should match Silo config
             
             Log.Information("🌐 Configuring Orleans Client with MongoDB Clustering");

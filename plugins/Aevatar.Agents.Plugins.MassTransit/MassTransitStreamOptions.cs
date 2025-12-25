@@ -87,6 +87,29 @@ public class ConsumerOptions
     /// 是否自动扫描 [StreamTopic] 属性添加到订阅列表（默认 true，仅 Silo 端有效）
     /// </summary>
     public bool AutoScanAgentTopics { get; set; } = true;
+
+    /// <summary>
+    /// Dispatch handler type for message routing
+    /// - GrainHandler: Dispatch to Grain handlers (Silo, best performance)
+    /// - LocalHandler: Dispatch to local memory streams (HttpApi Client)
+    /// </summary>
+    public DispatchHandler DispatchHandler { get; set; } = DispatchHandler.GrainHandler;
+}
+
+/// <summary>
+/// Dispatch handler type for MassTransit message routing
+/// </summary>
+public enum DispatchHandler
+{
+    /// <summary>
+    /// Dispatch to Grain handlers (Orleans/ProtoActor actors) - for Silo
+    /// </summary>
+    GrainHandler,
+    
+    /// <summary>
+    /// Dispatch to local memory stream subscribers - for HttpApi Client
+    /// </summary>
+    LocalHandler
 }
 
 public enum MassTransitTransportType
