@@ -9,6 +9,7 @@ using Microsoft.Extensions.Hosting;
 using Orleans;
 using Orleans.Configuration;
 using Orleans.Hosting;
+using Orleans.Streams.Kafka.Config;
 using Serilog;
 using Serilog.Events;
 using Orleans.Serialization;

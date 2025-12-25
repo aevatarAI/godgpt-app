@@ -4,6 +4,8 @@
     <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
     <!-- Allow PackageVersion to pin transitive dependencies (security overrides) -->
     <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+    <!-- Allow PackageVersion to pin transitive dependencies (security overrides) -->
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
   </PropertyGroup>
   <ItemGroup>
     <!-- Microsoft Extensions - .NET 10 -->
@@ -188,7 +190,13 @@
     <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.1" />
     <PackageVersion Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.1" />
     <PackageVersion Include="Microsoft.Extensions.Http.Polly" Version="10.0.1" />
+<<<<<<< HEAD
     <!-- Roslyn - see unified versions below -->
+=======
+    <!-- Roslyn (align versions to avoid NU1608) -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.Common" Version="4.5.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.5.0" />
+>>>>>>> origin/dev
     <!-- MassTransit -->
     <PackageVersion Include="MassTransit" Version="8.3.0" />
     <PackageVersion Include="MassTransit.Abstractions" Version="8.3.0" />
@@ -250,6 +258,161 @@
     <PackageVersion Include="Scriban" Version="6.3.0" />
     <!-- Supabase -->
     <PackageVersion Include="Supabase" Version="1.1.1" />
+    <!-- PostgreSQL (Supabase storage backend) -->
+    <PackageVersion Include="Npgsql" Version="8.0.5" />
+    <!-- PDF extraction -->
+    <PackageVersion Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
+    <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.CommandLine" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Hosting.Abstractions" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Options" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Diagnostics.HealthChecks" Version="10.0.1" />
+    <PackageVersion Include="Grpc.Tools" Version="2.72.0" />
+    <PackageVersion Include="MongoDB.Driver" Version="3.5.2" />
+    <PackageVersion Include="Elastic.Transport" Version="0.5.9" />
+    <PackageVersion Include="OpenTelemetry" Version="1.12.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.Console" Version="1.12.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.12.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.Prometheus.AspNetCore" Version="1.12.0-beta.1" />
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.12.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.12.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.12.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Runtime" Version="1.12.0" />
+    <PackageVersion Include="Swashbuckle.AspNetCore" Version="9.0.4" />
+    <PackageVersion Include="Serilog.Extensions.Logging" Version="9.0.0" />
+    <!-- log4net (override transitive vulnerable versions) -->
+    <PackageVersion Include="log4net" Version="2.0.17" />
+    <!-- ABP Framework - Using version 10.0.1 -->
+    <PackageVersion Include="Volo.Abp.Core" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Ddd.Domain" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AutoMapper" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Autofac" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Data" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.Mvc" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.Mvc.UI" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.Mvc.UI.Bootstrap" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.Mvc.UI.Bundling" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.Mvc.UI.Theme.LeptonXLite" Version="5.0.1" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.Mvc.UI.Theme.Shared" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Account.Web" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Account.Web.OpenIddict" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Account.Application" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Account.Application.Contracts" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Account.HttpApi" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Account.HttpApi.Client" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Identity.Application" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Identity.HttpApi" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Identity.Web" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Application" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.HttpApi" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Web" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.Serilog" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Localization" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.UI.Navigation" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Auditing" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.BackgroundJobs" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.BackgroundJobs.MongoDB" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Caching" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.OpenIddict.AspNetCore" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.OpenIddict.Domain" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.OpenIddict.MongoDB" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Identity.MongoDB" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.MongoDB" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.TestBase" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AspNetCore.Authentication.JwtBearer" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AuditLogging.Domain" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AuditLogging.Domain.Shared" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.AuditLogging.MongoDB" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Authorization" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.BackgroundJobs.Abstractions" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.BackgroundJobs.Domain" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.BackgroundJobs.Domain.Shared" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.Database.Domain" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.Database.Domain.Shared" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.Database.MongoDB" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Emailing" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.Domain" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.Domain.Shared" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.Application.Contracts" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.HttpApi.Client" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.MongoDB" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.GlobalFeatures" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Http.Client.IdentityModel" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Identity.Domain" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Identity.Domain.Shared" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Identity.Application.Contracts" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Identity.HttpApi.Client" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.OpenIddict.Domain.Shared" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Application.Contracts" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Domain.Identity" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Domain.OpenIddict" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.Domain.Shared" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.PermissionManagement.HttpApi.Client" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.Application" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.Application.Contracts" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.Domain" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.Domain.Shared" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.HttpApi" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.HttpApi.Client" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.SettingManagement.MongoDB" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.Studio.Client.AspNetCore" Version="2.1.3" />
+    <PackageVersion Include="Volo.Abp.Swashbuckle" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.Domain" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.Domain.Shared" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.Application.Contracts" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.HttpApi" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.HttpApi.Client" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.MongoDB" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.TestBase" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.Application" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.TenantManagement.Web" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.Application" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.HttpApi" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.FeatureManagement.Web" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.FileProviders.Embedded" Version="10.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Polly" Version="10.0.1" />
+    <!-- Roslyn - see unified versions below -->
+    <PackageVersion Include="HtmlAgilityPack" Version="1.12.4" />
+    <!-- Security overrides (fix NU1902/NU1904 via transitive version pin) -->
+    <PackageVersion Include="KubernetesClient" Version="17.0.14" />
+    <PackageVersion Include="MessagePack" Version="3.1.1" />
+    <!-- GodGPT Dependencies -->
+    <PackageVersion Include="Google.Apis.Auth" Version="1.69.0" />
+    <PackageVersion Include="Microsoft.IdentityModel.JsonWebTokens" Version="8.14.0" />
+    <PackageVersion Include="Microsoft.IdentityModel.Tokens" Version="8.14.0" />
+    <PackageVersion Include="System.IdentityModel.Tokens.Jwt" Version="8.14.0" />
+    <PackageVersion Include="Volo.Abp.EventBus.Abstractions" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.BlobStoring" Version="10.0.1" />
+    <PackageVersion Include="Volo.Abp.BlobStoring.Aws" Version="10.0.1" />
+    <PackageVersion Include="Stripe.net" Version="48.1.0" />
+    <PackageVersion Include="Google.Apis.AndroidPublisher.v3" Version="1.68.0.3711" />
+    <PackageVersion Include="JsonSchema.Net.Generation" Version="4.5.0" />
+    <PackageVersion Include="Microsoft.Orleans.Reminders" Version="9.2.1" />
+    <PackageVersion Include="Microsoft.CognitiveServices.Speech" Version="1.43.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.0" />
+    <PackageVersion Include="SixLabors.ImageSharp" Version="3.1.5" />
+    <PackageVersion Include="MaxMind.GeoIP2" Version="5.3.0" />
+    <!-- Roslyn/CodeAnalysis - Unified version to fix Razor Runtime Compilation conflict -->
+    <PackageVersion Include="Microsoft.CodeAnalysis.Common" Version="4.12.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.CSharp" Version="4.12.0" />
+    <PackageVersion Include="Microsoft.CodeAnalysis.Workspaces.Common" Version="4.12.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Core" Version="2.2.5" />
+    <PackageVersion Include="YamlDotNet" Version="16.3.0" />
+    <PackageVersion Include="Scriban" Version="6.3.0" />
     <!-- PostgreSQL (Supabase storage backend) -->
     <PackageVersion Include="Npgsql" Version="8.0.5" />
     <!-- PDF extraction -->
