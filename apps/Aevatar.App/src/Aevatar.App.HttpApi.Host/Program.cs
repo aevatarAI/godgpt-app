@@ -89,7 +89,17 @@ public class Program
             var config = context.Configuration;
             // Use Orleans connection string for MongoDB clustering
             var connectionString = config.GetConnectionString("Orleans") ?? "mongodb://localhost:27017/AevatarBusiness";
-            var databaseName = "AevatarBusiness"; // Should match Silo config
+            
+            // Get database name from config, or parse from connection string
+            var databaseName = config.GetSection("Storage")
+                .GetValue("DatabaseName", string.Empty);
+            
+            if (string.IsNullOrEmpty(databaseName))
+            {
+                // Parse database name from connection string as fallback
+                var mongoUrl = new MongoUrl(connectionString);
+                databaseName = mongoUrl.DatabaseName ?? "AevatarBusiness";
+            }
             
             Log.Information("🌐 Configuring Orleans Client with MongoDB Clustering");
             Log.Information("   ConnectionString: {ConnectionString}", connectionString);
