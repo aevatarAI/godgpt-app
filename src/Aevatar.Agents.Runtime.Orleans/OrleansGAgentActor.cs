@@ -1,9 +1,10 @@
-using System.Reflection;
 using Aevatar.Agents;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Context;
+using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.Agents.Core;
+using Aevatar.Agents.Core.Context;
 using Aevatar.Agents.Core.Internal;
-using Aevatar.Agents.Rpc;
 using Aevatar.Agents.Runtime.Orleans.Stream;
 using Google.Protobuf;
 using Microsoft.Extensions.Logging;
@@ -30,6 +31,7 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
     private readonly StreamingOptions _streamingOptions;
     private readonly IMessageStreamProvider? _externalStreamProvider;
     private readonly MessageStreamProviderOptions _providerOptions;
+    private readonly AgentContextPropagator? _contextPropagator;
     
     // Cached Grain reference (for RPC operations only)
     private IGAgentGrain? _grain;
@@ -48,7 +50,7 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
     /// Returns the full GrainKey format (AgentTypeShortName:AgentId).
     /// This is consistent with how grains are addressed in Orleans.
     /// </summary>
-    public string Id => $"{GetAgentTypeShortName(_agentTypeName)}:{_id}";
+    public string Id => $"{AgentId.GetAgentTypeShortName(_agentTypeName)}:{_id}";
 
     public OrleansGAgentActor(
         string id,
@@ -58,7 +60,8 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
         StreamingOptions streamingOptions,
         ILogger<OrleansGAgentActor> logger,
         IMessageStreamProvider? externalStreamProvider = null,
-        IOptions<MessageStreamProviderOptions>? providerOptions = null)
+        IOptions<MessageStreamProviderOptions>? providerOptions = null,
+        AgentContextPropagator? contextPropagator = null)
     {
         _id = id;
         _agentTypeName = agentTypeName;
@@ -68,6 +71,7 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
         Logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _externalStreamProvider = externalStreamProvider;
         _providerOptions = providerOptions?.Value ?? new MessageStreamProviderOptions();
+        _contextPropagator = contextPropagator;
     }
 
     #region IGAgentActor Implementation
@@ -87,7 +91,7 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
         // IMPORTANT:
         // AgentId is NOT guaranteed to be globally unique across different Agent types in this framework.
         // Using only agentId as the grain key would cause type collisions (wrong Agent instance reused).
-        var agentTypeShortName = GetAgentTypeShortName(_agentTypeName);
+        var agentTypeShortName = AgentId.GetAgentTypeShortName(_agentTypeName);
         var grainId = $"{agentTypeShortName}:{_id}";
         _grain = _grainFactory.GetGrain<IGAgentGrain>(grainId);
 
@@ -122,7 +126,7 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
         {
             // Use MassTransit stream with full GrainKey format (AgentType:AgentId)
             // This ensures OrleansMassTransitEventHandler routes to correct Grain
-            var agentTypeShortName = GetAgentTypeShortName(_agentTypeName);
+            var agentTypeShortName = AgentId.GetAgentTypeShortName(_agentTypeName);
             var grainKey = $"{agentTypeShortName}:{_id}";
             _myStream = _externalStreamProvider.GetStream(grainKey, agentTypeShortName);
             Logger.LogDebug("Using MassTransit stream for Actor {ActorId}, GrainKey: {GrainKey}", _id, grainKey);
@@ -131,7 +135,7 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
         {
             // Use Orleans stream - use same StreamId format as Grain (AgentType:AgentId)
             var streamNamespace = _streamingOptions.DefaultStreamNamespace ?? "AevatarAgents";
-            var agentTypeShortName = GetAgentTypeShortName(_agentTypeName);
+            var agentTypeShortName = AgentId.GetAgentTypeShortName(_agentTypeName);
             var streamKey = $"{agentTypeShortName}:{_id}";  // Must match Grain's grainKey
             var orleansStream = _orleansStreamProvider.GetStream<byte[]>(StreamId.Create(streamNamespace, streamKey));
             _myStream = new OrleansMessageStream(_id, orleansStream);
@@ -183,6 +187,9 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
             Timestamp = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow),
             CorrelationId = Guid.NewGuid().ToString()
         };
+
+        // Inject context into envelope for propagation across agent boundaries
+        _contextPropagator?.InjectContext(envelope);
 
         // Send via Stream (async, non-blocking)
         if (_myStream == null)
@@ -370,22 +377,10 @@ public class OrleansGAgentActor : IGAgentActor, IActorHierarchyOperations
     {
         if (_grain == null)
         {
-            var agentTypeShortName = GetAgentTypeShortName(_agentTypeName);
+            var agentTypeShortName = AgentId.GetAgentTypeShortName(_agentTypeName);
             var grainId = $"{agentTypeShortName}:{_id}";
             _grain = _grainFactory.GetGrain<IGAgentGrain>(grainId);
         }
-    }
-
-    /// <summary>
-    /// Extract short type name from assembly qualified name
-    /// Example: "Aevatar.App.Agents.UserQuotaGAgent, Aevatar.App.Agents" -> "UserQuotaGAgent"
-    /// </summary>
-    private static string GetAgentTypeShortName(string agentTypeName)
-    {
-        // Extract class name from assembly qualified name
-        var fullName = agentTypeName.Split(',')[0].Trim();
-        var lastDot = fullName.LastIndexOf('.');
-        return lastDot >= 0 ? fullName.Substring(lastDot + 1) : fullName;
     }
 
     /// <summary>

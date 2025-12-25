@@ -1,7 +1,6 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.AI.Abstractions;
 using Aevatar.Agents.AI.Core;
-using Aevatar.Agents.AI.WithTool;
 using Aevatar.Agents.AI.WithTool.Abstractions;
 using Google.Protobuf;
 using Moq;
@@ -23,6 +22,11 @@ public class AIGAgentWithToolBaseTests
         _mockToolManager = new Mock<IAevatarToolManager>();
         _mockEventPublisher = new Mock<IEventPublisher>();
 
+        // Tool caches require these async methods to return a Task (not null).
+        _mockToolManager
+            .Setup(m => m.GenerateFunctionDefinitionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<AevatarFunctionDefinition>());
+
         _agent = new TestAgent(_mockLLMProvider.Object, _mockToolManager.Object);
         _agent.SetEventPublisher(_mockEventPublisher.Object);
         
@@ -37,7 +41,6 @@ public class AIGAgentWithToolBaseTests
     {
         // Arrange
         var request = new ChatRequest { Message = "Hello", RequestId = "req1" };
-        var llmResponse = new AevatarLLMResponse { Content = "Hi there" };
         
         _mockLLMProvider
             .Setup(p => p.GenerateAsync(It.IsAny<AevatarLLMRequest>(), It.IsAny<CancellationToken>()))
@@ -47,6 +50,7 @@ public class AIGAgentWithToolBaseTests
             .Setup(m => m.GetAvailableToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ToolDefinition>());
 
+        _agent.EnableChatHistoryInState = true;
         await _agent.InitializeAsync("test-provider");
 
         // Act
@@ -96,6 +100,7 @@ public class AIGAgentWithToolBaseTests
             .Setup(m => m.GetAvailableToolsAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(new List<ToolDefinition> { new() { Name = "GetTime" } });
 
+        _agent.EnableChatHistoryInState = true;
         await _agent.InitializeAsync("test-provider");
 
         // Act
@@ -130,8 +135,101 @@ public class AIGAgentWithToolBaseTests
         _agent.PublicState.History[3].Content.ShouldBe("It is 12:00");
     }
 
+    [Fact]
+    public async Task ChatAsync_WithSkillsAllowlist_ShouldDenyToolsOutsideAllowlist()
+    {
+        // Arrange
+        var request = new ChatRequest { Message = "Use skill", RequestId = "req-skills" };
+
+        // Tool definitions (simulate skill tool + two normal tools)
+        _mockToolManager
+            .Setup(m => m.GenerateFunctionDefinitionsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<AevatarFunctionDefinition>
+            {
+                new() { Name = "skills_load", Description = "load skill" },
+                new() { Name = "AllowedTool", Description = "allowed tool" },
+                new() { Name = "DeniedTool", Description = "denied tool" }
+            });
+
+        _mockToolManager
+            .Setup(m => m.GetAvailableToolsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<ToolDefinition>
+            {
+                new() { Name = "skills_load" },
+                new() { Name = "AllowedTool" },
+                new() { Name = "DeniedTool" }
+            });
+
+        // skills_load returns allowlist -> only AllowedTool is permitted afterwards
+        _mockToolManager
+            .Setup(m => m.ExecuteToolAsync(
+                "skills_load",
+                It.IsAny<Dictionary<string, object>>(),
+                It.IsAny<ToolExecutionContext>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ToolExecutionResult
+            {
+                IsSuccess = true,
+                Content = """{"success":true,"name":"demo-skill","allowedTools":["AllowedTool"]}"""
+            });
+
+        var functionNamesPerCall = new List<IReadOnlyList<string>>();
+        var callIndex = 0;
+
+        _mockLLMProvider
+            .Setup(p => p.GenerateAsync(It.IsAny<AevatarLLMRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AevatarLLMRequest req, CancellationToken _) =>
+            {
+                functionNamesPerCall.Add(req.Functions?.Select(f => f.Name).ToList() ?? new List<string>());
+                callIndex++;
+
+                return callIndex switch
+                {
+                    // First response: model calls skills_load
+                    1 => new AevatarLLMResponse
+                    {
+                        AevatarFunctionCall = new AevatarFunctionCall { Name = "skills_load", Arguments = """{"name":"demo-skill"}""" }
+                    },
+                    // Second response: hallucinated tool call outside allowlist (should be denied by framework)
+                    2 => new AevatarLLMResponse
+                    {
+                        AevatarFunctionCall = new AevatarFunctionCall { Name = "DeniedTool", Arguments = "{}" }
+                    },
+                    // Third response: final answer
+                    _ => new AevatarLLMResponse { Content = "done" }
+                };
+            });
+
+        _agent.EnableChatHistoryInState = false; // irrelevant for this test
+        await _agent.InitializeAsync("test-provider");
+
+        // Act
+        var response = await _agent.ChatAsync(request);
+
+        // Assert
+        response.Content.ShouldBe("done");
+
+        // skills_load executed once; DeniedTool must NOT execute
+        _mockToolManager.Verify(m => m.ExecuteToolAsync(
+            "skills_load",
+            It.IsAny<Dictionary<string, object>>(),
+            It.IsAny<ToolExecutionContext>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+
+        _mockToolManager.Verify(m => m.ExecuteToolAsync(
+            "DeniedTool",
+            It.IsAny<Dictionary<string, object>>(),
+            It.IsAny<ToolExecutionContext>(),
+            It.IsAny<CancellationToken>()), Times.Never);
+
+        // After skills_load, the next LLM call should only see AllowedTool (hard allowlist)
+        functionNamesPerCall.Count.ShouldBeGreaterThanOrEqualTo(2);
+        functionNamesPerCall[0].ShouldContain("DeniedTool"); // before allowlist
+        functionNamesPerCall[1].ShouldBe(new[] { "AllowedTool" });
+    }
+
     // Test Agent Implementation
-    public class TestAgent : AIGAgentWithToolBase<AevatarAIAgentState>
+    public class TestAgent : AIGAgentBase
     {
         public AevatarAIAgentState PublicState => State;
 
@@ -141,46 +239,20 @@ public class AIGAgentWithToolBaseTests
         }
 
         public TestAgent(IAevatarLLMProvider llmProvider, IAevatarToolManager toolManager) 
-            : base(toolManager)
+            : base()
         {
-            // Initialize state manually for test
-            // State and Config are initialized by base class
-            
-            // Mock initialization
-            
-            // Mock initialization
-            // Reflection to set _isInitialized or just override InitializeAsync?
-            // InitializeAsync calls InitializeStateAndConfigAsync which we can override or mock stores.
-            // But base.InitializeAsync sets _llmProvider.
-            // We passed llmProvider in constructor but base doesn't set it.
-            // We need to set it.
-            
-            // Hack: Set _llmProvider via reflection or just assume InitializeAsync works if we mock factories?
-            // But we passed llmProvider in constructor.
-            // Wait, AIGAgentWithToolBase constructor:
-            /*
-            protected AIGAgentWithToolBase(
-                IAevatarLLMProvider llmProvider,
-                IAevatarToolManager toolManager,
-                ILogger? logger = null)
-            {
-                _toolManager = toolManager ?? throw new ArgumentNullException(nameof(toolManager));
-            }
-            */
-            // It does NOT set _llmProvider in base AIGAgentBase.
-            // AIGAgentBase has `protected IAevatarLLMProvider? _llmProvider;`
-            
-            // So we need to set it.
-            SetLLMProvider(llmProvider);
+            // Use injected mocks
+            _llmProvider = llmProvider;
+            _isInitialized = true;
+            ToolManager = toolManager;
         }
 
-        private void SetLLMProvider(IAevatarLLMProvider provider)
+        public override Task<string> GetDescriptionAsync() => Task.FromResult("test-agent");
+
+        protected override Task RegisterToolsAsync(CancellationToken cancellationToken = default)
         {
-            var field = typeof(AIGAgentBase).GetField("_llmProvider", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            field?.SetValue(this, provider);
-            
-            var initField = typeof(AIGAgentBase).GetField("_isInitialized", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            initField?.SetValue(this, true);
+            // Tests control tools via mock ToolManager.
+            return Task.CompletedTask;
         }
 
         public override Task InitializeAsync(string providerName, Action<AevatarAIAgentConfig>? configAI = null, CancellationToken cancellationToken = default)

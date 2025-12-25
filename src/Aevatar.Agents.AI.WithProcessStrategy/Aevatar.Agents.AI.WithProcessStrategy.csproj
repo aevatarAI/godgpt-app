@@ -12,6 +12,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <ProjectReference Include="..\Aevatar.Agents.AI.Core\Aevatar.Agents.AI.Core.csproj" />
         <ProjectReference Include="..\Aevatar.Agents.AI.WithTool\Aevatar.Agents.AI.WithTool.csproj" />
     </ItemGroup>
 

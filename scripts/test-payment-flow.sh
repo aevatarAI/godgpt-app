@@ -9,49 +9,18 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Configuration
-AUTH_URL="https://localhost:44320"
-API_URL="https://localhost:44345"
-# AevatarAuthServer is a PUBLIC client (no secret) supporting password grant
-CLIENT_ID="AevatarAuthServer"
-SCOPE="Aevatar openid profile"
-# Test user credentials
-TEST_USERNAME="admin"
-TEST_PASSWORD="1q2w3E*"
-
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Load common test utilities
+source "$SCRIPT_DIR/test-common.sh"
 
 # Variables
-ACCESS_TOKEN=""
 USER_ID=""
 CREATED_SUBSCRIPTION_ID=""
 FIRST_PRICE_ID=""
 
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
 
-log_step() {
-    echo -e "${BLUE}[STEP]${NC} $1"
-}
 
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
 
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
 
-log_response() {
-    echo -e "${YELLOW}[RESPONSE]${NC}"
-    echo "$1" | jq . 2>/dev/null || echo "$1"
-}
 
 # Check if jq is installed
 check_dependencies() {
@@ -66,58 +35,12 @@ check_dependencies() {
     fi
 }
 
-# Check if services are running
-check_services() {
-    log_step "Checking if services are running..."
-    
-    # Check Auth Server
-    if ! curl -k -s "$AUTH_URL/.well-known/openid-configuration" > /dev/null 2>&1; then
-        log_error "AuthServer is not running at $AUTH_URL"
-        exit 1
-    fi
-    log_info "AuthServer is running ✓"
-    
-    # Check HttpApi
-    if ! curl -k -s "$API_URL/api/abp/application-configuration" > /dev/null 2>&1; then
-        log_error "HttpApi is not running at $API_URL"
-        exit 1
-    fi
-    log_info "HttpApi is running ✓"
-}
-
-# Get access token using password grant (for testing)
-get_access_token() {
-    log_step "Getting access token with password grant..."
-    
-    # AevatarAuthServer is a PUBLIC client (no secret) that supports password grant
-    local response=$(curl -k -s -X POST "$AUTH_URL/connect/token" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "grant_type=password" \
-        -d "client_id=$CLIENT_ID" \
-        -d "username=$TEST_USERNAME" \
-        -d "password=$TEST_PASSWORD" \
-        -d "scope=$SCOPE")
-    
-    ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
-    
-    if [ "$ACCESS_TOKEN" == "null" ] || [ -z "$ACCESS_TOKEN" ]; then
-        log_error "Failed to get access token"
-        log_response "$response"
-        exit 1
-    fi
-    
-    log_info "Access token obtained ✓"
-    # Show first 50 chars of token
-    echo "Token: ${ACCESS_TOKEN:0:50}..."
-}
 
 # Test 1: Get Stripe Payment Keys
 test_get_keys() {
     log_step "Test 1: Getting Stripe payment keys..."
     
-    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/keys" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json")
+    local response=$(api_get "/api/godgpt/payment/keys")
     
     log_response "$response"
     
@@ -134,9 +57,7 @@ test_get_keys() {
 test_get_products() {
     log_step "Test 2: Getting Stripe products..."
     
-    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/products" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json")
+    local response=$(api_get "/api/godgpt/payment/products")
     
     log_response "$response"
     
@@ -156,9 +77,7 @@ test_get_products() {
 test_get_iap_products() {
     log_step "Test 3: Getting Apple IAP products..."
     
-    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/iap-products" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json")
+    local response=$(api_get "/api/godgpt/payment/iap-products")
     
     log_response "$response"
     
@@ -175,9 +94,7 @@ test_get_iap_products() {
 test_get_customer() {
     log_step "Test 4: Getting Stripe customer..."
     
-    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/customer" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json")
+    local response=$(api_post "/api/godgpt/payment/customer" "{}")
     
     log_response "$response"
     
@@ -195,8 +112,7 @@ test_create_checkout_session() {
     log_step "Test 5: Creating checkout session..."
     
     # First get a price ID from products
-    local products=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/products" \
-        -H "Authorization: Bearer $ACCESS_TOKEN")
+    local products=$(api_get "/api/godgpt/payment/products")
     
     local price_id=$(echo "$products" | jq -r '.[0].priceId // empty')
     
@@ -207,15 +123,12 @@ test_create_checkout_session() {
     
     log_info "Using price ID: $price_id"
     
-    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/create-checkout-session" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"priceId\": \"$price_id\",
-            \"mode\": \"subscription\",
-            \"successUrl\": \"https://localhost:44345/payment/success\",
-            \"cancelUrl\": \"https://localhost:44345/payment/cancel\"
-        }")
+    local response=$(api_post "/api/godgpt/payment/create-checkout-session" "{
+        \"priceId\": \"$price_id\",
+        \"mode\": \"subscription\",
+        \"successUrl\": \"https://localhost:44345/payment/success\",
+        \"cancelUrl\": \"https://localhost:44345/payment/cancel\"
+    }")
     
     log_response "$response"
     
@@ -235,8 +148,7 @@ test_create_subscription() {
     # Use saved price ID or fetch new one
     local price_id="$FIRST_PRICE_ID"
     if [ -z "$price_id" ]; then
-        local products=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/products" \
-            -H "Authorization: Bearer $ACCESS_TOKEN")
+        local products=$(api_get "/api/godgpt/payment/products")
         price_id=$(echo "$products" | jq -r '.[0].priceId // empty')
     fi
     
@@ -247,13 +159,10 @@ test_create_subscription() {
     
     log_info "Using price ID: $price_id"
     
-    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/create-subscription" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"priceId\": \"$price_id\",
-            \"devicePlatform\": \"web\"
-        }")
+    local response=$(api_post "/api/godgpt/payment/create-subscription" "{
+        \"priceId\": \"$price_id\",
+        \"devicePlatform\": \"web\"
+    }")
     
     log_response "$response"
     
@@ -274,8 +183,7 @@ test_create_subscription() {
 test_get_payment_history() {
     log_step "Test 7: Getting payment history..."
     
-    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/list" \
-        -H "Authorization: Bearer $ACCESS_TOKEN")
+    local response=$(api_get "/api/godgpt/payment/list")
     
     log_response "$response"
     
@@ -295,12 +203,9 @@ test_cancel_subscription() {
         log_info "Using subscription ID: $sub_id"
     fi
     
-    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/cancel-subscription" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"subscriptionId\": \"$sub_id\"
-        }")
+    local response=$(api_post "/api/godgpt/payment/cancel-subscription" "{
+        \"subscriptionId\": \"$sub_id\"
+    }")
     
     log_response "$response"
     
@@ -322,9 +227,7 @@ test_cancel_subscription() {
 test_refunded() {
     log_step "Test 9: Testing refunded endpoint..."
     
-    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/refunded" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json")
+    local response=$(api_post "/api/godgpt/payment/refunded" "{}")
     
     log_response "$response"
     
@@ -343,15 +246,12 @@ test_verify_receipt() {
     log_step "Test 10: Testing App Store verify receipt..."
     log_warn "Note: Using test data - real iOS sandbox receipt required for actual verification"
     
-    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/verify-receipt" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"productId\": \"weekly6\",
-            \"transactionId\": \"test_transaction_123\",
-            \"receiptData\": \"test_receipt_data\",
-            \"sandboxMode\": true
-        }")
+    local response=$(api_post "/api/godgpt/payment/verify-receipt" '{
+        "productId": "weekly6",
+        "transactionId": "test_transaction_123",
+        "receiptData": "test_receipt_data",
+        "sandboxMode": true
+    }')
     
     log_response "$response"
     
@@ -369,12 +269,9 @@ test_verify_receipt() {
 test_verify_google_play() {
     log_step "Test 11: Testing Google Play verify transaction..."
     
-    local response=$(curl -k -s -X POST "$API_URL/api/godgpt/payment/google-play/verify-transaction" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"transactionIdentifier\": \"test_google_transaction_123\"
-        }")
+    local response=$(api_post "/api/godgpt/payment/google-play/verify-transaction" '{
+        "transactionIdentifier": "test_google_transaction_123"
+    }')
     
     log_response "$response"
     
@@ -385,8 +282,7 @@ test_verify_google_play() {
 test_has_apple_subscription() {
     log_step "Test 12: Testing has-apple-subscription (deprecated)..."
     
-    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/has-apple-subscription" \
-        -H "Authorization: Bearer $ACCESS_TOKEN")
+    local response=$(api_get "/api/godgpt/payment/has-apple-subscription")
     
     log_response "$response"
     
@@ -397,8 +293,7 @@ test_has_apple_subscription() {
 test_get_subscription_status() {
     log_step "Test 13: Getting subscription status..."
     
-    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/payment/has-active-subscription" \
-        -H "Authorization: Bearer $ACCESS_TOKEN")
+    local response=$(api_get "/api/godgpt/payment/has-active-subscription")
     
     log_response "$response"
     
@@ -409,8 +304,7 @@ test_get_subscription_status() {
 test_new_api_products() {
     log_step "Test 14: Testing new Payment API - Get Products..."
     
-    local response=$(curl -k -s -X GET "$API_URL/api/payment/products/0" \
-        -H "Authorization: Bearer $ACCESS_TOKEN")
+    local response=$(api_get "/api/payment/products/0")
     
     log_response "$response"
     
@@ -430,15 +324,12 @@ test_new_api_subscribe() {
         log_info "Using price ID: $price_id"
     fi
     
-    local response=$(curl -k -s -X POST "$API_URL/api/payment/subscribe" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"platform\": 0,
-            \"productId\": \"$price_id\",
-            \"successUrl\": \"https://localhost:44345/success\",
-            \"cancelUrl\": \"https://localhost:44345/cancel\"
-        }")
+    local response=$(api_post "/api/payment/subscribe" "{
+        \"platform\": 0,
+        \"productId\": \"$price_id\",
+        \"successUrl\": \"https://localhost:44345/success\",
+        \"cancelUrl\": \"https://localhost:44345/cancel\"
+    }")
     
     log_response "$response"
     
@@ -716,7 +607,10 @@ main() {
     check_services
     echo ""
     
-    get_access_token
+    if ! login; then
+        log_error "Login failed, aborting tests"
+        exit 1
+    fi
     echo ""
     
     case "${1:-all}" in

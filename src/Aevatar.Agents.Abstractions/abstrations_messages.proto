@@ -4,24 +4,46 @@ package Aevatar.Agents;
 import "google/protobuf/any.proto";
 import "google/protobuf/timestamp.proto";
 
-// 事件传播方向
+// ============================================================
+// Context Value for type-safe context propagation
+// ============================================================
+
+// Type-safe context value using oneof for extensibility.
+// New types can be added without breaking compatibility.
+message ContextValue {
+  oneof value {
+    string string_value = 1;
+    bool bool_value = 2;
+    int64 int_value = 3;
+    double double_value = 4;
+    string datetime_iso = 5;    // ISO8601 format string
+    string guid_string = 6;     // Standard GUID format
+    // Reserved for future expansion:
+    // float float_value = 7;
+    // bytes bytes_value = 8;
+    // string decimal_string = 9;
+    // int32 enum_value = 10;
+  }
+}
+
+// Event propagation direction
 enum EventDirection {
   EVENT_DIRECTION_UNSPECIFIED = 0;
 
-  // 向下发送：Parent发送到自己的stream，自动广播给所有children
+  // Downward: Parent sends to its own stream, automatically broadcasts to all children
   EVENT_DIRECTION_DOWN = 1;
 
-  // 向上发送：Child发送到parent的stream，自动广播给所有siblings（包括自己）
+  // Upward: Child sends to parent's stream, automatically broadcasts to all siblings (including self)
   EVENT_DIRECTION_UP = 2;
 
-  // 双向发送：同时向上和向下发送
+  // Bidirectional: Send both upward and downward simultaneously
   EVENT_DIRECTION_BOTH = 3;
 }
 
 message MessageEnvelope {
   string id = 1;
   google.protobuf.Timestamp timestamp = 2;
-  google.protobuf.Any payload = 3;  // 业务Agent解析
+  google.protobuf.Any payload = 3;  // Parsed by business Agent
 }
 
 message EventEnvelope {
@@ -50,6 +72,11 @@ message EventEnvelope {
   // - Unspecified: Pure P2P, only target processes
   // - Down/Up/Both: Target processes then continues propagation in this direction
   EventDirection on_arrival_direction = 15;
+
+  // Context metadata for request-scoped data propagation.
+  // Type-safe key-value pairs from IAgentContext.
+  // Uses ContextValue oneof for extensibility and cross-language support.
+  map<string, ContextValue> context_metadata = 16;
 }
 
 message SubAgentAdded {
@@ -87,7 +114,7 @@ message CodingAgentState {
   string validation_history = 3;
 }
 
-// 异常事件
+// Exception event
 message EventHandlerExceptionEvent {
   string agent_id = 1;
   string event_id = 2;
@@ -110,31 +137,31 @@ message GAgentBaseExceptionEvent {
 // EventSourcing Messages
 // ============================================================
 
-// Agent State Event - EventSourcing 核心消息
-// 用于持久化和重放 Agent 状态变更
+// Agent State Event - EventSourcing core message
+// Used for persisting and replaying Agent state changes
 message AgentStateEvent {
-  // 基础字段
+  // Basic fields
   string event_id = 1;
   google.protobuf.Timestamp timestamp = 2;
   int64 version = 3;
-  string event_type = 4;  // 事件类型（全限定名）
+  string event_type = 4;  // Event type (fully qualified name)
 
-  // 事件数据（使用 Any 支持任意 Protobuf 消息）
+  // Event data (uses Any to support arbitrary Protobuf messages)
   google.protobuf.Any event_data = 5;
 
-  // 元数据
+  // Metadata
   string agent_id = 6;
   string correlation_id = 7;
   map<string, string> metadata = 8;
 }
 
-// Agent Snapshot - 快照消息
-// 用于优化事件重放性能
+// Agent Snapshot - Snapshot message
+// Used to optimize event replay performance
 message AgentSnapshot {
   int64 version = 1;
   google.protobuf.Timestamp timestamp = 2;
 
-  // 快照状态数据（使用 Any 支持任意状态类型）
+  // Snapshot state data (uses Any to support arbitrary state types)
   google.protobuf.Any state_data = 3;
 
   map<string, string> metadata = 4;

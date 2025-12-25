@@ -1,11 +1,17 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
+using Aevatar.Agents.GodGPT.Protos.FreeTrialCode;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Common.Options;
 using Aevatar.Dtos;
+using Google.Protobuf.Collections;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Volo.Abp;
@@ -41,30 +47,58 @@ public class GodGPTAdminService : ApplicationService, IGodGPTAdminService
     public async Task<GenerateCodesResultDto> GenerateFreeTrialCodeAsync(Guid currentUserId, GenerateFreeTrialCodeRequest input)
     {
         var batchId = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var agentId = CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId);
         var factoryActor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(
-            CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId));
-        var factoryGAgent = (IFreeTrialCodeFactoryGAgent)factoryActor.GetAgent();
+            agentId.ToString());
+        var factoryGAgent = factoryActor.As<IFreeTrialCodeFactoryGAgent>();
         
-        return await factoryGAgent.GenerateCodesAsync(new GenerateCodesRequestDto
+        var request = new GenerateCodesRequestProto
         {
             BatchId = batchId,
             ProductId = input.ProductId,
-            Platform = input.Platform,
+            Platform = (FactoryPaymentPlatform)(int)input.Platform,
             TrialDays = input.TrialDays,
-            StartTime = input.StartTime,
-            EndTime = input.EndTime,
+            StartTime = Timestamp.FromDateTime(input.StartTime.ToUniversalTime()),
+            EndTime = Timestamp.FromDateTime(input.EndTime.ToUniversalTime()),
             Quantity = input.Quantity,
-            OperatorUserId = currentUserId
-        });
+            OperatorUserId = currentUserId.ToString()
+        };
+        
+        var result = await factoryGAgent.GenerateCodesAsync(request);
+        
+        // Convert Protobuf result to DTO
+        return new GenerateCodesResultDto
+        {
+            Success = result.Success,
+            Message = result.Message,
+            GeneratedCount = result.GeneratedCount,
+            Codes = new HashSet<string>(result.Codes),
+            BatchId = batchId
+        };
     }
 
     /// <inheritdoc />
     public async Task<BatchInfoDto> GetBatchInfoAsync(string batchId)
     {
+        var agentId = CommonHelper.GetFreeTrialCodeFactoryGAgentId(long.Parse(batchId));
         var factoryActor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(
-            CommonHelper.GetFreeTrialCodeFactoryGAgentId(long.Parse(batchId)));
-        var factoryGAgent = (IFreeTrialCodeFactoryGAgent)factoryActor.GetAgent();
-        return await factoryGAgent.GetBatchInfoAsync();
+            agentId.ToString());
+        var factoryGAgent = factoryActor.As<IFreeTrialCodeFactoryGAgent>();
+        var batchInfo = await factoryGAgent.GetBatchInfoAsync();
+        
+        // Convert Protobuf to DTO
+        // Note: BatchInfoDto structure matches BatchInfoProto fields
+        return new BatchInfoDto
+        {
+            BatchId = batchInfo.BatchId,
+            TotalGenerated = batchInfo.TotalGenerated,
+            UsedCount = batchInfo.UsedCount,
+            CreationTime = batchInfo.CreationTime.ToDateTime().ToUniversalTime(),
+            LastGenerationTime = batchInfo.LastGenerationTime?.ToDateTime().ToUniversalTime() ?? DateTime.MinValue.ToUniversalTime(),
+            Status = (FreeTrialCodeFactoryStatus)batchInfo.Status,
+            GeneratedCodes = batchInfo.GeneratedCodes.ToList(),
+            UsedCodes = batchInfo.UsedCodes.ToList()
+        };
     }
 
     /// <inheritdoc />

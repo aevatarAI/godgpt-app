@@ -1,11 +1,11 @@
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
-using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.Dtos;
 using Aevatar.Application.Grains.GodChat;
 using GodGPT.GAgents.Awakening.Dtos;
 using GodGPT.GAgents.Awakening.Helpers;
 using GodGPT.GAgents.SpeechChat;
 using Microsoft.Extensions.Logging;
+using Aevatar.Agents.Abstractions.Extensions;
 
 // Protobuf types aliases
 using AwakeningStatusProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStatusProto;
@@ -37,11 +37,11 @@ public partial class AwakeningGAgent
                 using var cts = new CancellationTokenSource(timeout);
                 
                 // Get current user ID
-                var userId = Id;
+                var userId = Guid.Parse(Id);
                 
                 // Get IGodChat instance for current user using new framework
-                var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(userId);
-                var godChat = (IGodChat)godChatActor.GetAgent();
+                var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(Id);
+                var godChat = godChatActor.As<IGodChat>();
                 var chatId = Guid.NewGuid().ToString();
                 
                 var settings = new ExecutionPromptSettings
@@ -53,13 +53,13 @@ public partial class AwakeningGAgent
                 var response = await godChat.ChatWithoutHistoryAsync(userId, string.Empty, prompt, chatId, settings, true, region);
                 
                 string responseContent;
-                if (response.IsNullOrEmpty())
+                if (response == null || response.Messages.Count == 0)
                 {
                     responseContent = string.Empty;
                 }
                 else
                 {
-                    responseContent = response.FirstOrDefault()?.Content ?? string.Empty;
+                    responseContent = response.Messages.FirstOrDefault()?.Content ?? string.Empty;
                 }
                 
                 if (!string.IsNullOrWhiteSpace(responseContent))

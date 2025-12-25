@@ -63,15 +63,18 @@ public class MassTransitMessageStream : IMessageStream
 
                 try 
                 {
-                    // Use ITopicProducerProvider to get a producer for a specific address (topic)
-                    var producerProvider = _serviceProvider.GetRequiredService<ITopicProducerProvider>();
+                    // ITopicProducerProvider is a scoped service, need to create a scope in Orleans Grain context
+                    using var scope = _serviceProvider.CreateScope();
+                    var producerProvider = scope.ServiceProvider.GetRequiredService<ITopicProducerProvider>();
                     var producer = producerProvider.GetProducer<string, ByteArrayMessage>(new Uri($"topic:{topic}"));
                     // Use StreamId as Key to ensure partition ordering
                     await producer.Produce(StreamId, payload, ct);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error producing to Kafka topic {Topic} for StreamId {StreamId}", topic, StreamId);
+                    _logger.LogError(ex,
+                        "Failed to produce stream message to Kafka topic {Topic} (StreamId={StreamId})",
+                        topic, StreamId);
                     throw;
                 }
             }

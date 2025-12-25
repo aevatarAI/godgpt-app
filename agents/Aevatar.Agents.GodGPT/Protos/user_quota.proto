@@ -220,22 +220,10 @@ message CanUploadImageResponseProto {
     bool can_upload = 3;
 }
 
-message CreditsInfoProto {
-    bool is_initialized = 1;
-    int32 credits = 2;
-    bool should_show_toast = 3;
-}
-
 message ExecuteActionRequestProto {
     string user_id = 1;
     string session_id = 2;
     string chat_manager_guid = 3;
     int32 action_type = 4;  // ActionType enum value
-}
-
-message ExecuteActionResultProto {
-    bool success = 1;
-    string message = 2;
-    bool can_execute = 3;
 }
 

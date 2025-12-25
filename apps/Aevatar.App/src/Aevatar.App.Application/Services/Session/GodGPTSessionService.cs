@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
+using Aevatar.Agents.GodGPT.Protos.ChatManager;
+using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.GAgents.AI.Options;
 using Aevatar.Quantum;
 using Microsoft.Extensions.Logging;
@@ -38,8 +41,8 @@ public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
     public async Task<Guid> CreateSessionAsync(Guid userId, string systemLLM, string prompt, string? guider = null,
         DateTime? userLocalTime = null)
     {
-        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-        var manager = (IChatManagerGAgent)managerActor.GetAgent();
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
+        var manager = managerActor.As<IChatManagerGAgent>();
         return await manager.CreateSessionAsync(systemLLM, prompt, null, guider, userLocalTime);
     }
 
@@ -47,32 +50,49 @@ public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
     public async Task<Tuple<string, string>> ChatWithSessionAsync(Guid userId, Guid sessionId, string systemLLM,
         string content, ExecutionPromptSettings promptSettings = null)
     {
-        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-        var manager = (IChatManagerGAgent)managerActor.GetAgent();
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
+        var manager = managerActor.As<IChatManagerGAgent>();
         return await manager.ChatWithSessionAsync(sessionId, systemLLM, content, promptSettings);
     }
 
     /// <inheritdoc />
     public async Task<List<SessionInfoDto>> GetSessionListAsync(Guid userId)
     {
-        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-        var manager = (IChatManagerGAgent)managerActor.GetAgent();
-        return await manager.GetSessionListAsync();
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
+        var manager = managerActor.As<IChatManagerGAgent>();
+        var protoResult = await manager.GetSessionListAsync();
+        
+        // Convert Protobuf to DTO
+        var result = new List<SessionInfoDto>();
+        foreach (var sessionProto in protoResult.Sessions)
+        {
+            var createAt = sessionProto.CreateAt?.ToDateTime().ToUniversalTime() ?? DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
+            result.Add(new SessionInfoDto
+            {
+                SessionId = Guid.Parse(sessionProto.SessionId),
+                Title = sessionProto.Title,
+                CreateAt = createAt,
+                Guider = string.IsNullOrEmpty(sessionProto.Guider) ? null : sessionProto.Guider
+            });
+        }
+        
+        return result;
     }
 
     /// <inheritdoc />
     public async Task<List<ChatMessage>> GetSessionMessageListAsync(Guid userId, Guid sessionId)
     {
-        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-        var manager = (IChatManagerGAgent)managerActor.GetAgent();
-        return await manager.GetSessionMessageListAsync(sessionId);
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
+        var manager = managerActor.As<IChatManagerGAgent>();
+        var messagesProto = await manager.GetSessionMessageListAsync(sessionId);
+        return messagesProto.ToList();
     }
 
     /// <inheritdoc />
     public async Task<Aevatar.Quantum.SessionCreationInfoDto?> GetSessionCreationInfoAsync(Guid userId, Guid sessionId)
     {
-        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-        var manager = (IChatManagerGAgent)managerActor.GetAgent();
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
+        var manager = managerActor.As<IChatManagerGAgent>();
         var grainsResult = await manager.GetSessionCreationInfoAsync(sessionId);
 
         if (grainsResult != null)
@@ -92,16 +112,16 @@ public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
     /// <inheritdoc />
     public async Task<Guid> DeleteSessionAsync(Guid userId, Guid sessionId)
     {
-        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-        var manager = (IChatManagerGAgent)managerActor.GetAgent();
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
+        var manager = managerActor.As<IChatManagerGAgent>();
         return await manager.DeleteSessionAsync(sessionId);
     }
 
     /// <inheritdoc />
     public async Task<Guid> RenameSessionAsync(Guid userId, Guid sessionId, string title)
     {
-        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-        var manager = (IChatManagerGAgent)managerActor.GetAgent();
+        var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
+        var manager = managerActor.As<IChatManagerGAgent>();
         return await manager.RenameSessionAsync(sessionId, title);
     }
 
@@ -123,9 +143,25 @@ public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
 
         try
         {
-            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-        var manager = (IChatManagerGAgent)managerActor.GetAgent();
-            return await manager.SearchSessionsAsync(keyword.Trim(), 1000);
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
+            var manager = managerActor.As<IChatManagerGAgent>();
+            var protoResult = await manager.SearchSessionsAsync(keyword.Trim(), 1000);
+            
+            // Convert Protobuf to DTO
+            var result = new List<SessionInfoDto>();
+            foreach (var sessionProto in protoResult.Sessions)
+            {
+                var createAt = sessionProto.CreateAt?.ToDateTime().ToUniversalTime() ?? DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
+                result.Add(new SessionInfoDto
+                {
+                    SessionId = Guid.Parse(sessionProto.SessionId),
+                    Title = sessionProto.Title,
+                    CreateAt = createAt,
+                    Guider = string.IsNullOrEmpty(sessionProto.Guider) ? null : sessionProto.Guider
+                });
+            }
+            
+            return result;
         }
         catch (Exception ex)
         {

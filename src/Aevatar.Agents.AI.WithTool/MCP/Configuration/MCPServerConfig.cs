@@ -36,7 +36,7 @@ public class MCPServerConfig
     /// Environment variables for the process.
     /// Optional for Stdio transport.
     /// </summary>
-    public Dictionary<string, string?>? Environment { get; set; }
+    public Dictionary<string, string>? Environment { get; set; }
 
     /// <summary>
     /// Working directory for the process.

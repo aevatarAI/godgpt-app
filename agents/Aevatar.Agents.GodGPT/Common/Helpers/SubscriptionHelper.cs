@@ -101,6 +101,14 @@ public static class SubscriptionHelper
     }
 
     /// <summary>
+    /// Overload: Calculates subscription end date using C# PlanType
+    /// </summary>
+    public static DateTime GetSubscriptionEndDate(PlanType planType, DateTime startDate)
+    {
+        return GetSubscriptionEndDate(planType.ToQuotaPlanType(), startDate);
+    }
+
+    /// <summary>
     /// Gets the number of days for a plan type (used for refund calculations)
     /// </summary>
     public static int GetDaysForPlanType(QuotaPlanType planType)
@@ -180,6 +188,14 @@ public static class SubscriptionHelper
     public static bool IsUpgradeOrSameLevel(QuotaPlanType fromPlan, QuotaPlanType toPlan)
     {
         return ComparePlanTypes(toPlan, fromPlan) >= 0;
+    }
+    
+    /// <summary>
+    /// Overload: Checks if target plan is same level or upgrade (C# PlanType version)
+    /// </summary>
+    public static bool IsUpgradeOrSameLevel(PlanType fromPlan, PlanType toPlan)
+    {
+        return IsUpgradeOrSameLevel(fromPlan.ToQuotaPlanType(), toPlan.ToQuotaPlanType());
     }
 
     public static string GetMembershipLevel(bool isUltimate)

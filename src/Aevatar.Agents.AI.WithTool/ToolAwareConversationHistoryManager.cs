@@ -1,5 +1,4 @@
 using Aevatar.Agents.AI.Abstractions;
-using Aevatar.Agents.AI.Core;
 using Google.Protobuf.Collections;
 using Google.Protobuf.WellKnownTypes;
 
@@ -8,12 +7,53 @@ namespace Aevatar.Agents.AI.WithTool;
 /// <summary>
 /// Adds tool-specific history helpers on top of the base conversation manager.
 /// </summary>
-public class ToolAwareConversationHistoryManager : ConversationHistoryManager
+public class ToolAwareConversationHistoryManager
 {
+    private readonly RepeatedField<AevatarChatMessage> _history;
+
     public ToolAwareConversationHistoryManager(RepeatedField<AevatarChatMessage> history)
-        : base(history)
     {
+        _history = history ?? throw new ArgumentNullException(nameof(history));
     }
+
+    /// <summary>
+    /// Adds a message to the conversation history.
+    /// </summary>
+    public virtual void AddMessage(string content, AevatarChatRole role, string? name = null)
+    {
+        var message = new AevatarChatMessage
+        {
+            Role = role,
+            Content = content,
+            Timestamp = Timestamp.FromDateTime(DateTime.UtcNow)
+        };
+
+        if (!string.IsNullOrWhiteSpace(name))
+        {
+            message.Metadata[name] = string.Empty;
+        }
+
+        _history.Add(message);
+    }
+
+    /// <summary>
+    /// Adds a pre-constructed message to the conversation history.
+    /// </summary>
+    public virtual void AddMessage(AevatarChatMessage message)
+    {
+        ArgumentNullException.ThrowIfNull(message);
+
+        if (message.Timestamp == null)
+        {
+            message.Timestamp = Timestamp.FromDateTime(DateTime.UtcNow);
+        }
+
+        _history.Add(message);
+    }
+
+    public virtual void Clear() => _history.Clear();
+
+    public int MessageCount => _history.Count;
 
     /// <summary>
     /// Add tool call message to history.
@@ -31,7 +71,7 @@ public class ToolAwareConversationHistoryManager : ConversationHistoryManager
             ToolCalls = { new ToolCall { ToolName = functionCall.Name, Arguments = functionCall.Arguments } }
         };
 
-        History.Add(toolCallMsg);
+        _history.Add(toolCallMsg);
         return toolCallMsg;
     }
 
@@ -61,7 +101,7 @@ public class ToolAwareConversationHistoryManager : ConversationHistoryManager
             }
         };
 
-        History.Add(toolResultMsg);
+        _history.Add(toolResultMsg);
         return toolResultMsg;
     }
 }

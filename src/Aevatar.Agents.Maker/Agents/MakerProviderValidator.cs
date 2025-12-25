@@ -35,7 +35,7 @@ public partial class MakerCoordinatorGAgent
     {
         // Step 1: Discover all candidate providers
         List<string> candidateProviders;
-        var availableProviders = LLMProviderFactory.GetAvailableProviderNames().ToList();
+        var availableProviders = RequireLLMProviderFactory().GetAvailableProviderNames().ToList();
 
         if (useMultipleProviders)
         {
@@ -188,7 +188,7 @@ public partial class MakerCoordinatorGAgent
         {
             Logger.LogDebug("Validating LLM provider: {Provider}", providerName);
 
-            var provider = await LLMProviderFactory.GetProviderAsync(providerName);
+            var provider = await RequireLLMProviderFactory().GetProviderAsync(providerName);
 
             var testRequest = new Aevatar.Agents.AI.Abstractions.AevatarLLMRequest
             {

@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AevatarKit · Workspace MVP</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="sidebarTop">
+        <div class="workspaceTitle">Workspace</div>
+      </div>
+
+      <nav class="nav">
+        <button class="navItem active" data-page="agents">
+          <span class="navIcon">🤖</span>
+          <span>Agent Manager</span>
+        </button>
+        <button class="navItem" data-page="workflow">
+          <span class="navIcon">🧩</span>
+          <span>Workflow Editor</span>
+        </button>
+        <button class="navItem" data-page="models">
+          <span class="navIcon">🧠</span>
+          <span>Model Manager</span>
+        </button>
+        <button class="navItem" data-page="tools">
+          <span class="navIcon">🛠️</span>
+          <span>System Tools</span>
+        </button>
+        <button class="navItem" data-page="mcp">
+          <span class="navIcon">🔌</span>
+          <span>MCP Manager</span>
+        </button>
+        <button class="navItem" data-page="prompts">
+          <span class="navIcon">📝</span>
+          <span>Prompt Manager</span>
+        </button>
+        <button class="navItem" data-page="files">
+          <span class="navIcon">📁</span>
+          <span>File Manager</span>
+        </button>
+        <button class="navItem" data-page="memory">
+          <span class="navIcon">🗄️</span>
+          <span>Memory Manager</span>
+        </button>
+      </nav>
+
+      <div class="sidebarBottom">
+        <div class="user">
+          <div class="avatar">M</div>
+          <div class="userMeta">
+            <div class="userName">Max</div>
+            <div class="userHint">demo</div>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="content">
+      <header class="topbar">
+        <div class="topbarLeft">
+          <div class="pageTitleRow">
+            <div class="pageTitle" id="pageTitle">Agent Manager</div>
+            <div class="pill" id="pillAgents">- agents</div>
+            <div class="pill" id="pillCategories">- categories</div>
+          </div>
+        </div>
+
+        <div class="topbarRight">
+          <div class="search" id="searchWrap">
+            <span class="searchIcon">⌕</span>
+            <input id="searchInput" placeholder="Search agents..." />
+          </div>
+          <button class="iconBtn" id="refreshBtn" title="Refresh">⟳</button>
+          <button class="iconBtn" id="clearBtn" title="Clear selection (demo)">🗑</button>
+          <button class="primaryBtn" id="primaryBtn">+ Agent</button>
+        </div>
+      </header>
+
+      <main class="main">
+        <!-- Agent Manager -->
+        <section class="page active" id="page_agents">
+          <div class="panel">
+            <div class="panelBody" id="agentCategories"></div>
+          </div>
+        </section>
+
+        <!-- Workflow Editor -->
+        <section class="page" id="page_workflow">
+          <div class="grid2">
+            <div class="panel">
+              <div class="panelHeader">Workflow Editor (MVP)</div>
+              <div class="panelBody">
+                <div class="row">
+                  <select id="graphSelect" class="textInput">
+                    <option value="">(unsaved)</option>
+                  </select>
+                  <button id="graphNewBtn" class="iconBtn" title="New Graph">＋</button>
+                  <button id="graphSaveBtn" class="primaryBtn" title="Save Graph">Save</button>
+                </div>
+                <div class="label">Graph Name</div>
+                <input id="graphNameInput" class="textInput" placeholder="e.g. Demo Graph" />
+                <div class="label">Graph (YAML/JSON)</div>
+                <textarea id="graph" spellcheck="false"># MVP Graph (placeholder)
+steps:
+  - id: input
+    type: input
+  - id: llm_call
+    type: llm_call
+  - id: transform
+    type: transform
+</textarea>
+                <div class="label">Input</div>
+                <textarea id="input" class="small" spellcheck="false">给我一个可视化多智能体工作流平台的 MVP。</textarea>
+                <div class="row">
+                  <button id="startBtn" class="primaryBtn">Start Run</button>
+                  <div class="mono">RunId: <span id="runId">-</span></div>
+                </div>
+                <div class="hint mono">SSE: <span id="sseUrl">-</span></div>
+              </div>
+            </div>
+
+            <div class="panel">
+              <div class="panelHeader">
+                Run Timeline (SSE)
+                <span class="conn">
+                  <span id="connDot" class="dot"></span>
+                  <span id="connText">Disconnected</span>
+                </span>
+              </div>
+              <div class="panelBody">
+                <div id="events" class="events small"></div>
+                <details class="details" open>
+                  <summary>Run History</summary>
+                  <div class="row">
+                    <button id="refreshRunsBtn" class="iconBtn">⟳</button>
+                    <div class="hint mono">click to replay events</div>
+                  </div>
+                  <div id="runsList" class="events tiny"></div>
+                </details>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Model Manager -->
+        <section class="page" id="page_models">
+          <div class="panel">
+            <div class="panelHeader">Model Manager (placeholder)</div>
+            <div class="panelBody">
+              <div class="hint">MVP：展示形态。V1：多模型/Key 管理/路由策略。</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- System Tools -->
+        <section class="page" id="page_tools">
+          <div class="panel">
+            <div class="panelHeader">System Tools (placeholder)</div>
+            <div class="panelBody">
+              <div class="hint">MVP：展示形态。V1：内置安全工具集 + 审计。</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- MCP Manager -->
+        <section class="page" id="page_mcp">
+          <div class="panel">
+            <div class="panelHeader">
+              MCP Manager (MVP)
+              <button id="mcpAddBtn" class="primaryBtn">+ Server</button>
+            </div>
+            <div class="panelBody">
+              <div class="hint">MVP：管理配置（不做真实连接）。V1：连接测试 + tool catalog。</div>
+              <div id="mcpServers" class="events"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Prompt Manager -->
+        <section class="page" id="page_prompts">
+          <div class="panel">
+            <div class="panelHeader">Prompt Manager (placeholder)</div>
+            <div class="panelBody">
+              <div class="hint">MVP：展示形态。V1：Prompt center + 版本化 + 引用关系。</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- File Manager -->
+        <section class="page" id="page_files">
+          <div class="panel">
+            <div class="panelHeader">File Manager (placeholder)</div>
+            <div class="panelBody">
+              <div class="hint">MVP：展示形态。V1：附件/回放包/对象存储集成。</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Memory Manager -->
+        <section class="page" id="page_memory">
+          <div class="panel">
+            <div class="panelHeader">Memory Manager (MVP)</div>
+            <div class="panelBody">
+              <div class="row">
+                <input id="memorySearchQuery" class="textInput" placeholder="Search memory (substring MVP)..." />
+                <button id="memorySearchBtn" class="iconBtn">⌕</button>
+                <button id="memoryRefreshResourcesBtn" class="iconBtn">⟳</button>
+              </div>
+              <div class="row">
+                <div class="label">RunId</div>
+                <input id="memoryRunId" class="textInput" placeholder="paste runId (or click from Run History)" />
+                <button id="refreshMemoryBtn" class="iconBtn">Load run:{runId}</button>
+              </div>
+
+              <div class="hint">
+                MVP：in-memory store + run/session scope；搜索为子串匹配。V1：scope + RBAC + FTS/Vector。
+              </div>
+
+              <div class="grid2">
+                <div>
+                  <div class="label">Resources</div>
+                  <div id="memoryResources" class="events tiny"></div>
+                </div>
+                <div>
+                  <div class="label">Entries</div>
+                  <div id="memoryList" class="events"></div>
+                </div>
+              </div>
+
+              <div class="hint">
+                Skills 方向：把 Graph/Tool/Prompt/MemoryProfile 打包成 Skill，接入技能市场：
+                <a href="https://skillsmp.com/" target="_blank" rel="noreferrer">skillsmp.com</a>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Create Agent Modal -->
+  <div class="modalBackdrop hidden" id="modalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="modalTitle">Create Agent (MVP)</div>
+        <button class="iconBtn" id="modalClose">✕</button>
+      </div>
+      <div class="modalBody">
+        <div class="label">Name</div>
+        <input id="agentName" class="textInput" placeholder="e.g. creator" />
+        <div class="label">Category</div>
+        <input id="agentCategory" class="textInput" placeholder="e.g. creator" value="creator" />
+        <div class="label">Description</div>
+        <textarea id="agentDesc" class="small" spellcheck="false" placeholder="optional"></textarea>
+        <div class="row right">
+          <button class="iconBtn" id="modalCancel">Cancel</button>
+          <button class="primaryBtn" id="modalCreate">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create MCP Server Modal -->
+  <div class="modalBackdrop hidden" id="mcpModalBackdrop">
+    <div class="modal">
+      <div class="modalHeader">
+        <div class="modalTitle">Create MCP Server (MVP)</div>
+        <button class="iconBtn" id="mcpModalClose">✕</button>
+      </div>
+      <div class="modalBody">
+        <div class="label">Name</div>
+        <input id="mcpName" class="textInput" placeholder="e.g. Local Toolpack" />
+        <div class="label">Transport</div>
+        <select id="mcpTransport" class="textInput">
+          <option value="STDIO">STDIO</option>
+          <option value="HTTP">HTTP</option>
+          <option value="NPX">NPX</option>
+          <option value="UVX">UVX</option>
+        </select>
+        <div class="label">Command (for STDIO/NPX/UVX)</div>
+        <input id="mcpCommand" class="textInput" placeholder="e.g. npx" />
+        <div class="label">Args (space separated)</div>
+        <input id="mcpArgs" class="textInput" placeholder='e.g. -y some-mcp-server' />
+        <div class="label">Endpoint (for HTTP)</div>
+        <input id="mcpEndpoint" class="textInput" placeholder="e.g. http://localhost:8787/mcp" />
+        <div class="row">
+          <label class="mono"><input id="mcpEnabled" type="checkbox" /> enabled</label>
+        </div>
+        <div class="row right">
+          <button class="iconBtn" id="mcpModalCancel">Cancel</button>
+          <button class="primaryBtn" id="mcpModalCreate">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>
+
+

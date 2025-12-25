@@ -248,6 +248,57 @@ internal static class MongoDBIndexManager
     }
 
     /// <summary>
+    /// Synchronous index creation for AI memory messages.
+    /// </summary>
+    public static void EnsureAIMemoryIndexes(
+        IMongoCollection<AIMemoryMessageDocument> collection)
+    {
+        var collectionKey = GetCollectionKey(collection);
+        if (!InitializedCollections.TryAdd(collectionKey, true))
+        {
+            return;
+        }
+
+        try
+        {
+            var indexKeys = Builders<AIMemoryMessageDocument>.IndexKeys;
+            var indexes = new[]
+            {
+                // History queries: agent scope + time ordering
+                new CreateIndexModel<AIMemoryMessageDocument>(
+                    indexKeys.Combine(
+                        indexKeys.Ascending(x => x.AgentId),
+                        indexKeys.Descending(x => x.CreatedAt)),
+                    new CreateIndexOptions { Name = "idx_agent_created_at", Background = true }),
+
+                // Session-scoped history (optional)
+                new CreateIndexModel<AIMemoryMessageDocument>(
+                    indexKeys.Combine(
+                        indexKeys.Ascending(x => x.AgentId),
+                        indexKeys.Ascending(x => x.SessionId),
+                        indexKeys.Descending(x => x.CreatedAt)),
+                    new CreateIndexOptions { Name = "idx_agent_session_created_at", Background = true }),
+
+                // Full-text search within an agent's memory
+                // NOTE:
+                // - Compound text index: prefix field(s) must be ascending.
+                // - This enables queries like: { AgentId == X, $text: { $search: "..." } }
+                new CreateIndexModel<AIMemoryMessageDocument>(
+                    indexKeys.Combine(
+                        indexKeys.Ascending(x => x.AgentId),
+                        indexKeys.Text(x => x.Content)),
+                    new CreateIndexOptions { Name = "idx_agent_content_text", Background = true })
+            };
+
+            collection.Indexes.CreateMany(indexes);
+        }
+        catch (MongoCommandException ex) when (ex.Code == 85 || ex.Code == 86)
+        {
+            // Index already exists - OK
+        }
+    }
+
+    /// <summary>
     /// Get unique key for collection tracking
     /// </summary>
     private static string GetCollectionKey<T>(IMongoCollection<T> collection)

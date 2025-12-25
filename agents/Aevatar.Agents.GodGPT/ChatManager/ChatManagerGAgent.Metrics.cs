@@ -73,10 +73,10 @@ public partial class ChatGAgentManager
             {
                 return ultimateSubscription.PlanType switch
                 {
-                    QuotaPlanType.Day => UserMembershipTier.UltimateDay,
-                    QuotaPlanType.Week => UserMembershipTier.UltimateWeek,
-                    QuotaPlanType.Month => UserMembershipTier.UltimateMonth,
-                    QuotaPlanType.Year => UserMembershipTier.UltimateYear,
+                    PlanType.Day => UserMembershipTier.UltimateDay,
+                    PlanType.Week => UserMembershipTier.UltimateWeek,
+                    PlanType.Month => UserMembershipTier.UltimateMonth,
+                    PlanType.Year => UserMembershipTier.UltimateYear,
                     _ => UserMembershipTier.UltimateMonth // Default fallback for unknown plan types
                 };
             }
@@ -87,10 +87,10 @@ public partial class ChatGAgentManager
             {
                 return premiumSubscription.PlanType switch
                 {
-                    QuotaPlanType.Day => UserMembershipTier.PremiumDay,
-                    QuotaPlanType.Week => UserMembershipTier.PremiumWeek,
-                    QuotaPlanType.Month => UserMembershipTier.PremiumMonth,
-                    QuotaPlanType.Year => UserMembershipTier.PremiumYear,
+                    PlanType.Day => UserMembershipTier.PremiumDay,
+                    PlanType.Week => UserMembershipTier.PremiumWeek,
+                    PlanType.Month => UserMembershipTier.PremiumMonth,
+                    PlanType.Year => UserMembershipTier.PremiumYear,
                     _ => UserMembershipTier.PremiumMonth // Default fallback for unknown plan types
                 };
             }

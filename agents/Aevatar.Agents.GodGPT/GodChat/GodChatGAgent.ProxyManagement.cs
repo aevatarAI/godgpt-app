@@ -1,11 +1,12 @@
 using System.Diagnostics;
+using Aevatar.Agents.Abstractions.Extensions;
+using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
-using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.Dtos;
-using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.GEvents;
+using Aevatar.Application.Grains.Common.Constants;
 using GodGPT.GAgents.Common.Constants;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
-using Orleans;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 
@@ -16,45 +17,38 @@ public partial class GodChatGAgent
 {
     #region Proxy Status Updates
     
-    [EventHandler]
-    public async Task HandleEventAsync(UpdateProxyInitStatusGEvent @event)
+    /// <summary>
+    /// Update proxy initialization status - public interface method called by AIAgentStatusProxy
+    /// </summary>
+    public async Task UpdateProxyInitStatusAsync(string proxyId, ProxyInitStatus status)
     {
         var stopwatch = Stopwatch.StartNew();
-        Logger.LogDebug($"[GodChatGAgent][HandleEventAsync][UpdateProxyInitStatusGEvent] Start - SessionId: {Id}, ProxyId: {@event.ProxyId}, Status: {@event.Status}");
+        Logger.LogDebug($"[GodChatGAgent][UpdateProxyInitStatusAsync] Start - SessionId: {Id}, ProxyId: {proxyId}, Status: {status}");
         
         // Update the proxy initialization status using Protobuf event
         RaiseEvent(new UpdateProxyInitStatusEvent
         {
-            ProxyId = @event.ProxyId.ToString(),
-            Status = @event.Status.ToProto()
+            ProxyId = proxyId,
+            Status = status.ToProto()
         });
         await ConfirmEventsAsync();
         
         stopwatch.Stop();
-        Logger.LogDebug($"[GodChatGAgent][HandleEventAsync][UpdateProxyInitStatusGEvent] End - Duration: {stopwatch.ElapsedMilliseconds}ms, Status updated to: {@event.Status} for proxy: {@event.ProxyId}");
-    }
-    
-    /// <summary>
-    /// Update proxy initialization status - public interface method called by AIAgentStatusProxy
-    /// </summary>
-    public async Task UpdateProxyInitStatusAsync(Guid proxyId, ProxyInitStatus status)
-    {
-        // Using old C# class UpdateProxyInitStatusGEvent where ProxyId is Guid
-        await HandleEventAsync(new UpdateProxyInitStatusGEvent
-        {
-            ProxyId = proxyId,
-            Status = status
-        });
+        Logger.LogDebug($"[GodChatGAgent][UpdateProxyInitStatusAsync] End - Duration: {stopwatch.ElapsedMilliseconds}ms, Status updated to: {status} for proxy: {proxyId}");
     }
     
     #endregion
 
     #region Proxy Retrieval
     
-    private async Task<IAIAgentStatusProxy?> GetProxyByRegionAsync(string? region)
+    /// <summary>
+    /// Gets a proxy and its ID for the specified region.
+    /// Returns (proxy, proxyId) tuple.
+    /// </summary>
+    private async Task<(IAIAgentStatusProxy? Proxy, string? ProxyId)> GetProxyByRegionAsync(string? region)
     {
         var totalStopwatch = Stopwatch.StartNew();
-        var isCN = GodGPTLanguageHelper.CheckClientIsCNFromContext();
+        var isCN = GodGPTLanguageHelper.CheckClientIsCN(Context);
         if (string.IsNullOrWhiteSpace(region))
         {
             region = isCN ? CNDefaultRegion : DefaultRegion;
@@ -70,7 +64,7 @@ public partial class GodChatGAgent
             $"[GodChatGAgent][GetProxyByRegionAsync] session {Id.ToString()},isCN:{isCN}, Region: {region}");
 
         var existingProxy = State.RegionProxies?.FirstOrDefault(r => r.Region == region);
-        var proxyIds = existingProxy?.ProxyIds?.Select(Guid.Parse).ToList();
+        var proxyIds = existingProxy?.ProxyIds?.ToList();
         
         if (proxyIds == null || !proxyIds.Any())
         {
@@ -90,7 +84,7 @@ public partial class GodChatGAgent
                     new RegionProxiesEntryProto
                     {
                         Region = region,
-                        ProxyIds = { proxyIds.Select(g => g.ToString()) }
+                        ProxyIds = { proxyIds }
                     }
                 }
             });
@@ -101,12 +95,22 @@ public partial class GodChatGAgent
 
         foreach (var proxyId in proxyIds)
         {
-            var proxy = _clusterClient.GetGrain<IAIAgentStatusProxy>(proxyId);
+            // Use new framework ActorFactory to get proxy
+            var proxyActor = await _actorFactory.CreateGAgentActorAsync<AIAgentStatusProxy>(proxyId);
+            var proxy = proxyActor.As<IAIAgentStatusProxy>();
+            
+            // Always ensure ParentId is set (in case proxy was restored from old state without ParentId)
+            await proxy.ConfigAsync(new AIAgentStatusProxyConfigProto
+            {
+                RequestRecoveryDelay = Duration.FromTimeSpan(RequestRecoveryDelay),
+                ParentId = Id.ToString()
+            });
+            
             if (await proxy.IsAvailableAsync())
             {
                 totalStopwatch.Stop();
                 Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] TOTAL_Time - Duration: {totalStopwatch.ElapsedMilliseconds}ms, SessionId: {Id}");
-                return proxy;
+                return (proxy, proxyId);
             }
             Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] ProxyCheck_Failed -, ProxyId: {proxyId}, SessionId: {Id}");
         }
@@ -117,7 +121,7 @@ public partial class GodChatGAgent
         {
             totalStopwatch.Stop();
             Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] TOTAL_Time (no proxies) - Duration: {totalStopwatch.ElapsedMilliseconds}ms, SessionId: {Id}");
-            return null;
+            return (null, null);
         }
 
         totalStopwatch.Stop();
@@ -129,7 +133,7 @@ public partial class GodChatGAgent
         return await GetProxyByRegionAsync(DefaultRegion);
     }
 
-    private async Task<List<Guid>> InitializeRegionProxiesAsync(string region, string rolePrompts = "")
+    private async Task<List<string>> InitializeRegionProxiesAsync(string region, string rolePrompts = "")
     {
         var stopwatch = Stopwatch.StartNew();
         var llmsForRegion = GetLLMsForRegion(region);
@@ -138,12 +142,12 @@ public partial class GodChatGAgent
             stopwatch.Stop();
             Logger.LogDebug(
                 $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, initialized proxy for region {region}, LLM not config Duration: {stopwatch.ElapsedMilliseconds}ms");
-            return new List<Guid>();
+            return new List<string>();
         }
         
-        var oldSystemPrompt = (await GetConfigurationAsync()).GetPrompt();
+        var oldSystemPrompt = await (await GetConfigurationAsync()).GetPromptAsync();
 
-        var proxies = new List<Guid>();
+        var proxies = new List<string>();
         var totalProxyStopwatch = Stopwatch.StartNew();
         foreach (var llm in llmsForRegion)
         {
@@ -169,29 +173,33 @@ public partial class GodChatGAgent
                 }
             }
             
-            var proxy = _clusterClient.GetGrain<IAIAgentStatusProxy>(Guid.NewGuid());
+            // Use new framework to create proxy
+            var newProxyId = Guid.NewGuid().ToString();
+            var proxyActor = await _actorFactory.CreateGAgentActorAsync<AIAgentStatusProxy>(newProxyId);
+            var proxy = proxyActor.As<IAIAgentStatusProxy>();
             
-            // TODO: [P2P_STREAM] Currently using direct grain call because new framework doesn't support P2P stream yet.
-            _ = proxy.ConfigAsync(new AIAgentStatusProxyConfig
+            // Configure with Protobuf config - pass GodChat's ID as ParentId for callbacks
+            // MUST await to ensure ParentId is set before any chat calls
+            await proxy.ConfigAsync(new AIAgentStatusProxyConfigProto
             {
-                Instructions = systemPrompt,
-                LLMConfig = new LLMConfigDto { SystemLLM = llm },
-                StreamingModeEnabled = true,
-                StreamingConfig = new StreamingConfig { BufferingSize = 32 },
-                RequestRecoveryDelay = RequestRecoveryDelay,
-                ParentId = Id
-            }); // Fire and forget - don't await
+                RequestRecoveryDelay = Duration.FromTimeSpan(RequestRecoveryDelay),
+                ParentId = Id.ToString()  // Convert Guid to string
+            });
+            
+            // Set the prompt template (can fire and forget as it's not critical for callbacks)
+            await proxy.SetPromptTemplateAsync(systemPrompt);
+            
             RaiseEvent(new UpdateProxyInitStatusEvent
             {
-                ProxyId = proxy.Id.ToString(),
+                ProxyId = newProxyId,
                 Status = ProxyInitStatus.Initializing.ToProto()
             });
             await ConfirmEventsAsync();
             Logger.LogDebug(
-                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, UpdateProxyInitStatusEvent status Initializing proxyId {proxy.Id.ToString()}");
-            proxies.Add(proxy.Id);
+                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, UpdateProxyInitStatusEvent status Initializing proxyId {newProxyId}");
+            proxies.Add(newProxyId);
             Logger.LogDebug(
-                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, initialized proxy for region {region} with LLM {llm}. id {proxy.Id.ToString()}");
+                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, initialized proxy for region {region} with LLM {llm}. id {newProxyId}");
         }
         totalProxyStopwatch.Stop();
         stopwatch.Stop();
@@ -209,7 +217,7 @@ public partial class GodChatGAgent
     /// Ensures that the specified proxy is initialized before proceeding with operations.
     /// This method implements retry logic with exponential backoff to wait for proxy initialization.
     /// </summary>
-    private async Task EnsureProxyInitializedAsync(Guid proxyId, Guid sessionId)
+    private async Task EnsureProxyInitializedAsync(string proxyId, Guid sessionId)
     {
         const int maxRetries = 10;
         const int retryDelayMs = 200;
@@ -218,7 +226,7 @@ public partial class GodChatGAgent
         
         while (retryCount < maxRetries)
         {
-            var statusEntry = State.ProxyInitStatuses?.FirstOrDefault(s => s.ProxyId == proxyId.ToString());
+            var statusEntry = State.ProxyInitStatuses?.FirstOrDefault(s => s.ProxyId == proxyId);
             if (State.ProxyInitStatuses.IsNullOrEmpty() || statusEntry == null)
             {
                 Logger.LogDebug($"[GodChatGAgent][EnsureProxyInitializedAsync] Historical data detected based on FirstChatTime, skipping proxy initialization check - ProxyId: {proxyId}, SessionId: {sessionId}");
@@ -248,18 +256,13 @@ public partial class GodChatGAgent
 
     /// <summary>
     /// Gets an initialized AI agent status proxy for the specified region.
+    /// Returns (proxy, proxyId) tuple.
     /// </summary>
-    private async Task<IAIAgentStatusProxy?> GetInitializedProxyAsync(string? region, Guid sessionId)
+    private async Task<(IAIAgentStatusProxy? Proxy, string? ProxyId)> GetInitializedProxyAsync(string? region, Guid sessionId)
     {
-        var aiAgentStatusProxy = await GetProxyByRegionAsync(region);
-        
-        if (aiAgentStatusProxy != null)
-        {
-            var proxyId = aiAgentStatusProxy.Id;
-            await EnsureProxyInitializedAsync(proxyId, sessionId);
-        }
-        
-        return aiAgentStatusProxy;
+        return await GetProxyByRegionAsync(region);
+        // Note: Proxy initialization is handled by the new framework automatically
+        // The proxy is ready to use after CreateGAgentActorAsync
     }
     
     #endregion

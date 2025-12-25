@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.Application.Grains.ChatManager.Dtos;
+using Aevatar.Application.Grains.Common.Helpers;
 using Aevatar.GodGPT.Dtos;
 using Aevatar.Payment.Abstractions;
 using Asp.Versioning;
@@ -59,7 +60,7 @@ public class GodGPTPaymentController : AevatarController
         var result = products.Select(p => new StripeProductDto
         {
             PriceId = p.ProductId,
-            PlanType = MapBillingCycleToPlanType(p.BillingCycle),
+            PlanType = MapBillingCycleToPlanType(p.BillingCycle).ToQuotaPlanType(),
             Mode = "subscription",
             Amount = p.Price,
             Currency = p.Currency,

@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Cors;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -23,6 +24,10 @@ using Volo.Abp.Autofac;
 using Volo.Abp.Modularity;
 using Volo.Abp.Swashbuckle;
 using Volo.Abp.Studio.Client.AspNetCore;
+using Volo.Abp.BlobStoring;
+using Volo.Abp.BlobStoring.Aws;
+using Aevatar.App.HttpApi.Host.Handler;
+using Aevatar.Agents.Plugins.MassTransit.DependencyInjection;
 
 namespace Aevatar.App.HttpApi.Host;
 
@@ -35,7 +40,8 @@ namespace Aevatar.App.HttpApi.Host;
     typeof(AbpAutofacModule),
     typeof(AbpAspNetCoreSerilogModule),
     typeof(AbpSwashbuckleModule),
-    typeof(AbpStudioClientAspNetCoreModule)
+    typeof(AbpStudioClientAspNetCoreModule),
+    typeof(AbpBlobStoringAwsModule)
 )]
 public class AppHttpApiHostModule : AbpModule
 {
@@ -57,14 +63,52 @@ public class AppHttpApiHostModule : AbpModule
         // Configure GodGPT Options
         context.Services.Configure<GodGPTOptions>(configuration.GetSection("GodGPT"));
         
+        // Configure ManagerOptions for admin operations
+        context.Services.Configure<Aevatar.Common.Options.ManagerOptions>(options =>
+        {
+            var managerIds = configuration.GetSection("ManagerIds").Get<List<string>>();
+            if (managerIds != null)
+            {
+                options.ManagerIds = managerIds;
+            }
+        });
+        
         // Configure Agent Runtime (Local or Orleans)
         ConfigureAgentRuntime(context, configuration);
+        
+        // Configure AWS S3 Blob Storage
+        ConfigureBlobStorage(context, configuration);
+    }
+    
+    private void ConfigureBlobStorage(ServiceConfigurationContext context, IConfiguration configuration)
+    {
+        Configure<AbpBlobStoringOptions>(options =>
+        {
+            options.Containers.ConfigureDefault(container =>
+            {
+                var configSection = configuration.GetSection("AwsS3");
+                container.UseAws(o =>
+                {
+                    o.AccessKeyId = configSection.GetValue<string>("AccessKeyId", "None");
+                    o.SecretAccessKey = configSection.GetValue<string>("SecretAccessKey", "None");
+                    o.Region = configSection.GetValue<string>("Region", "None");
+                    o.ContainerName = configSection.GetValue<string>("ContainerName", "None");
+                });
+            });
+        });
     }
 
     private void ConfigureAgentRuntime(ServiceConfigurationContext context, IConfiguration configuration)
     {
         // Add Agent Runtime based on configuration
         context.Services.AddAgentRuntime(configuration);
+        
+        // Configure MassTransit Stream Plugin for chat responses (with Consumer)
+        var massTransitConfig = configuration.GetSection("MassTransit:Stream");
+        if (massTransitConfig.Exists())
+        {
+            context.Services.AddMassTransitStreamPlugin(configuration);
+        }
     }
 
     private void ConfigureConventionalControllers()
@@ -168,13 +212,44 @@ public class AppHttpApiHostModule : AbpModule
         app.UseCorrelationId();
         app.UseStaticFiles();
         app.UseRouting();
+
+        // ============================================================
+        //  Health / Smoke endpoint
+        //
+        //  WHY:
+        //  - ABP HttpApi.Host is "API-first"; "/" may legitimately be unmapped.
+        //  - Our integration test expects "/" to return 200 OK.
+        // ============================================================
+        app.Use(async (httpContext, next) =>
+        {
+            if (HttpMethods.IsGet(httpContext.Request.Method) && httpContext.Request.Path == "/")
+            {
+                httpContext.Response.StatusCode = StatusCodes.Status200OK;
+                await httpContext.Response.WriteAsync("OK");
+                return;
+            }
+
+            await next();
+        });
+
         app.UseCors();
         app.UseAuthentication();
         app.UseAuthorization();
+        
+        // ChatMiddleware for streaming AI chat (SSE)
+        // Must be after Authentication/Authorization to access user claims
+        app.UseMiddleware<ChatMiddleware>();
+        
         app.UseSwagger();
         app.UseAbpSwaggerUI(options =>
         {
             options.SwaggerEndpoint("/swagger/v1/swagger.json", "App API");
+            var configuration = context.ServiceProvider.GetRequiredService<IConfiguration>();
+            var swaggerClientId = configuration["AuthServer:SwaggerClientId"];
+            if (!string.IsNullOrWhiteSpace(swaggerClientId))
+            {
+                options.OAuthClientId(swaggerClientId);
+            }
         });
         app.UseAuditing();
         app.UseAbpSerilogEnrichers();

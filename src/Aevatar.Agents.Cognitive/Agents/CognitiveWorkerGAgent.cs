@@ -1,11 +1,16 @@
 using Aevatar.Agents.Abstractions.Attributes;
+using Aevatar.Agents.AI;
 using Aevatar.Agents.AI.Abstractions;
 using Aevatar.Agents.AI.Core;
+using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.Agents.Cognitive.Messages;
 using Aevatar.Agents.Cognitive.Primitives;
 using Aevatar.Agents.Cognitive.Template;
+using Aevatar.Agents.Cognitive.Utilities;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
+using System.Text;
+using System.Text.Json;
 
 namespace Aevatar.Agents.Cognitive.Agents;
 
@@ -25,58 +30,80 @@ namespace Aevatar.Agents.Cognitive.Agents;
 /// 
 /// 这是真正的 Actor 并行，不是进程内伪并发
 /// </summary>
-public class CognitiveWorkerGAgent : AIGAgentBase<CognitiveWorkerState>
+public class CognitiveWorkerGAgent : CognitiveAIGAgentBase<CognitiveWorkerState>
 {
     private readonly TemplateEngine _templateEngine = new();
     private readonly OutputParserFactory _parserFactory = new();
-    
-    public CognitiveWorkerGAgent() { }
-    public CognitiveWorkerGAgent(string id) : base(id) { }
-    
+
+    public CognitiveWorkerGAgent()
+    {
+    }
+
+    protected override string AgentKind => "cognitive_worker";
+
+    protected override void AppendAgentHistoryMetadata(Dictionary<string, string> metadata)
+    {
+        metadata["worker_id"] = CustomState.WorkerId ?? string.Empty;
+    }
+
     // ============================================================
     //  生命周期
     // ============================================================
-    
+
     protected override async Task OnActivateAsync(CancellationToken ct = default)
     {
         await base.OnActivateAsync(ct);
-        
+
         // 初始化 Worker 状态
-        CustomState.WorkerId = Id.Length > 8 ? Id[..8] : Id;
+        var rawId = AgentId.ExtractRawId(Id);
+        var compact = rawId.Replace("-", "", StringComparison.Ordinal);
+        CustomState.WorkerId = compact.Length > 8 ? compact[..8] : compact;
         CustomState.Status = WorkerStatus.WsIdle;
     }
-    
+
     public override Task<string> GetDescriptionAsync()
     {
         return Task.FromResult(
             $"CognitiveWorker [{CustomState.WorkerId}] - Status: {CustomState.Status}");
     }
-    
+
     // ============================================================
     //  事件处理
     // ============================================================
-    
+
     /// <summary>
     /// 处理执行步骤请求 (Protobuf 事件)
     /// </summary>
     [EventHandler]
     public async Task HandleExecuteStepRequest(ExecuteStepRequestEvent request)
     {
+        // fan_out uses Down broadcast; enforce "exactly one worker handles a subtask"
+        // by honoring the reserved variable `__target_worker` (Guid string in "N" format).
+        if (request.Variables.TryGetValue("__target_worker", out var targetValue))
+        {
+            var target = targetValue?.StringValue;
+            var self = Id;
+            if (!string.IsNullOrWhiteSpace(target) && !string.Equals(target, self, StringComparison.OrdinalIgnoreCase))
+            {
+                return; // ignore tasks not assigned to me
+            }
+        }
+
         Logger.LogDebug("Worker {WorkerId} received step request: {StepId}",
             CustomState.WorkerId, request.StepId);
-        
+
         CustomState.Status = WorkerStatus.WsExecuting;
         CustomState.CurrentStepId = request.StepId;
-        
+
         var startTime = DateTime.UtcNow;
-        
+
         try
         {
             var result = await ExecuteStepAsync(request);
-            
+
             CustomState.Status = WorkerStatus.WsIdle;
             CustomState.TotalStepsCompleted++;
-            
+
             // 发送完成事件给 Coordinator (向上传播)
             await PublishAsync(new StepCompletedEventProto
             {
@@ -84,17 +111,20 @@ public class CognitiveWorkerGAgent : AIGAgentBase<CognitiveWorkerState>
                 StepId = request.StepId,
                 WorkerId = CustomState.WorkerId,
                 Success = result.Success,
-                Result = result.Value?.ToString() ?? "",
+                // IMPORTANT:
+                // - For json/json_array outputs, result.Value is a Dictionary/List, and ToString() is useless.
+                // - Coordinator needs the RAW assistant response to parse/aggregate deterministically.
+                Result = result.AssistantResponse ?? result.Value?.ToString() ?? "",
                 Error = result.Error ?? "",
                 TokensUsed = result.TokensUsed,
                 LlmCalls = result.LlmCalls,
                 DurationMs = (int)(DateTime.UtcNow - startTime).TotalMilliseconds
-            });
+            }, EventDirection.Up);
         }
         catch (Exception ex)
         {
             CustomState.Status = WorkerStatus.WsError;
-            
+
             await PublishAsync(new StepCompletedEventProto
             {
                 RequestId = request.RequestId,
@@ -103,14 +133,14 @@ public class CognitiveWorkerGAgent : AIGAgentBase<CognitiveWorkerState>
                 Success = false,
                 Error = ex.Message,
                 DurationMs = (int)(DateTime.UtcNow - startTime).TotalMilliseconds
-            });
+            }, EventDirection.Up);
         }
     }
-    
+
     // ============================================================
     //  步骤执行
     // ============================================================
-    
+
     private async Task<PrimitiveResult> ExecuteStepAsync(ExecuteStepRequestEvent request)
     {
         return request.StepType switch
@@ -119,60 +149,350 @@ public class CognitiveWorkerGAgent : AIGAgentBase<CognitiveWorkerState>
             _ => PrimitiveResult.Fail($"Worker does not support step type: {request.StepType}")
         };
     }
-    
+
     private async Task<PrimitiveResult> ExecuteLlmCallAsync(ExecuteStepRequestEvent request)
     {
         // 从 Protobuf Value 转换参数
         var parameters = ConvertFromProtoMap(request.Parameters);
         var variables = ConvertFromProtoMap(request.Variables);
-        
+
         // 解析参数
         var prompt = parameters.GetValueOrDefault("prompt")?.ToString() ?? "";
         var systemPrompt = parameters.GetValueOrDefault("system")?.ToString();
         var outputType = parameters.GetValueOrDefault("output")?.ToString() ?? "text";
-        
+        var strictParse = ResolveBool(parameters.GetValueOrDefault("strict_parse"), true);
+
+        // Guardrails (configurable via DSL)
+        var maxLength = ResolveInt(parameters.GetValueOrDefault("max_length"), 102400);
+        maxLength = Math.Clamp(maxLength, 1024, 1024 * 1024); // [1KB, 1MB]
+
+        var timeoutSeconds = ResolveInt(parameters.GetValueOrDefault("timeout_seconds"), 180);
+        timeoutSeconds = Math.Clamp(timeoutSeconds, 5, 3600); // [5s, 1h]
+
+        var idleTimeoutSeconds = ResolveInt(parameters.GetValueOrDefault("idle_timeout_seconds"), 30);
+        idleTimeoutSeconds = Math.Clamp(idleTimeoutSeconds, 1, timeoutSeconds);
+
         // 渲染模板
         prompt = _templateEngine.Render(prompt, variables);
         if (systemPrompt != null)
         {
             systemPrompt = _templateEngine.Render(systemPrompt, variables);
         }
-        
-        // 调用 LLM
-        var llmRequest = new AevatarLLMRequest
+
+        // Prepare per-step chat request (system prompt is passed via Context override).
+        var chat = ChatRequest.Create(prompt);
+        if (!string.IsNullOrWhiteSpace(request.RequestId))
         {
-            SystemPrompt = systemPrompt,
-            UserPrompt = prompt
-        };
-        
-        var response = await LLMProvider.GenerateAsync(llmRequest);
-        
-        // 解析输出
-        var parser = _parserFactory.Create(outputType);
-        var parsed = parser.Parse(response.Content);
-        
-        var promptTokens = response.Usage?.PromptTokens ?? 0;
-        var completionTokens = response.Usage?.CompletionTokens ?? 0;
-        
+            chat.RequestId = request.RequestId;
+        }
+
+        chat.StageHint = request.StepId ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(systemPrompt))
+        {
+            chat.AddContext("system_prompt", systemPrompt!);
+        }
+
+        // Bind step metadata to history writes (async-local, safe for concurrent tasks).
+        using var _ = BeginStepHistory(
+            stepId: request.StepId ?? string.Empty,
+            stepType: request.StepType ?? "llm_call",
+            systemPrompt: systemPrompt,
+            requestId: request.RequestId);
+
+        var callTimeout = TimeSpan.FromSeconds(timeoutSeconds);
+        var idleTimeout = TimeSpan.FromSeconds(idleTimeoutSeconds);
+        using var timeoutCts = new CancellationTokenSource(callTimeout);
+        var ct = timeoutCts.Token;
+
+        var finalContent = string.Empty;
+        var totalPromptTokens = 0;
+        var totalCompletionTokens = 0;
+
+        try
+        {
+            var supportsStreaming = await SupportsStreamingAsync(ct);
+            if (supportsStreaming)
+            {
+                var sb = new StringBuilder();
+                var chunkIndex = 0;
+                var startAt = DateTimeOffset.UtcNow;
+
+                // Streaming events throttling (reduce event storm & threadpool starvation)
+                const int StreamPublishEveryN = 16;
+                var streamPublishMinInterval = TimeSpan.FromMilliseconds(250);
+                var lastPublishAt = DateTimeOffset.MinValue;
+
+                var stream = ChatStreamAsync(chat, ct);
+                var enumerator = stream.GetAsyncEnumerator(ct);
+
+                try
+                {
+                    while (true)
+                    {
+                        var elapsed = DateTimeOffset.UtcNow - startAt;
+                        var remaining = callTimeout - elapsed;
+                        if (remaining <= TimeSpan.Zero)
+                        {
+                            return new PrimitiveResult { Success = false, Error = $"llm-timeout>{timeoutSeconds}s" };
+                        }
+
+                        // Wait for next chunk, but don't block forever.
+                        var moveNextTask = enumerator.MoveNextAsync().AsTask();
+                        var waitTimeout = remaining < idleTimeout ? remaining : idleTimeout;
+                        var completed = await Task.WhenAny(moveNextTask, Task.Delay(waitTimeout));
+                        if (completed != moveNextTask)
+                        {
+                            return new PrimitiveResult
+                            {
+                                Success = false,
+                                Error = waitTimeout == idleTimeout
+                                    ? $"llm-idle-timeout>{idleTimeoutSeconds}s"
+                                    : $"llm-timeout>{timeoutSeconds}s"
+                            };
+                        }
+
+                        if (!await moveNextTask)
+                            break;
+
+                        var delta = enumerator.Current ?? string.Empty;
+                        if (string.IsNullOrEmpty(delta))
+                            continue;
+
+                        sb.Append(delta);
+                        finalContent = sb.ToString();
+
+                        // Red-flag：长度（尽早停止，避免输出爆炸导致内存/渲染被打穿）
+                        if (finalContent.Length > maxLength)
+                        {
+                            return new PrimitiveResult { Success = false, Error = $"redflag-length>{maxLength}" };
+                        }
+
+                        // Streaming report (Success=false indicates intermediate state)
+                        var now = DateTimeOffset.UtcNow;
+                        var isFirst = chunkIndex == 0;
+                        var shouldPublish =
+                            isFirst ||
+                            (chunkIndex % StreamPublishEveryN == 0) ||
+                            (now - lastPublishAt >= streamPublishMinInterval);
+
+                        if (shouldPublish)
+                        {
+                            lastPublishAt = now;
+
+                            await PublishAsync(new StepCompletedEventProto
+                            {
+                                RequestId = request.RequestId,
+                                StepId = request.StepId,
+                                WorkerId = CustomState.WorkerId,
+                                Success = false,
+                                Result = finalContent,
+                                Error = "",
+                                // IMPORTANT:
+                                // - 这是 streaming 中间态事件，Coordinator 只用于 UI 展示
+                                // - TokensUsed/LlmCalls 不应累计（否则会被反复加总，导致统计爆炸）
+                                TokensUsed = 0,
+                                LlmCalls = 0,
+                                DurationMs = 0
+                            }, EventDirection.Up);
+                        }
+
+                        chunkIndex++;
+                        if (chunkIndex > 20000)
+                        {
+                            return new PrimitiveResult { Success = false, Error = "llm-stream-too-long>20000" };
+                        }
+                    }
+                }
+                finally
+                {
+                    try
+                    {
+                        var disposeTask = enumerator.DisposeAsync().AsTask();
+                        await Task.WhenAny(disposeTask, Task.Delay(1000));
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+                }
+
+                // Token usage is not available in streaming mode; use a cheap estimate.
+                totalPromptTokens = Math.Max(1, prompt.Length / 4);
+                totalCompletionTokens = Math.Max(1, finalContent.Length / 4);
+            }
+            else
+            {
+                ChatResponse response;
+                try
+                {
+                    response = await ChatAsync(chat, ct).WaitAsync(callTimeout);
+                }
+                catch (TimeoutException)
+                {
+                    return new PrimitiveResult { Success = false, Error = $"llm-timeout>{timeoutSeconds}s" };
+                }
+
+                finalContent = response.Content ?? string.Empty;
+                totalPromptTokens = response.Usage?.PromptTokens ?? Math.Max(1, prompt.Length / 4);
+                totalCompletionTokens = response.Usage?.CompletionTokens ?? Math.Max(1, finalContent.Length / 4);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            return new PrimitiveResult
+            {
+                Success = false,
+                Error = $"llm-timeout>{timeoutSeconds}s",
+                SystemPrompt = systemPrompt,
+                UserPrompt = prompt,
+                AssistantResponse = finalContent,
+                TokensUsed = 0,
+                LlmCalls = 1
+            };
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LLM] ✗ Error in {StepId}: {Message}", request.StepId, ex.Message);
+            return new PrimitiveResult
+            {
+                Success = false,
+                Error = $"llm-error:{ex.Message}",
+                SystemPrompt = systemPrompt,
+                UserPrompt = prompt,
+                AssistantResponse = finalContent,
+                TokensUsed = 0,
+                LlmCalls = 1
+            };
+        }
+
+        // Red-flag：长度（兜底）
+        if (finalContent.Length > maxLength)
+        {
+            return new PrimitiveResult { Success = false, Error = $"redflag-length>{maxLength}" };
+        }
+
+        // 解析输出（与 Coordinator 语义对齐：text 不解析；非 text 可 strict/loose）
+        object? parsedValue;
+        if (string.Equals(outputType, "text", StringComparison.OrdinalIgnoreCase))
+        {
+            parsedValue = finalContent;
+        }
+        else
+        {
+            var parser = _parserFactory.Create(outputType);
+            parsedValue = parser.Parse(finalContent);
+            if (parsedValue == null)
+            {
+                if (!strictParse)
+                {
+                    parsedValue = finalContent;
+                }
+                else
+                {
+                    return new PrimitiveResult { Success = false, Error = "redflag-parse-null" };
+                }
+            }
+        }
+
+        // Persist a structured per-step interaction into AIMemory (optional).
+        // This is the "long-term" layer; State.History stays as a short-term window.
+        await PersistInteractionToMemoryAsync(
+            request,
+            systemPrompt,
+            prompt,
+            finalContent,
+            totalPromptTokens,
+            totalCompletionTokens);
+
         return new PrimitiveResult
         {
             Success = true,
-            Value = parsed,
-            TokensUsed = promptTokens + completionTokens,
-            PromptTokens = promptTokens,
-            CompletionTokens = completionTokens,
+            Value = parsedValue,
+            TokensUsed = totalPromptTokens + totalCompletionTokens,
+            PromptTokens = totalPromptTokens,
+            CompletionTokens = totalCompletionTokens,
             LlmCalls = 1,
-            // 保存对话记录供前端可视化
             SystemPrompt = systemPrompt,
             UserPrompt = prompt,
-            AssistantResponse = response.Content
+            AssistantResponse = finalContent
         };
     }
-    
+
+    private async Task PersistInteractionToMemoryAsync(
+        ExecuteStepRequestEvent request,
+        string? systemPrompt,
+        string userPrompt,
+        string assistantResponse,
+        int promptTokens,
+        int completionTokens)
+    {
+        if (AIMemory == null)
+            return;
+
+        try
+        {
+            var payload = new
+            {
+                kind = "aevatar.cognitive.llm_interaction.v1",
+                agentId = Id,
+                agentKind = "cognitive_worker",
+                workerId = CustomState.WorkerId ?? "",
+                requestId = request.RequestId ?? "",
+                stepId = request.StepId ?? "",
+                stepType = request.StepType ?? "",
+                systemPrompt,
+                userPrompt,
+                assistantResponse,
+                promptTokens,
+                completionTokens,
+                totalTokens = promptTokens + completionTokens,
+                timestamp = DateTimeOffset.UtcNow.ToString("O")
+            };
+
+            var json = JsonSerializer.Serialize(payload);
+            await AIMemory.AddMessageAsync("assistant", json);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to persist llm interaction to AIMemory (best-effort).");
+        }
+    }
+
+    private static int ResolveInt(object? value, int defaultValue)
+    {
+        if (value == null) return defaultValue;
+        return value switch
+        {
+            int i => i,
+            long l => (int)l,
+            double d => (int)d,
+            float f => (int)f,
+            decimal m => (int)m,
+            string s when int.TryParse(s, out var p) => p,
+            _ => defaultValue
+        };
+    }
+
+    private static bool ResolveBool(object? value, bool defaultValue)
+    {
+        if (value == null) return defaultValue;
+        return value switch
+        {
+            bool b => b,
+            int i => i != 0,
+            long l => l != 0,
+            double d => Math.Abs(d) > double.Epsilon,
+            float f => Math.Abs(f) > float.Epsilon,
+            decimal m => m != 0,
+            string s when bool.TryParse(s, out var p) => p,
+            _ => defaultValue
+        };
+    }
+
     // ============================================================
     //  辅助方法
     // ============================================================
-    
+
     /// <summary>
     /// 将 Protobuf Value Map 转换为普通字典
     /// </summary>
@@ -180,47 +500,12 @@ public class CognitiveWorkerGAgent : AIGAgentBase<CognitiveWorkerState>
         Google.Protobuf.Collections.MapField<string, Value> protoMap)
     {
         var result = new Dictionary<string, object>();
-        
+
         foreach (var (key, value) in protoMap)
         {
-            result[key] = ConvertFromProtoValue(value);
+            result[key] = ProtoValueConverter.FromProto(value);
         }
-        
-        return result;
-    }
-    
-    /// <summary>
-    /// 将 Protobuf Value 转换为 CLR 对象
-    /// </summary>
-    private static object ConvertFromProtoValue(Value value)
-    {
-        return value.KindCase switch
-        {
-            Value.KindOneofCase.NullValue => null!,
-            Value.KindOneofCase.NumberValue => value.NumberValue,
-            Value.KindOneofCase.StringValue => value.StringValue,
-            Value.KindOneofCase.BoolValue => value.BoolValue,
-            Value.KindOneofCase.StructValue => ConvertFromProtoStruct(value.StructValue),
-            Value.KindOneofCase.ListValue => value.ListValue.Values
-                .Select(ConvertFromProtoValue)
-                .ToList(),
-            _ => value.ToString()
-        };
-    }
-    
-    /// <summary>
-    /// 将 Protobuf Struct 转换为字典
-    /// </summary>
-    private static Dictionary<string, object> ConvertFromProtoStruct(Struct protoStruct)
-    {
-        var result = new Dictionary<string, object>();
-        
-        foreach (var (key, value) in protoStruct.Fields)
-        {
-            result[key] = ConvertFromProtoValue(value);
-        }
-        
+
         return result;
     }
 }
-

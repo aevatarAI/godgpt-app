@@ -6,6 +6,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <OutputType>Exe</OutputType>
+    <!-- Test SDK provides its own entrypoint via global code; avoid generating another Main -->
+    <GenerateProgramFile>false</GenerateProgramFile>
     <AssetTargetFallback>$(AssetTargetFallback);portable-net45+win8+wp8+wpa81;</AssetTargetFallback>
     <RootNamespace>Aevatar.App</RootNamespace>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>

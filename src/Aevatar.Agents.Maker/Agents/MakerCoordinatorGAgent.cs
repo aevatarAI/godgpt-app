@@ -148,7 +148,7 @@ public partial class MakerCoordinatorGAgent : AIGAgentBase<MakerCoordinatorState
     /// <summary>
     /// Get execution status (0=idle, 1=starting, 2=running, 3=completed, 4=failed, 5=cancelled).
     /// </summary>
-    public int GetStatus() => CustomState.Status;
+    public int GetStatus() => (int)CustomState.ExecutionState;
 
     /// <summary>Get total LLM calls made (including embedding calls).</summary>
     public int GetTotalLlmCalls() => CustomState.TotalLlmCalls + (_currentVoteEngine?.EmbeddingCallCount ?? 0);
@@ -244,7 +244,7 @@ public partial class MakerCoordinatorGAgent : AIGAgentBase<MakerCoordinatorState
                 WorkerId = token.WorkerId,
                 ProposalId = token.ProposalId,
                 Token = token.Token,
-                AccumulatedContent = token.AccumulatedContent,
+                AccumulatedContent = token.AccumulatedContent ?? "",
                 TokenIndex = token.TokenIndex,
                 IsFirstToken = token.IsFirstToken,
                 IsLastToken = token.IsLastToken,
@@ -297,7 +297,7 @@ public partial class MakerCoordinatorGAgent : AIGAgentBase<MakerCoordinatorState
     {
             // Auto-fallback: if requested provider doesn't exist, use first available
             var providerToUse = request.ProviderName;
-            var availableProviders = LLMProviderFactory.GetAvailableProviderNames();
+            var availableProviders = RequireLLMProviderFactory().GetAvailableProviderNames();
             if (!availableProviders.Contains(providerToUse) && availableProviders.Count > 0)
             {
                 providerToUse = availableProviders[0];
@@ -310,7 +310,7 @@ public partial class MakerCoordinatorGAgent : AIGAgentBase<MakerCoordinatorState
             CustomState.TaskDescription = request.TaskDescription;
             CustomState.ConsensusK = request.ConsensusK;
             CustomState.SamplesPerRound = request.SamplesPerRound;
-        CustomState.Status = 1;
+        CustomState.ExecutionState = MakerExecutionState.MakerStateInitializingWorkers;
             CustomState.StartedAt = Timestamp.FromDateTime(DateTime.UtcNow);
             CustomState.TotalLlmCalls = 0;
             CustomState.RedFlagReasons.Clear();
@@ -432,7 +432,8 @@ public partial class MakerCoordinatorGAgent : AIGAgentBase<MakerCoordinatorState
 
     private async Task ExecuteAndCompleteAsync(StartMakerTaskRequest request)
     {
-        CustomState.Status = 2;
+        // Start of execution (runtime will refine phases via progress events).
+        CustomState.ExecutionState = MakerExecutionState.MakerStateAssessingAtomicity;
 
             var (result, node) = await ExecuteTaskAsync(
                 taskId: request.ExecutionId,
@@ -444,7 +445,9 @@ public partial class MakerCoordinatorGAgent : AIGAgentBase<MakerCoordinatorState
             _stopwatch.Stop();
 
             var success = result != null;
-            CustomState.Status = success ? 3 : 4;
+            CustomState.ExecutionState = success
+                ? MakerExecutionState.MakerStateCompleted
+                : MakerExecutionState.MakerStateFailed;
             CustomState.UpdatedAt = Timestamp.FromDateTime(DateTime.UtcNow);
 
             _cachedResult = new MakerResult
@@ -491,7 +494,7 @@ public partial class MakerCoordinatorGAgent : AIGAgentBase<MakerCoordinatorState
         {
             Logger.LogError(ex, "Coordinator {Id} failed during execution", Id);
             _stopwatch.Stop();
-            CustomState.Status = 4;
+            CustomState.ExecutionState = MakerExecutionState.MakerStateFailed;
 
             _cachedResult = new MakerResult
             {
@@ -574,11 +577,13 @@ public partial class MakerCoordinatorGAgent : AIGAgentBase<MakerCoordinatorState
             Proposal = new LLMProposal
             {
                 ProposalId = result.ProposalId,
-                Content = result.Content,
+                WorkerId = result.WorkerId,
+                Content = result.Content ?? "",
                 Success = result.Success,
-                Error = result.Error,
+                Error = result.Error ?? "",
                 PromptTokens = result.PromptTokens,
                 CompletionTokens = result.CompletionTokens,
+                LatencyMs = result.LatencyMs,
                 ProviderName = result.ProviderName
             }
         });

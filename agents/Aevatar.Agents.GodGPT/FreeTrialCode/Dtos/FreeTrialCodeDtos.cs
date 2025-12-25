@@ -1,6 +1,8 @@
-using Aevatar.Agents.GodGPT.Protos.InviteCode;
 using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Common.Constants;
+// Use C# enum for PaymentPlatform, not Proto enum
+using PaymentPlatform = Aevatar.Application.Grains.Common.Constants.PaymentPlatform;
+using InviteCodeType = Aevatar.Application.Grains.Common.Constants.InviteCodeType;
 
 namespace Aevatar.Application.Grains.FreeTrialCode.Dtos;
 
@@ -26,6 +28,7 @@ public class GenerateCodesResultDto
     [Id(2)] public HashSet<string> Codes { get; set; }
     [Id(3)] public int GeneratedCount { get; set; }
     [Id(4)] public FreeTrialCodeError ErrorCode { get; set; }
+    [Id(5)] public long BatchId { get; set; }
 }
 
 [GenerateSerializer]

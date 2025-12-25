@@ -96,6 +96,11 @@ namespace Aevatar.Core
         private ILogger _logger = null!;
         
         /// <summary>
+        /// Agent ID - returns the Guid primary key as string for new framework compatibility
+        /// </summary>
+        protected Guid Id => this.GetPrimaryKey();
+        
+        /// <summary>
         /// Event sourcing version - matches new framework's GetCurrentVersion()
         /// Used to determine if agent has any historical events (Version > 0)
         /// </summary>
@@ -139,6 +144,14 @@ namespace Aevatar.Core
             _eventVersion += _pendingEvents.Count;
             _pendingEvents.Clear();
             return Task.CompletedTask;
+        }
+        
+        /// <summary>
+        /// Async version of ConfirmEvents for new framework compatibility
+        /// </summary>
+        protected Task ConfirmEventsAsync()
+        {
+            return ConfirmEvents();
         }
 
         /// <summary>

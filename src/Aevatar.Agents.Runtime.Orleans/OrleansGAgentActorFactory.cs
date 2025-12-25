@@ -1,4 +1,6 @@
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Helpers;
+using Aevatar.Agents.Core.Context;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -62,27 +64,34 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
         string? id = null, 
         CancellationToken ct = default)
     {
-        var actorId = id ?? Guid.NewGuid().ToString();
+        // Orleans 下 ActorId 必须包含类型前缀（避免跨类型 id 冲突）：
+        // ActorId = "AgentTypeShortName:RawId"
+        var inputId = string.IsNullOrWhiteSpace(id) ? Guid.NewGuid().ToString("D") : id.Trim();
+        var actorId = AgentId.Normalize(agentType, inputId);
+        var rawId = AgentId.ExtractRawId(actorId);
         var agentTypeName = agentType.AssemblyQualifiedName ?? agentType.FullName ?? agentType.Name;
 
-        _logger.LogInformation("Creating Orleans Actor proxy for Agent - Type: {AgentType}, Id: {Id}",
-            agentType.Name, actorId);
+        _logger.LogInformation(
+            "Creating Orleans Actor proxy for Agent - Type: {AgentType}, inputId={InputId}, actorId={ActorId}",
+            agentType.Name, inputId, actorId);
 
         // Create lightweight actor proxy (Agent will be created in Grain/Silo)
+        var contextPropagator = _serviceProvider.GetService<AgentContextPropagator>();
         var actor = new OrleansGAgentActor(
-            actorId,
+            rawId,
             agentTypeName,
             _clusterClient,
             _streamProvider,
             _streamingOptions,
             _serviceProvider.GetRequiredService<ILogger<OrleansGAgentActor>>(),
             _messageStreamProvider,
-            _providerOptions);
+            _providerOptions,
+            contextPropagator);
 
         // Activate - This will initialize Agent in the Grain (Silo side)
         await actor.ActivateAsync(ct);
 
-        _logger.LogInformation("✅ Created Orleans Actor proxy {Id}, Agent running in Silo", actorId);
+        _logger.LogInformation("✅ Created Orleans Actor proxy {ActorId}, Agent running in Silo", actor.Id);
 
         return actor;
     }

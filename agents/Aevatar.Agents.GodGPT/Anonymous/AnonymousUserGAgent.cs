@@ -12,9 +12,8 @@ using Aevatar.Application.Grains.Common.Observability;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Json.Schema.Generation;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
+using Aevatar.Agents.Abstractions.Extensions;
 
 namespace Aevatar.Application.Grains.Agents.Anonymous;
 
@@ -26,16 +25,18 @@ namespace Aevatar.Application.Grains.Agents.Anonymous;
 [GAgent(nameof(AnonymousUserGAgent))]
 public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUserGAgent
 {
-    private readonly IServiceProvider _serviceProvider;
-    private readonly IGAgentActorFactory _actorFactory;
+    // Injected by OrleansGAgentGrain via reflection
+    public IGAgentActorFactory? ActorFactory { get; set; }
     
-    // Cached ConfigurationGAgent instance (new framework)
-    private ConfigurationGAgent? _configurationAgent;
+    // Configuration options injected by OrleansGAgentGrain
+    public RolePromptOptions? RolePromptOptions { get; set; }
+    public AnonymousGodGPTOptions? AnonymousOptions { get; set; }
+    
+    // Cached ConfigurationGAgent interface (new framework)
+    private IConfigurationGAgent? _configurationAgentInterface;
 
-    public AnonymousUserGAgent(Guid id, IServiceProvider serviceProvider, IGAgentActorFactory actorFactory) : base(id)
+    public AnonymousUserGAgent()
     {
-        _serviceProvider = serviceProvider;
-        _actorFactory = actorFactory;
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -108,11 +109,11 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
 
         // Create new GodChat session (mimic ChatManagerGAgent.CreateSessionAsync)
         var newSessionId = Guid.NewGuid();
-        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(newSessionId);
-        var godChat = (IGodChat)godChatActor.GetAgent();
+        var godChatActor = await ActorFactory!.CreateGAgentActorAsync<GodChatGAgent>(newSessionId.ToString());
+        var godChat = godChatActor.As<IGodChat>();
 
         // Get system prompt and append role prompt if provided (exact copy from ChatManagerGAgent)
-        var sysMessage = configuration.GetPrompt();
+        var sysMessage = await configuration.GetPromptAsync();
         
         if (!string.IsNullOrEmpty(guider))
         {
@@ -129,7 +130,7 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
         {
             Instructions = sysMessage, 
             MaxHistoryCount = 32,
-            LlmSystemLlm = configuration.GetSystemLLM(),
+            LlmSystemLlm = await configuration.GetSystemLLMAsync(),
             StreamingModeEnabled = true, 
             StreamingBufferingSize = 32
         };
@@ -158,7 +159,7 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
         await EnsureInitializedAsync();
         
         // Get language from RequestContext with error handling
-        var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+        var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
         Logger.LogDebug($"[AnonymousUserGAgent][GuestChatAsync] Language from context: {language}");
         
         // Check chat limits
@@ -176,16 +177,16 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
         }
 
         var sessionId = Guid.Parse(State.CurrentSessionId);
-        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionId);
-        var godChat = (IGodChat)godChatActor.GetAgent();
+        var godChatActor = await ActorFactory!.CreateGAgentActorAsync<GodChatGAgent>(sessionId.ToString());
+        var godChat = godChatActor.As<IGodChat>();
         var configuration = await GetConfigurationAsync();
 
         // Execute streaming chat (exact copy from ChatManagerGAgent.StreamChatWithSessionAsync)
         var stopwatch = Stopwatch.StartNew();
         await godChat.GodStreamChatAsync(
             sessionId,
-            configuration.GetSystemLLM(), 
-            configuration.GetStreamingModeEnabled(),
+            await configuration.GetSystemLLMAsync(), 
+            await configuration.GetStreamingModeEnabledAsync(),
             content, 
             chatId,
             null, isHttpRequest: true);
@@ -231,16 +232,15 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
     /// <summary>
     /// Get configuration agent (new framework style)
     /// </summary>
-    private async Task<ConfigurationGAgent> GetConfigurationAsync()
+    private async Task<IConfigurationGAgent> GetConfigurationAsync()
     {
-        if (_configurationAgent == null)
+        if (_configurationAgentInterface == null)
         {
-            var actor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(
-                CommonHelper.GetSessionManagerConfigurationId());
-            _configurationAgent = (ConfigurationGAgent)actor.GetAgent();
-            await _configurationAgent.ActivateAsync();
+            var actor = await ActorFactory!.CreateGAgentActorAsync<ConfigurationGAgent>(
+                CommonHelper.GetSessionManagerConfigurationId().ToString());
+            _configurationAgentInterface = actor.As<IConfigurationGAgent>();
         }
-        return _configurationAgent;
+        return _configurationAgentInterface;
     }
 
     /// <summary>
@@ -248,10 +248,7 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
     /// </summary>
     private string GetRolePrompt(string roleName)
     {
-        try
-        {
-            var roleOptions = _serviceProvider.GetService<IOptionsMonitor<RolePromptOptions>>()?.CurrentValue;
-            var rolePrompt = roleOptions?.RolePrompts.GetValueOrDefault(roleName, string.Empty) ?? string.Empty;
+        var rolePrompt = RolePromptOptions?.RolePrompts.GetValueOrDefault(roleName, string.Empty) ?? string.Empty;
             
             if (!string.IsNullOrEmpty(rolePrompt))
             {
@@ -263,12 +260,6 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
             }
             
             return rolePrompt;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "[AnonymousUserGAgent][GetRolePrompt] Failed to get role prompt for role: {RoleName}", roleName);
-            return string.Empty;
-        }
     }
 
     /// <summary>
@@ -276,16 +267,7 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
     /// </summary>
     private int GetMaxChatCount()
     {
-        try
-        {
-            var options = _serviceProvider.GetService<IOptionsMonitor<AnonymousGodGPTOptions>>()?.CurrentValue;
-            return options?.MaxChatCount ?? 3;
-        }
-        catch (Exception ex)
-        {
-            Logger.LogWarning(ex, "[AnonymousUserGAgent][GetMaxChatCount] Failed to get max chat count, using default: 3");
-            return 3;
-        }
+        return AnonymousOptions?.MaxChatCount ?? 3;
     }
 
     /// <summary>
@@ -329,7 +311,9 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
     {
         if (string.IsNullOrEmpty(State.UserHashId))
         {
-            var userHashId = Id.ToString("N")[..16]; // Use first 16 chars as hash ID
+            // Id is string, extract first 16 chars as hash ID (remove hyphens if present)
+            var cleanId = Id.Replace("-", "");
+            var userHashId = cleanId.Length >= 16 ? cleanId[..16] : cleanId;
             
             RaiseEvent(new InitializeAnonymousUserEvent()
             {

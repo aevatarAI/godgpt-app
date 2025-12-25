@@ -9,44 +9,8 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Configuration
-AUTH_URL="https://localhost:44320"
-API_URL="https://localhost:44345"
-CLIENT_ID="AevatarAuthServer"
-SCOPE="Aevatar openid profile"
-TEST_USERNAME="admin"
-TEST_PASSWORD="1q2w3E*"
-
-# Colors for output
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-RED='\033[0;31m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Variables
-ACCESS_TOKEN=""
-
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $1"
-}
-
-log_step() {
-    echo -e "${BLUE}[STEP]${NC} $1"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $1"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $1"
-}
-
-log_response() {
-    echo -e "${YELLOW}[RESPONSE]${NC}"
-    echo "$1" | jq . 2>/dev/null || echo "$1"
-}
+# Load common test utilities
+source "$SCRIPT_DIR/test-common.sh"
 
 # Check if jq is installed
 check_dependencies() {
@@ -61,45 +25,43 @@ check_dependencies() {
     fi
 }
 
-# Check if services are running
-check_services() {
-    log_step "Checking if services are running..."
+# Test 0: Create a batch (generate trial codes)
+test_create_batch() {
+    log_step "Test 0: Creating a test batch (generating trial codes)..."
+    log_warn "Note: This requires manager permissions"
     
-    if ! curl -k -s "$AUTH_URL/.well-known/openid-configuration" > /dev/null 2>&1; then
-        log_error "AuthServer is not running at $AUTH_URL"
-        exit 1
-    fi
-    log_info "AuthServer is running ✓"
+    # Calculate start and end times (30 days from now)
+    local start_time=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    local end_time=$(date -u -v+30d +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u -d "+30 days" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || date -u +"%Y-%m-%dT%H:%M:%SZ")
     
-    if ! curl -k -s "$API_URL/api/abp/application-configuration" > /dev/null 2>&1; then
-        log_error "HttpApi is not running at $API_URL"
-        exit 1
-    fi
-    log_info "HttpApi is running ✓"
-}
-
-# Get access token using password grant
-get_access_token() {
-    log_step "Getting access token with password grant..."
+    local response=$(api_post "/api/godgpt/invitation/generate-trial-code" "{
+        \"trialDays\": 30,
+        \"productId\": \"test_product\",
+        \"platform\": 0,
+        \"startTime\": \"$start_time\",
+        \"endTime\": \"$end_time\",
+        \"quantity\": 5,
+        \"description\": \"Test batch for management flow\"
+    }")
     
-    local response=$(curl -k -s -X POST "$AUTH_URL/connect/token" \
-        -H "Content-Type: application/x-www-form-urlencoded" \
-        -d "grant_type=password" \
-        -d "client_id=$CLIENT_ID" \
-        -d "username=$TEST_USERNAME" \
-        -d "password=$TEST_PASSWORD" \
-        -d "scope=$SCOPE")
+    log_response "$response"
     
-    ACCESS_TOKEN=$(echo "$response" | jq -r '.access_token')
-    
-    if [ "$ACCESS_TOKEN" == "null" ] || [ -z "$ACCESS_TOKEN" ]; then
-        log_error "Failed to get access token"
-        log_response "$response"
-        exit 1
+    if echo "$response" | jq -e '.success == true' > /dev/null 2>&1; then
+        local batch_id=$(echo "$response" | jq -r '.batchId')
+        if [ "$batch_id" != "null" ] && [ -n "$batch_id" ]; then
+            log_info "Batch created successfully ✓"
+            log_info "Batch ID: $batch_id"
+            log_info "Generated Count: $(echo "$response" | jq -r '.generatedCount')"
+            echo "$batch_id"  # Return batchId to stdout for next test
+            return 0
+        fi
     fi
     
-    log_info "Access token obtained ✓"
-    echo "Token: ${ACCESS_TOKEN:0:50}..."
+    # If creation failed, return empty (caller will handle fallback)
+    local error_msg=$(echo "$response" | jq -r '.error.message // .message // empty' 2>/dev/null || echo "$response")
+    log_warn "Failed to create batch: $error_msg"
+    echo ""  # Return empty string to stdout
+    return 1
 }
 
 # Test 1: Get Batch Info
@@ -107,16 +69,23 @@ test_get_batch_info() {
     log_step "Test 1: Getting batch info..."
     log_warn "Note: This requires manager permissions"
     
-    local batch_id="${1:-test_batch_001}"
+    local batch_id="${1:-}"
     
-    local response=$(curl -k -s -X GET "$API_URL/api/godgpt/management/batch-info/$batch_id" \
-        -H "Authorization: Bearer $ACCESS_TOKEN" \
-        -H "Content-Type: application/json")
+    if [ -z "$batch_id" ]; then
+        log_error "Batch ID is required"
+        return 1
+    fi
+    
+    local response=$(api_get "/api/godgpt/management/batch-info/$batch_id")
     
     log_response "$response"
     
     if echo "$response" | jq -e '.batchId' > /dev/null 2>&1; then
         log_info "Batch info retrieved successfully ✓"
+        log_info "Batch ID: $(echo "$response" | jq -r '.batchId')"
+        log_info "Total Generated: $(echo "$response" | jq -r '.totalGenerated')"
+        log_info "Used Count: $(echo "$response" | jq -r '.usedCount')"
+        log_info "Status: $(echo "$response" | jq -r '.status')"
         return 0
     else
         # Check if it's a permission error
@@ -126,7 +95,7 @@ test_get_batch_info() {
         else
             log_warn "Failed to get batch info: $error_msg"
         fi
-        return 0  # Don't fail if permission denied
+        return 1
     fi
 }
 
@@ -141,7 +110,32 @@ run_all_tests() {
     log_warn "Note: These tests require manager permissions"
     echo ""
     
-    if test_get_batch_info; then
+    # Step 1: Create a batch first
+    local batch_id=""
+    local temp_file=$(mktemp)
+    # Capture both stdout (batchId) and stderr (logs) separately
+    test_create_batch > "$temp_file" 2>&1 || true  # Don't fail if creation fails
+    # Extract batchId from the response JSON (look for numeric batchId in JSON)
+    batch_id=$(cat "$temp_file" | jq -r '.batchId // empty' 2>/dev/null || \
+               cat "$temp_file" | grep -oE '"batchId"[[:space:]]*:[[:space:]]*[0-9]+' | grep -oE '[0-9]+' | head -1 || \
+               cat "$temp_file" | grep -E '^[0-9]+$' | head -1)
+    rm -f "$temp_file"
+    
+    if [ -n "$batch_id" ] && [ "$batch_id" != "null" ] && [ "$batch_id" != "" ]; then
+        log_info "Using created batchId: $batch_id"
+        ((passed++))
+    else
+        log_warn "Failed to create batch (may require special permissions)"
+        log_warn "Will try to use a test batchId instead"
+        # Use a recent timestamp as fallback
+        batch_id=$(date +%s)
+        log_info "Using fallback batchId: $batch_id"
+        ((failed++))
+    fi
+    echo ""
+    
+    # Step 2: Get batch info using the created batchId
+    if [ -n "$batch_id" ] && test_get_batch_info "$batch_id"; then
         ((passed++))
     else
         ((failed++))
@@ -165,12 +159,18 @@ main() {
     check_services
     echo ""
     
-    get_access_token
+    if ! login; then
+        log_error "Login failed, aborting tests"
+        exit 1
+    fi
     echo ""
     
     case "${1:-all}" in
+        "create-batch")
+            test_create_batch
+            ;;
         "batch-info")
-            test_get_batch_info "${2:-test_batch_001}"
+            test_get_batch_info "${2:-}"
             ;;
         "all"|*)
             run_all_tests
@@ -179,4 +179,3 @@ main() {
 }
 
 main "$@"
-

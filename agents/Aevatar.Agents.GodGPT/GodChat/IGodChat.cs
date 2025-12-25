@@ -1,4 +1,6 @@
 using Aevatar.Agents.GodGPT.Protos;
+using Aevatar.Agents.GodGPT.Protos.GodChat;
+using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
 using Aevatar.AI.Exceptions;
 using Aevatar.AI.Feature.StreamSyncWoker;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
@@ -24,14 +26,17 @@ public interface IGodChat : IGAgent
     /// </summary>
     Task ConfigAsync(GodChatConfig config);
     
-    Task StartStreamChatAsync(StartStreamChatInput input);
+    /// <summary>
+    /// Start streaming chat with Protobuf input (for RPC calls)
+    /// </summary>
+    Task StartStreamChatAsync(StartStreamChatInputProto input);
 
     Task<string> GodStreamChatAsync(Guid sessionId, string llm, bool streamingModeEnabled, string message,
         string chatId, ExecutionPromptSettings? promptSettings = null, bool isHttpRequest = false, string? region = null,
         bool addToHistory = true, List<string>? images = null, DateTime? userLocalTime = null, string? userTimeZoneId = null);
 
     [ReadOnly]
-    Task<List<ChatMessage>> GetChatMessageAsync();
+    Task<ChatMessageListProto> GetChatMessageAsync();
     
     [ReadOnly]
     Task<List<ChatMessageWithMetaDto>> GetChatMessageWithMetaAsync();
@@ -47,14 +52,14 @@ public interface IGodChat : IGAgent
     Task SetUserProfileAsync(UserProfileDto? userProfileDto);
     Task<UserProfileDto?> GetUserProfileAsync();
 
-    Task ChatMessageCallbackAsync(AIChatContextDto aiChatContextDto,
+    Task ChatMessageCallbackAsync(AIChatContextProto? aiChatContextProto,
         AIExceptionEnum aiExceptionEnum, string? errorMessage,
-        AIStreamChatContent? aiStreamChatContent);
+        AIStreamChatContentProto? aiStreamChatContent);
     
-    Task<List<ChatMessage>?> ChatWithHistory(Guid sessionId, string systemLLM, string content, string chatId, 
+    Task<ChatMessageListProto> ChatWithHistory(Guid sessionId, string systemLLM, string content, string chatId, 
         ExecutionPromptSettings promptSettings = null, bool isHttpRequest = false, string? region = null);
     
-    Task<List<ChatMessage>?> ChatWithoutHistoryAsync(Guid sessionId, string systemLLM, string content, string chatId, 
+    Task<ChatMessageListProto> ChatWithoutHistoryAsync(Guid sessionId, string systemLLM, string content, string chatId, 
         ExecutionPromptSettings promptSettings = null, bool isHttpRequest = false, string? region = null);
 
 
@@ -67,5 +72,5 @@ public interface IGodChat : IGAgent
     /// <summary>
     /// Update proxy initialization status (called by AIAgentStatusProxy)
     /// </summary>
-    Task UpdateProxyInitStatusAsync(Guid proxyId, ProxyInitStatus status);
+    Task UpdateProxyInitStatusAsync(string proxyId, ProxyInitStatus status);
 }

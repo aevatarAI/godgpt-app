@@ -1,5 +1,6 @@
 using GodGPT.GAgents.SpeechChat;
 using GodGPT.GAgents.Awakening.Dtos;
+using Aevatar.Agents.GodGPT.Protos.Awakening;
 using Orleans.Concurrency;
 
 namespace GodGPT.GAgents.Awakening;
@@ -32,13 +33,13 @@ public interface IAwakeningGAgent : Aevatar.Agents.Abstractions.IGAgent
         VoiceLanguageEnum language, string? region = "");
     
     /// <summary>
-    /// Get today's awakening level and quote, if not generated then generate asynchronously and return null
-    /// The returned DTO contains status field, frontend can determine whether to continue polling based on this
+    /// Get today's awakening level and quote (Protobuf version for RPC)
+    /// The returned Proto contains status field, frontend can determine whether to continue polling based on this
     /// Status of Generating means generation is in progress, Completed means generation is finished (success or failure)
     /// </summary>
     /// <param name="language">Language type</param>
-    /// <returns>Today's awakening content, return null if not generated, includes generation status</returns>
-    Task<AwakeningContentDto?> GetTodayAwakeningAsync(VoiceLanguageEnum language, string? region = "");
+    /// <returns>Today's awakening content as Protobuf, includes generation status</returns>
+    Task<AwakeningContentDtoProto> GetTodayAwakeningAsync(VoiceLanguageEnum language, string? region = "");
     
     /// <summary>
     /// Reset awakening generation state for testing purposes

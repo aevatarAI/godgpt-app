@@ -54,14 +54,18 @@ public interface IUserQuotaGAgent : Aevatar.Agents.Abstractions.IGAgent
     // Note: Other methods remain unchanged for now as they are used internally
     // They can be migrated later if needed
     Task<bool> InitializeCreditsAsync();
-    Task<CreditsInfoDto> GetCreditsAsync();
+    Task<CreditsInfoProto> GetCreditsAsync();
     Task<bool> IsSubscribedAsync(bool ultimate = false);
     Task<SubscriptionInfoDto> GetSubscriptionAsync(bool ultimate = false);
     Task<SubscriptionInfoDto> GetAndSetSubscriptionAsync(bool ultimate = false);
     Task UpdateSubscriptionAsync(SubscriptionInfoDto subscriptionInfoDto, bool ultimate = false);
+    
+    // RPC-compatible Protobuf methods
+    Task<SubscriptionInfoProto> GetSubscriptionProtoAsync(bool ultimate = false);
+    Task<SubscriptionInfoProto> GetAndSetSubscriptionProtoAsync(bool ultimate = false);
     Task CancelSubscriptionAsync();
-    Task<ExecuteActionResultDto> ExecuteActionAsync(string sessionId, string chatManagerGuid, ActionType actionType = ActionType.Conversation);
-    Task<ExecuteActionResultDto> ExecuteVoiceActionAsync(string sessionId, string chatManagerGuid);
+    Task<ExecuteActionResultProto> ExecuteActionAsync(string sessionId, string chatManagerGuid, ActionType actionType = ActionType.Conversation);
+    Task<ExecuteActionResultProto> ExecuteVoiceActionAsync(string sessionId, string chatManagerGuid);
     Task ResetRateLimitsAsync(string actionType = "conversation");
     Task ClearAllAsync();
     Task UpdateQuotaAsync(string productId, DateTime expiresDate);
@@ -107,10 +111,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         return true;
     }
 
-    public async Task<CreditsInfoDto> GetCreditsAsync()
+    public async Task<CreditsInfoProto> GetCreditsAsync()
     {
         await InitializeCreditsAsync();
-        var creditsInfoDto = new CreditsInfoDto
+        var creditsInfoProto = new CreditsInfoProto
         {
             IsInitialized = State.HasInitialCredits,
             Credits = State.Credits,
@@ -118,14 +122,14 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         };
         if (State.HasInitialCredits && !State.HasShownInitialCreditsToast)
         {
-            creditsInfoDto.ShouldShowToast = true;
+            creditsInfoProto.ShouldShowToast = true;
         }
         else
         {
-            creditsInfoDto.ShouldShowToast = false;
+            creditsInfoProto.ShouldShowToast = false;
         }
 
-        return creditsInfoDto;
+        return creditsInfoProto;
     }
 
     public async Task SetShownCreditsToastAsync(SetShownCreditsToastRequestProto request)
@@ -216,11 +220,37 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             InvoiceIds = subscriptionInfo?.InvoiceIds.ToList() ?? new List<string>()
         };
     }
+    
+    // RPC-compatible Protobuf method
+    public async Task<SubscriptionInfoProto> GetSubscriptionProtoAsync(bool ultimate = false)
+    {
+        var subscriptionInfo = ultimate ? State.UltimateSubscription : State.Subscription;
+
+        if (subscriptionInfo == null)
+        {
+            RaiseEvent(new UpdateSubscriptionEvent
+            {
+                SubscriptionInfo = new SubscriptionInfoProto(),
+                IsUltimate = ultimate
+            });
+            await ConfirmEventsAsync();
+            subscriptionInfo = ultimate ? State.UltimateSubscription : State.Subscription;
+        }
+
+        return subscriptionInfo?.Clone() ?? new SubscriptionInfoProto();
+    }
 
     public async Task<SubscriptionInfoDto> GetAndSetSubscriptionAsync(bool ultimate = false)
     {
         await IsSubscribedAsync(ultimate);
         return await GetSubscriptionAsync(ultimate);
+    }
+    
+    // RPC-compatible Protobuf method
+    public async Task<SubscriptionInfoProto> GetAndSetSubscriptionProtoAsync(bool ultimate = false)
+    {
+        await IsSubscribedAsync(ultimate);
+        return await GetSubscriptionProtoAsync(ultimate);
     }
 
     public async Task UpdateSubscriptionAsync(SubscriptionInfoDto subscriptionInfoDto, bool ultimate = false)
@@ -254,9 +284,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         }
     }
 
-    public async Task<ExecuteActionResultDto> ExecuteActionAsync(string sessionId, string chatManagerGuid, ActionType actionType = ActionType.Conversation)
+    public async Task<ExecuteActionResultProto> ExecuteActionAsync(string sessionId, string chatManagerGuid, ActionType actionType = ActionType.Conversation)
     {
-        var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+        var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
         Logger.LogDebug($"[ExecuteActionAsync] Language from sessionId:{sessionId} chatManagerGuid: {chatManagerGuid}, language:{language}");
         
         if (actionType == ActionType.ImageConversation)
@@ -287,7 +317,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 var localizedMessage = LocalizationService != null
                     ? LocalizationService.GetLocalizedException(ExceptionMessageKeys.DailyUpdateLimit, language)
                     : "Daily update limit exceeded";
-                return new ExecuteActionResultDto
+                return new ExecuteActionResultProto
                 {
                     Code = ExecuteActionStatus.RateLimitExceeded,
                     Message = localizedMessage
@@ -301,7 +331,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         return await ExecuteStandardActionAsync(sessionId, chatManagerGuid, actionType);
     }
 
-    public async Task<ExecuteActionResultDto> ExecuteVoiceActionAsync(string sessionId, string chatManagerGuid)
+    public async Task<ExecuteActionResultProto> ExecuteVoiceActionAsync(string sessionId, string chatManagerGuid)
     {
         return await ExecuteStandardActionAsync(sessionId, chatManagerGuid, ActionType.VoiceConversation);
     }
@@ -324,7 +354,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
         if ((dailyInfo?.Count ?? 0) >= 1)
         {
-            var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+            var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
             var localizedMessage = LocalizationService != null
                 ? LocalizationService.GetLocalizedException(ExceptionMessageKeys.DailyUpdateLimit, language)
                 : "Daily upload limit exceeded";
@@ -339,7 +369,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         return new CanUploadImageResponseProto { Success = true, CanUpload = true };
     }
 
-    private async Task<ExecuteActionResultDto> ExecuteStandardActionAsync(string sessionId, string chatManagerGuid, ActionType actionTypeEnum)
+    private async Task<ExecuteActionResultProto> ExecuteStandardActionAsync(string sessionId, string chatManagerGuid, ActionType actionTypeEnum)
     {
         var now = DateTime.UtcNow;
         var isVoiceMessage = actionTypeEnum == ActionType.VoiceConversation;
@@ -347,7 +377,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
         if (await IsSubscribedAsync(true))
         {
-            return new ExecuteActionResultDto { Success = true };
+            return new ExecuteActionResultProto { Success = true };
         }
 
         var isSubscribed = await IsSubscribedAsync(false);
@@ -390,7 +420,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
             if (!isAllowed)
             {
-                return new ExecuteActionResultDto
+                return new ExecuteActionResultProto
                 {
                     Code = ExecuteActionStatus.InsufficientCredits,
                     Message = "You've run out of credits."
@@ -402,7 +432,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         
         try
         {
-            var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+            var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
             var localizedMessage = LocalizationService != null
                 ? LocalizationService.GetLocalizedException(ExceptionMessageKeys.ChatRateLimit, language)
                 : "Chat rate limit exceeded";
@@ -413,7 +443,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             var oldValue = State.RateLimits[actionType].Count;
             if (oldValue <= 0)
             {
-                return new ExecuteActionResultDto
+                return new ExecuteActionResultProto
                 {
                     Code = ExecuteActionStatus.RateLimitExceeded,
                     Message = isVoiceMessage ? voiceLocalizedMessage : localizedMessage
@@ -451,7 +481,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         };
         RaiseEvent(new UpdateRateLimitEvent { ActionType = actionType, RateLimitInfo = newRateLimitInfo });
 
-        return new ExecuteActionResultDto { Success = true };
+        return new ExecuteActionResultProto { Success = true };
     }
 
     private Task ReportCreditsExhaustedAsync()
@@ -769,7 +799,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         {
             FreeTrialCode = State.FreeTrialInfo.FreeTrialCode,
             TrialDays = State.FreeTrialInfo.TrialDays,
-            PlanType = (PlanType)(int)State.FreeTrialInfo.PlanType,
+            PlanType = State.FreeTrialInfo.PlanType,  // Already QuotaPlanType
             IsUltimate = State.FreeTrialInfo.IsUltimate,
             TransactionId = State.FreeTrialInfo.TransactionId
         });

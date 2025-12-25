@@ -1,8 +1,7 @@
 using System.Diagnostics;
-using System.Text;
 using Aevatar.Agents.AI;
 using Aevatar.Agents.AI.Abstractions;
-using Aevatar.Agents.AI.WithTool;
+using Aevatar.Agents.AI.Core;
 using Aevatar.Agents.AI.WithTool.Abstractions;
 using Aevatar.Agents.AI.WithTool.MCP;
 using Aevatar.Agents.AI.WithTool.MCP.Configuration;
@@ -14,16 +13,21 @@ namespace MCPToolDemo;
 /// <summary>
 /// An agent that demonstrates MCP tool integration.
 /// </summary>
-public class MCPAgent : AIGAgentWithToolBase<AevatarAIAgentState>
+public class MCPAgent : AIGAgentBase
 {
     private readonly IConfiguration _configuration;
 
     public MCPAgent(IConfiguration configuration) : base()
     {
         _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+
+        // Base prompt; AIGAgentBase will append the available tool list automatically.
+        SystemPrompt =
+            "You are a helpful AI assistant.\n" +
+            "When interacting with MCP servers (filesystem, Context7, etc.), prefer invoking the relevant tool before responding.";
     }
 
-    protected override async Task RegisterToolsAsync()
+    protected override async Task RegisterToolsAsync(CancellationToken cancellationToken = default)
     {
         Logger?.LogInformation("🔧 Starting tool registration...");
 
@@ -33,7 +37,7 @@ public class MCPAgent : AIGAgentWithToolBase<AevatarAIAgentState>
         var context7ApiKey = context7Config["ApiKey"];
 
         // 0. Register local tool
-        await RegisterToolAsync(new TimeTool(), Logger);
+        await RegisterToolAsync(new TimeTool(), Logger, cancellationToken);
         Logger?.LogInformation("✅ Registered local tool: TimeTool");
 
         // 1. Stdio (Docker) - Filesystem Server
@@ -164,13 +168,5 @@ public class MCPAgent : AIGAgentWithToolBase<AevatarAIAgentState>
 
         var tools = await GetRegisteredToolsAsync();
         Logger?.LogInformation("🎉 Tool registration complete! Total tools: {Count}", tools.Count);
-    }
-
-    protected override string BuildToolAwareSystemPrompt(IReadOnlyList<ToolDefinition> tools)
-    {
-        var builder = new StringBuilder(base.BuildToolAwareSystemPrompt(tools));
-        builder.AppendLine();
-        builder.AppendLine("When interacting with MCP servers (filesystem, Context7, etc.), prefer invoking the relevant tool before responding to the user.");
-        return builder.ToString();
     }
 }

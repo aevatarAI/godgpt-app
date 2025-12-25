@@ -1,0 +1,317 @@
+# ============================================================
+#  AXIOM THEOREM LOOP
+#
+#  Pipeline:
+#   1) Coordinator proposes a new theorem (single LLM call)
+#   2) All workers attempt to prove / refute it (fan_out + llm_call on workers)
+#   3) Coordinator judges proof with consensus (vote)
+#   4) If proved: add theorem to state, recurse to propose next theorem
+# ============================================================
+
+name: axiom_theorem_loop
+version: "1.0"
+description: "Coordinator proposes theorems, workers prove, consensus judge, then iterate new theorems."
+
+inputs:
+  - name: task
+    type: string
+    required: true
+    description: "Raw task text. Must include AXIOMS lines; optional focus."
+
+  - name: context
+    type: object
+    required: false
+    description: "Optional extra context."
+
+  - name: state
+    type: object
+    required: false
+    description: "Internal loop state (recursive)."
+
+  - name: k
+    type: int
+    default: 3
+    description: "Consensus threshold K (vote). Worker count N is expected to be 2K-1."
+
+  - name: max_rounds
+    type: int
+    default: 10
+    description: "Max rounds for vote steps."
+
+  - name: similarity
+    type: float
+    default: 0.85
+    description: "Semantic clustering threshold (if embeddings enabled)."
+
+  - name: max_depth
+    type: int
+    default: 10
+    description: "Max theorem iterations (also recursion depth cap)."
+
+  - name: continue_on_failure
+    type: bool
+    default: false
+    description: "If true, continue proposing new candidates even when judgement.proved=false (long-run exploration)."
+
+  - name: language
+    type: string
+    default: "English"
+    description: "Natural language for statements/proofs/reasons (JSON keys remain unchanged)."
+
+steps:
+  # --------------------------------------------------------
+  # Step 0: init state (parse axioms from raw task)
+  # --------------------------------------------------------
+  - id: ensure_state
+    type: conditional
+    condition: "{{ state != null }}"
+    if_false:
+      - id: init_state
+        type: llm_call
+        prompt: |
+          You are a formal theorem discovery coordinator.
+          Initialize a loop state from raw_task.
+
+          CRITICAL:
+          - Extract axioms from raw_task. Each axiom is a line that starts with something like "O1:" or "A1:".
+          - Do NOT invent axioms.
+          - If raw_task contains a "Focus:" section, extract it; else focus="".
+          - Return ONLY JSON (no markdown).
+
+          raw_task:
+          {{ task }}
+          {% if context %}
+          context:
+          {{ context | json }}
+          {% endif %}
+
+          Output JSON schema:
+          {
+            "axioms": [string],
+            "focus": string,
+            "theorems": [
+              {
+                "id": string,
+                "statement": string,
+                "proof": string,
+                "depends_on": [string]
+              }
+            ],
+            "iteration": int,
+            "max_iterations": int,
+            "last_candidate": { "statement": string, "motivation": string } | null,
+            "last_judgement": { "proved": bool, "reason": string } | null,
+            "done": bool,
+            "status": "running" | "completed" | "failed" | "limit",
+            "summary": string
+          }
+
+          Language: {{language}}
+        output: json
+        store: state
+
+  # --------------------------------------------------------
+  # Step 1: coordinator proposes a new theorem candidate
+  # --------------------------------------------------------
+  - id: propose_theorem
+    type: llm_call
+    prompt: |
+      You are the coordinator. Propose ONE new theorem that is plausibly derivable
+      from the axioms and already proved theorems.
+
+      Constraints:
+      - Return ONLY JSON.
+      - The theorem MUST be stated precisely and be checkable.
+      - It must be NON-TRIVIAL and NEW (not identical to any existing theorem).
+      - Prefer theorems that can be proved in <= 10 short steps.
+
+      Axioms:
+      {{ state.axioms | json }}
+
+      Already proved theorems (statements only):
+      {{ state.theorems | json }}
+
+      Focus (optional):
+      {{ state.focus }}
+
+      Output JSON schema:
+      {
+        "statement": string,
+        "motivation": string,
+        "depends_on": [string],
+        "difficulty": "easy" | "medium" | "hard"
+      }
+
+      Language: {{language}}
+    output: json
+    store: candidate
+
+  # --------------------------------------------------------
+  # Step 2: build prover assignments (N = 2K - 1)
+  # --------------------------------------------------------
+  - id: build_provers
+    type: llm_call
+    prompt: |
+      Create prover assignments for N independent workers where N = 2*K - 1.
+      Use distinct proof styles / angles.
+
+      Return ONLY JSON array.
+      K={{k}}
+      N={{ (k * 2) - 1 }}
+
+      Output JSON schema (array):
+      [
+        { "id": "worker-0", "role": "string", "angle": "string" },
+        ...
+      ]
+
+      Language: {{language}}
+    output: json_array
+    store: provers
+
+  # --------------------------------------------------------
+  # Step 3: all workers attempt proof / refutation in parallel
+  # --------------------------------------------------------
+  - id: prove_with_workers
+    type: fan_out
+    for_each: provers
+    reduce: collect
+    step:
+      type: llm_call
+      prompt: |
+        You are {{item.role}} ({{item.id}}).
+        Your angle: {{item.angle}}
+
+        Task:
+        Prove the theorem candidate OR find a counterexample / missing assumption.
+
+        Rules:
+        - Use ONLY the axioms and already proved theorems below.
+        - If you need extra assumptions, explicitly label them as EXTRA ASSUMPTIONS and treat them as not allowed.
+        - Keep the proof in short, numbered steps. Each step must cite dependencies (axioms/theorems).
+        - If you refute, provide the smallest gap.
+        - Output in plain text (no JSON).
+
+        Axioms:
+        {{ state.axioms | json }}
+
+        Theorems:
+        {{ state.theorems | json }}
+
+        Candidate theorem:
+        {{ candidate | json }}
+
+        Output language: {{language}}
+      output: text
+    store: worker_proofs
+
+  # --------------------------------------------------------
+  # Step 4: coordinator judges proof with consensus (vote)
+  # --------------------------------------------------------
+  - id: judge_proof
+    type: vote
+    k: "{{k}}"
+    max_rounds: "{{max_rounds}}"
+    similarity: "{{similarity}}"
+    generator:
+      type: llm_call
+      prompt: |
+        You are the proof judge.
+        Decide if the candidate theorem is PROVED from the given axioms + proved theorems,
+        based on the worker submissions.
+
+        Requirements:
+        - Return ONLY JSON.
+        - proved=true only if the proof is complete with no missing assumptions.
+        - If proved=false, explain the minimal gap.
+        - Provide final_proof as a single coherent proof if proved=true (merge best worker parts).
+
+        Axioms:
+        {{ state.axioms | json }}
+        Theorems:
+        {{ state.theorems | json }}
+        Candidate:
+        {{ candidate | json }}
+        Worker proofs:
+        {{ worker_proofs | json }}
+
+        Output JSON schema:
+        {
+          "proved": bool,
+          "reason": string,
+          "final_proof": string,
+          "depends_on": [string]
+        }
+
+        Language: {{language}}
+      output: json
+    store: judgement
+
+  # --------------------------------------------------------
+  # Step 5: update state
+  # --------------------------------------------------------
+  - id: update_state
+    type: llm_call
+    prompt: |
+      Update the loop state.
+
+      Rules:
+      - Return ONLY JSON.
+      - If judgement.proved=true:
+        - append a new theorem to state.theorems with a new id "T{iteration+1}"
+        - set iteration := iteration + 1
+      - If proved=false:
+        - keep iteration unchanged
+      - done/status logic:
+        - if iteration >= max_depth: done=true, status="limit"
+        - else if proved=false and continue_on_failure != true: done=true, status="failed"
+        - else done=false, status="running"
+      - Always record last_candidate and last_judgement.
+
+      Inputs:
+      max_depth={{max_depth}}
+      continue_on_failure={{continue_on_failure}}
+      language={{language}}
+      state={{ state | json }}
+      candidate={{ candidate | json }}
+      judgement={{ judgement | json }}
+
+      Output schema: same as init_state.
+    output: json
+    store: state
+
+  # --------------------------------------------------------
+  # Step 6: continue loop if proved and not at limit
+  # --------------------------------------------------------
+  - id: stop_or_continue
+    type: conditional
+    condition: "{{ state.done == true || state.iteration >= max_depth }}"
+    if_false:
+      - id: recurse
+        type: workflow_call
+        workflow: axiom_theorem_loop
+        params:
+          task: "{{task}}"
+          context: "{{context}}"
+          state: "{{state}}"
+          k: "{{k}}"
+          max_rounds: "{{max_rounds}}"
+          similarity: "{{similarity}}"
+          max_depth: "{{max_depth}}"
+          continue_on_failure: "{{continue_on_failure}}"
+          language: "{{language}}"
+        store: recursive_output
+      - id: unwrap_state
+        type: assign
+        from: "recursive_output.state"
+        store: state
+
+output:
+  status: "{{state.status}}"
+  iteration: "{{state.iteration}}"
+  state: "{{state}}"
+  theorems: "{{state.theorems}}"
+  last_candidate: "{{state.last_candidate}}"
+  last_judgement: "{{state.last_judgement}}"
+
+

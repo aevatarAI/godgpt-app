@@ -12,7 +12,7 @@ namespace Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent;
 /// New Framework: Inherits from GAgentBase, NOT Grain
 /// Uses Protobuf State + Event Sourcing pattern
 /// </summary>
-public class ConfigurationGAgent : GAgentBase<ConfigurationState>
+public class ConfigurationGAgent : GAgentBase<ConfigurationState>, IConfigurationGAgent
 {
     private const string DefaultSystemLLM = "OpenAI";
     private const string DefaultUserProfilePrompt = @"
@@ -111,13 +111,13 @@ public class ConfigurationGAgent : GAgentBase<ConfigurationState>
         return Task.FromResult($"Configuration GAgent - LLM: {State.SystemLlm}, Streaming: {State.StreamingModeEnabled}");
     }
 
-    public string GetSystemLLM() => State.SystemLlm ?? DefaultSystemLLM;
+    public Task<string> GetSystemLLMAsync() => Task.FromResult(State.SystemLlm ?? DefaultSystemLLM);
 
-    public bool GetStreamingModeEnabled() => State.StreamingModeEnabled;
+    public Task<bool> GetStreamingModeEnabledAsync() => Task.FromResult(State.StreamingModeEnabled);
 
-    public string GetPrompt() => State.Prompt ?? string.Empty;
+    public Task<string> GetPromptAsync() => Task.FromResult(State.Prompt ?? string.Empty);
 
-    public string GetUserProfilePrompt() => State.UserProfilePrompt ?? DefaultUserProfilePrompt;
+    public Task<string> GetUserProfilePromptAsync() => Task.FromResult(State.UserProfilePrompt ?? DefaultUserProfilePrompt);
 
     public async Task UpdateSystemPromptAsync(string systemPrompt)
     {

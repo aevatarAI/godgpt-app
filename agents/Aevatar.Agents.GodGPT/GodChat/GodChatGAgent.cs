@@ -2,14 +2,13 @@ using System.Diagnostics;
 using System.Text;
 using Aevatar.Agents.GodGPT.Protos;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
+using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
 using Aevatar.AI.Exceptions;
 using Aevatar.AI.Feature.StreamSyncWoker;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
-using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.Dtos;
-using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.GEvents;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Options;
@@ -42,6 +41,7 @@ namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 
 [Description("god chat agent")]
 [GAgent(nameof(GodChatGAgent))]
+[Reentrant]
 public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatStateProto, GodChatConfig>, IGodChat
 {
     #region Constants
@@ -64,10 +64,9 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
     private readonly IOptionsMonitor<LLMRegionOptions> _llmRegionOptions;
     private readonly ILocalizationService _localizationService;
     private readonly IGAgentActorFactory _actorFactory;
-    private readonly IClusterClient _clusterClient;
     
-    // Cached ConfigurationGAgent instance (new framework)
-    private ConfigurationGAgent? _configurationAgent;
+    // Cached ConfigurationGAgent interface (new framework)
+    private IConfigurationGAgent? _configurationAgentInterface;
     
     // Dictionary to maintain text accumulator for voice chat sessions
     // Key: chatId, Value: accumulated text buffer for sentence detection
@@ -80,20 +79,27 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
     
     #endregion
 
+    #region Injected Properties (for Orleans Grain mode)
+    
+    /// <summary>
+    /// ServiceProvider injected by Orleans Grain for Stream access
+    /// </summary>
+    public IServiceProvider? ServiceProvider { get; set; }
+    
+    #endregion
+
     #region Constructor
     
     public GodChatGAgent(
         ISpeechService speechService, 
         IOptionsMonitor<LLMRegionOptions> llmRegionOptions, 
         ILocalizationService localizationService, 
-        IGAgentActorFactory actorFactory,
-        IClusterClient clusterClient)
+        IGAgentActorFactory actorFactory)
     {
         _speechService = speechService;
         _llmRegionOptions = llmRegionOptions;
         _localizationService = localizationService;
         _actorFactory = actorFactory;
-        _clusterClient = clusterClient;
     }
     
     #endregion
@@ -114,7 +120,7 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
             Logger.LogDebug($"[GodChatGAgent][ConfigAsync] LLMConfigs is null or empty.");
             return;
         }
-        var isCN = GodGPTLanguageHelper.CheckClientIsCNFromContext();
+        var isCN = GodGPTLanguageHelper.CheckClientIsCN(Context);
         var defaultRegion = DefaultRegion;
         if (isCN)
         {
@@ -159,14 +165,17 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
 
     public async Task InitAsync(Guid ChatManagerGuid)
     {
-        Logger.LogDebug($"[GodChatGAgent][InitAsync] Start - SessionId: {Id}, ChatManagerGuid: {ChatManagerGuid}");
+        Logger.LogInformation($"[GodChatGAgent][InitAsync] Start - SessionId: {Id}, ChatManagerGuid: {ChatManagerGuid}");
         
         RaiseEvent(new SetChatManagerGuidEvent
         {
             ChatManagerGuid = ChatManagerGuid.ToString()
         });
+        
+        // CRITICAL: Confirm events to persist the ChatManagerGuid before returning
+        await ConfirmEventsAsync();
 
-        Logger.LogDebug($"[GodChatGAgent][InitAsync] End -  SessionId: {Id}");
+        Logger.LogInformation($"[GodChatGAgent][InitAsync] End - SessionId: {Id}, State.ChatManagerGuid: {State.ChatManagerGuid}");
     }
     
     #endregion
@@ -211,11 +220,11 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
 
     #region Message Retrieval
     
-    public Task<List<ChatMessage>> GetChatMessageAsync()
+    public Task<ChatMessageListProto> GetChatMessageAsync()
     {
         Logger.LogDebug(
             $"[ChatGAgentManager][GetSessionMessageListAsync] - session:ID {Id.ToString()} ,message={JsonConvert.SerializeObject(State.ChatHistory)}");
-        return Task.FromResult(State.ChatHistory.FromProtoList());
+        return Task.FromResult(State.ChatHistory.ToChatMessageListProto());
     }
 
     public Task<List<ChatMessageWithMetaDto>> GetChatMessageWithMetaAsync()
@@ -248,6 +257,165 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
     public Task<DateTime?> GetLastChatTimeAsync()
     {
         return Task.FromResult(State.LastChatTime?.ToDateTime());
+    }
+    
+    #endregion
+    
+    #region Helper Methods
+    
+    /// <summary>
+    /// Build PromptWithStreamInputProto for RPC call to AIAgentStatusProxy
+    /// </summary>
+    private PromptWithStreamInputProto BuildPromptWithStreamInputProto(
+        string prompt,
+        List<ChatMessage>? history,
+        ExecutionPromptSettings? promptSettings,
+        AIChatContextDto? context,
+        List<string>? imageKeys)
+    {
+        var input = new PromptWithStreamInputProto { Prompt = prompt };
+        
+        // Convert history
+        if (history != null)
+        {
+            foreach (var msg in history)
+            {
+                input.History.Add(new Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos.ChatMessageProto
+                {
+                    Role = msg.Role ?? "",
+                    Content = msg.Content ?? "",
+                    TimestampTicks = msg.Timestamp.Ticks,
+                    ChatRole = (int)msg.ChatRole
+                });
+            }
+        }
+        
+        // Convert prompt settings
+        if (promptSettings != null)
+        {
+            input.PromptSettings = new Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos.ExecutionPromptSettingsProto();
+            if (promptSettings.Temperature != null) input.PromptSettings.Temperature = promptSettings.Temperature;
+            if (promptSettings.MaxTokens != null) input.PromptSettings.MaxTokens = promptSettings.MaxTokens;
+            if (promptSettings.TopP != null) input.PromptSettings.TopP = promptSettings.TopP;
+            if (promptSettings.FrequencyPenalty != null) input.PromptSettings.FrequencyPenalty = promptSettings.FrequencyPenalty;
+            if (promptSettings.PresencePenalty != null) input.PromptSettings.PresencePenalty = promptSettings.PresencePenalty;
+            if (promptSettings.StopSequences != null) input.PromptSettings.StopSequences.AddRange(promptSettings.StopSequences);
+            if (promptSettings.Model != null) input.PromptSettings.Model = promptSettings.Model;
+        }
+        
+        // Convert context
+        if (context != null)
+        {
+            input.Context = new AIChatContextProto
+            {
+                RequestId = context.RequestId.ToString()
+            };
+            if (context.AgentId != null) input.Context.AgentId = context.AgentId;
+            if (context.SessionId != null) input.Context.SessionId = context.SessionId;
+            if (context.UserId != null) input.Context.UserId = context.UserId;
+            if (context.SystemPrompt != null) input.Context.SystemPrompt = context.SystemPrompt;
+            if (context.ChatId != null) input.Context.ChatId = context.ChatId;
+            if (context.MessageId != null) input.Context.MessageId = context.MessageId;
+            if (context.Metadata != null)
+            {
+                foreach (var kvp in context.Metadata)
+                {
+                    input.Context.Metadata[kvp.Key] = kvp.Value;
+                }
+            }
+        }
+        
+        // Add image keys
+        if (imageKeys != null)
+        {
+            input.ImageKeys.AddRange(imageKeys);
+        }
+        
+        return input;
+    }
+    
+    /// <summary>
+    /// Build ChatWithHistoryInputProto for RPC call to AIAgentStatusProxy
+    /// </summary>
+    private ChatWithHistoryInputProto BuildChatWithHistoryInputProto(
+        string prompt,
+        List<ChatMessage>? history,
+        ExecutionPromptSettings? promptSettings,
+        AIChatContextDto? context)
+    {
+        var input = new ChatWithHistoryInputProto { Prompt = prompt };
+        
+        // Convert history
+        if (history != null)
+        {
+            foreach (var msg in history)
+            {
+                input.History.Add(new Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos.ChatMessageProto
+                {
+                    Role = msg.Role ?? "",
+                    Content = msg.Content ?? "",
+                    TimestampTicks = msg.Timestamp.Ticks,
+                    ChatRole = (int)msg.ChatRole
+                });
+            }
+        }
+        
+        // Convert prompt settings
+        if (promptSettings != null)
+        {
+            input.PromptSettings = new Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos.ExecutionPromptSettingsProto();
+            if (promptSettings.Temperature != null) input.PromptSettings.Temperature = promptSettings.Temperature;
+            if (promptSettings.MaxTokens != null) input.PromptSettings.MaxTokens = promptSettings.MaxTokens;
+            if (promptSettings.TopP != null) input.PromptSettings.TopP = promptSettings.TopP;
+            if (promptSettings.FrequencyPenalty != null) input.PromptSettings.FrequencyPenalty = promptSettings.FrequencyPenalty;
+            if (promptSettings.PresencePenalty != null) input.PromptSettings.PresencePenalty = promptSettings.PresencePenalty;
+            if (promptSettings.StopSequences != null) input.PromptSettings.StopSequences.AddRange(promptSettings.StopSequences);
+            if (promptSettings.Model != null) input.PromptSettings.Model = promptSettings.Model;
+        }
+        
+        // Convert context
+        if (context != null)
+        {
+            input.Context = new AIChatContextProto
+            {
+                RequestId = context.RequestId.ToString()
+            };
+            if (context.AgentId != null) input.Context.AgentId = context.AgentId;
+            if (context.SessionId != null) input.Context.SessionId = context.SessionId;
+            if (context.UserId != null) input.Context.UserId = context.UserId;
+            if (context.SystemPrompt != null) input.Context.SystemPrompt = context.SystemPrompt;
+            if (context.ChatId != null) input.Context.ChatId = context.ChatId;
+            if (context.MessageId != null) input.Context.MessageId = context.MessageId;
+            if (context.Metadata != null)
+            {
+                foreach (var kvp in context.Metadata)
+                {
+                    input.Context.Metadata[kvp.Key] = kvp.Value;
+                }
+            }
+        }
+        
+        return input;
+    }
+    
+    /// <summary>
+    /// Convert ChatWithHistoryResultProto to ChatMessageListProto
+    /// </summary>
+    private ChatMessageListProto ConvertToChatMessageListProto(ChatWithHistoryResultProto? result)
+    {
+        var listProto = new ChatMessageListProto();
+        if (result?.Messages != null)
+        {
+            foreach (var msg in result.Messages)
+            {
+                listProto.Messages.Add(new Aevatar.Agents.GodGPT.Protos.GodChat.ChatMessageProto
+                {
+                    ChatRole = msg.ChatRole,  // Both are int32
+                    Content = msg.Content ?? ""
+                });
+            }
+        }
+        return listProto;
     }
     
     #endregion

@@ -41,20 +41,23 @@ Aevatar.Agents.Cognitive/
 ├── README.md
 │
 ├── Agents/
-│   ├── CognitiveCoordinatorGAgent.cs # 工作流协调器 ⭐
-│   └── CognitiveWorkerGAgent.cs      # LLM 执行器 ⭐
+│   ├── CognitiveCoordinatorGAgent.cs                     # Coordinator: state + step dispatcher ⭐
+│   ├── CognitiveCoordinatorGAgent.Workflow.cs            # workflow start/fail/output build
+│   ├── CognitiveCoordinatorGAgent.Parallel.cs            # fan_out/parallel + worker completion
+│   ├── CognitiveCoordinatorGAgent.Llm.cs                 # Coordinator-side LLM (streaming + guardrails)
+│   ├── CognitiveCoordinatorGAgent.Vote.cs                # vote consensus (semantic clustering + red-flag)
+│   ├── CognitiveCoordinatorGAgent.StepEvents.cs          # step events for UI/observability
+│   ├── CognitiveCoordinatorGAgent.Parameters.cs          # output parsing + parameter helpers + red-flag config
+│   └── CognitiveWorkerGAgent.cs                          # Worker: execute llm_call and report results ⭐
 │
 ├── Template/
 │   ├── TemplateEngine.cs             # 模板渲染 (Scriban)
 │   └── OutputParser.cs               # 输出解析器
 │
 ├── Primitives/
-│   ├── IPrimitive.cs                 # 原语接口 + 上下文
-│   ├── LlmCallPrimitive.cs           # LLM 调用原语
-│   ├── ConditionalPrimitive.cs       # 条件分支原语
-│   ├── VotePrimitive.cs              # 投票共识原语
-│   ├── WorkflowCallPrimitive.cs      # 递归调用原语
-│   └── CheckpointPrimitive.cs        # 检查点原语
+│   ├── IPrimitive.cs                 # 原语上下文 + PrimitiveResult + 参数扩展
+│   ├── WorkflowDefinition.cs         # WorkflowDefinition/StepDefinition/InputParameter + IWorkflowRegistry
+│   └── WorkflowResult.cs             # 执行结果 + InMemoryWorkflowRegistry
 │
 ├── Engine/
 │   └── WorkflowParser.cs             # YAML 解析器

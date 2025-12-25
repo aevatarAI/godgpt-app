@@ -81,10 +81,12 @@ main() {
     fi
     log_info "MongoDB is running ✓"
     
-    # Build all projects first
-    log_info "Building projects..."
+    # Build service projects only (exclude tests)
+    log_info "Building service projects..."
     cd "$PROJECT_ROOT"
-    dotnet build apps/Aevatar.App/Aevatar.App.sln --configuration Debug
+    dotnet build apps/Aevatar.App/src/Aevatar.Silo/Aevatar.Silo.csproj --configuration Debug
+    dotnet build apps/Aevatar.App/src/Aevatar.AuthServer/Aevatar.AuthServer.csproj --configuration Debug
+    dotnet build apps/Aevatar.App/src/Aevatar.App.HttpApi.Host/Aevatar.App.HttpApi.Host.csproj --configuration Debug
     
     # 1. Start Silo first (Orleans)
     start_service "silo" "$APP_DIR" "11111" "Aevatar.Silo/Aevatar.Silo.csproj"

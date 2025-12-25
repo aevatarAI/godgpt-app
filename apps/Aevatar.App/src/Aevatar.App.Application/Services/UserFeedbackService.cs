@@ -4,9 +4,11 @@ using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.GodGPT.Protos.UserFeedback;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.UserFeedback;
 using Aevatar.Application.Grains.UserFeedback.Dtos;
+using Aevatar.Application.Grains.Common.Helpers;
 using Aevatar.App.Application.Contracts.Services;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
@@ -32,7 +34,7 @@ public class UserFeedbackService : IUserFeedbackService
 
     private async Task<IUserFeedbackGAgent> GetAgentAsync(Guid userId)
     {
-        var actor = await _actorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId.ToString());
         return actor.As<IUserFeedbackGAgent>();
     }
 
@@ -146,7 +148,7 @@ public class UserFeedbackService : IUserFeedbackService
             {
                 item.Subscription = new UserSubscription
                 {
-                    PlanType = (Aevatar.Application.Grains.Common.Constants.PlanType)protoItem.Subscription.PlanType,
+                    PlanType = (QuotaPlanType)protoItem.Subscription.PlanType,
                     IsUltimate = protoItem.Subscription.IsUltimate,
                     StartDate = protoItem.Subscription.StartDate.ToDateTime(),
                     EndDate = protoItem.Subscription.EndDate.ToDateTime()

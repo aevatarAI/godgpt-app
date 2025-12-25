@@ -3,10 +3,13 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using Aevatar.Agents.Abstractions.Context;
+using Aevatar.Agents.Core.Context;
 using Aevatar.App.Application.Common;
 using Aevatar.App.Application.Services;
 using Aevatar.App.Application.Contracts.Services.Session;
 using Aevatar.Application.Grains.Agents.ChatManager;
+using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.App.HttpApi.Extensions;
@@ -16,7 +19,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Orleans;
-using Orleans.Runtime;
 using Volo.Abp;
 
 namespace Aevatar.Controllers;
@@ -35,6 +37,7 @@ public class GodGPTSessionController : AevatarController
     private readonly IClusterClient _clusterClient;
     private readonly ILogger<GodGPTSessionController> _logger;
     private readonly IIpLocationService _ipLocationService;
+    private readonly IAgentContextAccessor _agentContextAccessor;
     private readonly string _defaultLLM = "OpenAI";
     private readonly string _defaultPrompt = "you are a robot";
 
@@ -42,12 +45,14 @@ public class GodGPTSessionController : AevatarController
         IGodGPTSessionService sessionService,
         IClusterClient clusterClient,
         ILogger<GodGPTSessionController> logger,
-        IIpLocationService ipLocationService)
+        IIpLocationService ipLocationService,
+        IAgentContextAccessor agentContextAccessor)
     {
         _sessionService = sessionService;
         _clusterClient = clusterClient;
         _logger = logger;
         _ipLocationService = ipLocationService;
+        _agentContextAccessor = agentContextAccessor;
     }
 
     /// <summary>
@@ -60,7 +65,8 @@ public class GodGPTSessionController : AevatarController
         var clientIp = HttpContext.GetClientIpAddress();
         var appType = HttpContext.GetGodGPTAppType();
         var isCN = await _ipLocationService.IsInMainlandChinaAsync(clientIp, appType.ToString());
-        RequestContext.Set("IsCN", isCN);
+        var agentContext = _agentContextAccessor.GetOrCreate();
+        agentContext.Set(AgentContextKeys.IsCN, isCN);
         var sessionId = await _sessionService.CreateSessionAsync((Guid)CurrentUser.Id!, _defaultLLM, _defaultPrompt, request.Guider, request.UserLocalTime);
         _logger.LogDebug("[GodGPTSessionController][CreateSessionAsync] sessionId: {0}, duration: {1}ms",
             sessionId.ToString(), stopwatch.ElapsedMilliseconds);
@@ -78,7 +84,8 @@ public class GodGPTSessionController : AevatarController
         var clientIp = HttpContext.GetClientIpAddress();
         var appType = HttpContext.GetGodGPTAppType();
         var isCN = await _ipLocationService.IsInMainlandChinaAsync(clientIp, appType.ToString());
-        RequestContext.Set("IsCN", isCN);
+        var agentContext2 = _agentContextAccessor.GetOrCreate();
+        agentContext2.Set(AgentContextKeys.IsCN, isCN);
         var sessionId = await _sessionService.CreateSessionAsync((Guid)CurrentUser.Id!, _defaultLLM, _defaultPrompt, "");
         _logger.LogDebug("[GodGPTSessionController][CreateSessionAsync] sessionId: {0}, duration: {1}ms",
             sessionId.ToString(), stopwatch.ElapsedMilliseconds);
@@ -191,8 +198,15 @@ public class GodGPTSessionController : AevatarController
             var language = HttpContext.GetGodGPTLanguage();
             _logger.LogDebug(
                 $"[GodGPTSessionController][GetSessionMessageListAsync] sessionId: {sessionId}, language:{language}");
-            RequestContext.Set("GodGPTLanguage", language.ToString());
+            var agentContext = _agentContextAccessor.GetOrCreate();
+            agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
             chatMessages = await manager.GetSessionMessageListWithMetaAsync(sessionId);
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError($"[GodGPTSessionController][GetSessionMessageListAsync] exception sessionId: {sessionId}, , duration: {stopwatch.ElapsedMilliseconds}ms, error:{ex.Message}");
+            // Convert InvalidOperationException to UserFriendlyException for proper HTTP error handling
+            throw new UserFriendlyException(ex.Message);
         }
         catch (Exception ex)
         {

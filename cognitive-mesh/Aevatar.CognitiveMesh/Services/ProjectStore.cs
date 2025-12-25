@@ -411,7 +411,8 @@ public sealed class ProjectStore
                 ProviderName = opts.ProviderName ?? AevatarAgentsConstants.DefaultProviderName,
                 MakerReliability = Enum.TryParse<MakerReliability>(opts.Reliability, true, out var r) ? r : MakerReliability.Medium,
                 MaxLlmCalls = opts.MaxLlmCalls ?? 500,
-                MaxTokens = opts.MaxTokens ?? 2_000_000
+                MaxTokens = opts.MaxTokens ?? 2_000_000,
+                Context = opts.Context
             },
             // C-UoT: 组合式
             StrategyKind.UotCombinational => ReasoningOptions.ForUotCombinational(
@@ -488,6 +489,7 @@ public class YamlProjectOptions
     public string? ProviderName { get; set; }
     public int? MaxLlmCalls { get; set; }
     public long? MaxTokens { get; set; }
+    public Dictionary<string, string>? Context { get; set; }
 
     // DIRECT
     public string? SystemPrompt { get; set; }

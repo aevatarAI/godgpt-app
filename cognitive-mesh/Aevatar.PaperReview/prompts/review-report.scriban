@@ -1,0 +1,25 @@
+{{# ============================================================ #}}
+{{#  PAPER REVIEW REPORT TEMPLATE                                #}}
+{{#  Variables: title, authors, venue_type, review_type,         #}}
+{{#             session_id, success, duration, llm_calls,        #}}
+{{#             total_tokens, content                            #}}
+{{# ============================================================ #}}
+
+# 📝 Paper Review Report
+
+**Title:** {{ title }}  
+**Authors:** {{ authors }}  
+**Venue:** {{ venue_type }}  
+**Review Type:** {{ review_type }}  
+**Session ID:** {{ session_id }}  
+
+---
+
+**Status:** {{ if success }}✓ Completed{{ else }}✗ Failed{{ end }}  
+**Duration:** {{ duration | math.format "F1" }}s  
+**LLM Calls:** {{ llm_calls }}  
+**Total Tokens:** {{ total_tokens | math.format "N0" }}
+
+---
+
+{{ content }}

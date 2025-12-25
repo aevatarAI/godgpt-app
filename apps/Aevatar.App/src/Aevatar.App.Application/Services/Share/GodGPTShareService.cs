@@ -3,15 +3,18 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Context;
+using Aevatar.Agents.Abstractions.Extensions;
+using Aevatar.Agents.Core.Context;
 using Aevatar.App.Application.Common;
 using Aevatar.App.Application.Contracts.Services;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
+using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Constants;
 using Aevatar.GodGPT.Dtos;
 using Microsoft.Extensions.Logging;
 using Orleans;
-using Orleans.Runtime;
 using Volo.Abp;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Auditing;
@@ -35,17 +38,20 @@ public class GodGPTShareService : ApplicationService, IGodGPTShareService
     private readonly IClusterClient _clusterClient;
     private readonly ILogger<GodGPTShareService> _logger;
     private readonly ILocalizationService _localizationService;
+    private readonly IAgentContextAccessor _agentContextAccessor;
 
     public GodGPTShareService(
         IGAgentActorFactory actorFactory,
         IClusterClient clusterClient,
         ILogger<GodGPTShareService> logger,
-        ILocalizationService localizationService)
+        ILocalizationService localizationService,
+        IAgentContextAccessor agentContextAccessor)
     {
         _actorFactory = actorFactory;
         _clusterClient = clusterClient;
         _logger = logger;
         _localizationService = localizationService;
+        _agentContextAccessor = agentContextAccessor;
     }
 
     /// <inheritdoc />
@@ -53,9 +59,10 @@ public class GodGPTShareService : ApplicationService, IGodGPTShareService
     {
         try
         {
-            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId);
-            var manager = (IChatManagerGAgent)managerActor.GetAgent();
-            RequestContext.Set("GodGPTLanguage", language.ToString());
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId.ToString());
+            var manager = managerActor.As<IChatManagerGAgent>();
+            var agentContext = _agentContextAccessor.GetOrCreate();
+            agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
             var shareId = await manager.GenerateChatShareContentAsync(request.SessionId);
             return new CreateShareIdResponse
             {
@@ -93,9 +100,10 @@ public class GodGPTShareService : ApplicationService, IGodGPTShareService
 
         try
         {
-            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-            var manager = (IChatManagerGAgent)managerActor.GetAgent();
-            RequestContext.Set("GodGPTLanguage", language.ToString());
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
+            var manager = managerActor.As<IChatManagerGAgent>();
+            var agentContext = _agentContextAccessor.GetOrCreate();
+            agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
             var shareLinkDto = await manager.GetChatShareContentAsync(sessionId, shareId);
             return shareLinkDto.Messages;
         }
@@ -117,7 +125,9 @@ public class GodGPTShareService : ApplicationService, IGodGPTShareService
             var chatId = Guid.NewGuid().ToString();
             var response = await godChat.ChatWithHistory(sessionId, string.Empty, content,
                 chatId, null, true, region);
-            responseContent = response.IsNullOrEmpty() ? sessionType.GetDefaultContent(language) : response.FirstOrDefault().Content;
+            responseContent = (response == null || response.Messages.Count == 0)
+                ? sessionType.GetDefaultContent(language) 
+                : response.Messages.FirstOrDefault()?.Content ?? sessionType.GetDefaultContent(language);
             _logger.LogDebug(
                 $"[GodGPTShareService][GetShareKeyWordWithAIAsync] completed for sessionId={sessionId}, responseContent:{responseContent}");
         }

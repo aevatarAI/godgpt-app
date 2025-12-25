@@ -2,41 +2,51 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using Aevatar.Agents.Abstractions;
-using Aevatar.Agents.Maker;
+using Aevatar.CognitiveMesh.Abstractions;
+using Aevatar.CognitiveMesh.Services;
+using Aevatar.CognitiveMesh.Strategies;
 using Aevatar.PaperReview.Models;
+using ErrorEvent = Aevatar.PaperReview.Models.ErrorEvent;
+using ResultEvent = Aevatar.PaperReview.Models.ResultEvent;
 
 namespace Aevatar.PaperReview.Services;
 
 // ============================================================
 //  PAPER REVIEW SERVICE
-//  论文评审核心服务 - 基于 MAKER 策略的多专家共识系统
+//  职责：会话管理与评审流程编排
 // ============================================================
 
 /// <summary>
-/// 论文评审服务。
-/// 使用 MAKER 系统进行多专家协同评审，达成共识后输出综合评审意见。
+/// 论文评审服务 - 基于 Cognitive Mesh DSL 的多专家共识系统。
 /// </summary>
 public sealed class PaperReviewService
 {
-    private readonly IMakerExecutor _makerExecutor;
+    private readonly ConcurrentDictionary<string, ReviewSession> _sessions = new();
+    private readonly ProjectStore _projectStore;
+    private readonly CognitiveStrategy _cognitiveStrategy;
+    private readonly PaperUploadService _uploadService;
+    private readonly ReviewPromptProvider _promptProvider;
+    private readonly ReviewEventBridge _eventBridge;
     private readonly SupabaseService _supabase;
     private readonly ILogger<PaperReviewService> _logger;
-    private readonly ConcurrentDictionary<string, ReviewSession> _sessions = new();
-    private readonly string _uploadsBasePath;
     private readonly string _outputBasePath;
 
     public PaperReviewService(
-        IMakerExecutor makerExecutor,
         SupabaseService supabase,
-        ILogger<PaperReviewService> logger)
+        PaperUploadService uploadService,
+        ReviewPromptProvider promptProvider,
+        ReviewEventBridge eventBridge,
+        CognitiveStrategy cognitiveStrategy,
+        ILoggerFactory loggerFactory)
     {
-        _makerExecutor = makerExecutor;
         _supabase = supabase;
-        _logger = logger;
-        _uploadsBasePath = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
+        _uploadService = uploadService;
+        _promptProvider = promptProvider;
+        _eventBridge = eventBridge;
+        _cognitiveStrategy = cognitiveStrategy;
+        _logger = loggerFactory.CreateLogger<PaperReviewService>();
+        _projectStore = new ProjectStore(loggerFactory.CreateLogger<ProjectStore>());
         _outputBasePath = Path.Combine(Directory.GetCurrentDirectory(), "output");
-        Directory.CreateDirectory(_uploadsBasePath);
         Directory.CreateDirectory(_outputBasePath);
     }
 
@@ -72,25 +82,22 @@ public sealed class PaperReviewService
 
             var session = new ReviewSession
             {
-                Title = request.Title ?? "Untitled Paper",
-                Authors = request.Authors ?? "Unknown",
-                Type = Enum.TryParse<ReviewType>(request.ReviewType, true, out var rt) ? rt : ReviewType.DetailedReview,
+                Title = request.Title,
+                Authors = request.Authors,
+                Type = Enum.TryParse<ReviewType>(request.ReviewType, true, out var rt) ? rt : ReviewType.Standard,
                 VenueType = request.VenueType ?? "AI Conference",
                 UploadId = request.UploadId
             };
 
-            if (!string.IsNullOrEmpty(request.PaperContent))
-            {
-                session.PaperContent = request.PaperContent;
-            }
-            else if (!string.IsNullOrEmpty(request.UploadId))
-            {
-                session.PaperContent = await LoadPaperFromUploadAsync(request.UploadId);
-            }
+            // 加载论文内容
+            await LoadPaperContentAsync(session, request);
+
+            // 默认值
+            if (string.IsNullOrWhiteSpace(session.Title)) session.Title = "Untitled";
+            if (string.IsNullOrWhiteSpace(session.Authors)) session.Authors = "Unknown";
 
             _sessions[session.Id] = session;
-
-            _logger.LogInformation("Created review session: {SessionId} - {Title}", session.Id, session.Title);
+            _logger.LogInformation("Created session: {Id} - {Title}", session.Id, session.Title);
 
             return new
             {
@@ -110,50 +117,10 @@ public sealed class PaperReviewService
 
     public async Task<object> UploadPaperAsync(IFormFileCollection files, CancellationToken ct)
     {
-        try
-        {
-            if (files.Count == 0)
-                return new { success = false, error = "No file uploaded" };
-
-            var file = files[0];
-            var uploadId = Guid.NewGuid().ToString("N")[..12];
-            var uploadDir = Path.Combine(_uploadsBasePath, uploadId);
-            Directory.CreateDirectory(uploadDir);
-
-            var fileName = Path.GetFileName(file.FileName);
-            var filePath = Path.Combine(uploadDir, fileName);
-
-            await using var stream = new FileStream(filePath, FileMode.Create);
-            await file.CopyToAsync(stream, ct);
-
-            _logger.LogInformation("Uploaded paper: {FileName} ({Size} bytes)", fileName, file.Length);
-
-            return new
-            {
-                success = true,
-                uploadId,
-                fileName,
-                size = file.Length
-            };
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Failed to upload paper");
-            return new { success = false, error = ex.Message };
-        }
-    }
-
-    private async Task<string> LoadPaperFromUploadAsync(string uploadId)
-    {
-        var uploadDir = Path.Combine(_uploadsBasePath, uploadId);
-        if (!Directory.Exists(uploadDir))
-            return "";
-
-        var files = Directory.GetFiles(uploadDir);
-        if (files.Length == 0)
-            return "";
-
-        return await File.ReadAllTextAsync(files[0]);
+        var result = await _uploadService.UploadAsync(files, ct);
+        return result.Success
+            ? new { success = true, uploadId = result.UploadId, fileName = result.FileName, size = result.Size }
+            : new { success = false, error = result.Error };
     }
 
     // ─────────────────────────────────────────────────────────
@@ -175,7 +142,7 @@ public sealed class PaperReviewService
         session.OutputDir = Path.Combine(_outputBasePath, session.Id);
         Directory.CreateDirectory(session.OutputDir);
 
-        _logger.LogInformation("Starting review for session {SessionId}: {Title}", sessionId, session.Title);
+        _logger.LogInformation("Starting review: {Id} - {Title}", sessionId, session.Title);
 
         _ = ExecuteReviewAsync(session, session.CancellationTokenSource.Token);
 
@@ -196,269 +163,20 @@ public sealed class PaperReviewService
             session.Status = ReviewStatus.Cancelled;
             session.Error = "Stopped by user";
 
-            session.EventChannel.Writer.TryWrite(new Models.ErrorEvent
+            session.EventChannel.Writer.TryWrite(new ErrorEvent
             {
                 SessionId = sessionId,
                 Message = "Review stopped by user"
             });
             session.EventChannel.Writer.TryComplete();
 
-            _logger.LogInformation("Stopped review for session {SessionId}", sessionId);
+            _logger.LogInformation("Stopped review: {Id}", sessionId);
             return new { success = true };
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to stop review {SessionId}", sessionId);
+            _logger.LogError(ex, "Failed to stop review: {Id}", sessionId);
             return new { success = false, error = ex.Message };
-        }
-    }
-
-    private async Task ExecuteReviewAsync(ReviewSession session, CancellationToken ct)
-    {
-        var stopwatch = Stopwatch.StartNew();
-
-        // 保存初始记录到 Supabase
-        await _supabase.SaveReviewAsync(
-            session.Id,
-            session.Title,
-            session.Authors,
-            session.Type.ToString(),
-            session.VenueType,
-            "Reviewing",
-            null, null,
-            0, 0, 0);
-
-        try
-        {
-            var reviewTask = BuildReviewTask(session);
-            var options = BuildMakerOptions(session);
-
-            var result = await _makerExecutor.ExecuteAsync(reviewTask, options, ct);
-
-            stopwatch.Stop();
-            session.Status = result.Success ? ReviewStatus.Completed : ReviewStatus.Failed;
-            session.Duration = stopwatch.Elapsed;
-            session.TotalLlmCalls = result.TotalLLMCalls;
-            session.TotalTokens = result.TotalTokens;
-
-            _logger.LogInformation("[{Session}] Review completed. Success={Success}, Duration={Duration}s",
-                session.Id, result.Success, stopwatch.Elapsed.TotalSeconds);
-
-            string? reportUrl = null;
-            if (!string.IsNullOrEmpty(result.Content))
-            {
-                var report = FormatReviewReport(session, result);
-                SaveFile(session, "reports", "review_report.md", report);
-                
-                // 上传报告到 Supabase Storage
-                reportUrl = await _supabase.UploadReportAsync(session.Id, report);
-            }
-
-            // 更新 Supabase 记录
-            await _supabase.UpdateReviewAsync(
-                session.Id,
-                session.Status.ToString(),
-                result.Content,
-                result.Error,
-                result.TotalLLMCalls,
-                result.TotalTokens,
-                session.Duration.TotalSeconds,
-                reportUrl);
-
-            SendEvent(session, new Models.ResultEvent
-            {
-                SessionId = session.Id,
-                Success = result.Success,
-                Content = result.Content,
-                Error = result.Error,
-                TotalLlmCalls = result.TotalLLMCalls,
-                TotalTokens = result.TotalTokens
-            });
-        }
-        catch (Exception ex)
-        {
-            stopwatch.Stop();
-            session.Status = ReviewStatus.Failed;
-            session.Duration = stopwatch.Elapsed;
-            session.Error = ex.Message;
-
-            _logger.LogError(ex, "[{Session}] Review failed", session.Id);
-
-            // 更新失败状态到 Supabase
-            await _supabase.UpdateReviewAsync(
-                session.Id,
-                "Failed",
-                null,
-                ex.Message,
-                session.TotalLlmCalls,
-                session.TotalTokens,
-                session.Duration.TotalSeconds);
-
-            SendEvent(session, new Models.ErrorEvent
-            {
-                SessionId = session.Id,
-                Message = ex.Message,
-                StackTrace = ex.StackTrace
-            });
-        }
-        finally
-        {
-            session.EventChannel.Writer.TryComplete();
-        }
-    }
-
-    private string BuildReviewTask(ReviewSession session)
-    {
-        var reviewTypePrompt = session.Type switch
-        {
-            ReviewType.QuickReview => "Provide a quick preliminary review focusing on major issues.",
-            ReviewType.DetailedReview => "Provide a detailed peer review with specific actionable feedback.",
-            ReviewType.DeepAnalysis => "Conduct deep analysis of methodology, experiments, and theoretical foundations.",
-            ReviewType.RevisionSuggestion => "Focus on specific revision suggestions to improve the paper.",
-            _ => "Provide a comprehensive academic review."
-        };
-
-        return $"""
-            You are a senior reviewer for a top-tier {session.VenueType}.
-            
-            {reviewTypePrompt}
-            
-            Paper Title: {session.Title}
-            Authors: {session.Authors}
-            
-            Review the following paper and provide:
-            
-            1. **Summary** (2-3 sentences summarizing the paper's contribution)
-            
-            2. **Strengths** (3-5 major strengths)
-               - Be specific about what the paper does well
-               - Reference specific sections/results when possible
-            
-            3. **Weaknesses** (3-5 major weaknesses)
-               - Be constructive and suggest how to address each weakness
-               - Distinguish between major and minor issues
-            
-            4. **Questions for Authors** (3-5 clarifying questions)
-            
-            5. **Detailed Comments** (section-by-section feedback)
-               - For each issue, quote the problematic text
-               - Explain why it's problematic
-               - Provide a concrete revision suggestion
-            
-            6. **Overall Recommendation**
-               - Strong Accept / Accept / Weak Accept / Borderline / Weak Reject / Reject / Strong Reject
-               - Justify your recommendation
-            
-            7. **Confidence Score** (1-5)
-               - How confident are you in this review?
-            
-            ═══════════════════════════════════════════════════════════════
-            PAPER TO REVIEW
-            ═══════════════════════════════════════════════════════════════
-            
-            {session.PaperContent}
-            
-            ═══════════════════════════════════════════════════════════════
-            END OF PAPER
-            ═══════════════════════════════════════════════════════════════
-            """;
-    }
-
-    private MakerOptions BuildMakerOptions(ReviewSession session)
-    {
-        var reliability = session.Type switch
-        {
-            ReviewType.QuickReview => ReliabilityLevel.Low,
-            ReviewType.DetailedReview => ReliabilityLevel.Medium,
-            ReviewType.DeepAnalysis => ReliabilityLevel.High,
-            ReviewType.RevisionSuggestion => ReliabilityLevel.Medium,
-            _ => ReliabilityLevel.Medium
-        };
-
-        return new MakerOptions
-        {
-            ProviderName = AevatarAgentsConstants.DefaultProviderName,
-            Reliability = reliability,
-            MaxTotalLlmCalls = 100,
-            MaxTotalTokens = 500_000,
-            MaxDuration = TimeSpan.FromMinutes(30),
-            OnProgress = p => HandleProgress(session, p)
-        };
-    }
-
-    private void HandleProgress(ReviewSession session, MakerProgress p)
-    {
-        session.Timeline.Add(new TimelineEntry(p.Phase.ToString(), p.Message, DateTimeOffset.UtcNow));
-        session.CurrentPhase = p.Phase.ToString();
-
-        SendEvent(session, new Models.ProgressEvent
-        {
-            SessionId = session.Id,
-            Phase = p.Phase.ToString(),
-            Message = p.Message,
-            ProgressPercent = session.ProgressPercent,
-            Depth = p.Depth
-        });
-
-        if (p.Voting != null)
-        {
-            SendEvent(session, new ConsensusEvent
-            {
-                SessionId = session.Id,
-                Round = p.Voting.Round,
-                TotalVotes = p.Voting.TotalVotes,
-                VotesNeeded = p.Voting.VotesNeeded,
-                LeaderVotes = p.Voting.LeaderVotes,
-                Reached = p.Voting.LeaderVotes >= p.Voting.VotesNeeded
-            });
-        }
-    }
-
-    private string FormatReviewReport(ReviewSession session, MakerResult result)
-    {
-        return $"""
-            # 📝 Paper Review Report
-            
-            **Title:** {session.Title}  
-            **Authors:** {session.Authors}  
-            **Venue:** {session.VenueType}  
-            **Review Type:** {session.Type}  
-            **Session ID:** {session.Id}  
-            
-            ---
-            
-            **Status:** {(result.Success ? "✓ Completed" : "✗ Failed")}  
-            **Duration:** {session.Duration.TotalSeconds:F1}s  
-            **LLM Calls:** {result.TotalLLMCalls}  
-            **Total Tokens:** {result.TotalTokens:N0}
-            
-            ---
-            
-            {result.Content}
-            """;
-    }
-
-    private void SendEvent(ReviewSession session, ReviewEvent evt)
-    {
-        session.EventChannel.Writer.TryWrite(evt);
-    }
-
-    private void SaveFile(ReviewSession session, string category, string fileName, string content)
-    {
-        session.Files.GetOrAdd(category, _ => new ConcurrentDictionary<string, string>())[fileName] = content;
-
-        if (!string.IsNullOrEmpty(session.OutputDir))
-        {
-            try
-            {
-                var dir = Path.Combine(session.OutputDir, category);
-                Directory.CreateDirectory(dir);
-                File.WriteAllText(Path.Combine(dir, fileName), content);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to save file: {Category}/{FileName}", category, fileName);
-            }
         }
     }
 
@@ -490,8 +208,8 @@ public sealed class PaperReviewService
         if (!_sessions.TryGetValue(sessionId, out var session))
             return new { success = false, error = "Session not found" };
 
-        var content = session.Files.TryGetValue("reports", out var reports) 
-            ? reports.GetValueOrDefault("review_report.md") 
+        var content = session.Files.TryGetValue("reports", out var reports)
+            ? reports.GetValueOrDefault("review_report.md")
             : null;
 
         return new
@@ -528,6 +246,330 @@ public sealed class PaperReviewService
         await foreach (var evt in session.EventChannel.Reader.ReadAllAsync(ct))
         {
             yield return evt;
+        }
+    }
+    
+    // ─────────────────────────────────────────────────────────
+    //  Deliverables (交付物 / 下载)
+    // ─────────────────────────────────────────────────────────
+    
+    public bool TryGetFileContent(string sessionId, string category, string fileName, out string content)
+    {
+        content = "";
+        if (!_sessions.TryGetValue(sessionId, out var session)) return false;
+        if (!session.Files.TryGetValue(category, out var files)) return false;
+        return files.TryGetValue(fileName, out content!);
+    }
+    
+    public object GetArtifacts(string sessionId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+            return new { success = false, error = "Session not found" };
+        
+        var list = new List<object>();
+        foreach (var (category, files) in session.Files)
+        {
+            foreach (var (name, value) in files)
+            {
+                list.Add(new
+                {
+                    category,
+                    name,
+                    size = value?.Length ?? 0
+                });
+            }
+        }
+        
+        return new
+        {
+            success = true,
+            sessionId,
+            artifacts = list
+        };
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  私有方法
+    // ─────────────────────────────────────────────────────────
+
+    private async Task LoadPaperContentAsync(ReviewSession session, CreateSessionRequest request)
+    {
+        if (!string.IsNullOrEmpty(request.PaperContent))
+        {
+            session.PaperContent = request.PaperContent;
+        }
+        else if (!string.IsNullOrEmpty(request.CopyFromSessionId)
+                 && _sessions.TryGetValue(request.CopyFromSessionId, out var oldSession))
+        {
+            session.PaperContent = oldSession.PaperContent;
+            session.UploadId = oldSession.UploadId;
+            _logger.LogInformation("Copied content from session {Old} to {New}",
+                request.CopyFromSessionId, session.Id);
+        }
+        else if (!string.IsNullOrEmpty(request.UploadId))
+        {
+            var (content, fileName) = await _uploadService.LoadContentAsync(request.UploadId);
+            session.PaperContent = content;
+            if (string.IsNullOrWhiteSpace(session.Title))
+                session.Title = string.IsNullOrWhiteSpace(fileName) ? "Untitled" : fileName;
+        }
+    }
+
+    private async Task ExecuteReviewAsync(ReviewSession session, CancellationToken ct)
+    {
+        var stopwatch = Stopwatch.StartNew();
+
+        await _supabase.SaveReviewAsync(
+            session.Id, session.Title, session.Authors,
+            session.Type.ToString(), session.VenueType,
+            "Reviewing", null, null, 0, 0, 0);
+
+        try
+        {
+            var reviewTask = BuildReviewTask(session);
+            var options = BuildReasoningOptions(session);
+            var progress = new Progress<ReasoningProgress>(p => _eventBridge.HandleProgress(session, p));
+
+            _logger.LogInformation("[{Id}] Starting workflow={Workflow}, K={K}, N={N}",
+                session.Id, options.CognitiveWorkflow, options.CognitiveConsensusK, options.CognitiveWorkerCount);
+
+            var result = await _cognitiveStrategy.ExecuteAsync(reviewTask, options, progress, ct);
+
+            stopwatch.Stop();
+            session.Status = result.Success ? ReviewStatus.Completed : ReviewStatus.Failed;
+            session.Duration = stopwatch.Elapsed;
+            session.TotalLlmCalls = result.TotalLlmCalls;
+            session.TotalTokens = result.PromptTokens + result.CompletionTokens;
+
+            _logger.LogInformation("[{Id}] Complete. Success={Success}, Duration={Dur}s",
+                session.Id, result.Success, stopwatch.Elapsed.TotalSeconds);
+
+            string? reportUrl = null;
+            
+            // ============================================================
+            //  Deliverables (交付物)
+            //  - 每次评审输出两个文件：
+            //    1) reports/review_report.md     : compose 后的最终文档（即使失败也保留元信息）
+            //    2) details/review_details.json  : atomic points 的 task + consensus（best-effort）
+            // ============================================================
+            var report = FormatReport(session, result);
+            SaveFile(session, "reports", "review_report.md", report);
+            
+            // 云端上传（可选）
+            if (!string.IsNullOrWhiteSpace(report))
+            {
+                reportUrl = await _supabase.UploadReportAsync(session.Id, report);
+            }
+            
+            // details：不应影响主流程，失败也只打警告
+            try
+            {
+                var detailsJson = _eventBridge.BuildReviewDetailsJson(session);
+                SaveFile(session, "details", "review_details.json", detailsJson);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[{Id}] Failed to build review_details.json (ignored)", session.Id);
+            }
+
+            await _supabase.UpdateReviewAsync(
+                session.Id, session.Status.ToString(), result.Content, result.Error,
+                result.TotalLlmCalls, result.TotalTokens, session.Duration.TotalSeconds, reportUrl);
+
+            SendEvent(session, new ResultEvent
+            {
+                SessionId = session.Id,
+                Success = result.Success,
+                Content = result.Content,
+                Error = result.Error,
+                TotalLlmCalls = result.TotalLlmCalls,
+                TotalTokens = result.TotalTokens
+            });
+
+            if (!result.Success)
+            {
+                SendEvent(session, new ErrorEvent
+                {
+                    SessionId = session.Id,
+                    Message = result.Error ?? "Review failed"
+                });
+            }
+            
+            // 清理桥接层 session 缓存（避免长期运行内存增长）
+            try
+            {
+                _eventBridge.CleanupSession(session.Id);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[{Id}] CleanupSession failed (ignored)", session.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            session.Status = ReviewStatus.Failed;
+            session.Duration = stopwatch.Elapsed;
+            session.Error = ex.Message;
+
+            _logger.LogError(ex, "[{Id}] Review failed", session.Id);
+
+            await _supabase.UpdateReviewAsync(
+                session.Id, "Failed", null, ex.Message,
+                session.TotalLlmCalls, session.TotalTokens, session.Duration.TotalSeconds);
+
+            SendEvent(session, new ErrorEvent
+            {
+                SessionId = session.Id,
+                Message = ex.Message,
+                StackTrace = ex.StackTrace
+            });
+        }
+        finally
+        {
+            session.EventChannel.Writer.TryComplete();
+        }
+    }
+
+    private string BuildReviewTask(ReviewSession session)
+    {
+        var (dimCount, scrutinyLevel, focusAreas) = session.Type switch
+        {
+            ReviewType.Quick => (2, "high-level", "core contribution and major flaws"),
+            ReviewType.Standard => (4, "standard", "technical soundness, novelty, experiments, presentation"),
+            ReviewType.Detailed => (5, "detailed", "methodology, innovation, evaluation, clarity, related work"),
+            ReviewType.Rigorous => (6, "rigorous", "all technical aspects with deep scrutiny"),
+            ReviewType.Critical => (7, "exhaustive", "every aspect with maximum rigor and skepticism"),
+            _ => (4, "standard", "key aspects")
+        };
+
+        return _promptProvider.RenderReviewTaskAsText(new ReviewTaskContext
+        {
+            VenueType = session.VenueType ?? "AI Conference",
+            ScrutinyLevel = scrutinyLevel,
+            DimensionCount = dimCount,
+            FocusAreas = focusAreas,
+            Title = session.Title ?? "Untitled",
+            Authors = session.Authors ?? "Unknown",
+            PaperContent = session.PaperContent ?? ""
+        });
+    }
+
+    private ReasoningOptions BuildReasoningOptions(ReviewSession session)
+    {
+        var (k, n, desc) = MakerParameters.GetParams(session.Type);
+
+        var project = _projectStore.GetProject("paper-review");
+        var baseOpts = project?.Options ?? new ReasoningOptions
+        {
+            ProviderName = "deepseek",
+            MakerReliability = MakerReliability.High,
+            MaxLlmCalls = 400,
+            MaxTokens = 800_000
+        };
+
+        var reliability = session.Type switch
+        {
+            ReviewType.Quick => MakerReliability.Low,
+            ReviewType.Standard => MakerReliability.Medium,
+            ReviewType.Detailed => MakerReliability.High,
+            ReviewType.Rigorous => MakerReliability.Critical,
+            ReviewType.Critical => MakerReliability.Critical,
+            _ => MakerReliability.Medium
+        };
+
+        _logger.LogInformation("[{Id}] MAKER: {Type} → K={K}, N={N} ({Desc})",
+            session.Id, session.Type, k, n, desc);
+
+        SendEvent(session, new StageLogEvent
+        {
+            SessionId = session.Id,
+            Stage = "Configuration",
+            Status = "completed",
+            Summary = $"MAKER initialized: K={k}, N={n} workers ({desc})",
+            StartTime = DateTimeOffset.UtcNow,
+            EndTime = DateTimeOffset.UtcNow,
+            Stats = new StageStats { WorkerCount = n }
+        });
+
+        var estimatedDimensions = session.Type switch
+        {
+            ReviewType.Quick => 3,
+            ReviewType.Standard => 5,
+            ReviewType.Detailed => 6,
+            ReviewType.Rigorous => 7,
+            ReviewType.Critical => 8,
+            _ => 5
+        };
+
+        var llmCallBudget = n * (1 + estimatedDimensions * 4) + 20;
+        var tokenBudget = 200_000 * n;
+
+        var ctx = new Dictionary<string, string>(baseOpts.Context ?? new Dictionary<string, string>())
+        {
+            ["paper.content"] = session.PaperContent ?? "",
+            ["paper.title"] = session.Title ?? "Untitled",
+            ["paper.venue"] = session.VenueType ?? "AI Conference",
+            ["paper.reviewType"] = session.Type.ToString()
+        };
+
+        return baseOpts with
+        {
+            MakerReliability = reliability,
+            MakerConsensusK = k,
+            MakerExecutionMode = MakerExecutionMode.Academic,
+            MaxLlmCalls = Math.Max(baseOpts.MaxLlmCalls, llmCallBudget),
+            MaxTokens = Math.Max(baseOpts.MaxTokens, tokenBudget),
+            // 论文评审属于“长任务”：真实场景下经常超过 30min
+            // - 至少 1h，避免中途超时导致前面产出作废
+            MaxDuration = TimeSpan.FromHours(1),
+            Context = ctx,
+            CognitiveWorkflow = "maker-v2",
+            CognitiveWorkerCount = n,
+            CognitiveConsensusK = k,
+            CognitiveMaxRounds = 10,
+            CognitiveMaxDepth = 8,
+            CognitiveSemanticSimilarity = 0.85f,
+            CognitiveTimeoutMinutes = 60
+        };
+    }
+
+    private string FormatReport(ReviewSession session, ReasoningResult result)
+    {
+        return _promptProvider.RenderReport(new ReviewReportContext
+        {
+            Title = session.Title ?? "Untitled",
+            Authors = session.Authors ?? "Unknown",
+            VenueType = session.VenueType ?? "AI Conference",
+            ReviewType = session.Type.ToString(),
+            SessionId = session.Id,
+            Success = result.Success,
+            DurationSeconds = session.Duration.TotalSeconds,
+            LlmCalls = result.TotalLlmCalls,
+            TotalTokens = result.TotalTokens,
+            Content = result.Content ?? ""
+        });
+    }
+
+    private void SendEvent(ReviewSession session, ReviewEvent evt) =>
+        session.EventChannel.Writer.TryWrite(evt);
+
+    private void SaveFile(ReviewSession session, string category, string fileName, string content)
+    {
+        session.Files.GetOrAdd(category, _ => new ConcurrentDictionary<string, string>())[fileName] = content;
+
+        if (!string.IsNullOrEmpty(session.OutputDir))
+        {
+            try
+            {
+                var dir = Path.Combine(session.OutputDir, category);
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(Path.Combine(dir, fileName), content);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to save file: {Category}/{FileName}", category, fileName);
+            }
         }
     }
 }

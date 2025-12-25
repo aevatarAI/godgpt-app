@@ -71,7 +71,7 @@ public class UserInfoServiceTests
         var actor = Substitute.For<IGAgentActor, IUserInfoCollectionGAgent>();
         var agent = (IUserInfoCollectionGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new UserInfoCollectionResponseProto
@@ -101,7 +101,7 @@ public class UserInfoServiceTests
         var actor = Substitute.For<IGAgentActor, IUserInfoCollectionGAgent>();
         var agent = (IUserInfoCollectionGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new UserInfoCollectionProto
@@ -142,7 +142,7 @@ public class UserInfoServiceTests
         var actor = Substitute.For<IGAgentActor, IUserInfoCollectionGAgent>();
         var agent = (IUserInfoCollectionGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new UserInfoDisplayProto

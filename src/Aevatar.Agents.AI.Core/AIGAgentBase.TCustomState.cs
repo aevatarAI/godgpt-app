@@ -46,6 +46,8 @@ public abstract class AIGAgentBase<TCustomState> : AIGAgentBase
         base.TransitionState(state, evt);
         var customState = state.CustomState == null ? new TCustomState() : state.CustomState.Unpack<TCustomState>();
         TransitionState(customState, evt);
+        // IMPORTANT: Pack modified customState back to state.CustomState
+        state.CustomState = Google.Protobuf.WellKnownTypes.Any.Pack(customState);
     }
 
     protected virtual void TransitionState(TCustomState state, IMessage evt)

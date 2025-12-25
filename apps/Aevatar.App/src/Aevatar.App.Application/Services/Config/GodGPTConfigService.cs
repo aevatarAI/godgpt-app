@@ -1,5 +1,6 @@
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Quantum;
@@ -26,18 +27,18 @@ public class GodGPTConfigService : ApplicationService, IGodGPTConfigService
     }
 
     /// <inheritdoc />
-    public Task<string> GetSystemPromptAsync()
+    public async Task<string> GetSystemPromptAsync()
     {
-        var configurationActor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
-        var configurationAgent = (ConfigurationGAgent)configurationActor.GetAgent();
-        return Task.FromResult(configurationAgent.GetPrompt());
+        var configurationActor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId().ToString());
+        var configurationAgent = configurationActor.As<IConfigurationGAgent>();
+        return await configurationAgent.GetPromptAsync();
     }
 
     /// <inheritdoc />
-    public Task UpdateSystemPromptAsync(GodGPTConfigurationDto godGptConfigurationDto)
+    public async Task UpdateSystemPromptAsync(GodGPTConfigurationDto godGptConfigurationDto)
     {
-        var configurationActor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId());
-        var configurationAgent = (ConfigurationGAgent)configurationActor.GetAgent();
-        return configurationAgent.UpdateSystemPromptAsync(godGptConfigurationDto.SystemPrompt);
+        var configurationActor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(CommonHelper.GetSessionManagerConfigurationId().ToString());
+        var configurationAgent = configurationActor.As<IConfigurationGAgent>();
+        await configurationAgent.UpdateSystemPromptAsync(godGptConfigurationDto.SystemPrompt);
     }
 }

@@ -74,7 +74,7 @@ public class EventPublisherTool : AevatarToolBase
         CancellationToken cancellationToken = default)
     {
         // 验证参数
-        var validation = ValidateParameters(parameters);
+        var validation = ValidateParameters(ToNullableParameters(parameters));
         if (!validation.IsValid)
         {
             logger?.LogWarning("Invalid parameters: {Errors}", string.Join(", ", validation.Errors));

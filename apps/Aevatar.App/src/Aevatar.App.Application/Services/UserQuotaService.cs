@@ -35,7 +35,7 @@ public class UserQuotaService : IUserQuotaService
 
     private async Task<IUserQuotaGAgent> GetAgentAsync(Guid userId)
     {
-        var actor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId.ToString());
         return actor.As<IUserQuotaGAgent>();
     }
 

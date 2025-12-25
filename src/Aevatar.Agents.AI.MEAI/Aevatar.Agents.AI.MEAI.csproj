@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -21,8 +21,7 @@
     <!-- Logging -->
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     
-    <!-- JSON -->
-    <PackageReference Include="System.Text.Json" />
+    <!-- System.Text.Json ships with .NET runtime (no PackageReference needed) -->
   </ItemGroup>
 
   <ItemGroup>

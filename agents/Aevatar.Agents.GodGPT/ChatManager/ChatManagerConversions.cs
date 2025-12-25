@@ -1,5 +1,4 @@
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
-using GodGPT.GAgents.DailyPush;
 using GodGPT.GAgents.SpeechChat;
 using Google.Protobuf.WellKnownTypes;
 
@@ -237,5 +236,24 @@ public static class ChatManagerConversions
             proto.AudioData = Google.Protobuf.ByteString.CopyFrom(response.AudioData);
         }
         return proto;
+    }
+
+    public static ResponseStreamGodChat FromProto(this ResponseStreamGodChatProto proto)
+    {
+        var response = new ResponseStreamGodChat
+        {
+            ResponseType = (ResponseType)proto.ResponseType,
+            Response = proto.Response,
+            NewTitle = proto.NewTitle,
+            ChatId = proto.ChatId,
+            IsLastChunk = proto.IsLastChunk,
+            SerialNumber = proto.SerialNumber,
+            SessionId = Guid.TryParse(proto.SessionId, out var sessionId) ? sessionId : Guid.Empty
+        };
+        if (proto.AudioData != null && proto.AudioData.Length > 0)
+        {
+            response.AudioData = proto.AudioData.ToByteArray();
+        }
+        return response;
     }
 }

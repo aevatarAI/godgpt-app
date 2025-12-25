@@ -1,6 +1,6 @@
 # AI Agent With Tool Demo
 
-这个示例展示了如何使用 `AIGAgentWithToolBase` 创建一个带工具调用能力的 AI 智能助手。
+这个示例展示了如何使用 `AIGAgentBase` 创建一个带工具调用能力的 AI 智能助手。
 
 ## 功能特性
 

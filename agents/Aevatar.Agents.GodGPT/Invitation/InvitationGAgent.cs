@@ -3,6 +3,7 @@ using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.Invitation;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Agents.Invitation;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
@@ -44,7 +45,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         }
 
         var inviteCode = await GenerateUniqueCodeAsync();
-        var inviteCodeGrain = await GetInviteCodeAgentAsync(CommonHelper.StringToGuid(inviteCode));
+        var inviteCodeGrain = await GetInviteCodeAgentAsync(CommonHelper.StringToGuid(inviteCode).ToString());
         await inviteCodeGrain.InitializeAsync(Id.ToString(), inviteCode);
 
         RaiseEvent(new SetInviteCodeEvent
@@ -285,7 +286,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
             InviteeId = inviteeId,
             HasCompletedChat = invitee.HasCompletedChat,
             HasPaid = true,
-            PaidPlan = (InvitationPlanType)planType,
+            PaidPlan = (QuotaPlanType)planType,
             PaidAt = Timestamp.FromDateTime(DateTime.UtcNow),
             MembershipLevel = isUltimate
                 ? CsMembershipLevel.Membership_Level_Ultimate
@@ -364,7 +365,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
             attemptCount++;
             string code = ToBase62(timestamp);
             var codeGrainId = CommonHelper.StringToGuid(code);
-            var codeGrain = await GetInviteCodeAgentAsync(codeGrainId);
+            var codeGrain = await GetInviteCodeAgentAsync(codeGrainId.ToString());
             var isUsed = await codeGrain.IsInitialized();
 
             Logger.LogDebug(
@@ -565,7 +566,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         return true;
     }
 
-    private async Task<IInviteCodeGAgent> GetInviteCodeAgentAsync(Guid codeGrainId)
+    private async Task<IInviteCodeGAgent> GetInviteCodeAgentAsync(string codeGrainId)
     {
         if (ActorFactory == null)
         {
@@ -576,7 +577,7 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         return actor.As<IInviteCodeGAgent>();
     }
     
-    private async Task<IUserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    private async Task<IUserQuotaGAgent> GetUserQuotaAgentAsync(string userId)
     {
         if (ActorFactory == null)
         {

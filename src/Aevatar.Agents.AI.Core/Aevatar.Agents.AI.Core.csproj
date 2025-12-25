@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -15,6 +15,7 @@
 
     <ItemGroup>
         <ProjectReference Include="..\Aevatar.Agents.AI.Abstractions\Aevatar.Agents.AI.Abstractions.csproj" />
+        <ProjectReference Include="..\Aevatar.Agents.AI.WithTool\Aevatar.Agents.AI.WithTool.csproj" />
         <ProjectReference Include="..\Aevatar.Agents.Core\Aevatar.Agents.Core.csproj" />
         <ProjectReference Include="..\Aevatar.Agents.Abstractions\Aevatar.Agents.Abstractions.csproj" />
     </ItemGroup>
@@ -27,9 +28,6 @@
         <PackageReference Include="Microsoft.Extensions.Options" />
         <PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" />
         <PackageReference Include="Microsoft.Extensions.AI" />
-
-        <!-- JSON Processing -->
-        <PackageReference Include="System.Text.Json" />
 
         <!-- Protobuf Dynamic Message Creation -->
         <PackageReference Include="Google.Protobuf" />

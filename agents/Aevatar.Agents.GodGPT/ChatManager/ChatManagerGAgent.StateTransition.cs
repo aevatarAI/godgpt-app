@@ -62,7 +62,13 @@ public partial class ChatGAgentManager
             case RenameTitleEvent @renameTitleEventLog:
                 Logger.LogDebug(
                     $"[ChatGAgentManager][RenameChatTitleEvent] event:{JsonConvert.SerializeObject(@renameTitleEventLog)}");
-                var sessionInfo = state.SessionInfoList.First(f => f.SessionId == @renameTitleEventLog.SessionId);
+                var sessionInfo = state.SessionInfoList.FirstOrDefault(f => f.SessionId == @renameTitleEventLog.SessionId);
+                if (sessionInfo == null)
+                {
+                    Logger.LogWarning(
+                        $"[ChatGAgentManager][RenameChatTitleEvent] session not found: SessionId={@renameTitleEventLog.SessionId}");
+                    break;
+                }
                 Logger.LogDebug(
                     $"[ChatGAgentManager][RenameChatTitleEvent] event exist:{JsonConvert.SerializeObject(@renameTitleEventLog)}");
                 sessionInfo.Title = @renameTitleEventLog.Title;

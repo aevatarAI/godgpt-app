@@ -10,11 +10,7 @@ using Volo.Abp.AutoMapper;
 using Volo.Abp.Modularity;
 using GodGPT.GAgents.Awakening.Options;
 using GodGPT.GAgents.SpeechChat;
-using GodGPT.GAgents.DailyPush;
-using GodGPT.GAgents.DailyPush.Options;
-using GodGPT.GAgents.DailyPush.Services;
 using Microsoft.Extensions.Configuration;
-using StackExchange.Redis;
 
 namespace Aevatar.Application.Grains;
 
@@ -46,44 +42,13 @@ public class GodGPTGAgentModule : AbpModule
         context.Services.AddSingleton<IPostConfigureOptions<GooglePayOptions>, GooglePayOptionsPostProcessor>();
         
         Configure<SpeechOptions>(configuration.GetSection("Speech"));
-        Configure<DailyPushOptions>(configuration.GetSection("DailyPush"));
         
         // Register speech services
         context.Services.AddSingleton<ISpeechService, SpeechService>();
         context.Services.AddSingleton<IGooglePayService, GooglePayService>();
         context.Services.AddSingleton<ILocalizationService, LocalizationService>();
         
-        // Register HttpClient factory first
+        // Register HttpClient factory
         context.Services.AddHttpClient();
-        
-        // Register Firebase and Daily Push services
-        // Note: ILogger<T>, IConfiguration, IOptionsMonitor<T> are automatically registered by ABP/ASP.NET Core
-        context.Services.AddSingleton<FirebaseService>();
-        context.Services.AddSingleton<DailyPushContentService>();
-        
-        // Register Redis connection for push deduplication
-        // Compatible with Station's Redis configuration format: "Redis:Configuration"
-        // Fallback to "ConnectionStrings:Redis" for standalone deployment
-        context.Services.AddSingleton<IConnectionMultiplexer>(provider =>
-        {
-            var redisConfig = configuration["Redis:Configuration"] ?? 
-                             configuration.GetConnectionString("Redis") ?? 
-                             "localhost:6379";
-            
-            // Ensure port is included (Station config might be just "127.0.0.1")
-            var connectionString = redisConfig.Contains(":") ? redisConfig : $"{redisConfig}:6379";
-            var options = ConfigurationOptions.Parse(connectionString);
-            
-            // Configure Redis options for production resilience
-            options.AbortOnConnectFail = false;
-            options.ConnectRetry = 3;
-            options.ConnectTimeout = 5000;
-            options.SyncTimeout = 5000;
-            
-            return ConnectionMultiplexer.Connect(options);
-        });
-        
-        // Register push deduplication service
-        context.Services.AddSingleton<IPushDeduplicationService, PushDeduplicationService>();
     }
 }

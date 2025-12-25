@@ -206,16 +206,85 @@ public class MyAIAgent : AIGAgentBase<MyCustomState, MyCustomConfig>
 For agents that need to call external tools:
 
 ```csharp
-public class ToolAgent : AIGAgentWithToolBase<MyState, MyConfig>
+public class ToolAgent : AIGAgentBase<MyState, MyConfig>
 {
-    protected override void RegisterTools()
+    protected override async Task RegisterToolsAsync(CancellationToken cancellationToken = default)
     {
         // Register tools that the AI can call
-        RegisterTool(new WeatherTool());
-        RegisterTool(new CalculatorTool());
+        await RegisterToolAsync(new WeatherTool(), cancellationToken: cancellationToken);
+        await RegisterToolAsync(new CalculatorTool(), cancellationToken: cancellationToken);
     }
 }
 ```
+
+### DotNet File Skills (.NET 10)
+You can import a single-file C# "skill" as a Tool (executed via `dotnet run --file`):
+
+```csharp
+protected override async Task RegisterToolsAsync(CancellationToken cancellationToken = default)
+{
+    await base.RegisterToolsAsync(cancellationToken);
+    await RegisterDotNetFileSkillAsync("skills/calc_tax.cs", cancellationToken);
+}
+```
+
+Skill file template (reads JSON from stdin, prints JSON to stdout):
+
+```csharp
+/*aevatar_tool
+{
+  "name": "calc_tax",
+  "description": "Calculate tax from amount and rate",
+  "parameters": {
+    "required": ["amount", "rate"],
+    "items": {
+      "amount": { "type": "number", "description": "Base amount" },
+      "rate": { "type": "number", "description": "Tax rate (0-1)" }
+    }
+  }
+}
+*/
+
+using System.Text.Json;
+
+var input = await Console.In.ReadToEndAsync();
+var args = JsonSerializer.Deserialize<Dictionary<string, double>>(input)!;
+var tax = args["amount"] * args["rate"];
+Console.WriteLine(JsonSerializer.Serialize(new { tax }));
+```
+
+### Agent Skills (SKILL.md)
+Agent Skills are **folders** that contain a `SKILL.md` entry file (YAML front matter + instructions), plus scripts/resources.
+See: [Agent Skills overview](https://agentskills.io/home).
+
+In Aevatar, `AIGAgentBase` can expose Agent Skills to LLM via built-in tools:
+- `skills_list`: list available skills under configured roots
+- `skills_load`: load a skill's `SKILL.md` content and (optionally) auto-import dotnet-file tools found in that skill folder
+
+If `SKILL.md` front matter contains `allowed-tools`, Aevatar will treat it as a **hard allowlist**:
+- The model will only see / be able to execute tools in that list for the remainder of the current tool-call loop.
+- If `allowed-tools` is omitted or empty, no restriction is applied.
+
+Enable it in your agent:
+
+```csharp
+public sealed class MyAgent : AIGAgentBase
+{
+    public MyAgent()
+    {
+        EnableAgentSkills = true;
+        AddAgentSkillsRoot("agent_skills"); // or absolute path
+    }
+}
+```
+
+Or configure roots via env var:
+
+```bash
+export AEVATAR_AGENT_SKILLS_DIRS="/abs/path/to/agent_skills;/abs/path/to/more_skills"
+```
+
+For the full guide (integration + features + safety), see: `docs/AGENT_SKILLS_GUIDE.md`.
 
 ---
 

@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Axiom Reasoning · Cognitive Mesh</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">AR</div>
+      <div>
+        <div class="brand-title">Axiom Reasoning</div>
+        <div class="brand-sub">Cognitive Mesh · axiom_reasoning</div>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="btn-stop" class="btn danger" disabled>Stop</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Sessions</div>
+            <div class="panel-subtitle">Click to switch</div>
+          </div>
+          <button id="btn-refresh" class="icon-btn" title="Refresh">⟳</button>
+        </div>
+        <div id="session-list" class="session-list empty-state">No sessions</div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">New Run</div>
+            <div class="panel-subtitle">Create a session then run</div>
+          </div>
+        </div>
+
+        <div class="form">
+          <label class="field">
+            <span>Axioms (one per line)</span>
+            <textarea id="input-axioms" rows="8" placeholder="O1: ...&#10;O2: ..."></textarea>
+          </label>
+          <label class="field">
+            <span>Goal</span>
+            <input id="input-goal" type="text" placeholder="What to prove/derive">
+          </label>
+
+          <div class="row-3">
+            <label class="field">
+              <span>Workflow</span>
+              <select id="input-workflow"></select>
+            </label>
+            <label class="field">
+              <span>Language</span>
+              <select id="input-language">
+                <option value="English">English</option>
+                <option value="Chinese">中文</option>
+              </select>
+            </label>
+            <div class="field">
+              <span>&nbsp;</span>
+              <div class="hint" style="margin-top:10px;">Workflow=选择推理流程；Language=控制证明/定理自然语言。</div>
+            </div>
+          </div>
+
+          <div class="row-3">
+            <label class="field">
+              <span>K</span>
+              <input id="input-k" type="number" min="1" max="9" value="3">
+            </label>
+            <label class="field">
+              <span>max_rounds</span>
+              <input id="input-max-rounds" type="number" min="1" max="50" value="10">
+            </label>
+            <label class="field">
+              <span>max_depth</span>
+              <input id="input-max-depth" type="number" min="1" max="200" value="200">
+            </label>
+          </div>
+
+          <details class="advanced" open>
+            <summary>Advanced (long-run budgets)</summary>
+            <div class="row-3">
+              <label class="field">
+                <span>max_duration_minutes</span>
+                <input id="input-max-duration-minutes" type="number" min="1" max="1440" value="120">
+              </label>
+              <label class="field">
+                <span>max_llm_calls</span>
+                <input id="input-max-llm-calls" type="number" min="1" max="200000" value="5000">
+              </label>
+              <label class="field">
+                <span>max_tokens</span>
+                <input id="input-max-tokens" type="number" min="1" max="200000000" value="8000000">
+              </label>
+            </div>
+            <label class="field field-inline">
+              <input id="input-continue-on-failure" type="checkbox" checked>
+              <span>continue_on_failure (proved=false 也继续下一轮)</span>
+            </label>
+            <div class="hint">
+              Tip: 长跑建议同时调大 max_depth；预算越大越烧钱。若模型流式输出很慢，Worker 内部有 idle/total timeout 防“假死”。
+            </div>
+          </details>
+
+          <button id="btn-create" class="btn block">Create Session</button>
+          <button id="btn-run" class="btn primary block" disabled>Run</button>
+          <div class="hint">Tip: voting proposals are grouped; raw token spam is hidden.</div>
+        </div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Live Progress</div>
+            <div class="panel-subtitle" id="status-text">Waiting to start</div>
+          </div>
+          <div class="stats-row">
+            <div class="stat-chip">Phase: <span id="stat-phase">-</span></div>
+            <div class="stat-chip">Tokens: <span id="stat-tokens">0</span></div>
+            <div class="stat-chip">LLM: <span id="stat-llm">0</span></div>
+          </div>
+        </div>
+        <div class="progress-bar">
+          <div id="progress-bar-inner"></div>
+        </div>
+        <div class="pipeline" id="pipeline-steps"></div>
+      </section>
+
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Voting / Consensus</div>
+              <div class="panel-subtitle">K-threshold progress + final winning content</div>
+            </div>
+            <div class="stat-chip">K=<span id="vote-k">-</span></div>
+          </div>
+          <div id="voting-body" class="voting-body empty-state">Waiting for vote steps</div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Result</div>
+              <div class="panel-subtitle">Parsed from artifacts after completion</div>
+            </div>
+            <div class="actions">
+              <a id="dl-state" class="link disabled" href="#" target="_blank" rel="noreferrer">state.json</a>
+              <a id="dl-steps" class="link disabled" href="#" target="_blank" rel="noreferrer">theorems.json</a>
+              <a id="dl-review" class="link disabled" href="#" target="_blank" rel="noreferrer">review.md</a>
+              <a id="dl-transcript" class="link disabled" href="#" target="_blank" rel="noreferrer">transcript.jsonl</a>
+            </div>
+          </div>
+          <div id="result-body" class="result-body empty-state">Result will appear here</div>
+        </div>
+      </div>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Workers</div>
+            <div class="panel-subtitle">Click card for full history (PaperReview-style)</div>
+          </div>
+          <div class="stat-chip"><span id="worker-count">0</span> workers</div>
+        </div>
+        <div id="worker-grid" class="worker-grid empty-state">Waiting for workers</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Dependency Graph</div>
+            <div class="panel-subtitle">Axioms → Theorems (edges = depends_on)</div>
+          </div>
+          <div class="stat-chip">iter=<span id="graph-iter">0</span></div>
+        </div>
+        <div class="graph-wrap">
+          <div id="graph-canvas" class="graph-canvas">
+            <svg id="graph-svg" width="1200" height="520" viewBox="0 0 1200 520" xmlns="http://www.w3.org/2000/svg">
+              <g id="graph-viewport"></g>
+            </svg>
+          </div>
+          <div id="graph-inspector" class="graph-inspector empty-state">
+            Click a node to inspect details.
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Steps</div>
+            <div class="panel-subtitle">Human-readable cards (proposals + consensus)</div>
+          </div>
+        </div>
+        <div id="steps" class="steps empty-state">No steps yet</div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Raw Events (debug)</div>
+            <div class="panel-subtitle">Collapsed by default</div>
+          </div>
+          <button id="btn-toggle-raw" class="icon-btn" title="Toggle raw">▾</button>
+        </div>
+        <pre id="raw" class="raw hidden"></pre>
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- Worker Detail Modal (PaperReview-style) -->
+<div id="modal" class="modal hidden">
+  <div id="modal-backdrop" class="modal-backdrop"></div>
+  <div class="modal-content">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title" id="modal-title">Worker</div>
+        <div class="modal-subtitle" id="modal-subtitle">Chat History</div>
+      </div>
+      <button id="modal-close" class="icon-btn" title="Close">✕</button>
+    </div>
+    <div id="modal-body" class="modal-body"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>
+
+

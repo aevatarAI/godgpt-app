@@ -26,7 +26,7 @@ public partial class GodChatGAgent
     {
         var totalStopwatch = Stopwatch.StartNew();
         Logger.LogInformation($"[PERF][VoiceChat] {sessionId} START - file: {fileName}, size: {voiceData?.Length ?? 0} chars, language: {voiceLanguage}, duration: {voiceDurationSeconds}s");
-        var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+        var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
 
         // Validate voiceData
         if (string.IsNullOrEmpty(voiceData) || voiceLanguage == VoiceLanguageEnum.Unset)
@@ -195,7 +195,7 @@ public partial class GodChatGAgent
         Logger.LogDebug($"[GodChatGAgent][StreamVoiceChatWithSession] {sessionId.ToString()} STT result sent to frontend: '{voiceContent}'");
 
         var quotaStopwatch = Stopwatch.StartNew();
-        var userQuotaGAgent = await GetUserQuotaAgentAsync(Guid.Parse(State.ChatManagerGuid));
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(State.ChatManagerGuid);
         var actionResultDto = await userQuotaGAgent.ExecuteVoiceActionAsync(sessionId.ToString(), State.ChatManagerGuid.ToString());
         
         quotaStopwatch.Stop();
@@ -286,8 +286,8 @@ public partial class GodChatGAgent
 
         var llmStopwatch = Stopwatch.StartNew();
         var configuration = await GetConfigurationAsync();
-        await GodVoiceStreamChatAsync(sessionId, configuration.GetSystemLLM(),
-            configuration.GetStreamingModeEnabled(),
+        await GodVoiceStreamChatAsync(sessionId, await configuration.GetSystemLLMAsync(),
+            await configuration.GetStreamingModeEnabledAsync(),
             voiceContent, chatId, promptSettings, isHttpRequest, region, voiceLanguage, voiceDurationSeconds);
         llmStopwatch.Stop();
         
@@ -308,7 +308,7 @@ public partial class GodChatGAgent
 
         // Step 1: Get configuration and system message (same as GodStreamChatAsync)
         var configuration = await GetConfigurationAsync();
-        var sysMessage = configuration.GetPrompt();
+        var sysMessage = await configuration.GetPromptAsync();
 
         // Step 2: Initialize LLM if needed (same as GodStreamChatAsync)
 
@@ -317,17 +317,12 @@ public partial class GodChatGAgent
             promptSettings, isHttpRequest, region, voiceLanguage, voiceDurationSeconds);
 
         // Step 4: Get AI proxy and start streaming chat (same as GodStreamChatAsync)
-        var aiAgentStatusProxy = await GetProxyByRegionAsync(region);
+        var (aiAgentStatusProxy, proxyId) = await GetProxyByRegionAsync(region);
         
-        if (aiAgentStatusProxy != null)
+        if (aiAgentStatusProxy != null && proxyId != null)
         {
-            var proxyId = aiAgentStatusProxy.Id;
-            
-            // Ensure proxy is initialized before proceeding
-            await EnsureProxyInitializedAsync(proxyId, sessionId);
-            
             Logger.LogDebug(
-                $"[GodChatGAgent][GodVoiceStreamChatAsync] agent {aiAgentStatusProxy.Id.ToString()}, session {sessionId.ToString()}, chat {chatId}");
+                $"[GodChatGAgent][GodVoiceStreamChatAsync] agent {proxyId}, session {sessionId.ToString()}, chat {chatId}");
             
             // Set default temperature for voice chat
             var settings = promptSettings ?? new ExecutionPromptSettings();
@@ -353,8 +348,9 @@ public partial class GodChatGAgent
             }
             Logger.LogDebug($"[GodChatGAgent][GodVoiceStreamChatAsync] promptMsg: {promptMsg}");
 
-            var result = await aiAgentStatusProxy.PromptWithStreamAsync(promptMsg, State.ChatHistory.FromProtoList(), settings,
-                context: aiChatContextDto);
+            // Build PromptWithStreamInputProto for RPC call
+            var protoInput = BuildPromptWithStreamInputProto(promptMsg, State.ChatHistory.FromProtoList(), settings, aiChatContextDto, null);
+            var result = await aiAgentStatusProxy.PromptWithStreamProtoAsync(protoInput);
             if (!result)
             {
                 Logger.LogError(

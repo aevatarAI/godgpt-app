@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Aevatar.Agents.AI;
 using Aevatar.Agents.AI.Abstractions;
 using Aevatar.Agents.AI.WithTool.Abstractions;
 using Google.Protobuf;
@@ -109,8 +110,17 @@ public class AevatarMemorySearchTool : AevatarToolBase
                 memoryType = "all";
             }
 
-            // 模拟内存搜索结果
-            var results = SimulateMemorySearch(query, memoryType, maxResults);
+            // ============================================================
+            //  Real memory search (best-effort)
+            //
+            //  Priority:
+            //  1) State snapshot (ToolContext.GetStateCallback): current history window + rolling summary
+            //  2) External memory store (ToolContext.Memory): long-term / RAG memory (if wired)
+            //
+            //  NOTE:
+            //  - If Memory is not wired yet, the tool still provides value by searching State.History + summary.
+            // ============================================================
+            var results = await SearchAsync(query, memoryType, maxResults, context, cancellationToken);
 
             _logger.LogInformation("Memory search completed: {Query} found {Count} results in {MemoryType} memory",
                 query, results.Count, memoryType);
@@ -146,52 +156,119 @@ public class AevatarMemorySearchTool : AevatarToolBase
         return result;
     }
 
-    private List<MemoryItem> SimulateMemorySearch(string query, string memoryType, int maxResults)
+    private async Task<List<MemoryItem>> SearchAsync(
+        string query,
+        string memoryType,
+        int maxResults,
+        ToolContext context,
+        CancellationToken cancellationToken)
     {
-        // 模拟搜索结果
         var allResults = new List<MemoryItem>();
 
-        switch (memoryType.ToLower())
+        var type = memoryType.ToLowerInvariant();
+        var includeConversation = type is "all" or "conversation";
+        var includeLongTerm = type is "all" or "longterm";
+        var includeWorking = type is "all" or "working";
+
+        // 1) Conversation/working memory from agent State snapshot
+        if (includeConversation || includeWorking)
         {
-            case "working":
-                allResults.AddRange([
-                    new MemoryItem { Id = "1", Type = "working", Content = $"Working memory: {query} information", Timestamp = DateTime.UtcNow.AddHours(-1) },
-                    new MemoryItem { Id = "2", Type = "working", Content = $"Current task involves {query}", Timestamp = DateTime.UtcNow.AddHours(-2) }
-                ]);
-                break;
+            try
+            {
+                var state = context.GetStateCallback?.Invoke() as AevatarAIAgentState;
+                if (state != null)
+                {
+                    // Rolling summary (Layer 2) lives in state.Context["history_summary"]
+                    if (state.Context != null &&
+                        state.Context.TryGetValue("history_summary", out var summary) &&
+                        !string.IsNullOrWhiteSpace(summary) &&
+                        summary.Contains(query, StringComparison.OrdinalIgnoreCase))
+                    {
+                        allResults.Add(new MemoryItem
+                        {
+                            Id = "history_summary",
+                            Type = "conversation_summary",
+                            Content = summary,
+                            Timestamp = DateTime.UtcNow,
+                            Metadata = new Dictionary<string, object>
+                            {
+                                ["source"] = "state.context.history_summary"
+                            }
+                        });
+                    }
 
-            case "conversation":
-                allResults.AddRange([
-                    new MemoryItem { Id = "3", Type = "conversation", Content = $"User: Tell me about {query}\nAssistant: Here's what I know about {query}...", Timestamp = DateTime.UtcNow.AddHours(-3) },
-                    new MemoryItem { Id = "4", Type = "conversation", Content = $"User: What is {query}?\nAssistant: {query} is...", Timestamp = DateTime.UtcNow.AddHours(-4) }
-                ]);
-                break;
+                    // Recent history window (Layer 1) from state.History
+                    if (state.History != null && state.History.Count > 0)
+                    {
+                        foreach (var msg in state.History)
+                        {
+                            cancellationToken.ThrowIfCancellationRequested();
+                            var content = msg.Content ?? string.Empty;
+                            if (string.IsNullOrWhiteSpace(content)) continue;
+                            if (!content.Contains(query, StringComparison.OrdinalIgnoreCase)) continue;
 
-            case "longterm":
-                allResults.AddRange([
-                    new MemoryItem { Id = "5", Type = "longterm", Content = $"Long-term knowledge about {query}: key concepts and definitions", Timestamp = DateTime.UtcNow.AddDays(-1) },
-                    new MemoryItem { Id = "6", Type = "longterm", Content = $"Historical information regarding {query} from previous sessions", Timestamp = DateTime.UtcNow.AddDays(-2) }
-                ]);
-                break;
-
-            case "all":
-            default:
-                // 包含所有类型的结果
-                allResults.AddRange([
-                    new MemoryItem { Id = "1", Type = "working", Content = $"Working memory: {query} information", Timestamp = DateTime.UtcNow.AddHours(-1) },
-                    new MemoryItem { Id = "3", Type = "conversation", Content = $"User: Tell me about {query}\nAssistant: Here's what I know about {query}...", Timestamp = DateTime.UtcNow.AddHours(-3) },
-                    new MemoryItem { Id = "5", Type = "longterm", Content = $"Long-term knowledge about {query}: key concepts and definitions", Timestamp = DateTime.UtcNow.AddDays(-1) }
-                ]);
-                break;
+                            allResults.Add(new MemoryItem
+                            {
+                                Id = string.IsNullOrWhiteSpace(msg.Id) ? Guid.NewGuid().ToString("N") : msg.Id,
+                                Type = "conversation",
+                                Content = $"{msg.Role}: {content}",
+                                Timestamp = msg.Timestamp?.ToDateTime() ?? DateTime.UtcNow,
+                                Metadata = new Dictionary<string, object>
+                                {
+                                    ["role"] = msg.Role.ToString(),
+                                    ["source"] = "state.history"
+                                }
+                            });
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "State-based memory search failed (best-effort)");
+            }
         }
 
-        // 过滤包含查询词的结果
-        var filteredResults = allResults
-            .Where(r => r.Content.Contains(query, StringComparison.OrdinalIgnoreCase))
-            .Take(maxResults)
-            .ToList();
+        // 2) Long-term memory (optional) via IAevatarAIMemory
+        if (includeLongTerm && context.Memory != null)
+        {
+            try
+            {
+                var hits = await context.Memory.SearchAsync(query, topK: maxResults, cancellationToken: cancellationToken);
+                foreach (var hit in hits)
+                {
+                    if (string.IsNullOrWhiteSpace(hit)) continue;
+                    allResults.Add(new MemoryItem
+                    {
+                        Id = Guid.NewGuid().ToString("N"),
+                        Type = "longterm",
+                        Content = hit,
+                        Timestamp = DateTime.UtcNow,
+                        Metadata = new Dictionary<string, object>
+                        {
+                            ["source"] = "IAevatarAIMemory.SearchAsync"
+                        }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Long-term memory search failed (best-effort)");
+            }
+        }
 
-        return filteredResults;
+        // Deduplicate + cap results (stable order: keep earlier matches first)
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var final = new List<MemoryItem>(Math.Min(maxResults, allResults.Count));
+        foreach (var item in allResults)
+        {
+            if (final.Count >= maxResults) break;
+            var key = $"{item.Type}:{item.Content}";
+            if (!seen.Add(key)) continue;
+            final.Add(item);
+        }
+
+        return final;
     }
 }
 

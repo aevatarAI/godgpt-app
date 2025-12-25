@@ -1,10 +1,10 @@
 using System.Text.Json;
 using Aevatar.Agents.AI.Abstractions;
 using Aevatar.Agents.AI.Abstractions.Providers;
+using Aevatar.Agents.AI.Core;
 using Aevatar.Agents.AI.WithProcessStrategy.Abstractions;
 using Aevatar.Agents.AI.WithProcessStrategy.Messages;
 using Aevatar.Agents.AI.WithProcessStrategy.Strategies;
-using Aevatar.Agents.AI.WithTool;
 using Aevatar.Agents.AI.WithTool.Abstractions;
 using Microsoft.Extensions.Logging;
 
@@ -25,11 +25,11 @@ public class StrategyDecision
 /// <summary>
 /// Level 3: AI Agent with advanced processing strategies.
 /// 第三级：具有高级处理策略的AI代理
-/// 在AIGAgentWithToolBase基础上增加了让LLM进行策略性回答的功能
+/// 在 AIGAgentBase（已内置工具能力）基础上增加了让LLM进行策略性回答的功能
 /// 支持多种处理策略（如Chain-of-Thought、ReAct、Tree-of-Thoughts等）
 /// </summary>
 /// <typeparam name="TState">The agent state type (must be Protobuf)</typeparam>
-public abstract class AIGAgentWithProcessStrategy<TState> : AIGAgentWithToolBase<TState>
+public abstract class AIGAgentWithProcessStrategy<TState> : AIGAgentBase<TState>
     where TState : class, Google.Protobuf.IMessage<TState>, new()
 {
     #region Fields

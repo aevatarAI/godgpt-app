@@ -31,7 +31,7 @@ public class UserInfoService : IUserInfoService
 
     private async Task<IUserInfoCollectionGAgent> GetAgentAsync(Guid userId)
     {
-        var actor = await _actorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId.ToString());
         return actor.As<IUserInfoCollectionGAgent>();
     }
 
@@ -115,7 +115,8 @@ public class UserInfoService : IUserInfoService
         }
         
         // Convert Protobuf to DTO
-        return ConvertCollectionFromProto(protoResult);
+        // Use the known userId parameter directly (State.UserId stores full Agent Id, not raw Guid)
+        return ConvertCollectionFromProto(protoResult, userId);
     }
 
     public async Task<UserInfoDisplayDto> GetUserInfoDisplayAsync(Guid userId)
@@ -209,15 +210,17 @@ public class UserInfoService : IUserInfoService
         {
             Success = proto.Success,
             Message = proto.Message,
-            Data = proto.Data != null ? ConvertCollectionFromProto(proto.Data) : null
+            Data = proto.Data != null ? ConvertCollectionFromProto(proto.Data, null) : null
         };
     }
 
-    private UserInfoCollectionDto ConvertCollectionFromProto(UserInfoCollectionProto proto)
+    private UserInfoCollectionDto ConvertCollectionFromProto(UserInfoCollectionProto proto, Guid? knownUserId = null)
     {
+        // Use knownUserId if provided (preferred - avoids parsing Agent Id)
+        // Note: proto.UserId stores full Agent Id (format: "AgentType:Guid"), not raw Guid
         var dto = new UserInfoCollectionDto
         {
-            UserId = Guid.TryParse(proto.UserId, out var uid) ? uid : Guid.Empty,
+            UserId = knownUserId ?? Guid.Empty, // Use known userId, don't parse from proto.UserId
             CreatedAt = proto.CreatedAt?.ToDateTime() ?? DateTime.MinValue,
             UpdatedAt = proto.UpdatedAt?.ToDateTime() ?? DateTime.MinValue,
             IsCompleted = proto.IsCompleted,

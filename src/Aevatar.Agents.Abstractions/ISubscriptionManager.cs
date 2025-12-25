@@ -43,14 +43,14 @@ namespace Aevatar.Agents.Abstractions;
 public interface ISubscriptionManager
 {
     /// <summary>
-    /// 创建订阅（带重试策略）
+    /// Create subscription (with retry policy)
     /// </summary>
-    /// <param name="parentId">父节点ID</param>
-    /// <param name="childId">子节点ID</param>
-    /// <param name="eventHandler">事件处理器</param>
-    /// <param name="retryPolicy">重试策略</param>
-    /// <param name="cancellationToken">取消令牌</param>
-    /// <returns>订阅句柄</returns>
+    /// <param name="parentId">Parent node ID</param>
+    /// <param name="childId">Child node ID</param>
+    /// <param name="eventHandler">Event handler</param>
+    /// <param name="retryPolicy">Retry policy</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Subscription handle</returns>
     Task<ISubscriptionHandle> SubscribeWithRetryAsync(
         string parentId,
         string childId,
@@ -59,131 +59,131 @@ public interface ISubscriptionManager
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 检查订阅健康状态
+    /// Check subscription health status
     /// </summary>
-    /// <param name="subscription">订阅句柄</param>
-    /// <returns>是否健康</returns>
+    /// <param name="subscription">Subscription handle</param>
+    /// <returns>Whether healthy</returns>
     Task<bool> IsSubscriptionHealthyAsync(ISubscriptionHandle subscription);
 
     /// <summary>
-    /// 重新连接订阅
+    /// Reconnect subscription
     /// </summary>
-    /// <param name="subscription">订阅句柄</param>
-    /// <param name="cancellationToken">取消令牌</param>
+    /// <param name="subscription">Subscription handle</param>
+    /// <param name="cancellationToken">Cancellation token</param>
     Task ReconnectSubscriptionAsync(
         ISubscriptionHandle subscription,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 取消订阅
+    /// Unsubscribe
     /// </summary>
-    /// <param name="subscription">订阅句柄</param>
-    /// <param name="cancellationToken">取消令牌</param>
+    /// <param name="subscription">Subscription handle</param>
+    /// <param name="cancellationToken">Cancellation token</param>
     Task UnsubscribeAsync(
         ISubscriptionHandle subscription,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// 获取所有活跃订阅
+    /// Get all active subscriptions
     /// </summary>
-    /// <returns>活跃订阅列表</returns>
+    /// <returns>Active subscription list</returns>
     Task<IReadOnlyList<ISubscriptionHandle>> GetActiveSubscriptionsAsync();
 }
 
 /// <summary>
-/// 订阅句柄
+/// Subscription handle
 /// </summary>
 public interface ISubscriptionHandle
 {
     /// <summary>
-    /// 订阅ID
+    /// Subscription ID
     /// </summary>
     Guid SubscriptionId { get; }
 
     /// <summary>
-    /// 父节点ID
+    /// Parent node ID
     /// </summary>
     string ParentId { get; }
 
     /// <summary>
-    /// 子节点ID
+    /// Child node ID
     /// </summary>
     string ChildId { get; }
 
     /// <summary>
-    /// 订阅创建时间
+    /// Subscription creation time
     /// </summary>
     DateTime CreatedAt { get; }
 
     /// <summary>
-    /// 最后活动时间
+    /// Last activity time
     /// </summary>
     DateTime LastActivityAt { get; }
 
     /// <summary>
-    /// 是否健康
+    /// Whether healthy
     /// </summary>
     bool IsHealthy { get; }
 
     /// <summary>
-    /// 重试次数
+    /// Retry count
     /// </summary>
     int RetryCount { get; }
 
     /// <summary>
-    /// 底层的流订阅（如果有）
+    /// Underlying stream subscription (if any)
     /// </summary>
     IMessageStreamSubscription? StreamSubscription { get; }
 }
 
 /// <summary>
-/// 重试策略接口
+/// Retry policy interface
 /// </summary>
 public interface IRetryPolicy
 {
     /// <summary>
-    /// 最大重试次数
+    /// Maximum retry count
     /// </summary>
     int MaxRetries { get; }
 
     /// <summary>
-    /// 计算下次重试的延迟
+    /// Calculate delay for next retry
     /// </summary>
-    /// <param name="attemptNumber">当前尝试次数</param>
-    /// <returns>延迟时间</returns>
+    /// <param name="attemptNumber">Current attempt number</param>
+    /// <returns>Delay duration</returns>
     TimeSpan GetDelay(int attemptNumber);
 
     /// <summary>
-    /// 是否应该重试
+    /// Whether should retry
     /// </summary>
-    /// <param name="exception">异常</param>
-    /// <param name="attemptNumber">当前尝试次数</param>
-    /// <returns>是否重试</returns>
+    /// <param name="exception">Exception</param>
+    /// <param name="attemptNumber">Current attempt number</param>
+    /// <returns>Whether to retry</returns>
     bool ShouldRetry(Exception exception, int attemptNumber);
 }
 
 /// <summary>
-/// 订阅健康状态
+/// Subscription health status
 /// </summary>
 public enum SubscriptionHealth
 {
     /// <summary>
-    /// 健康
+    /// Healthy
     /// </summary>
     Healthy,
 
     /// <summary>
-    /// 降级（部分功能可用）
+    /// Degraded (partial functionality available)
     /// </summary>
     Degraded,
 
     /// <summary>
-    /// 不健康
+    /// Unhealthy
     /// </summary>
     Unhealthy,
 
     /// <summary>
-    /// 断开连接
+    /// Disconnected
     /// </summary>
     Disconnected
 }

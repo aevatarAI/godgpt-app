@@ -26,7 +26,7 @@ public static class AgentRetrievalHelpers
         Guid id) 
         where TAgent : GAgentBase
     {
-        var agent = agentFactory.CreateGAgent<TAgent>(id);
+        var agent = agentFactory.CreateGAgent<TAgent>(id.ToString());
         await agent.ActivateAsync();
         return agent;
     }

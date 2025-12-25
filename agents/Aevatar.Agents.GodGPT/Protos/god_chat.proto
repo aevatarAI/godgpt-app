@@ -41,6 +41,13 @@ message ChatMessageProto {
   string content = 3;
   google.protobuf.Timestamp timestamp = 4;
   map<string, string> metadata = 5;
+  int32 chat_role = 6;  // ChatRole enum value
+  repeated string image_keys = 7;
+}
+
+// Wrapper for RPC - List<ChatMessage>
+message ChatMessageListProto {
+  repeated ChatMessageProto messages = 1;
 }
 
 message RegionProxiesEntryProto {
@@ -86,7 +93,8 @@ message UpdateUserProfileEvent {
 }
 
 message RenameChatTitleEvent {
-  string title = 1;
+  string session_id = 1;  // Guid as string
+  string title = 2;
 }
 
 message SetChatManagerGuidEvent {
@@ -141,6 +149,33 @@ message StreamChatCombinedEvent {
 // Add chat messages event
 message AddChatMessagesEvent {
   repeated ChatMessageProto messages = 1;
+}
+
+// =============================================================================
+// RPC Input Messages
+// =============================================================================
+
+message ExecutionPromptSettingsProto {
+  optional string temperature = 1;
+  optional string max_tokens = 2;
+  optional string top_p = 3;
+  optional string frequency_penalty = 4;
+  optional string presence_penalty = 5;
+  repeated string stop_sequences = 6;
+  optional string model = 7;
+}
+
+message StartStreamChatInputProto {
+  string session_id = 1;        // Guid as string
+  string sysm_llm = 2;
+  string content = 3;
+  string chat_id = 4;
+  optional ExecutionPromptSettingsProto prompt_settings = 5;
+  bool is_http_request = 6;
+  optional string region = 7;
+  repeated string images = 8;
+  optional google.protobuf.Timestamp user_local_time = 9;
+  optional string user_time_zone_id = 10;
 }
 
 // =============================================================================

@@ -5,7 +5,8 @@ using Aevatar.Core.Abstractions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
-// Alias to avoid conflict with Proto enums
+// Alias to avoid conflict with Proto enums - use Proto types for State operations
+using InvitationCodeType = Aevatar.Agents.GodGPT.Protos.InviteCode.InvitationCodeType;
 using CsInvitationCodeType = Aevatar.Application.Grains.Common.Constants.InvitationCodeType;
 using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
 using CsPaymentPlatform = Aevatar.Application.Grains.Common.Constants.PaymentPlatform;

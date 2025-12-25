@@ -228,7 +228,11 @@ public class AevatarToolManager : IAevatarToolManager
                 Description = param.Value.Description,
                 Required = parameters.Required?.Contains(param.Key) ?? false,
                 Default = param.Value.DefaultValue,
-                Enum = param.Value.Enum?.Select(e => e.ToString()).ToList()
+                Enum = param.Value.Enum?
+                    .Select(e => e?.ToString())
+                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                    .Select(s => s!)
+                    .ToList()
             };
         }
 

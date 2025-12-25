@@ -1,11 +1,11 @@
 using System.Diagnostics;
 using Aevatar.Agents.GodGPT.Protos;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
+using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Service;
-using Aevatar.Application.Grains.UserBilling;
 using Aevatar.Application.Grains.UserProfile;
 using Aevatar.GAgents.AI.Common;
 using Aevatar.GAgents.AI.Options;
@@ -15,6 +15,7 @@ using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Volo.Abp;
+using Aevatar.Agents.Abstractions.Extensions;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager;
 
@@ -30,23 +31,24 @@ public partial class ChatGAgentManager
             return new UserProfileDto();
         }
 
-        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(Guid.Parse(sessionInfo.SessionId));
-        var godChat = (IGodChat)godChatActor.GetAgent();
+        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionInfo.SessionId);
+        var godChat = godChatActor.As<IGodChat>();
         var userProfileDto = await godChat.GetUserProfileAsync();
         return userProfileDto ?? new UserProfileDto();
     }
     
     #endregion
     
-    public async Task RenameChatTitleAsync(RenameChatTitleEvent @event)
+    public async Task RenameChatTitleAsync(Aevatar.Agents.GodGPT.Protos.GodChat.RenameChatTitleEvent @event)
     {
         Logger.LogDebug($"[ChatGAgentManager][RenameChatTitleEvent] start:{JsonConvert.SerializeObject(@event)}");
 
         RaiseEvent(new RenameTitleEvent()
         {
-            SessionId = @event.SessionId.ToString(),
+            SessionId = @event.SessionId,
             Title = @event.Title
         });
+        await ConfirmEventsAsync();
 
         Logger.LogDebug($"[ChatGAgentManager][RenameChatTitleEvent] end:{JsonConvert.SerializeObject(@event)}");
     }
@@ -59,12 +61,13 @@ public partial class ChatGAgentManager
         var configuration = await GetConfigurationAsync();
         Stopwatch sw = new Stopwatch();
         sw.Start();
-        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(Guid.NewGuid());
-        var godChat = (IGodChat)godChatActor.GetAgent();
+        var newSessionId = Guid.NewGuid();
+        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(newSessionId.ToString());
+        var godChat = godChatActor.As<IGodChat>();
         // await RegisterAsync(godChat);
         sw.Stop();
         Logger.LogDebug($"CreateSessionAsync - step,time use:{sw.ElapsedMilliseconds}");
-        Logger.LogDebug($"[ChatManagerGAgent][CreateSessionAsync] grainId={godChat.GetGrainId().ToString()}");
+        Logger.LogDebug($"[ChatManagerGAgent][CreateSessionAsync] grainId={newSessionId.ToString()}");
 
         sw.Reset();
 
@@ -91,7 +94,7 @@ public partial class ChatGAgentManager
         {
             Instructions = sysMessage, 
             MaxHistoryCount = 32,
-            LlmSystemLlm = configuration.GetSystemLLM(),  // Now sync call
+            LlmSystemLlm = await configuration.GetSystemLLMAsync(),
             StreamingModeEnabled = true, 
             StreamingBufferingSize = 32
         };
@@ -101,12 +104,12 @@ public partial class ChatGAgentManager
         sw.Stop();
         Logger.LogDebug($"CreateSessionAsync - step2,time use:{sw.ElapsedMilliseconds}");
 
-        var sessionId = godChat.Id;
+        var sessionId = newSessionId; // Use the sessionId we created, not parsing from Actor ID
         if (userProfile != null)
         {
             Logger.LogDebug("CreateSessionAsync set user profile. session={0}", sessionId);
             var userProfileActor = await _actorFactory.CreateGAgentActorAsync<UserProfileGAgent>(Id);
-            var userProfileGAgent = (IUserProfileGAgent)userProfileActor.GetAgent();
+            var userProfileGAgent = userProfileActor.As<IUserProfileGAgent>();
             await userProfileGAgent.SetUserProfileAsync(userProfile.Gender, userProfile.BirthDate, userProfile.BirthPlace, userProfile.FullName);
             Logger.LogDebug("CreateSessionAsync set GodChat user profile. session={0}", sessionId);
             await godChat.SetUserProfileAsync(userProfile);
@@ -123,16 +126,19 @@ public partial class ChatGAgentManager
             CreateAt = DateTime.UtcNow.ToProtoTimestamp(),
             Guider = guider // Set the role information for the conversation
         });
+        await ConfirmEventsAsync();
 
         var initStopwatch = Stopwatch.StartNew();
-        await godChat.InitAsync(Id);
+        // Extract raw Guid from Agent ID (may be in "AgentType:Guid" format)
+        var chatManagerGuid = ExtractGuidFromId(Id);
+        await godChat.InitAsync(chatManagerGuid);
         initStopwatch.Stop();
         Logger.LogDebug(
             $"[ChatManagerGAgent][CreateSessionAsync] InitAsync completed - Duration: {initStopwatch.ElapsedMilliseconds}ms");
 
         sw.Stop();
         Logger.LogDebug($"CreateSessionAsync - step2,time use:{sw.ElapsedMilliseconds}");
-        return godChat.Id;
+        return newSessionId;
     }
 
     public async Task<Tuple<string, string>> ChatWithSessionAsync(Guid sessionId, string sysmLLM, string content,
@@ -141,7 +147,7 @@ public partial class ChatGAgentManager
         throw new Exception("The method is outdated");
     }
 
-    public async Task<List<SessionInfoDto>> GetSessionListAsync()
+    public async Task<SessionListProto> GetSessionListAsync()
     {
         // Clean expired sessions (7 days old and empty title)
         var sevenDaysAgo = DateTime.UtcNow.AddDays(-7);
@@ -159,22 +165,17 @@ public partial class ChatGAgentManager
             await ConfirmEventsAsync();
         }
 
-        var result = new List<SessionInfoDto>();
+        var result = new SessionListProto();
 
         foreach (var item in State.SessionInfoList)
         {
-            var createAt = item.CreateAt?.ToDateTime() ?? DateTime.MinValue;
-            if (createAt == default)
+            result.Sessions.Add(new SessionInfoProto
             {
-                createAt = new DateTime(2025, 4, 18);
-            }
-
-            result.Add(new SessionInfoDto()
-            {
-                SessionId = Guid.Parse(item.SessionId),
+                SessionId = item.SessionId,
                 Title = item.Title,
-                CreateAt = createAt,
-                Guider = item.Guider // Include role information in the response
+                CreateAt = item.CreateAt ?? Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc)),
+                Guider = item.Guider ?? string.Empty,
+                ShareId = item.ShareId ?? string.Empty
             });
         }
 
@@ -187,7 +188,7 @@ public partial class ChatGAgentManager
         return sessionInfo != null;
     }
 
-    public async Task<List<ChatMessage>> GetSessionMessageListAsync(Guid sessionId)
+    public async Task<ChatMessageListProto> GetSessionMessageListAsync(Guid sessionId)
     {
         Logger.LogDebug($"[ChatGAgentManager][GetSessionMessageListAsync] - session:ID {sessionId.ToString()}");
         var sessionInfo = State.GetSession(sessionId);
@@ -196,11 +197,11 @@ public partial class ChatGAgentManager
 
         if (sessionInfo == null)
         {
-            throw new UserFriendlyException($"Unable to load conversation {sessionId}");
+            throw new InvalidOperationException($"Unable to load conversation {sessionId}");
         }
 
-        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(Guid.Parse(sessionInfo.SessionId));
-        var godChat = (IGodChat)godChatActor.GetAgent();
+        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionInfo.SessionId);
+        var godChat = godChatActor.As<IGodChat>();
         return await godChat.GetChatMessageAsync();
     }
 
@@ -211,7 +212,7 @@ public partial class ChatGAgentManager
 
         if (sessionInfo == null)
         {
-            var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+            var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
             var parameters = new Dictionary<string, string>
             {
                 ["SessionId"] = sessionId.ToString()
@@ -221,11 +222,12 @@ public partial class ChatGAgentManager
                     parameters);
             Logger.LogWarning(
                 $"[ChatManagerGAgent][GetSessionMessageListWithMetaAsync] - Session not found: {sessionId} ,language:{language}");
-            throw new UserFriendlyException(localizedMessage);
+            // Use InvalidOperationException instead of UserFriendlyException for Orleans serialization
+            throw new InvalidOperationException(localizedMessage);
         }
 
-        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(Guid.Parse(sessionInfo.SessionId));
-        var godChat = (IGodChat)godChatActor.GetAgent();
+        var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionInfo.SessionId);
+        var godChat = godChatActor.As<IGodChat>();
         var result = await godChat.GetChatMessageWithMetaAsync();
 
         Logger.LogDebug(
@@ -297,15 +299,16 @@ public partial class ChatGAgentManager
         var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
         await userQuotaGAgent.ClearAllAsync();
 
-        var userBillingActor = await _actorFactory.CreateGAgentActorAsync<UserBillingGAgent>(Id);
-        var userBillingGAgent = (IUserBillingGAgent)userBillingActor.GetAgent();
-        await userBillingGAgent.ClearAllAsync();
+        // TODO: [USER_BILLING_DISABLED] UserBillingGAgent not implemented
+        // var userBillingActor = await _actorFactory.CreateGAgentActorAsync<UserBillingGAgent>(Id);
+        // var userBillingGAgent = (IUserBillingGAgent)userBillingActor.GetAgent();
+        // await userBillingGAgent.ClearAllAsync();
 
         var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(Id);
         await userInfoCollectionGAgent.ClearAllAsync();
 
         var userProfileActor = await _actorFactory.CreateGAgentActorAsync<UserProfileGAgent>(Id);
-        var userProfileGAgent = (IUserProfileGAgent)userProfileActor.GetAgent();
+        var userProfileGAgent = userProfileActor.As<IUserProfileGAgent>();
         await userProfileGAgent.ClearAsync();
 
         // TODO: [GOOGLE_AUTH_DISABLED] Unbind Google account - disabled until Google Auth is migrated
@@ -314,7 +317,7 @@ public partial class ChatGAgentManager
 
         RaiseEvent(new ClearAllEvent());
         await ConfirmEventsAsync();
-        return Id;
+        return Guid.Parse(Id);
     }
 }
 

@@ -1,6 +1,7 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.UserFeedback;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Service;
@@ -67,7 +68,7 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState>, IUserFeedbackGA
             Logger.LogDebug("[UserFeedbackGAgent][SubmitFeedbackAsync] Start - UserId: {UserId}, FeedbackType: {FeedbackType}",
                 request.UserId, request.FeedbackType);
             
-            var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+            var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
             
             // Validate request
             var validationResult = ValidateSubmitRequest(request, language);
@@ -150,7 +151,7 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState>, IUserFeedbackGA
             {
                 feedbackInfo.Subscription = new UserSubscriptionInfo
                 {
-                    PlanType = (FeedbackPlanType)request.Subscription.PlanType,
+                    PlanType = (QuotaPlanType)request.Subscription.PlanType,
                     IsUltimate = request.Subscription.IsUltimate,
                     StartDate = request.Subscription.StartDate,
                     EndDate = request.Subscription.EndDate
@@ -179,7 +180,7 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState>, IUserFeedbackGA
         }
         catch (Exception ex)
         {
-            var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+            var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
             Logger.LogError(ex, "[UserFeedbackGAgent][SubmitFeedbackAsync] Error submitting feedback for user: {UserId}", request.UserId);
             
             var errorMessage = LocalizationService != null
@@ -199,7 +200,7 @@ public class UserFeedbackGAgent : GAgentBase<UserFeedbackState>, IUserFeedbackGA
     {
         Logger.LogDebug("[UserFeedbackGAgent][CheckFeedbackEligibilityAsync] Checking eligibility for user {UserId}", Id);
             
-        var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+        var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
         
         // If no previous feedback, user is eligible
         if (State.LastFeedbackTime == null)

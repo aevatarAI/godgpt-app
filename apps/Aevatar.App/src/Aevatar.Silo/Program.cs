@@ -23,6 +23,9 @@ using Aevatar.Agents.Runtime.Orleans.CQRS;
 using Aevatar.Agents.Plugins.CQRS;
 using Aevatar.Agents.Plugins.CQRS.Batching;
 using Aevatar.Agents.Plugins.CQRS.Elasticsearch;  // Use Core's CQRS implementation
+using Aevatar.Agents.AI.Abstractions.Configuration;
+using Aevatar.Agents.AI.MEAI.DependencyInjection;
+using Aevatar.Agents.GodGPT.Extensions;
 
 namespace Aevatar.Silo;
 
@@ -117,6 +120,11 @@ public class Program
 
                 // Configure MessageStreamProviderOptions
                 services.Configure<MessageStreamProviderOptions>(context.Configuration.GetSection("MessageStream"));
+                
+                // Configure LLM Providers for AI Agents
+                services.Configure<LLMProvidersConfig>(context.Configuration.GetSection("LLMProviders"));
+                services.AddMEAI();
+                Log.Information("🤖 LLM Providers configured from appsettings.json");
 
                 // MassTransit Stream Plugin - ONLY if MessageStream.Provider is "MassTransit"
                 var messageStreamProvider = context.Configuration.GetSection("MessageStream").GetValue("Provider", "Orleans");
@@ -172,6 +180,14 @@ public class Program
                 });
                 
                 Log.Information("✅ CQRS configured with Core.BatchedStateProjector (ES: {EsUrl})", esUrl);
+                
+                // Register GodGPT Agent services and configuration (modularized)
+                services.AddGodGPTServices(context.Configuration);
+                
+                // Configure ManagerOptions for admin operations (framework-level, not GodGPT-specific)
+                services.Configure<Aevatar.Common.Options.ManagerOptions>(context.Configuration.GetSection("ManagerIds"));
+                
+                Log.Information("✅ GodGPT Agent services registered via AddGodGPTServices()");
             });
     }
 }

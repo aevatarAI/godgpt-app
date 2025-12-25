@@ -1,6 +1,8 @@
 using Aevatar.GAgents.AI.Common;
 using Aevatar.Application.Grains.Agents.ChatManager;
+using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.GodChat;
+using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using GodGPT.GAgents.Awakening.Dtos;
 using Microsoft.Extensions.Logging;
 
@@ -25,10 +27,10 @@ public partial class AwakeningGAgent
             
             // Get ChatManagerGAgent for this user using new framework
             var chatManagerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-            var chatManager = (IChatManagerGAgent)chatManagerActor.GetAgent();
-            var sessionList = await chatManager.GetSessionListAsync();
+            var chatManager = chatManagerActor.As<IChatManagerGAgent>();
+            var sessionListProto = await chatManager.GetSessionListAsync();
             
-            if (sessionList == null || sessionList.Count == 0)
+            if (sessionListProto == null || sessionListProto.Sessions.Count == 0)
             {
                 return new List<SessionContentDto>();
             }
@@ -37,26 +39,31 @@ public partial class AwakeningGAgent
             SessionContentDto? novaChimeSession = null;
             
             // Single pass: Find both sessions in one traversal with optimizations
-            for (int i = sessionList.Count - 1; i >= 0; i--)
+            for (int i = sessionListProto.Sessions.Count - 1; i >= 0; i--)
             {
-                var session = sessionList[i];
+                var sessionProto = sessionListProto.Sessions[i];
+                var sessionId = Guid.Parse(sessionProto.SessionId);
+                var sessionTitle = sessionProto.Title;
+                var sessionCreateAt = sessionProto.CreateAt?.ToDateTime().ToUniversalTime() ?? DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
+                var sessionGuider = string.IsNullOrEmpty(sessionProto.Guider) ? null : sessionProto.Guider;
                 
                 // Optimization: Skip sessions with empty titles as they likely have no messages
-                if (string.IsNullOrEmpty(session.Title))
+                if (string.IsNullOrEmpty(sessionTitle))
                 {
                     continue;
                 }
                 
-                var messages = await chatManager.GetSessionMessageListAsync(session.SessionId);
+                var messagesProto = await chatManager.GetSessionMessageListAsync(sessionId);
+                var messages = messagesProto.ToList();
                 
                 if (messages != null && messages.Count > 0)
                 {
                     var sessionContent = new SessionContentDto
                     {
-                        SessionId = session.SessionId,
-                        Title = session.Title ?? string.Empty,
+                        SessionId = sessionId,
+                        Title = sessionTitle ?? string.Empty,
                         Messages = messages,
-                        LastActivityTime = session.CreateAt,
+                        LastActivityTime = sessionCreateAt,
                         ExtractedContent = ExtractCoreContent(messages)
                     };
                     
@@ -67,7 +74,7 @@ public partial class AwakeningGAgent
                     }
                     
                     // Check if this is a Nova·Chime session
-                    if (session.Guider == NovaChimeGuider && novaChimeSession == null)
+                    if (sessionGuider == NovaChimeGuider && novaChimeSession == null)
                     {
                         novaChimeSession = sessionContent;
                     }

@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Volo.Abp.Data;
@@ -23,17 +24,20 @@ public class AppDbMigrationService : ITransientDependency
     private readonly IEnumerable<IAppDbSchemaMigrator> _dbSchemaMigrators;
     private readonly ITenantRepository _tenantRepository;
     private readonly ICurrentTenant _currentTenant;
+    private readonly IConfiguration _configuration;
 
     public AppDbMigrationService(
         IDataSeeder dataSeeder,
         ITenantRepository tenantRepository,
         ICurrentTenant currentTenant,
-        IEnumerable<IAppDbSchemaMigrator> dbSchemaMigrators)
+        IEnumerable<IAppDbSchemaMigrator> dbSchemaMigrators,
+        IConfiguration configuration)
     {
         _dataSeeder = dataSeeder;
         _tenantRepository = tenantRepository;
         _currentTenant = currentTenant;
         _dbSchemaMigrators = dbSchemaMigrators;
+        _configuration = configuration;
 
         Logger = NullLogger<AppDbMigrationService>.Instance;
     }
@@ -94,11 +98,13 @@ public class AppDbMigrationService : ITransientDependency
     {
         Logger.LogInformation($"Executing {(tenant == null ? "host" : tenant.Name + " tenant")} database seed...");
         
+        // Read admin credentials from configuration, fallback to ABP defaults
+        var adminEmail = _configuration["Identity:Admin:Email"] ?? AppConsts.AdminEmailDefaultValue;
+        var adminPassword = _configuration["Identity:Admin:Password"] ?? AppConsts.AdminPasswordDefaultValue;
+        
         await _dataSeeder.SeedAsync(new DataSeedContext(tenant?.Id)
-            .WithProperty(IdentityDataSeedContributor.AdminEmailPropertyName,
-                AppConsts.AdminEmailDefaultValue)
-            .WithProperty(IdentityDataSeedContributor.AdminPasswordPropertyName,
-                AppConsts.AdminPasswordDefaultValue)
+            .WithProperty(IdentityDataSeedContributor.AdminEmailPropertyName, adminEmail)
+            .WithProperty(IdentityDataSeedContributor.AdminPasswordPropertyName, adminPassword)
         );
     }
 

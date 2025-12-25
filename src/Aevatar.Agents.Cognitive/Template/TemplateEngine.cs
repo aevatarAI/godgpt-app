@@ -1,3 +1,4 @@
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Scriban;
@@ -18,7 +19,11 @@ public partial class TemplateEngine
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        // Human-readable JSON in prompts:
+        // - Avoid \uXXXX for non-ASCII (Chinese / math symbols like ℋ, Φ, ⊗)
+        // - Safe here because this JSON is used for LLM prompts, not for HTML/JS embedding.
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
     
     /// <summary>
@@ -53,7 +58,23 @@ public partial class TemplateEngine
         context.PushGlobal(scriptObject);
         
         // 渲染
-        return scribanTemplate.Render(context);
+        var result = scribanTemplate.Render(context);
+        
+        // DEBUG: 如果渲染结果中包含空的 Task，输出调试信息
+        if (result.Contains("Task:") && result.Contains("Task: \n"))
+        {
+            System.Diagnostics.Debug.WriteLine($"[TemplateEngine] Empty Task detected!");
+            System.Diagnostics.Debug.WriteLine($"[TemplateEngine] Variables: {string.Join(", ", variables.Keys)}");
+            System.Diagnostics.Debug.WriteLine($"[TemplateEngine] task in vars: {variables.ContainsKey("task")}");
+            if (variables.ContainsKey("task"))
+            {
+                var taskVal = variables["task"];
+                System.Diagnostics.Debug.WriteLine($"[TemplateEngine] task type: {taskVal?.GetType().Name ?? "null"}");
+                System.Diagnostics.Debug.WriteLine($"[TemplateEngine] task length: {taskVal?.ToString()?.Length ?? 0}");
+            }
+        }
+        
+        return result;
     }
     
     /// <summary>
@@ -106,33 +127,40 @@ public partial class TemplateEngine
     // ============================================================
     
     /// <summary>
-    /// 预处理模板：将 {{var}} 风格转换为 Scriban 的 {{ var }}
+    /// 预处理模板：将各种模板语法转换为 Scriban 的统一语法
+    /// 支持: Mustache ({{var}}), Handlebars ({{#if}}), Liquid/Jinja2 ({% if %})
     /// </summary>
     private static string PreprocessTemplate(string template)
     {
-        // Scriban 需要空格，但我们允许紧凑语法
-        // {{var}} → {{ var }}
-        // {{#if condition}} → {{ if condition }}
-        // {{#each items}} → {{ for item in items }}
-        // {{/if}} → {{ end }}
-        // {{/each}} → {{ end }}
-        
         var result = template;
         
-        // 转换 if/each/end
+        // ─────────────────────────────────────────────────────────
+        //  1. Liquid/Jinja2 风格 {% if %} / {% endif %}
+        //     转换为 Scriban 的 {{ if }} / {{ end }}
+        // ─────────────────────────────────────────────────────────
+        result = LiquidIfRegex().Replace(result, "{{ if $1 }}");
+        result = LiquidElseRegex().Replace(result, "{{ else }}");
+        result = LiquidEndIfRegex().Replace(result, "{{ end }}");
+        result = LiquidForRegex().Replace(result, "{{ for $1 }}");
+        result = LiquidEndForRegex().Replace(result, "{{ end }}");
+        
+        // ─────────────────────────────────────────────────────────
+        //  2. Handlebars 风格 {{#if}} / {{/if}}
+        // ─────────────────────────────────────────────────────────
         result = IfBlockRegex().Replace(result, "{{ if $1 }}");
         result = EachBlockRegex().Replace(result, "{{ for item in $1 }}");
         result = EndBlockRegex().Replace(result, "{{ end }}");
         result = ElseBlockRegex().Replace(result, "{{ else }}");
         
-        // 转换 Liquid 风格的过滤器参数 `| filter: arg` → `| filter arg`
-        // 例如: {{atomic_check | contains: 'ATOMIC'}} → {{ atomic_check | contains 'ATOMIC' }}
+        // ─────────────────────────────────────────────────────────
+        //  3. Liquid 过滤器参数语法 `| filter: arg` → `| filter arg`
+        // ─────────────────────────────────────────────────────────
         result = LiquidFilterArgRegex().Replace(result, "$1 ");
         
-        // 转换管道过滤器
+        // ─────────────────────────────────────────────────────────
+        //  4. 管道过滤器和简单变量
+        // ─────────────────────────────────────────────────────────
         result = PipeFilterRegex().Replace(result, "{{ $1 | $2 }}");
-        
-        // 转换简单变量 {{var}} → {{ var }}
         result = SimpleVarRegex().Replace(result, "{{ $1 }}");
         
         return result;
@@ -140,12 +168,22 @@ public partial class TemplateEngine
     
     /// <summary>
     /// 转换值为 Scriban 兼容格式
+    /// 关键：字典必须转换为 ScriptObject 才能支持 item.property 语法
     /// </summary>
     private static object? ConvertValue(object? value)
     {
+        if (value == null) return null;
+        
+        // 优先检查字典类型（必须在 IEnumerable 之前，因为字典也实现 IEnumerable）
+        if (value is IDictionary<string, object> dict)
+            return ConvertDictToScriptObject(dict);
+        
+        // 检查非泛型字典（兼容不同的字典类型）
+        if (value is System.Collections.IDictionary nonGenericDict)
+            return ConvertNonGenericDictToScriptObject(nonGenericDict);
+        
         return value switch
         {
-            null => null,
             string s => s,
             bool b => b,
             int i => i,
@@ -154,31 +192,58 @@ public partial class TemplateEngine
             double d => d,
             decimal m => (double)m,
             DateTime dt => dt,
+            ScriptObject so => so, // 已经是 ScriptObject，直接返回
             IEnumerable<object> list => list.Select(ConvertValue).ToList(),
-            IDictionary<string, object> dict => dict.ToDictionary(kv => kv.Key, kv => ConvertValue(kv.Value)),
+            System.Collections.IEnumerable enumerable => enumerable.Cast<object>().Select(ConvertValue).ToList(),
             _ => ConvertComplexObject(value)
         };
     }
     
     /// <summary>
-    /// 转换复杂对象为字典
+    /// 将非泛型字典转换为 ScriptObject
     /// </summary>
-    private static object ConvertComplexObject(object value)
+    private static ScriptObject ConvertNonGenericDictToScriptObject(System.Collections.IDictionary dict)
     {
-        // 使用反射转换为字典
+        var scriptObj = new ScriptObject();
+        foreach (System.Collections.DictionaryEntry entry in dict)
+        {
+            var key = entry.Key?.ToString() ?? "";
+            scriptObj[key] = ConvertValue(entry.Value);
+        }
+        return scriptObj;
+    }
+    
+    /// <summary>
+    /// 将字典转换为 Scriban ScriptObject，支持 item.property 语法
+    /// </summary>
+    private static ScriptObject ConvertDictToScriptObject(IDictionary<string, object> dict)
+    {
+        var scriptObj = new ScriptObject();
+        foreach (var (key, val) in dict)
+        {
+            scriptObj[key] = ConvertValue(val);
+        }
+        return scriptObj;
+    }
+    
+    /// <summary>
+    /// 转换复杂对象为 ScriptObject
+    /// </summary>
+    private static ScriptObject ConvertComplexObject(object value)
+    {
         var type = value.GetType();
-        var dict = new Dictionary<string, object?>();
+        var scriptObj = new ScriptObject();
         
         foreach (var prop in type.GetProperties())
         {
             if (prop.CanRead)
             {
                 var propValue = prop.GetValue(value);
-                dict[ToCamelCase(prop.Name)] = ConvertValue(propValue);
+                scriptObj[ToCamelCase(prop.Name)] = ConvertValue(propValue);
             }
         }
         
-        return dict;
+        return scriptObj;
     }
     
     private static string ToCamelCase(string name)
@@ -251,6 +316,23 @@ public partial class TemplateEngine
     //  正则表达式
     // ============================================================
     
+    // Liquid/Jinja2 风格: {% if %}, {% else %}, {% endif %}, {% for %}, {% endfor %}
+    [GeneratedRegex(@"\{%\s*if\s+(.+?)\s*%\}")]
+    private static partial Regex LiquidIfRegex();
+    
+    [GeneratedRegex(@"\{%\s*else\s*%\}")]
+    private static partial Regex LiquidElseRegex();
+    
+    [GeneratedRegex(@"\{%\s*endif\s*%\}")]
+    private static partial Regex LiquidEndIfRegex();
+    
+    [GeneratedRegex(@"\{%\s*for\s+(.+?)\s*%\}")]
+    private static partial Regex LiquidForRegex();
+    
+    [GeneratedRegex(@"\{%\s*endfor\s*%\}")]
+    private static partial Regex LiquidEndForRegex();
+    
+    // Handlebars 风格: {{#if}}, {{/if}}
     [GeneratedRegex(@"\{\{#if\s+(.+?)\}\}")]
     private static partial Regex IfBlockRegex();
     
@@ -263,7 +345,13 @@ public partial class TemplateEngine
     [GeneratedRegex(@"\{\{else\}\}")]
     private static partial Regex ElseBlockRegex();
     
-    [GeneratedRegex(@"\{\{(.+?)\s*\|\s*(.+?)\}\}")]
+    // NOTE:
+    // - `|` in Scriban is used for filter / pipe expressions (value | filter).
+    // - `||` is a boolean operator, and MUST NOT be treated as a pipe.
+    // - Our previous regex matched `||` accidentally (because it allowed 0 whitespace), which
+    //   caused expressions like `a || b` to be rewritten and crash with errors like:
+    //   "Invalid target function `True` (bool)".
+    [GeneratedRegex(@"\{\{(.+?)\s*(?<!\|)\|(?!\|)\s*(.+?)\}\}")]
     private static partial Regex PipeFilterRegex();
     
     // 转换 Liquid 风格的过滤器参数: `filter: arg` → `filter arg`

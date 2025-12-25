@@ -80,12 +80,6 @@ public interface IGAgentGrain : IGrainWithStringKey
     Task<string?> GetParentAsync();
 
     /// <summary>
-    /// 激活并设置Agent类型（已废弃，请使用 InitializeAgentAsync）
-    /// </summary>
-    [Obsolete("Use InitializeAgentAsync instead")]
-    Task ActivateAsync(string? agentTypeName = null, string? stateTypeName = null);
-
-    /// <summary>
     /// 停用
     /// </summary>
     Task DeactivateAsync();

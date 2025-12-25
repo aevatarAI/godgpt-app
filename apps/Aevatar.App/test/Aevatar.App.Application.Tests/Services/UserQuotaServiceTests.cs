@@ -45,7 +45,7 @@ public class UserQuotaServiceTests
         var actor = Substitute.For<IGAgentActor, IUserQuotaGAgent>();
         var agent = (IUserQuotaGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
 
         // Act
@@ -73,7 +73,7 @@ public class UserQuotaServiceTests
         var actor = Substitute.For<IGAgentActor, IUserQuotaGAgent>();
         var agent = (IUserQuotaGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new UpdateCreditsResponseProto
@@ -111,7 +111,7 @@ public class UserQuotaServiceTests
         var actor = Substitute.For<IGAgentActor, IUserQuotaGAgent>();
         var agent = (IUserQuotaGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new UpdateSubscriptionResponseProto
@@ -123,7 +123,7 @@ public class UserQuotaServiceTests
         {
             IsActive = true,
             PlanType = (QuotaPlanType)2, // QUOTA_PLAN_TYPE_MONTH = 2
-            Status = QuotaPaymentStatus.Active,
+            Status = QuotaPaymentStatus.Completed,
             StartDate = Timestamp.FromDateTime(DateTime.UtcNow),
             EndDate = Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1))
         });
@@ -152,7 +152,7 @@ public class UserQuotaServiceTests
         var actor = Substitute.For<IGAgentActor, IUserQuotaGAgent>();
         var agent = (IUserQuotaGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new CanUploadImageResponseProto

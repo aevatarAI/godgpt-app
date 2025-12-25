@@ -33,11 +33,15 @@ public class OrleansStreamNotFoundHandler : IStreamNotFoundHandler
             // Using IGAgentGrain which is the standard grain interface for agents
             var grain = _grainFactory.GetGrain<IGAgentGrain>(streamId);
             
-            // Invoke a method to force activation
-            // GetDescriptionAsync will trigger grain activation if not already activated
-            await grain.GetDescriptionAsync();
+            // Invoke a non-obsolete method to force activation.
+            // NOTE:
+            // - OnActivateAsync always initializes stream subscription.
+            // - If AgentTypeName was persisted, the agent will be restored automatically.
+            // - If not initialized, IsInitializedAsync simply returns false (but activation already happened).
+            var initialized = await grain.IsInitializedAsync();
             
-            _logger.LogDebug("Successfully triggered activation for Orleans Grain {AgentId}", streamId);
+            _logger.LogDebug("Successfully triggered activation for Orleans Grain {AgentId} (initialized={Initialized})",
+                streamId, initialized);
         }
         catch (Exception ex)
         {

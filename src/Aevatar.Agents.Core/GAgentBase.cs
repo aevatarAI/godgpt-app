@@ -4,7 +4,9 @@ using System.Linq;
 using System.Reflection;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Attributes;
+using Aevatar.Agents.Abstractions.Context;
 using Aevatar.Agents.Abstractions.Helpers;
+using Aevatar.Agents.Core.Context;
 using Aevatar.Agents.Core.EventSourcing;
 using Aevatar.Agents.Core.Helpers;
 using Aevatar.Agents.Core.Observability;
@@ -27,11 +29,16 @@ public abstract class GAgentBase : IGAgent
     // ============ Fields ============
 
     /// <summary>
-    /// Agent unique identifier.
-    /// Format varies by runtime:
-    /// - Orleans: "AgentType:Guid" (e.g., "ChatAgent:12345678-...")
-    /// - Local/Proto: "Guid" (e.g., "12345678-...")
-    /// Can be set internally by factories for recovery scenarios.
+    /// Agent unique identifier (**unified format**).
+    ///
+    /// Format: <c>"AgentTypeShortName:RawId"</c>
+    /// Example: <c>"ChatAgent:12345678-..."</c>
+    ///
+    /// NOTE:
+    /// - RawId (usually Guid string) can be passed during creation, Factory will automatically
+    ///   prepend type prefix via <see cref="AgentId.Normalize(System.Type,string)"/>
+    /// - If directly <c>new</c> Agent (bypassing Actor/Factory), this value may only be RawId;
+    ///   once crossing boundaries (Stream/DB/Hierarchy), normalize first
     /// </summary>
     public string Id { get; internal set; } = string.Empty;
 
@@ -44,6 +51,18 @@ public abstract class GAgentBase : IGAgent
     /// Logger property - supports automatic injection
     /// </summary>
     protected ILogger Logger { get; set; } = NullLogger.Instance;
+
+    /// <summary>
+    /// Agent context accessor for request-scoped data.
+    /// Internal to allow injection via AgentContextAccessorInjector.
+    /// </summary>
+    internal IAgentContextAccessor? ContextAccessor;
+
+    /// <summary>
+    /// Convenience property to get current agent context.
+    /// Returns null if not in a context scope.
+    /// </summary>
+    protected IAgentContext? Context => ContextAccessor?.Context;
 
     // Event handler cache (type -> metadata list)
     private static readonly ConcurrentDictionary<Type, EventHandlerMetadata[]> HandlerCache = new();
@@ -390,12 +409,15 @@ public abstract class GAgentBase : IGAgent
         // Create event handling log scope
         var eventType = envelope.Payload?.TypeUrl?.Split('/').LastOrDefault() ?? "Unknown";
 
-        using var scope = LoggingScope.CreateEventHandlingScope(
+        using var loggingScope = LoggingScope.CreateEventHandlingScope(
             Logger,
             Id,
             envelope.Id,
             eventType,
             envelope.CorrelationId);
+
+        // Create context scope from envelope metadata (restores previous context on dispose)
+        using var contextScope = ContextAccessor?.CreateScope(envelope) ?? AgentContextScope.Empty;
 
         var stopwatch = Stopwatch.StartNew();
         var handled = false;
@@ -479,7 +501,8 @@ public abstract class GAgentBase : IGAgent
                          // Log why message is null if we expected it to work
                          if (!handler.IsAllEventHandler)
                          {
-                            var msg = $"Skipping handler {handler.Method.Name} because message could not be unpacked (Type mismatch or Unpack failure). Expected: {handler.ParameterType.FullName}, Actual URL: {envelope.Payload.TypeUrl}";
+                            var actualTypeUrl = envelope.Payload?.TypeUrl ?? "null";
+                            var msg = $"Skipping handler {handler.Method.Name} because message could not be unpacked (Type mismatch or Unpack failure). Expected: {handler.ParameterType.FullName}, Actual URL: {actualTypeUrl}";
                             Logger.LogDebug(msg);
                          }
                     }

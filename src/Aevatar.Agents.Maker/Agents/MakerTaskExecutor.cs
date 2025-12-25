@@ -249,9 +249,25 @@ public partial class MakerCoordinatorGAgent
 
         if (options.Mode == ExecutionMode.Academic)
         {
-            // Academic mode: try decomposition first
-            Logger.LogInformation("[ACADEMIC] Depth {Depth}: Forcing DECOMPOSITION (Academic mode always decomposes first)", current.Depth);
+            // ─────────────────────────────────────────────────────────
+            //  Academic mode: Decompose first, but respect strategy's IsAtomic
+            //  This allows strategies to define atomic levels (e.g., depth 1+)
+            //  while still getting the benefits of Academic mode's forced decomposition
+            // ─────────────────────────────────────────────────────────
+            if (_decomposer.IsAtomic(current.Description, current.Depth))
+            {
+                Logger.LogInformation(
+                    "[ACADEMIC] Depth {Depth}: Strategy says ATOMIC → SOLVING (skipping decomposition)",
+                    current.Depth);
+                current.Phase = TaskExecutionPhase.Solving;
+            }
+            else
+            {
+                Logger.LogInformation(
+                    "[ACADEMIC] Depth {Depth}: Forcing DECOMPOSITION (Academic mode)",
+                    current.Depth);
             current.Phase = TaskExecutionPhase.Decomposing;
+            }
         }
         else
         {

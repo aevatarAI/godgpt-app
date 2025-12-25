@@ -45,10 +45,8 @@ public static class RpcInvoker
                 result = GetTaskResult(task);
             }
 
-            if (result != null)
-            {
-                response.Result = ProtobufPacker.Pack(result);
-            }
+            // Always pack result (even if null, it will be packed as Empty)
+            response.Result = ProtobufPacker.Pack(result);
             response.Success = true;
         }
         catch (Exception ex)

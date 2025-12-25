@@ -1,0 +1,133 @@
+namespace Aevatar.AxiomReasoning.AgUi;
+
+// ============================================================
+//  AG-UI EVENTS (minimal subset)
+//
+//  目标：
+//  - 让 AxiomReasoning 的 SSE 输出对齐 AG-UI Protocol（事件流接口标准化）
+//  - 保持实现极简：只实现本项目需要的事件类型 + CUSTOM 扩展
+//
+//  NOTE:
+//  - JSON 序列化使用 camelCase（在 Program.cs 里配置），所以这里用 PascalCase 命名即可。
+//  - Timestamp 采用 Unix epoch milliseconds（与 AG-UI SDK 示例一致）。
+// ============================================================
+
+public abstract record AgUiEvent
+{
+    public abstract string Type { get; }
+    public long? Timestamp { get; init; }
+    public object? RawEvent { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Run lifecycle
+// ─────────────────────────────────────────────────────────────
+
+public sealed record RunStartedEvent : AgUiEvent
+{
+    public override string Type => "RUN_STARTED";
+    public required string ThreadId { get; init; }
+    public required string RunId { get; init; }
+}
+
+public sealed record RunFinishedEvent : AgUiEvent
+{
+    public override string Type => "RUN_FINISHED";
+    public required string ThreadId { get; init; }
+    public required string RunId { get; init; }
+    public object? Result { get; init; }
+}
+
+public sealed record RunErrorEvent : AgUiEvent
+{
+    public override string Type => "RUN_ERROR";
+    public required string Message { get; init; }
+    public string? Code { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Step lifecycle
+// ─────────────────────────────────────────────────────────────
+
+public sealed record StepStartedEvent : AgUiEvent
+{
+    public override string Type => "STEP_STARTED";
+    public required string StepName { get; init; }
+}
+
+public sealed record StepFinishedEvent : AgUiEvent
+{
+    public override string Type => "STEP_FINISHED";
+    public required string StepName { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Text message streaming
+// ─────────────────────────────────────────────────────────────
+
+public sealed record TextMessageStartEvent : AgUiEvent
+{
+    public override string Type => "TEXT_MESSAGE_START";
+    public required string MessageId { get; init; }
+    public required string Role { get; init; } // "assistant" | "user" | "system" | ...
+}
+
+public sealed record TextMessageContentEvent : AgUiEvent
+{
+    public override string Type => "TEXT_MESSAGE_CONTENT";
+    public required string MessageId { get; init; }
+    public required string Delta { get; init; } // Non-empty string
+}
+
+public sealed record TextMessageEndEvent : AgUiEvent
+{
+    public override string Type => "TEXT_MESSAGE_END";
+    public required string MessageId { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  State sync
+// ─────────────────────────────────────────────────────────────
+
+public sealed record StateSnapshotEvent : AgUiEvent
+{
+    public override string Type => "STATE_SNAPSHOT";
+    public required object Snapshot { get; init; }
+}
+
+public sealed record StateDeltaEvent : AgUiEvent
+{
+    public override string Type => "STATE_DELTA";
+    public required object[] Delta { get; init; } // JSON Patch (RFC 6902)
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Message sync
+// ─────────────────────────────────────────────────────────────
+
+public sealed record AgUiMessage
+{
+    public required string Id { get; init; }
+    public required string Role { get; init; }   // "user" | "assistant" | "system" | "tool" | ...
+    public required string Content { get; init; }
+    public string? Name { get; init; }
+    public string? ToolCallId { get; init; }
+}
+
+public sealed record MessagesSnapshotEvent : AgUiEvent
+{
+    public override string Type => "MESSAGES_SNAPSHOT";
+    public required List<AgUiMessage> Messages { get; init; }
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Extension point
+// ─────────────────────────────────────────────────────────────
+
+public sealed record CustomEvent : AgUiEvent
+{
+    public override string Type => "CUSTOM";
+    public required string Name { get; init; }
+    public object? Value { get; init; }
+}
+

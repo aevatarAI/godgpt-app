@@ -2,32 +2,32 @@ namespace Aevatar.Agents.Abstractions;
 
 /// <summary>
 /// Message stream subscription handle
-/// 允许管理和取消订阅
+/// Allows managing and canceling subscriptions
 /// </summary>
 public interface IMessageStreamSubscription : IAsyncDisposable
 {
     /// <summary>
-    /// 订阅ID
+    /// Subscription ID
     /// </summary>
     Guid SubscriptionId { get; }
     
     /// <summary>
-    /// 关联的Stream ID
+    /// Associated Stream ID
     /// </summary>
     string StreamId { get; }
     
     /// <summary>
-    /// 是否已激活
+    /// Whether activated
     /// </summary>
     bool IsActive { get; }
     
     /// <summary>
-    /// 取消订阅
+    /// Unsubscribe
     /// </summary>
     Task UnsubscribeAsync();
     
     /// <summary>
-    /// 恢复订阅（用于重连场景）
+    /// Resume subscription (for reconnection scenarios)
     /// </summary>
     Task ResumeAsync();
 }

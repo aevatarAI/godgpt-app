@@ -103,8 +103,8 @@ public abstract class AevatarToolBase : IAevatarTool
             Version = Version,
             Tags = Tags,
             Parameters = CreateParameters(),
-            ExecuteAsync = (parameters, executionContext, ct) => 
-                ExecuteAsync(parameters, context, logger, ct),
+            ExecuteAsync = (parameters, executionContext, ct) =>
+                ExecuteAsync(parameters, BuildRuntimeToolContext(context, executionContext, logger), logger, ct),
             RequiresInternalAccess = RequiresInternalAccess(),
             CanBeOverridden = CanBeOverridden(),
             RequiresConfirmation = RequiresConfirmation(),
@@ -112,6 +112,68 @@ public abstract class AevatarToolBase : IAevatarTool
             RateLimit = GetRateLimit(),
             Timeout = GetTimeout()
         };
+    }
+
+    // ============================================================
+    //  ToolContext composition
+    //
+    //  WHY:
+    //  - ToolDefinition.ExecuteAsync receives a per-call ToolExecutionContext (memory, session, callbacks...).
+    //  - IAevatarTool.ExecuteAsync expects ToolContext.
+    //  - We merge "registration-time context" (static) + "execution-time context" (dynamic) into a runtime ToolContext.
+    //
+    //  NOTE:
+    //  - This keeps backward compatibility: if executionContext is null, tools behave exactly as before.
+    // ============================================================
+    private static ToolContext BuildRuntimeToolContext(
+        ToolContext baseContext,
+        ToolExecutionContext? executionContext,
+        ILogger? logger)
+    {
+        // Clone base context first (avoid tools mutating shared captured instance)
+        var merged = new ToolContext
+        {
+            AgentId = baseContext.AgentId,
+            AgentType = baseContext.AgentType,
+            IncludeCoreTools = baseContext.IncludeCoreTools,
+            Categories = baseContext.Categories,
+            GetStateCallback = baseContext.GetStateCallback,
+            PublishEventCallback = baseContext.PublishEventCallback,
+            Memory = baseContext.Memory,
+            GetSessionIdCallback = baseContext.GetSessionIdCallback,
+            Logger = baseContext.Logger ?? logger,
+            Metadata = baseContext.Metadata != null
+                ? new Dictionary<string, object>(baseContext.Metadata)
+                : new Dictionary<string, object>()
+        };
+
+        if (executionContext == null)
+            return merged;
+
+        if (!string.IsNullOrWhiteSpace(executionContext.AgentId))
+            merged.AgentId = executionContext.AgentId;
+
+        if (executionContext.Memory != null)
+            merged.Memory = executionContext.Memory;
+
+        if (executionContext.PublishEventCallback != null)
+            merged.PublishEventCallback = executionContext.PublishEventCallback;
+
+        if (executionContext.GetSessionId != null)
+            merged.GetSessionIdCallback = () => executionContext.GetSessionId();
+
+        if (executionContext.Logger != null)
+            merged.Logger = executionContext.Logger;
+
+        if (executionContext.Metadata is { Count: > 0 })
+        {
+            foreach (var (k, v) in executionContext.Metadata)
+            {
+                merged.Metadata[k] = v;
+            }
+        }
+
+        return merged;
     }
     
     /// <inheritdoc />
@@ -166,7 +228,24 @@ public abstract class AevatarToolBase : IAevatarTool
         
         return result;
     }
-    
+
+    /// <summary>
+    /// Convert ExecuteAsync parameters (Dictionary&lt;string, object&gt;) to the validator shape
+    /// (Dictionary&lt;string, object?&gt;).
+    ///
+    /// Note: nullability annotations are not part of the CLR type identity, so this is purely for
+    /// compile-time flow analysis and to keep call sites clean.
+    /// </summary>
+    protected static Dictionary<string, object?> ToNullableParameters(Dictionary<string, object> parameters)
+    {
+        var result = new Dictionary<string, object?>(parameters.Count, StringComparer.Ordinal);
+        foreach (var (key, value) in parameters)
+        {
+            result[key] = value;
+        }
+        return result;
+    }
+
     /// <summary>
     /// 是否需要内部访问权限
     /// </summary>

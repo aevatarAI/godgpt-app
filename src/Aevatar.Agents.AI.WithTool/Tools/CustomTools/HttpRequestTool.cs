@@ -112,7 +112,7 @@ public class HttpRequestTool : AevatarToolBase
         CancellationToken cancellationToken)
     {
         // 验证参数
-        var validation = ValidateParameters(parameters);
+        var validation = ValidateParameters(ToNullableParameters(parameters));
         if (!validation.IsValid)
         {
             logger?.LogWarning("Invalid parameters: {Errors}", string.Join(", ", validation.Errors));
@@ -221,7 +221,7 @@ public class HttpRequestTool : AevatarToolBase
     }
     
     /// <inheritdoc />
-    public override ToolParameterValidationResult ValidateParameters(Dictionary<string, object> parameters)
+    public override ToolParameterValidationResult ValidateParameters(Dictionary<string, object?> parameters)
     {
         var result = base.ValidateParameters(parameters);
         

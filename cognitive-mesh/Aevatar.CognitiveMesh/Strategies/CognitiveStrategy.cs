@@ -1,5 +1,8 @@
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Helpers;
+using Aevatar.Agents.AI.Abstractions.Configuration;
 using Aevatar.Agents.AI.Abstractions.Providers;
+using Aevatar.Agents.AI.Core.Embeddings;
 using Aevatar.Agents.Cognitive.Agents;
 using Aevatar.Agents.Cognitive.Engine;
 using Aevatar.Agents.Cognitive.Messages;
@@ -7,6 +10,9 @@ using Aevatar.Agents.Cognitive.Primitives;
 using Aevatar.CognitiveMesh.Abstractions;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Configuration;
+using System.Collections.Concurrent;
+using System.Text;
 
 namespace Aevatar.CognitiveMesh.Strategies;
 
@@ -29,9 +35,14 @@ public sealed class CognitiveStrategy : IReasoningStrategy
 {
     private readonly IGAgentActorManager _actorManager;
     private readonly ILLMProviderFactory _llmFactory;
-    private readonly IEmbeddingGenerator<string, Embedding<float>>? _embeddingGenerator;
+    private readonly IAIAgentEmbeddingFactory? _embeddingFactory;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<CognitiveStrategy> _logger;
     private readonly string _workflowsPath;
+    
+    // Lazy-initialized embedding generator for semantic clustering
+    private IEmbeddingGenerator<string, Embedding<float>>? _embeddingGenerator;
+    private bool _embeddingInitialized;
     
     // 工作流注册表
     private readonly InMemoryWorkflowRegistry _workflowRegistry = new();
@@ -40,12 +51,14 @@ public sealed class CognitiveStrategy : IReasoningStrategy
     public CognitiveStrategy(
         IGAgentActorManager actorManager,
         ILLMProviderFactory llmFactory,
+        IConfiguration configuration,
         ILogger<CognitiveStrategy> logger,
-        IEmbeddingGenerator<string, Embedding<float>>? embeddingGenerator = null)
+        IAIAgentEmbeddingFactory? embeddingFactory = null)
     {
         _actorManager = actorManager;
         _llmFactory = llmFactory;
-        _embeddingGenerator = embeddingGenerator;
+        _embeddingFactory = embeddingFactory;
+        _configuration = configuration;
         _logger = logger;
         
         // 工作流文件路径查找（按优先级）
@@ -95,6 +108,9 @@ public sealed class CognitiveStrategy : IReasoningStrategy
         
         try
         {
+            // ─── 阶段 0：初始化 Embedding Generator（语义聚类） ───
+            await EnsureEmbeddingInitializedAsync(ct);
+            
             // ─── 阶段 1：加载工作流 ───
             progress?.Report(new ReasoningProgress
             {
@@ -126,8 +142,22 @@ public sealed class CognitiveStrategy : IReasoningStrategy
                 ProgressPercent = 0.1f
             });
             
-            var coordinatorId = Guid.NewGuid().ToString();
-            var coordinatorActor = await _actorManager.CreateAndRegisterAsync<CognitiveCoordinatorGAgent>(coordinatorId, ct);
+            // ============================================================
+            //  Stable AgentId (session-aware)
+            //
+            //  WHY:
+            //  - Frontend wants "stateless refresh": reconnect must re-hydrate from Agent state/memory.
+            //  - That requires deterministic ids so the service can locate the same Coordinator/Workers.
+            //
+            //  If no session_id/run_id is provided, we keep the old behavior (random Guid).
+            // ============================================================
+            var stableSessionKey = TryGetStableSessionKey(options);
+            var rawCoordinatorId = !string.IsNullOrWhiteSpace(stableSessionKey)
+                ? DeterministicGuid.FromString($"cognitive:{stableSessionKey}:coordinator").ToString("D")
+                : Guid.NewGuid().ToString("D");
+
+            // NOTE: 返回的 actor.Id 是规范化后的完整 ActorId: "CognitiveCoordinatorGAgent:RawId"
+            var coordinatorActor = await _actorManager.CreateAndRegisterAsync<CognitiveCoordinatorGAgent>(rawCoordinatorId, ct);
             var coordinator = coordinatorActor.GetAgent() as CognitiveCoordinatorGAgent;
             
             if (coordinator == null)
@@ -141,6 +171,28 @@ public sealed class CognitiveStrategy : IReasoningStrategy
             
             // 配置 Coordinator
             coordinator.SetActorManager(_actorManager);
+
+            // ============================================================
+            //  Long-term chat persistence (State.History + AIMemory)
+            //
+            //  Strategy:
+            //  - State.History: short-term window for quick UI hydration
+            //  - AIMemory: long-term append-only log (optional, if factory is registered)
+            //
+            //  NOTE:
+            //  - We enable this automatically when a stable session key exists,
+            //    but callers can explicitly override via options.Context["enable_chat_history"].
+            // ============================================================
+            var enableChatHistory = ShouldEnableChatHistory(options, stableSessionKey);
+            if (enableChatHistory)
+            {
+                coordinator.EnableChatHistoryInState = true;
+                coordinator.EnableChatHistoryCompaction = true;
+
+                // We persist a structured per-step interaction to AIMemory ourselves.
+                // Avoid duplicating the same content via "archive compacted history" (best-effort).
+                coordinator.ArchiveCompactedHistoryToAIMemory = false;
+            }
             
             // 配置语义聚类投票（如果有）
             if (_embeddingGenerator != null)
@@ -148,14 +200,113 @@ public sealed class CognitiveStrategy : IReasoningStrategy
                 coordinator.SetEmbeddingGenerator(_embeddingGenerator, options.CognitiveSemanticSimilarity ?? 0.85f);
             }
             
+            // Track streaming state per step
+            // - 用于识别“首 token / 末 token”，避免 per-token 打日志导致卡死
+            // - 注意：StepEvent 回调可能并发触发，HashSet 非线程安全，会导致 IndexOutOfRangeException（内部数组被并发写破坏）
+            var streamingStarted = new ConcurrentDictionary<string, byte>();
+
             // 设置步骤事件回调 - 转发给 progress reporter
             coordinator.SetStepEventCallback(stepEvent =>
             {
+                // Phase 格式: "{PHASE_PREFIX}:{stepId}"
+                // 与 MakerPhase 枚举对应: Assessing/Decomposing/Solving/Composing
+                var phasePrefix = GetPhasePrefix(stepEvent.StepId, stepEvent.StepType);
+                
+                // Build StreamingTokenProgress for real-time display
+                StreamingTokenProgress? streamingToken = null;
+                var isRunning = stepEvent.Status == global::Aevatar.Agents.Cognitive.Messages.StepStatus.Running;
+                var isCompleted = stepEvent.Status == global::Aevatar.Agents.Cognitive.Messages.StepStatus.Completed;
+                
+                // Worker 数量必须使用“真实 Worker Pool Size”，不能用 ParallelTotal（它可能是 fan_out 数量或 vote batchSize）。
+                // 否则会导致同一个 gen[N] 在不同事件里映射到不同 worker（UI 会出现某个 worker 永远空 / 串台）。
+                var n = options.CognitiveWorkerCount ?? 5;
+                
+                // Normalize worker ID: coordinator for main tasks, worker-{(index-1) % N} for gen[index]
+                var normalizedWorkerId = NormalizeWorkerId(stepEvent.StepId, n);
+                
+                if (!string.IsNullOrEmpty(stepEvent.AssistantResponse) && stepEvent.StepType == "llm_call")
+                {
+                    var tokenCount = stepEvent.AssistantResponse.Length / 4;
+                    var isFirst = streamingStarted.TryAdd(stepEvent.StepId, 0); // Returns true if newly added
+                    
+                    streamingToken = new StreamingTokenProgress
+                    {
+                        WorkerId = normalizedWorkerId,
+                        ProposalId = stepEvent.StepId,
+                        Token = "",
+                        AccumulatedContent = stepEvent.AssistantResponse,
+                        TokenIndex = tokenCount,
+                        IsFirstToken = isFirst,
+                        IsLastToken = isCompleted,
+                        SystemPrompt = stepEvent.SystemPrompt,
+                        UserPrompt = stepEvent.UserPrompt,
+                        ProviderName = options.ProviderName ?? "deepseek"
+                    };
+
+                    // 只在“首 token / 末 token”打一次日志：否则 streaming 会把 stdout 打爆
+                    if (stepEvent.StepId.Contains("gen[") && (isFirst || isCompleted))
+                    {
+                        _logger.LogDebug(
+                            "[STREAM-MAP] {StepId} ({Status}) -> {WorkerId} (n={N}, parallelTotal={ParallelTotal}, len={Len})",
+                            stepEvent.StepId,
+                            stepEvent.Status,
+                            normalizedWorkerId,
+                            n,
+                            stepEvent.ParallelTotal,
+                            stepEvent.AssistantResponse?.Length ?? 0);
+                    }
+                    
+                    // Clear tracking when completed
+                    if (isCompleted) streamingStarted.TryRemove(stepEvent.StepId, out _);
+                }
+                
+                // Build VotingProgress when vote data is present
+                Aevatar.CognitiveMesh.Abstractions.VotingProgress? votingProgress = null;
+                if (stepEvent.StepType == "vote" && stepEvent.VoteK > 0)
+                {
+                    votingProgress = new Aevatar.CognitiveMesh.Abstractions.VotingProgress
+                    {
+                        Type = "Consensus",
+                        Round = stepEvent.VoteRound,
+                        TotalVotes = stepEvent.VoteCurrentVotes,
+                        VotesNeeded = stepEvent.VoteK,
+                        LeaderVotes = stepEvent.VoteCurrentVotes,
+                        RunnerUpVotes = 0,
+                        ClusterCount = 1,
+                        UsedSemanticClustering = false
+                    };
+                }
+
+                // Build ProposalProgress when LLM call completes
+                ProposalProgress? proposalProgress = null;
+                if (isCompleted && stepEvent.StepType == "llm_call" && !string.IsNullOrEmpty(stepEvent.AssistantResponse))
+                {
+                    proposalProgress = new ProposalProgress
+                    {
+                        ProposalId = stepEvent.StepId,
+                        Content = stepEvent.AssistantResponse,
+                        Success = true,
+                        ProviderName = options.ProviderName ?? "deepseek"
+                    };
+                }
+                
                 progress?.Report(new ReasoningProgress
                 {
-                    Phase = $"STEP:{stepEvent.StepType.ToUpper()}",
+                    Phase = $"{phasePrefix}:{stepEvent.StepId}",
                     Message = stepEvent.Message,
                     ProgressPercent = 0.2f + 0.7f * stepEvent.Progress,
+                    TaskId = normalizedWorkerId,  // Use normalized ID for frontend aggregation
+                    // ============================================================
+                    //  MAKER 递归深度（关键字段）
+                    //
+                    //  WHY:
+                    //  - PaperReview 的 Atomic Points 树依赖 Depth 来构建 parent/child
+                    //  - Depth 缺失会导致：
+                    //    1) 多级 decompose 全部被当成 root（只显示第一级）
+                    //    2) solve_atomic/compose 的共识无法归属到 point（DONE 但无结论）
+                    //    3) 深层 execute_subtasks[i] “串到”第一级（ID 冲突/覆盖）
+                    // ============================================================
+                    Depth = stepEvent.Depth,
                     StepId = stepEvent.StepId,
                     StepType = stepEvent.StepType,
                     StepStatus = stepEvent.Status.ToString(),
@@ -166,10 +317,22 @@ public sealed class CognitiveStrategy : IReasoningStrategy
                     ParallelTotal = stepEvent.ParallelTotal,
                     ParallelCompleted = stepEvent.ParallelCompleted,
                     ParallelFailed = stepEvent.ParallelFailed,
-                    // 传递 LLM 对话记录
+                    // Global stats (Coordinator + Workers)
+                    // NOTE:
+                    // - DSL step events only provide cumulative tokens_used / llm_calls (no prompt/completion split)
+                    // - We map tokens_used → TotalPromptTokens (Completion=0) to preserve exact totalTokens = prompt+completion
+                    TotalLlmCalls = stepEvent.LlmCalls,
+                    TotalPromptTokens = stepEvent.TokensUsed,
+                    TotalCompletionTokens = 0,
+                    // LLM conversation data
                     SystemPrompt = stepEvent.SystemPrompt,
                     UserPrompt = stepEvent.UserPrompt,
-                    AssistantResponse = stepEvent.AssistantResponse
+                    AssistantResponse = stepEvent.AssistantResponse,
+                    // Streaming Token for real-time display
+                    StreamingToken = streamingToken,
+                    // Voting and Proposal progress for stage tracking
+                    Voting = votingProgress,
+                    Proposal = proposalProgress
                 });
             });
             
@@ -182,9 +345,21 @@ public sealed class CognitiveStrategy : IReasoningStrategy
             
             // 创建 Worker 池
             var workerPoolSize = options.CognitiveWorkerCount > 0 ? options.CognitiveWorkerCount.Value : 5;
-            await coordinator.CreateWorkerPoolAsync(workerPoolSize);
             
-            _logger.LogInformation("Created Coordinator {Id} with {Workers} workers", coordinatorId, workerPoolSize);
+            IReadOnlyList<Guid>? stableWorkerIds = null;
+            if (!string.IsNullOrWhiteSpace(stableSessionKey))
+            {
+                var ids = new List<Guid>(capacity: workerPoolSize);
+                for (var i = 0; i < workerPoolSize; i++)
+                {
+                    ids.Add(DeterministicGuid.FromString($"cognitive:{stableSessionKey}:worker:{i}"));
+                }
+                stableWorkerIds = ids;
+            }
+            
+            await coordinator.CreateWorkerPoolAsync(workerPoolSize, stableWorkerIds);
+            
+            _logger.LogInformation("Created Coordinator {Id} with {Workers} workers", coordinatorActor.Id, workerPoolSize);
             
             // ─── 阶段 3：执行工作流 ───
             progress?.Report(new ReasoningProgress
@@ -201,15 +376,22 @@ public sealed class CognitiveStrategy : IReasoningStrategy
             // 注意：由于是事件驱动，我们需要轮询或使用事件订阅
             
             // 构建初始变量
+            // context 包含原始任务内容，递归时子任务可以访问
             var initialVariables = new Dictionary<string, object>
             {
-                ["task"] = task
+                ["task"] = task,
+                ["context"] = task  // 递归时子任务通过 context 访问原始内容
             };
-            
+
             // 添加额外参数
-            if (options.CognitiveConsensusK > 0)
+            // 默认 K=3，可被外部显式配置覆盖
+            if (options.CognitiveConsensusK is > 0)
             {
                 initialVariables["k"] = options.CognitiveConsensusK.Value;
+            }
+            else
+            {
+                initialVariables["k"] = 3;
             }
             if (options.CognitiveMaxRounds > 0)
             {
@@ -219,18 +401,55 @@ public sealed class CognitiveStrategy : IReasoningStrategy
             {
                 initialVariables["max_depth"] = options.CognitiveMaxDepth.Value;
             }
+
+            // Extra runtime flags (from service Context)
+            // - Keep it explicit: only propagate known flags to avoid leaking arbitrary user data into DSL variables.
+            if (options.Context != null &&
+                options.Context.TryGetValue("continue_on_failure", out var cof) &&
+                bool.TryParse(cof, out var continueOnFailure))
+            {
+                initialVariables["continue_on_failure"] = continueOnFailure;
+            }
+
+            if (options.Context != null &&
+                options.Context.TryGetValue("language", out var lang) &&
+                !string.IsNullOrWhiteSpace(lang))
+            {
+                initialVariables["language"] = lang.Trim();
+            }
+
+            // HPA knobs (whitelist):
+            // - propagate only expected keys to avoid leaking arbitrary user data into DSL variables
+            if (options.Context != null)
+            {
+                foreach (var (key, value) in options.Context)
+                {
+                    if (string.IsNullOrWhiteSpace(key) || value == null) continue;
+
+                    var k2 = key.Trim();
+                    if (k2.StartsWith("hpa_", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(k2, "min_coherence", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(k2, "max_gap_norm", StringComparison.OrdinalIgnoreCase) ||
+                        string.Equals(k2, "max_associator_mean", StringComparison.OrdinalIgnoreCase))
+                    {
+                        // Keep as string; DSL parsers / hpa executor will parse when needed.
+                        initialVariables[k2] = value;
+                    }
+                }
+            }
             
             // 直接调用 Coordinator 启动工作流（不通过事件流）
             _ = coordinator.StartWorkflowAsync(workflowName, initialVariables);
             
             // ─── 阶段 4：等待完成（轮询状态）───
-            var result = await WaitForCompletionAsync(coordinator, progress, ct);
+            // 重要：必须尊重 options.MaxDuration，避免测试/生产无限等待。
+            var timeout = options.MaxDuration > TimeSpan.Zero ? options.MaxDuration : TimeSpan.FromMinutes(30);
+            var workflowResult = await WaitForCompletionAsync(coordinator, progress, timeout, ct);
             
             // ─── 阶段 5：清理 ───
-            await _actorManager.DeactivateAndUnregisterAsync(coordinatorId, ct);
+            await _actorManager.DeactivateAndUnregisterAsync(coordinatorActor.Id, ct);
             
             var duration = DateTime.UtcNow - startTime;
-            var workflowResult = coordinator.GetResult();
             
             if (workflowResult.Success)
             {
@@ -244,17 +463,47 @@ public sealed class CognitiveStrategy : IReasoningStrategy
                     TotalCompletionTokens = workflowResult.TotalTokens / 2
                 });
                 
+                // Serialize output properly (not just ToString)
+                var outputContent = SerializeOutput(workflowResult.Output);
+                
                 return ReasoningResult.Succeeded(
-                    workflowResult.Output?.ToString() ?? "",
+                    outputContent,
                     duration,
                     workflowResult.TotalLlmCalls,
                     workflowResult.TotalTokens / 2,
                     workflowResult.TotalTokens / 2);
             }
-            else
+
+            // ─────────────────────────────────────────────────────────
+            //  Timeout fallback (关键：不浪费已完成的结果)
+            // ─────────────────────────────────────────────────────────
+            if (string.Equals(workflowResult.Error, "Workflow execution timed out", StringComparison.OrdinalIgnoreCase))
             {
-                return ReasoningResult.Failed(workflowResult.Error ?? "Workflow failed", duration);
+                // workflowResult.Output 已在 WaitForCompletionAsync 中被填充为“部分报告”
+                var outputContent = SerializeOutput(workflowResult.Output);
+
+                progress?.Report(new ReasoningProgress
+                {
+                    Phase = "COMPLETE",
+                    Message = $"Timed out after {timeout.TotalMinutes:F0} minutes; returning partial report.",
+                    ProgressPercent = 1.0f,
+                    TotalLlmCalls = workflowResult.TotalLlmCalls,
+                    TotalPromptTokens = workflowResult.TotalTokens,
+                    TotalCompletionTokens = 0
+                });
+
+                // NOTE:
+                // - DSL 只提供累计 tokens_used / llm_calls
+                // - 这里把 tokens_used 视为 promptTokens（completion=0），确保 TotalTokens 一致
+                return ReasoningResult.Succeeded(
+                    outputContent,
+                    duration,
+                    workflowResult.TotalLlmCalls,
+                    workflowResult.TotalTokens,
+                    completionTokens: 0);
             }
+
+            return ReasoningResult.Failed(workflowResult.Error ?? "Workflow failed", duration);
         }
         catch (OperationCanceledException)
         {
@@ -272,6 +521,65 @@ public sealed class CognitiveStrategy : IReasoningStrategy
     //  辅助方法
     // ============================================================
     
+    /// <summary>
+    /// Lazy-initialize embedding generator from LLM provider configuration.
+    /// Required for semantic clustering in vote steps.
+    /// </summary>
+    private async Task EnsureEmbeddingInitializedAsync(CancellationToken ct = default)
+    {
+        if (_embeddingInitialized) return;
+        
+        if (_embeddingFactory == null)
+        {
+            _logger.LogDebug("No IAIAgentEmbeddingFactory available, semantic clustering disabled");
+            _embeddingInitialized = true;
+            return;
+        }
+        
+        try
+        {
+            // Get default provider configuration from IConfiguration
+            var providersSection = _configuration.GetSection("LLMProviders:Providers");
+            var defaultProviderName = _configuration["LLMProviders:Default"] ?? "deepseek";
+            var providerSection = providersSection.GetSection(defaultProviderName);
+            
+            if (!providerSection.Exists())
+            {
+                _logger.LogWarning("LLM provider configuration not found: {Name}, semantic clustering disabled", defaultProviderName);
+                _embeddingInitialized = true;
+                return;
+            }
+            
+            var providerConfig = new LLMProviderConfig();
+            providerSection.Bind(providerConfig);
+            
+            if (providerConfig.Embeddings is not { Enabled: true })
+            {
+                _logger.LogDebug("Embeddings not enabled in provider config, semantic clustering disabled");
+                _embeddingInitialized = true;
+                return;
+            }
+            
+            _embeddingGenerator = await _embeddingFactory.CreateAsync(providerConfig, ct);
+            
+            if (_embeddingGenerator != null)
+            {
+                _logger.LogInformation("✓ Semantic clustering enabled with embedding model: {Model}", 
+                    providerConfig.Embeddings.Model ?? providerConfig.Model);
+            }
+            else
+            {
+                _logger.LogWarning("Failed to create embedding generator, semantic clustering disabled");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error initializing embedding generator, semantic clustering disabled");
+        }
+        
+        _embeddingInitialized = true;
+    }
+
     private Task EnsureWorkflowsLoadedAsync()
     {
         if (_workflowsLoaded) return Task.CompletedTask;
@@ -308,27 +616,17 @@ public sealed class CognitiveStrategy : IReasoningStrategy
     private async Task<WorkflowResult> WaitForCompletionAsync(
         CognitiveCoordinatorGAgent coordinator,
         IProgress<ReasoningProgress>? progress,
+        TimeSpan timeout,
         CancellationToken ct)
     {
-        var pollInterval = TimeSpan.FromMilliseconds(500);
-        var timeout = TimeSpan.FromMinutes(30);
+        var pollInterval = TimeSpan.FromMilliseconds(1000); // 降低轮询频率
         var elapsed = TimeSpan.Zero;
+        var lastDescription = "";
         
         while (!ct.IsCancellationRequested && elapsed < timeout)
         {
             await Task.Delay(pollInterval, ct);
             elapsed += pollInterval;
-            
-            // 检查状态
-            var description = await coordinator.GetDescriptionAsync();
-            
-            // 报告进度
-            progress?.Report(new ReasoningProgress
-            {
-                Phase = "RUNNING",
-                Message = description,
-                ProgressPercent = 0.2f + 0.7f * (float)(elapsed.TotalSeconds / timeout.TotalSeconds)
-            });
             
             // 检查是否完成
             var result = coordinator.GetResult();
@@ -336,14 +634,88 @@ public sealed class CognitiveStrategy : IReasoningStrategy
             {
                 return result;
             }
+
+            // 只在描述变化时报告进度（减少无用事件）
+            var description = await coordinator.GetDescriptionAsync();
+            if (description != lastDescription)
+            {
+                lastDescription = description;
+                // 不再发送 RUNNING 轮询事件，避免干扰真正的步骤事件
+            }
         }
         
-        // 超时
-        return new WorkflowResult
+        // ─────────────────────────────────────────────────────────
+        //  超时：不直接判失败，而是输出“当前已完成的部分结果”
+        // ─────────────────────────────────────────────────────────
+        var snapshot = coordinator.GetResult();
+        snapshot.Success = false;
+        snapshot.Error = "Workflow execution timed out";
+        snapshot.Output = BuildTimeoutFallbackOutput(coordinator.GetStepEvents(), elapsed, timeout);
+        return snapshot;
+    }
+
+    // ─────────────────────────────────────────────────────────
+    //  Timeout fallback: 组合已完成片段为部分报告（不浪费前面跑出的内容）
+    // ─────────────────────────────────────────────────────────
+    private static string BuildTimeoutFallbackOutput(IReadOnlyList<WorkflowStepEvent> events, TimeSpan elapsed, TimeSpan timeout)
+    {
+        static string? LastCompletedAssistant(IReadOnlyList<WorkflowStepEvent> evts, int depth, string stepId, string stepType)
         {
-            Success = false,
-            Error = "Workflow execution timed out"
-        };
+            for (var i = evts.Count - 1; i >= 0; i--)
+            {
+                var e = evts[i];
+                if (e.Depth != depth) continue;
+                if (e.Status != StepStatus.Completed) continue;
+                if (!string.Equals(e.StepId, stepId, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.Equals(e.StepType, stepType, StringComparison.OrdinalIgnoreCase)) continue;
+                if (!string.IsNullOrWhiteSpace(e.AssistantResponse)) return e.AssistantResponse;
+            }
+            return null;
+        }
+
+        var sb = new StringBuilder();
+        sb.AppendLine("## ⚠️ Timeout: Partial Review Report\n");
+        sb.AppendLine($"本次评审已运行 **{elapsed.TotalMinutes:F1} 分钟**，超过超时阈值 **{timeout.TotalMinutes:F0} 分钟**，系统停止等待并输出当前已完成的部分结果。");
+        sb.AppendLine("注意：由于超时，评审流程未完整执行，以下内容可能不完整/未达成最终共识。\n");
+
+        if (events.Count == 0)
+        {
+            sb.AppendLine("> (没有捕获到任何步骤事件，无法生成部分结果)");
+            return sb.ToString().Trim();
+        }
+
+        var top = LastCompletedAssistant(events, 0, "compose", "vote") ?? LastCompletedAssistant(events, 0, "solve_atomic", "vote");
+        if (!string.IsNullOrWhiteSpace(top))
+        {
+            sb.AppendLine("### 已生成的汇总输出（best-effort）");
+            sb.AppendLine(top.Trim());
+            return sb.ToString().Trim();
+        }
+
+        var solutions = new List<string>();
+        foreach (var e in events)
+        {
+            if (e.Depth <= 0) continue;
+            if (e.Status != StepStatus.Completed) continue;
+            if (!string.Equals(e.StepType, "vote", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(e.StepId, "solve_atomic", StringComparison.OrdinalIgnoreCase)) continue;
+            if (string.IsNullOrWhiteSpace(e.AssistantResponse)) continue;
+            solutions.Add(e.AssistantResponse);
+        }
+
+        if (solutions.Count > 0)
+        {
+            sb.AppendLine("### 组合输出（fallback）");
+            sb.AppendLine(string.Join("\n\n---\n\n", solutions.Select(s => s.Trim())));
+            return sb.ToString().Trim();
+        }
+
+        var last = events[^1];
+        sb.AppendLine("### 运行快照");
+        sb.AppendLine($"- **Last step**: `{last.StepType}` `{last.StepId}` ({last.Status}) depth={last.Depth}");
+        sb.AppendLine($"- **Last message**: {last.Message}");
+        sb.AppendLine("> (尚未产生可用的评审内容；仅记录了流程事件)");
+        return sb.ToString().Trim();
     }
     
     /// <summary>
@@ -353,5 +725,226 @@ public sealed class CognitiveStrategy : IReasoningStrategy
     {
         EnsureWorkflowsLoadedAsync().GetAwaiter().GetResult();
         return _workflowRegistry.List();
+    }
+    
+    // ============================================================
+    //  Phase 映射 - 与 MakerPhase 枚举对应
+    // ============================================================
+    
+    /// <summary>
+    /// stepId 关键词 → Phase 前缀映射
+    /// </summary>
+    private static readonly (string keyword, string prefix)[] PhaseMapping =
+    [
+        ("check_atomic", "ASSESS"),     // MakerPhase.Assessing
+        ("decompose", "DECOMPOSE"),     // MakerPhase.Decomposing
+        ("compose", "COMPOSE"),         // MakerPhase.Composing
+        ("solve", "SOLVE"),             // MakerPhase.Solving
+        ("execute", "EXECUTE"),         // MakerPhase.Executing
+    ];
+
+    // ============================================================
+    //  Fan-out Step Prefixes (worker grouping)
+    //
+    //  WHY:
+    //  - DSL fan_out 会把 step id 展开成 "{id}[i]"（0-based index）
+    //  - UI 侧依赖 WorkerId 分组；若不识别这些展开形式，就会“永远只有 coordinator”
+    //
+    //  NOTE:
+    //  - 这里用“数据驱动前缀集合”避免写一堆 if/else 分支
+    //  - 新增 fan_out step 时，只需要把 id 加进集合（或升级为从 workflow 元数据自动生成）
+    // ============================================================
+    private static readonly HashSet<string> FanOutStepPrefixes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        // axiom_theorem_loop.yaml
+        "prove_with_workers",
+
+        // hypothesis_promotion_loop*.yaml
+        // NOTE:
+        // - fan_out 会展开成 "{id}[i]"，若不加入这里，UI 会把所有并行子任务都归到 coordinator，
+        //   进而造成 streaming token 交错时“每个 token 都新增一条 history 记录”的错觉。
+        "refute_scout",
+        "prove_or_refute_with_workers",
+
+        // maker-v2.yaml / maker.yaml
+        "execute_subtasks",
+        "solve_subtasks",
+
+        // uot-combinational*.yaml
+        "decompose_thoughts",
+        "synthesize",
+        "synthesize_candidates",
+        "evaluate_candidates"
+    };
+    
+    private static string GetPhasePrefix(string stepId, string stepType)
+    {
+        var stepIdLower = stepId.ToLowerInvariant();
+        
+        foreach (var (keyword, prefix) in PhaseMapping)
+        {
+            if (stepIdLower.Contains(keyword))
+                return prefix;
+        }
+        
+        return stepType.ToUpperInvariant();
+    }
+
+    /// <summary>
+    /// Normalize step ID to logical worker ID (coordinator or worker-N).
+    /// Uses N (worker count) to cycle workers: gen[index] -> worker-{(index-1) % workerCount}
+    /// </summary>
+    private static string NormalizeWorkerId(string stepId, int workerCount = 5)
+    {
+        if (string.IsNullOrEmpty(stepId)) return "coordinator";
+        
+        var lower = stepId.ToLowerInvariant();
+        
+        // Coordinator patterns: check_atomic, compose, vote steps
+        if (lower.Contains("check_atomic") || 
+            lower.Contains("coordinator") ||
+            (lower.Contains("compose") && !lower.Contains("gen[")) ||
+            lower.EndsWith(".vote"))
+        {
+            return "coordinator";
+        }
+        
+        // Worker patterns: gen[index] -> worker-{(index-1) % workerCount}
+        var match = System.Text.RegularExpressions.Regex.Match(stepId, @"gen\[(\d+)\]");
+        if (match.Success && int.TryParse(match.Groups[1].Value, out var genIndex))
+        {
+            var workerIndex = workerCount > 0 ? (genIndex - 1) % workerCount : 0;
+            return $"worker-{workerIndex}";
+        }
+
+        // Fan-out patterns: "{stepIdPrefix}[i]" -> worker-{i % workerCount}
+        // e.g. prove_with_workers[2], execute_subtasks[0], decompose_thoughts[4] ...
+        var bracketStart = stepId.IndexOf('[');
+        if (bracketStart > 0)
+        {
+            var bracketEnd = stepId.IndexOf(']', bracketStart + 1);
+            if (bracketEnd > bracketStart + 1)
+            {
+                var prefix = stepId[..bracketStart];
+                var indexText = stepId[(bracketStart + 1)..bracketEnd];
+                if (FanOutStepPrefixes.Contains(prefix) && int.TryParse(indexText, out var i))
+                {
+                    var workerIndex = workerCount > 0 ? i % workerCount : 0;
+                    return $"worker-{workerIndex}";
+                }
+            }
+        }
+        
+        // Default to coordinator for unknown patterns
+        return "coordinator";
+    }
+
+    private static string? TryGetStableSessionKey(ReasoningOptions options)
+    {
+        if (options.Context == null || options.Context.Count == 0)
+            return null;
+
+        // Prefer "session_id" (service-owned); fallback to "run_id" for generic callers.
+        if (options.Context.TryGetValue("session_id", out var sessionId) &&
+            !string.IsNullOrWhiteSpace(sessionId))
+        {
+            return sessionId.Trim();
+        }
+
+        if (options.Context.TryGetValue("run_id", out var runId) &&
+            !string.IsNullOrWhiteSpace(runId))
+        {
+            return runId.Trim();
+        }
+
+        return null;
+    }
+
+    private static bool ShouldEnableChatHistory(ReasoningOptions options, string? stableSessionKey)
+    {
+        // Explicit override (preferred).
+        if (options.Context != null &&
+            options.Context.TryGetValue("enable_chat_history", out var raw) &&
+            !string.IsNullOrWhiteSpace(raw) &&
+            bool.TryParse(raw, out var enabled))
+        {
+            return enabled;
+        }
+
+        // Implicit default:
+        // - if caller provides a stable session key, we assume they want reconnectable history.
+        return !string.IsNullOrWhiteSpace(stableSessionKey);
+    }
+    
+    /// <summary>
+    /// Serialize workflow output to readable string.
+    /// Handles Dictionary, List, and primitive types.
+    /// </summary>
+    private static string SerializeOutput(object? output)
+    {
+        if (output == null) return "";
+        
+        // If it's already a string, return it
+        if (output is string str) return str;
+        
+        // If it's a Dictionary, try to extract meaningful content
+        if (output is IDictionary<string, object> dict)
+        {
+            // Try common field names first
+            var priorityFields = new[] { "solution", "content", "result", "answer", "output", "text", "review" };
+            foreach (var field in priorityFields)
+            {
+                if (dict.TryGetValue(field, out var val) && val != null)
+                {
+                    var serialized = SerializeOutput(val);
+                    if (!string.IsNullOrEmpty(serialized) && serialized.Length > 10)
+                        return serialized;
+                }
+            }
+            
+            // If no priority field found, look for any string value
+            foreach (var (key, val) in dict)
+            {
+                if (val is string s && s.Length > 50)
+                    return s;
+            }
+            
+            // Last resort: JSON serialize
+            try
+            {
+                return System.Text.Json.JsonSerializer.Serialize(dict, new System.Text.Json.JsonSerializerOptions
+                {
+                    WriteIndented = true
+                });
+            }
+            catch
+            {
+                return dict.ToString() ?? "";
+            }
+        }
+        
+        // If it's a List, serialize each item
+        if (output is System.Collections.IList list)
+        {
+            var items = new List<string>();
+            foreach (var item in list)
+            {
+                items.Add(SerializeOutput(item));
+            }
+            return string.Join("\n\n", items);
+        }
+        
+        // For other objects, try JSON serialization
+        try
+        {
+            return System.Text.Json.JsonSerializer.Serialize(output, new System.Text.Json.JsonSerializerOptions
+            {
+                WriteIndented = true
+            });
+        }
+        catch
+        {
+            return output.ToString() ?? "";
+        }
     }
 }

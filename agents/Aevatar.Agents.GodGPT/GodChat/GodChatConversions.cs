@@ -114,6 +114,38 @@ public static class GodChatConversions
         return protos.Select(p => p.FromProto()).ToList();
     }
     
+    /// <summary>
+    /// Convert List&lt;ChatMessage&gt; to ChatMessageListProto for RPC return
+    /// </summary>
+    public static ChatMessageListProto ToChatMessageListProto(this List<ChatMessage>? messages)
+    {
+        var result = new ChatMessageListProto();
+        if (messages != null)
+        {
+            result.Messages.AddRange(messages.Select(m => m.ToProto()));
+        }
+        return result;
+    }
+    
+    /// <summary>
+    /// Convert List&lt;ChatMessageProto&gt; to ChatMessageListProto for RPC return
+    /// </summary>
+    public static ChatMessageListProto ToChatMessageListProto(this IEnumerable<ChatMessageProto> protos)
+    {
+        var result = new ChatMessageListProto();
+        result.Messages.AddRange(protos);
+        return result;
+    }
+    
+    /// <summary>
+    /// Convert ChatMessageListProto to List&lt;ChatMessage&gt;
+    /// </summary>
+    public static List<ChatMessage> ToList(this ChatMessageListProto? proto)
+    {
+        if (proto == null) return new List<ChatMessage>();
+        return proto.Messages.FromProtoList();
+    }
+    
     // =============================================================================
     // RegionProxies Conversions
     // =============================================================================
@@ -257,6 +289,39 @@ public static class GodChatConversions
         }
         
         return proto;
+    }
+    
+    public static Aevatar.Application.Grains.Agents.ChatManager.ResponseStreamGodChat FromProto(this ResponseStreamGodChatProto proto)
+    {
+        var response = new Aevatar.Application.Grains.Agents.ChatManager.ResponseStreamGodChat
+        {
+            ResponseType = proto.ResponseType switch
+            {
+                ResponseTypeProto.ResponseTypeChatResponse => Aevatar.Application.Grains.Agents.ChatManager.ResponseType.ChatResponse,
+                _ => Aevatar.Application.Grains.Agents.ChatManager.ResponseType.ChatResponse
+            },
+            Response = proto.Response ?? "",
+            NewTitle = proto.NewTitle ?? "",
+            ChatId = proto.ChatId ?? "",
+            IsLastChunk = proto.IsLastChunk,
+            SerialNumber = proto.SerialNumber,
+            SessionId = Guid.TryParse(proto.SessionId, out var sessionId) ? sessionId : Guid.Empty
+        };
+        
+        if (proto.AudioData != null && proto.AudioData.Length > 0)
+        {
+            response.AudioData = proto.AudioData.ToByteArray();
+        }
+        
+        if (proto.AudioMetadata != null)
+        {
+            response.AudioMetadata = new Aevatar.Application.Grains.Agents.ChatManager.AudioMetadata
+            {
+                Duration = proto.AudioMetadata.DurationSeconds
+            };
+        }
+        
+        return response;
     }
 }
 

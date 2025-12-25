@@ -3,6 +3,8 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using Aevatar.Agents.Abstractions.Context;
+using Aevatar.Agents.Core.Context;
 using Aevatar.App.Application.Contracts.Services.Share;
 using Aevatar.Quantum;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
@@ -12,7 +14,6 @@ using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Orleans.Runtime;
 using Volo.Abp;
 using Aevatar.App.Application.Services;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
@@ -33,15 +34,18 @@ public class GodGPTShareController : AevatarController
     private readonly IGodGPTShareService _shareService;
     private readonly ILogger<GodGPTShareController> _logger;
     private readonly IIpLocationService _ipLocationService;
+    private readonly IAgentContextAccessor _agentContextAccessor;
 
     public GodGPTShareController(
         IGodGPTShareService shareService,
         ILogger<GodGPTShareController> logger,
-        IIpLocationService ipLocationService)
+        IIpLocationService ipLocationService,
+        IAgentContextAccessor agentContextAccessor)
     {
         _shareService = shareService;
         _logger = logger;
         _ipLocationService = ipLocationService;
+        _agentContextAccessor = agentContextAccessor;
     }
 
     /// <summary>
@@ -95,7 +99,8 @@ public class GodGPTShareController : AevatarController
         var clientIp = HttpContext.GetClientIpAddress();
         var appType = HttpContext.GetGodGPTAppType();
         var isCN = await _ipLocationService.IsInMainlandChinaAsync(clientIp, appType.ToString());
-        RequestContext.Set("IsCN", isCN);
+        var agentContext = _agentContextAccessor.GetOrCreate();
+        agentContext.Set(AgentContextKeys.IsCN, isCN);
         var response = await _shareService.GetShareKeyWordWithAIAsync(sessionId, processedContent, region, sessionType, language);
         _logger.LogDebug(
             $"[GodGPTShareController][GetShareKeyWordWithAIAsync] completed for sessionId={sessionId}, language={language},processedContent={processedContent}, duration: {stopwatch.ElapsedMilliseconds}ms");

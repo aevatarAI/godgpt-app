@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
+using Aevatar.Agents.GodGPT.Protos.UserInfoCollection;
 using Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.Common.Service;
@@ -13,6 +14,7 @@ using GodGPT.GAgents.Common.Constants;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
+using Aevatar.Agents.Abstractions.Extensions;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 
@@ -23,33 +25,33 @@ public partial class GodChatGAgent
 {
     #region Agent Factory Methods
     
-    private async Task<IUserInfoCollectionGAgent> GetUserInfoCollectionAgentAsync(Guid userId)
+    private async Task<IUserInfoCollectionGAgent> GetUserInfoCollectionAgentAsync(string userId)
     {
         var actor = await _actorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId);
-        return (IUserInfoCollectionGAgent)actor.GetAgent();
+        return actor.As<IUserInfoCollectionGAgent>();
     }
     
-    private async Task<IUserQuotaGAgent> GetUserQuotaAgentAsync(Guid userId)
+    private async Task<IUserQuotaGAgent> GetUserQuotaAgentAsync(string userId)
     {
         var actor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId);
-        return (IUserQuotaGAgent)actor.GetAgent();
+        return actor.As<IUserQuotaGAgent>();
     }
 
-    private async Task<ConfigurationGAgent> GetConfigurationAsync()
+    private async Task<IConfigurationGAgent> GetConfigurationAsync()
     {
-        if (_configurationAgent == null)
+        if (_configurationAgentInterface == null)
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<ConfigurationGAgent>(
-                CommonHelper.GetSessionManagerConfigurationId());
-            _configurationAgent = (ConfigurationGAgent)actor.GetAgent();
+                CommonHelper.GetSessionManagerConfigurationId().ToString());
+            _configurationAgentInterface = actor.As<IConfigurationGAgent>();
         }
-        return _configurationAgent;
+        return _configurationAgentInterface;
     }
 
-    private async Task<IInvitationGAgent> GetInvitationAgentAsync(Guid userId)
+    private async Task<IInvitationGAgent> GetInvitationAgentAsync(string userId)
     {
         var actor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>(userId);
-        return (IInvitationGAgent)actor.GetAgent();
+        return actor.As<IInvitationGAgent>();
     }
     
     #endregion
@@ -71,11 +73,11 @@ public partial class GodChatGAgent
             {
                 Title = title
             });
-            var chatManagerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(Guid.Parse(State.ChatManagerGuid));
-            var chatManagerGAgent = (IChatManagerGAgent)chatManagerActor.GetAgent();
-            await chatManagerGAgent.RenameChatTitleAsync(new RenameChatTitleEvent()
+            var chatManagerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(State.ChatManagerGuid);
+            var chatManagerGAgent = chatManagerActor.As<IChatManagerGAgent>();
+            await chatManagerGAgent.RenameChatTitleAsync(new Aevatar.Agents.GodGPT.Protos.GodChat.RenameChatTitleEvent()
             {
-                SessionId = sessionId,
+                SessionId = sessionId.ToString(),
                 Title = title
             });
             
@@ -126,9 +128,16 @@ public partial class GodChatGAgent
         // Re-enable when Google Calendar integration is migrated to new framework
         Logger.LogDebug($"[GodChatGAgent][GenerateDailyRecommendationsAsync] {Id} Google Calendar disabled - returning empty prompt");
         
-        var userQuotaGAgent = await GetUserQuotaAgentAsync(Guid.Parse(State.ChatManagerGuid));
-        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(Guid.Parse(State.ChatManagerGuid));
-        (string fullName, string prompt) = await userInfoCollectionGAgent.GenerateUserInfoPromptAsync(userLocalTime);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(State.ChatManagerGuid);
+        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(State.ChatManagerGuid);
+        var request = new GenerateUserInfoPromptRequestProto
+        {
+            UserId = State.ChatManagerGuid,
+            UserLocalTime = userLocalTime.HasValue ? Timestamp.FromDateTime(DateTime.SpecifyKind(userLocalTime.Value, DateTimeKind.Utc)) : null
+        };
+        var response = await userInfoCollectionGAgent.GenerateUserInfoPromptAsync(request);
+        var fullName = response.FullName;
+        var prompt = response.Prompt;
         var isSubscribed = await userQuotaGAgent.IsSubscribedAsync(true) || await userQuotaGAgent.IsSubscribedAsync(false);
         
         var languageEnglishName = GodGPTLanguageHelper.GetLanguageEnglishName(language);

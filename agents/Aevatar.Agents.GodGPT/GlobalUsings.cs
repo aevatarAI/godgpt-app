@@ -7,9 +7,6 @@ global using System.Text;
 global using System.Text.Json;
 global using System.Net.Mime;
 
-// Proto generated namespaces
-global using Aevatar.Agents.GodGPT.Protos.DailyPushUser;
-
 // Legacy Compatibility Layer - Aevatar.Core (Primary for this project)
 global using Aevatar.Core;
 global using Aevatar.Core.Abstractions;
@@ -39,7 +36,6 @@ global using EventHandlerAttribute = Aevatar.Core.EventHandlerAttribute;
 global using Aevatar.Application.Grains.Agents.ChatManager.Common;
 global using Aevatar.Application.Grains.Common.Constants;
 global using Aevatar.Application.Grains.ChatManager.Dtos;
-global using Aevatar.Application.Grains.UserBilling;
 
 // C# enums are kept in Common/Constants for business logic compatibility
 // Proto enums are used in State and Event definitions only

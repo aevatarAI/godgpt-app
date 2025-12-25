@@ -79,7 +79,7 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
     public async Task<UserInfoCollectionResponseProto> UpdateUserInfoCollectionAsync(UpdateUserInfoCollectionRequestProto request)
     {
         Logger.LogInformation("[UserInfoCollectionGAgent][UpdateUserInfoCollectionAsync] Updating user info collection userId:{userId}", request.UserId);
-        var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+        var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
 
         // Validate required fields if they are being updated
         if (request.NameInfo != null)
@@ -339,7 +339,7 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
     public Task<UserInfoOptionsResponseProto> GetUserInfoOptionsAsync()
     {
         Logger.LogDebug("[UserInfoCollectionGAgent][GetUserInfoOptionsAsync] Getting user info options");
-        var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+        var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
 
         var seekingInterestOptions = UserInfoLocalizationHelper.GetSeekingInterestEnumOptions(language);
         var sourceChannelOptions = UserInfoLocalizationHelper.GetSourceChannelEnumOptions(language);
@@ -386,7 +386,7 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
             });
         }
 
-        var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+        var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
         var currentTime = request.UserLocalTime != null
             ? request.UserLocalTime.ToDateTime() 
             : DateTime.UtcNow;

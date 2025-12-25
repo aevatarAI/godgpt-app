@@ -95,50 +95,122 @@ public abstract class AevatarLLMProviderBase : IAevatarLLMProvider
         AevatarLLMRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // For streaming, we can only retry the initial connection
-        IAsyncEnumerable<AevatarLLMToken>? stream = null;
+        // ============================================================
+        //  关键修复：不要对同一个流进行“二次枚举”
+        //
+        //  旧实现：
+        //  - 为了拿到首个 token（TTFT）会创建一个 enumerator 并 MoveNext 一次
+        //  - 然后又用 await foreach 再枚举同一个 IAsyncEnumerable
+        //    * 对很多实现来说，这会触发第二次 API 调用（等于“白跑一遍”）
+        //    * 还会导致首个 enumerator 未正确释放，连接/资源泄漏
+        //
+        //  正确做法：
+        //  - 只创建一个 enumerator
+        //  - 仅对“首 token”施加超时与重试（TTFT）
+        //  - 后续继续读取同一个 enumerator
+        // ============================================================
+
+        var policy = Policy;
+        IAsyncEnumerator<AevatarLLMToken>? enumerator = null;
+        CancellationTokenSource? streamCts = null;
         AevatarLLMToken? firstToken = null;
 
-        await ExecuteWithPolicyAsync(
-            async ct =>
-            {
-                stream = GenerateStreamCoreAsync(request, ct);
-                var enumerator = stream.GetAsyncEnumerator(ct);
-                try
+        try
+        {
+            // Retry & circuit breaker only for "TTFT / first token"
+            firstToken = await ExecuteWithPolicyAsync(
+                async ct =>
                 {
-                    if (await enumerator.MoveNextAsync())
+                    CancellationTokenSource? localCts = null;
+                    IAsyncEnumerator<AevatarLLMToken>? localEnumerator = null;
+
+                    try
                     {
-                        firstToken = enumerator.Current;
+                        // Link to external cancellation, but enforce TTFT timeout via CancelAfter
+                        localCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                        localCts.CancelAfter(policy.CallTimeout);
+
+                        localEnumerator = GenerateStreamCoreAsync(request, localCts.Token)
+                            .GetAsyncEnumerator(localCts.Token);
+
+                        if (!await localEnumerator.MoveNextAsync())
+                        {
+                            // Empty stream
+                            await localEnumerator.DisposeAsync();
+                            localEnumerator = null;
+                            localCts.Dispose();
+                            localCts = null;
+                            return (AevatarLLMToken?)null;
+                        }
+
+                        // First token received — stop the TTFT timer, keep external cancellation alive
+                        localCts.CancelAfter(System.Threading.Timeout.InfiniteTimeSpan);
+
+                        var token = localEnumerator.Current;
+
+                        // Hand over ownership to outer scope
+                        enumerator = localEnumerator;
+                        streamCts = localCts;
+                        localEnumerator = null;
+                        localCts = null;
+
+                        return token;
                     }
-                }
-                finally
-                {
-                    // Enumerator will be disposed when stream iteration completes
-                }
-                return true; // Dummy return for ExecuteWithPolicyAsync
-            },
-            cancellationToken);
+                    finally
+                    {
+                        if (localEnumerator != null)
+                        {
+                            await localEnumerator.DisposeAsync();
+                        }
 
-        // Yield first token if we got one
-        if (firstToken != null)
-        {
-            yield return firstToken;
-        }
+                        localCts?.Dispose();
+                    }
+                },
+                cancellationToken,
+                applyTimeout: false);
 
-        // Continue streaming
-        if (stream != null)
-        {
-            var skipFirst = firstToken != null;
-            await foreach (var token in stream.WithCancellation(cancellationToken))
+            if (firstToken != null)
             {
-                if (skipFirst)
-                {
-                    skipFirst = false;
-                    continue;
-                }
-                yield return token;
+                yield return firstToken;
+            }
+
+            if (enumerator == null)
+            {
+                yield break;
+            }
+
+            while (await enumerator.MoveNextAsync())
+            {
+                yield return enumerator.Current;
             }
         }
+        finally
+        {
+            if (enumerator != null)
+            {
+                await enumerator.DisposeAsync();
+            }
+
+            streamCts?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// 默认模型信息（给继承自 <see cref="AevatarLLMProviderBase"/> 的 Provider 使用）。
+    /// 
+    /// 设计取舍：
+    /// - 该基类强制子类实现 <c>GenerateStreamCoreAsync</c>，因此默认认为支持 Streaming。
+    /// - 子类若想提供更准确的模型能力/元数据，可自行 override。
+    /// </summary>
+    public virtual Task<AevatarModelInfo> GetModelInfoAsync(CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(new AevatarModelInfo
+        {
+            Name = ProviderName,
+            MaxTokens = 4096,
+            SupportsStreaming = true,
+            SupportsFunctions = false
+        });
     }
 
     /// <summary>
@@ -222,7 +294,8 @@ public abstract class AevatarLLMProviderBase : IAevatarLLMProvider
 
     private async Task<T> ExecuteWithPolicyAsync<T>(
         Func<CancellationToken, Task<T>> operation,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool applyTimeout = true)
     {
         var policy = Policy;
         var startTime = DateTime.UtcNow;
@@ -255,14 +328,28 @@ public abstract class AevatarLLMProviderBase : IAevatarLLMProvider
 
             try
             {
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                timeoutCts.CancelAfter(policy.CallTimeout);
+                var effectiveCt = ct;
+                CancellationTokenSource? timeoutCts = null;
 
-                var result = await operation(timeoutCts.Token);
+                if (applyTimeout)
+                {
+                    timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                    timeoutCts.CancelAfter(policy.CallTimeout);
+                    effectiveCt = timeoutCts.Token;
+                }
 
-                // Success - reset circuit breaker
-                OnSuccess(ProviderName);
-                return result;
+                try
+                {
+                    var result = await operation(effectiveCt);
+
+                    // Success - reset circuit breaker
+                    OnSuccess(ProviderName);
+                    return result;
+                }
+                finally
+                {
+                    timeoutCts?.Dispose();
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {

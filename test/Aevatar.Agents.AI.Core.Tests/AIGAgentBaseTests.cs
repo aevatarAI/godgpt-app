@@ -151,10 +151,109 @@ public class AIGAgentBaseTests(AITestFixture fixture) : IClassFixture<AITestFixt
     }
 
     [Fact]
+    [DisplayName("ChatAsync should append messages to State.History when switch enabled")]
+    public async Task ChatAsync_WithHistoryEnabled_ShouldAppendToStateHistory()
+    {
+        // Arrange
+        _mockProvider.Clear();
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "Hello from assistant" });
+
+        var agent = _agentFactory.CreateGAgent<TestAIGAgent>();
+        await agent.InitializeAsync("test-provider");
+        agent.EnableChatHistoryInState = true;
+
+        // Act
+        await agent.ChatAsync(ChatRequest.Create("Hello from user"));
+
+        // Assert
+        var state = agent.GetState();
+        state.History.Count.ShouldBe(2);
+        state.History[0].Role.ShouldBe(AevatarChatRole.User);
+        state.History[0].Content.ShouldBe("Hello from user");
+        state.History[1].Role.ShouldBe(AevatarChatRole.Assistant);
+        state.History[1].Content.ShouldBe("Hello from assistant");
+    }
+
+    [Fact]
+    [DisplayName("ChatAsync should replay State.History into LLM request when switch enabled")]
+    public async Task ChatAsync_WithHistoryEnabled_ShouldReplayHistoryInRequest()
+    {
+        // Arrange
+        _mockProvider.Clear();
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "A1" });
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "A2" });
+
+        var agent = _agentFactory.CreateGAgent<TestAIGAgent>();
+        await agent.InitializeAsync("test-provider");
+        agent.EnableChatHistoryInState = true;
+
+        // Act
+        await agent.ChatAsync(ChatRequest.Create("U1"));
+        await agent.ChatAsync(ChatRequest.Create("U2"));
+
+        // Assert
+        _mockProvider.CapturedRequests.Count.ShouldBe(2);
+        _mockProvider.CapturedRequests[0].Messages.Count.ShouldBe(1);
+        _mockProvider.CapturedRequests[0].Messages[0].Content.ShouldBe("U1");
+
+        // Second request should include prior (U1, A1) + current (U2)
+        _mockProvider.CapturedRequests[1].Messages.Count.ShouldBe(3);
+        _mockProvider.CapturedRequests[1].Messages[0].Content.ShouldBe("U1");
+        _mockProvider.CapturedRequests[1].Messages[1].Content.ShouldBe("A1");
+        _mockProvider.CapturedRequests[1].Messages[2].Content.ShouldBe("U2");
+    }
+
+    [Fact]
+    [DisplayName("ChatAsync should compact history and inject summary when compaction enabled")]
+    public async Task ChatAsync_WithHistoryCompactionEnabled_ShouldCompactAndInjectSummary()
+    {
+        // Arrange
+        _mockProvider.Clear();
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "A1" });
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "A2" });
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "A3" });
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "S12" }); // summary after 3rd call
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "A4" });
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "S23" }); // summary after 4th call
+
+        var agent = _agentFactory.CreateGAgent<TestAIGAgent>();
+        await agent.InitializeAsync("test-provider");
+        agent.EnableChatHistoryInState = true;
+        agent.EnableChatHistoryCompaction = true;
+        agent.ChatHistoryMaxMessages = 4; // keep last 2 turns (user+assistant)*2
+
+        // Act
+        await agent.ChatAsync(ChatRequest.Create("U1"));
+        await agent.ChatAsync(ChatRequest.Create("U2"));
+        await agent.ChatAsync(ChatRequest.Create("U3")); // triggers compaction (history 6 -> 4) + summary
+
+        // Assert (state bounded + summary stored)
+        var stateAfter3 = agent.GetState();
+        stateAfter3.History.Count.ShouldBe(4);
+        stateAfter3.Context.ContainsKey("history_summary").ShouldBeTrue();
+        stateAfter3.Context["history_summary"].ShouldBe("S12");
+
+        // Act (next request should carry summary in system prompt)
+        await agent.ChatAsync(ChatRequest.Create("U4"));
+
+        // Assert (find the LLM request for U4; summary call uses UserPrompt and no Messages)
+        var requestForU4 = _mockProvider.CapturedRequests
+            .First(r => r.Messages.Any(m => m.Content == "U4"));
+
+        requestForU4.SystemPrompt.ShouldNotBeNull();
+        requestForU4.SystemPrompt!.ShouldContain("Conversation summary (memory)");
+        requestForU4.SystemPrompt!.ShouldContain("S12");
+        requestForU4.Messages.Count.ShouldBe(5); // 4 history + current user message
+    }
+
+    [Fact]
     [DisplayName("ChatStreamAsync should stream tokens")]
     public async Task ChatStreamAsync_ShouldStream()
     {
         // Arrange
+        _mockProvider.Clear();
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "Test response from test-provider" });
+
         var agent = _agentFactory.CreateGAgent<TestAIGAgent>();
         await agent.InitializeAsync("test-provider");
 
@@ -171,6 +270,37 @@ public class AIGAgentBaseTests(AITestFixture fixture) : IClassFixture<AITestFixt
         // The mock provider returns "Test response from test-provider" by default, split into words
         receivedTokens.Should().HaveCount(4); // "Test ", "response ", "from ", "test-provider"
         string.Join("", receivedTokens).Should().Be("Test response from test-provider");
+    }
+
+    [Fact]
+    [DisplayName("ChatStreamAsync should append messages to State.History when switch enabled")]
+    public async Task ChatStreamAsync_WithHistoryEnabled_ShouldAppendToStateHistory()
+    {
+        // Arrange
+        _mockProvider.Clear();
+        _mockProvider.EnqueueResponse(new AevatarLLMResponse { Content = "Streamed response" });
+
+        var agent = _agentFactory.CreateGAgent<TestAIGAgent>();
+        await agent.InitializeAsync("test-provider");
+        agent.EnableChatHistoryInState = true;
+
+        var request = ChatRequest.Create("Stream user");
+        var receivedTokens = new List<string>();
+
+        // Act
+        await foreach (var token in agent.ChatStreamAsync(request))
+        {
+            receivedTokens.Add(token);
+        }
+
+        // Assert
+        string.Join("", receivedTokens).ShouldBe("Streamed response");
+        var state = agent.GetState();
+        state.History.Count.ShouldBe(2);
+        state.History[0].Role.ShouldBe(AevatarChatRole.User);
+        state.History[0].Content.ShouldBe("Stream user");
+        state.History[1].Role.ShouldBe(AevatarChatRole.Assistant);
+        state.History[1].Content.ShouldBe("Streamed response");
     }
 
     [Fact]
@@ -217,6 +347,7 @@ public class AIGAgentBaseTests(AITestFixture fixture) : IClassFixture<AITestFixt
 
         // Act
         await agent.InitializeAsync("test-provider");
+        await agent.ActivateAsync();
 
         // Assert
         var config = agent.GetCustomConfig();
@@ -248,7 +379,8 @@ public class AIGAgentBaseTests(AITestFixture fixture) : IClassFixture<AITestFixt
 
         // Assert
         _mockProvider.CapturedRequests.ShouldNotBeEmpty();
-        _mockProvider.CapturedRequests[0].SystemPrompt.ShouldBe("Custom system prompt");
+        _mockProvider.CapturedRequests[0].SystemPrompt.ShouldNotBeNull();
+        _mockProvider.CapturedRequests[0].SystemPrompt!.ShouldStartWith("Custom system prompt");
     }
 
     [Fact]

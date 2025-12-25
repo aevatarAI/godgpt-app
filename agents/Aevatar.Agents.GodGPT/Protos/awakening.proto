@@ -86,3 +86,33 @@ message ResetTodayContentEvent {
   // Empty event - just triggers the reset
 }
 
+// =============================================================================
+// Awakening DTOs for RPC
+// =============================================================================
+
+message AwakeningContentDtoProto {
+  int32 awakening_level = 1;
+  string awakening_message = 2;
+  AwakeningStatusProto status = 3;
+}
+
+message AwakeningResultDtoProto {
+  bool is_success = 1;
+  int64 timestamp = 2;
+  int32 awakening_level = 3;
+  string awakening_message = 4;
+  string error_message = 5;
+}
+
+message SessionContentDtoProto {
+  string session_id = 1;
+  string title = 2;
+  google.protobuf.Timestamp last_activity_time = 3;
+  string extracted_content = 4;
+  // Note: Messages are complex type, omitting for simplification
+}
+
+message SessionContentListProto {
+  repeated SessionContentDtoProto sessions = 1;
+}
+

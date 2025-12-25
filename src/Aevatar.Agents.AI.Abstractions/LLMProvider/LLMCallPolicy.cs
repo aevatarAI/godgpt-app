@@ -37,8 +37,8 @@ public sealed record LLMCallPolicy
     /// <summary>Duration to keep circuit open before testing.</summary>
     public TimeSpan CircuitBreakerDuration { get; init; } = TimeSpan.FromMinutes(1);
 
-    /// <summary>Timeout for individual LLM calls.</summary>
-    public TimeSpan CallTimeout { get; init; } = TimeSpan.FromMinutes(2);
+    /// <summary>Timeout for individual LLM calls (10 min for large token generation).</summary>
+    public TimeSpan CallTimeout { get; init; } = TimeSpan.FromMinutes(10);
 
     /// <summary>Default policy with sensible defaults.</summary>
     public static LLMCallPolicy Default => new();

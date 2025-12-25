@@ -4,7 +4,6 @@ package aevatar.agents.creative_reasoning;
 option csharp_namespace = "Aevatar.Agents.CreativeReasoning.Messages";
 
 import "google/protobuf/timestamp.proto";
-import "google/protobuf/any.proto";
 
 // ============================================================
 //  Universe of Thoughts (UoT) - Creative Reasoning Framework

@@ -4,6 +4,7 @@ using System.Security;
 using System.Threading.Tasks;
 using Aevatar.App.Application.Services;
 using Aevatar.App.Application.Contracts.Services.Admin;
+using Aevatar.App.HttpApi.Controllers;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Dtos;
 using Microsoft.AspNetCore.Authorization;

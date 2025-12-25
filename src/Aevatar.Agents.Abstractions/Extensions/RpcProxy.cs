@@ -205,6 +205,10 @@ internal class RpcProxy<TInterface> : DispatchProxy where TInterface : class
             throw new InvalidOperationException(
                 $"RPC call '{request.MethodName}' failed: {response.Error?.Message ?? "Unknown error"}");
 
+        // Handle null result (should be packed as Empty, but check for safety)
+        if (response.Result == null)
+            return default(TResult)!;
+
         return ProtobufPacker.Unpack<TResult>(response.Result);
     }
 }

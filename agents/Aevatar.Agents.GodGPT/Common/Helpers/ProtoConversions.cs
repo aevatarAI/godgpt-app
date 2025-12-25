@@ -1,3 +1,4 @@
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Common.Constants;
 using Google.Protobuf.WellKnownTypes;
 
@@ -5,10 +6,49 @@ namespace Aevatar.Application.Grains.Common.Helpers;
 
 /// <summary>
 /// Extension methods for converting between Protobuf types and C# types
-/// NOTE: PlanType and PaymentStatus conversions removed - now using Proto types from user_quota.proto everywhere
 /// </summary>
 public static class ProtoConversions
 {
+    #region PlanType Conversions
+    
+    /// <summary>
+    /// Convert C# PlanType to Proto QuotaPlanType
+    /// </summary>
+    public static QuotaPlanType ToQuotaPlanType(this PlanType planType)
+    {
+        return (QuotaPlanType)(int)planType;
+    }
+    
+    /// <summary>
+    /// Convert Proto QuotaPlanType to C# PlanType
+    /// </summary>
+    public static PlanType ToPlanType(this QuotaPlanType quotaPlanType)
+    {
+        return (PlanType)(int)quotaPlanType;
+    }
+    
+    #endregion
+    
+    #region PaymentStatus Conversions
+    
+    /// <summary>
+    /// Convert C# PaymentStatus to Proto QuotaPaymentStatus
+    /// </summary>
+    public static QuotaPaymentStatus ToQuotaPaymentStatus(this PaymentStatus status)
+    {
+        return (QuotaPaymentStatus)(int)status;
+    }
+    
+    /// <summary>
+    /// Convert Proto QuotaPaymentStatus to C# PaymentStatus
+    /// </summary>
+    public static PaymentStatus ToPaymentStatus(this QuotaPaymentStatus status)
+    {
+        return (PaymentStatus)(int)status;
+    }
+    
+    #endregion
+
     #region Timestamp Conversions
     
     /// <summary>

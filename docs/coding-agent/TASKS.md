@@ -1,6 +1,6 @@
 # Coding Agent 任务清单
 
-> 目标：补齐 `AIGAgentWithToolBase` 直到具备 https://github.com/ghuntley/how-to-build-a-coding-agent 教程中的全部 coding agent 能力。
+> 目标：补齐 `AIGAgentBase`（工具能力已合并）直到具备 https://github.com/ghuntley/how-to-build-a-coding-agent 教程中的全部 coding agent 能力。
 
 ## 1. Proto 与消息层
 - [ ] 定义 `coding_tools.proto`，覆盖 `ReadFileRequest/Response`、`ListFilesRequest/Response`、`RunCommandRequest/Response`、`EditFileRequest/Response`、`CodeSearchRequest/Response` 等所有跨边界结构。
@@ -14,7 +14,7 @@
 - [ ] `WorkspaceCodeSearchTool`：封装 ripgrep，允许 type 过滤、结果条数/上下文控制。
 
 ## 3. 工具执行框架
-- [ ] 为 `AIGAgentWithToolBase.ExecuteToolAsync` 填充 `ToolExecutionContext`：包含 `AgentId`、`WorkspaceRoot`、`AllowedCommands`、`MaxOutputBytes` 等。
+- [ ] 为 `AIGAgentBase.ExecuteToolAsync` 填充 `ToolExecutionContext`：包含 `AgentId`、`WorkspaceRoot`、`AllowedCommands`、`MaxOutputBytes` 等。
 - [ ] 重构 `HandleFunctionCallAsync` 为循环（或尾递归），直到 LLM 返回纯文本，支持多轮工具调用。
 - [ ] 为危险工具启用默认安全策略：`RateLimit`、`RequiresConfirmation`、操作审计事件。
 

@@ -7,10 +7,14 @@ namespace Aevatar.Agents.Abstractions;
 public interface IGAgent
 {
     /// <summary>
-    /// Agent unique identifier.
-    /// Format varies by runtime:
-    /// - Orleans: "AgentType:Guid" (e.g., "ChatAgent:12345678-...")
-    /// - Local/Proto: "Guid" (e.g., "12345678-...")
+    /// Agent's globally unique identifier (**unified format**).
+    ///
+    /// Format: <c>"AgentTypeShortName:RawId"</c>
+    /// Example: <c>"ChatAgent:12345678-..."</c>
+    ///
+    /// Note:
+    /// - RawId (usually Guid string) can be passed during creation, system will automatically assemble into full format
+    /// - All subsequent cross-boundary/cross-runtime operations (Manager/Stream/Hierarchy/DB) should always use this full format
     /// </summary>
     string Id { get; }
 

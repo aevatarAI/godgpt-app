@@ -2,6 +2,8 @@ using Aevatar.App.HttpApi.Controllers;
 using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using Aevatar.Agents.Abstractions.Context;
+using Aevatar.Agents.Core.Context;
 using Aevatar.Anonymous;
 using Aevatar.Application.Constants;
 using Aevatar.App.Application.Contracts.Services;
@@ -14,7 +16,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Orleans.Runtime;
 using Volo.Abp;
 
 namespace Aevatar.Controllers;
@@ -33,17 +34,20 @@ public class GodGPTGuestController : AevatarController
     private readonly ILogger<GodGPTGuestController> _logger;
     private readonly ILocalizationService _localizationService;
     private readonly IIpLocationService _ipLocationService;
+    private readonly IAgentContextAccessor _agentContextAccessor;
 
     public GodGPTGuestController(
         IGodGPTGuestService guestService,
         ILogger<GodGPTGuestController> logger,
         ILocalizationService localizationService,
-        IIpLocationService ipLocationService)
+        IIpLocationService ipLocationService,
+        IAgentContextAccessor agentContextAccessor)
     {
         _guestService = guestService;
         _logger = logger;
         _localizationService = localizationService;
         _ipLocationService = ipLocationService;
+        _agentContextAccessor = agentContextAccessor;
     }
 
     /// <summary>
@@ -62,8 +66,9 @@ public class GodGPTGuestController : AevatarController
         {
             var appType = HttpContext.GetGodGPTAppType();
             var isCN = await _ipLocationService.IsInMainlandChinaAsync(clientIp, appType.ToString());
-            RequestContext.Set("IsCN", isCN);
-            
+            var agentContext = _agentContextAccessor.GetOrCreate();
+            agentContext.Set(AgentContextKeys.IsCN, isCN);
+
             // Always check limits first to provide graceful response
             var limits = await _guestService.GetGuestChatLimitsAsync(clientIp);
 

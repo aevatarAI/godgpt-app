@@ -19,9 +19,9 @@ dotnet add reference Aevatar.Agents.AI.WithTool.MCP
 ```csharp
 using Aevatar.Agents.AI.WithTool.MCP;
 
-public class MyAgent : AIGAgentWithToolBase<MyState>
+public class MyAgent : AIGAgentBase<MyState>
 {
-    protected override async Task RegisterToolsAsync()
+    protected override async Task RegisterToolsAsync(CancellationToken cancellationToken = default)
     {
         // Option 1: Via npx (simplest)
         await ToolManager.RegisterMCPServerViaNpxAsync(
@@ -145,7 +145,7 @@ await ToolManager.RegisterMCPServerAsync(
 ## Architecture
 
 ```
-AIGAgentWithToolBase
+AIGAgentBase
     ↓
 AevatarToolManager (统一管理)
     ├── Local Tools

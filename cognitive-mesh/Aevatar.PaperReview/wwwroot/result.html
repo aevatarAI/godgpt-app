@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Review Result</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f6f8fa;
+            --bg-tertiary: #f0f2f5;
+            --bg-hover: #f3f4f6;
+            
+            --text-primary: #1f2937;
+            --text-secondary: #4b5563;
+            --text-muted: #9ca3af;
+            
+            --accent: #2563eb;
+            --accent-light: #dbeafe;
+            --accent-hover: #1d4ed8;
+            
+            --success: #059669;
+            --success-light: #d1fae5;
+            --warning: #d97706;
+            --error: #dc2626;
+            
+            --border: #e5e7eb;
+            --border-dark: #d1d5db;
+            
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1);
+            
+            --radius-sm: 6px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            
+            --font-mono: 'JetBrains Mono', monospace;
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            
+            --sidebar-width: 280px;
+            --header-height: 60px;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            line-height: 1.6;
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           LAYOUT
+           ───────────────────────────────────────────────────────────── */
+
+        .app {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+        }
+
+        .header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: var(--header-height);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 24px;
+            background: var(--bg-primary);
+            border-bottom: 1px solid var(--border);
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .back-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: all 0.2s;
+        }
+
+        .back-btn:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-dark);
+        }
+
+        .header-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .header-meta {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn:hover {
+            background: var(--bg-hover);
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           MAIN
+           ───────────────────────────────────────────────────────────── */
+
+        .main {
+            display: flex;
+            margin-top: var(--header-height);
+            min-height: calc(100vh - var(--header-height));
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           SIDEBAR (TOC)
+           ───────────────────────────────────────────────────────────── */
+
+        .sidebar {
+            position: fixed;
+            top: var(--header-height);
+            left: 0;
+            bottom: 0;
+            width: var(--sidebar-width);
+            background: var(--bg-primary);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            padding: 20px 0;
+        }
+
+        .toc-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0 20px 16px;
+            font-family: var(--font-mono);
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .toc-list {
+            padding: 12px 0;
+        }
+
+        .toc-item {
+            display: block;
+            padding: 8px 20px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: all 0.15s;
+            border-left: 2px solid transparent;
+        }
+
+        .toc-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .toc-item.active {
+            background: var(--accent-light);
+            color: var(--accent);
+            border-left-color: var(--accent);
+            font-weight: 500;
+        }
+
+        .toc-item.level-2 { padding-left: 32px; font-size: 12px; }
+        .toc-item.level-3 { padding-left: 44px; font-size: 11px; color: var(--text-muted); }
+
+        /* ─────────────────────────────────────────────────────────────
+           CONTENT
+           ───────────────────────────────────────────────────────────── */
+
+        .content {
+            flex: 1;
+            margin-left: var(--sidebar-width);
+            padding: 40px;
+            max-width: 900px;
+        }
+
+        .content-wrapper {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 40px 48px;
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           MARKDOWN CONTENT
+           ───────────────────────────────────────────────────────────── */
+
+        .markdown-body {
+            font-size: 15px;
+            line-height: 1.8;
+        }
+
+        .markdown-body h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin: 32px 0 16px;
+            padding-bottom: 12px;
+            border-bottom: 2px solid var(--border);
+            color: var(--text-primary);
+        }
+
+        .markdown-body h1:first-child { margin-top: 0; }
+
+        .markdown-body h2 {
+            font-size: 22px;
+            font-weight: 600;
+            margin: 28px 0 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border);
+            color: var(--accent);
+        }
+
+        .markdown-body h3 {
+            font-size: 18px;
+            font-weight: 600;
+            margin: 24px 0 10px;
+            color: var(--text-primary);
+        }
+
+        .markdown-body h4 {
+            font-size: 15px;
+            font-weight: 600;
+            margin: 20px 0 8px;
+            color: var(--text-secondary);
+        }
+
+        .markdown-body p {
+            margin: 12px 0;
+        }
+
+        .markdown-body ul, .markdown-body ol {
+            margin: 12px 0;
+            padding-left: 24px;
+        }
+
+        .markdown-body li {
+            margin: 8px 0;
+        }
+
+        .markdown-body li > ul, .markdown-body li > ol {
+            margin: 4px 0;
+        }
+
+        .markdown-body strong {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .markdown-body em {
+            font-style: italic;
+        }
+
+        .markdown-body blockquote {
+            margin: 16px 0;
+            padding: 12px 20px;
+            border-left: 4px solid var(--accent);
+            background: var(--bg-secondary);
+            border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+            color: var(--text-secondary);
+        }
+
+        .markdown-body code {
+            font-family: var(--font-mono);
+            font-size: 13px;
+            background: var(--bg-secondary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: var(--accent);
+        }
+
+        .markdown-body pre {
+            margin: 16px 0;
+            padding: 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            overflow-x: auto;
+        }
+
+        .markdown-body pre code {
+            background: none;
+            padding: 0;
+            font-size: 12px;
+            color: var(--text-primary);
+        }
+
+        .markdown-body hr {
+            margin: 32px 0;
+            border: none;
+            border-top: 1px solid var(--border);
+        }
+
+        .markdown-body table {
+            width: 100%;
+            margin: 16px 0;
+            border-collapse: collapse;
+        }
+
+        .markdown-body th, .markdown-body td {
+            padding: 10px 12px;
+            border: 1px solid var(--border);
+            text-align: left;
+        }
+
+        .markdown-body th {
+            background: var(--bg-secondary);
+            font-weight: 600;
+        }
+
+        .markdown-body a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+
+        .markdown-body a:hover {
+            text-decoration: underline;
+        }
+
+        /* Section anchors */
+        .section-anchor {
+            scroll-margin-top: calc(var(--header-height) + 20px);
+        }
+
+        /* Loading State */
+        .loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 80px;
+            color: var(--text-muted);
+        }
+
+        .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Error State */
+        .error {
+            text-align: center;
+            padding: 80px;
+            color: var(--error);
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           SCROLLBAR
+           ───────────────────────────────────────────────────────────── */
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-secondary); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--border-dark); }
+
+        /* ─────────────────────────────────────────────────────────────
+           PRINT
+           ───────────────────────────────────────────────────────────── */
+
+        @media print {
+            .header, .sidebar { display: none; }
+            .main { margin: 0; }
+            .content { margin: 0; padding: 0; max-width: none; }
+            .content-wrapper { border: none; box-shadow: none; padding: 20px; }
+        }
+
+        /* ─────────────────────────────────────────────────────────────
+           RESPONSIVE
+           ───────────────────────────────────────────────────────────── */
+
+        @media (max-width: 900px) {
+            .sidebar { display: none; }
+            .content { margin-left: 0; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <a href="/" class="back-btn">← Back</a>
+                <div>
+                    <div id="title" class="header-title">Review Result</div>
+                    <div id="meta" class="header-meta">Loading...</div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn" onclick="printResult()">🖨️ Print</button>
+                <button class="btn" onclick="copyToClipboard()">📋 Copy</button>
+                <button class="btn btn-primary" onclick="downloadMarkdown()">⬇️ Download</button>
+            </div>
+        </header>
+
+        <!-- Main -->
+        <main class="main">
+            <!-- Sidebar (TOC) -->
+            <aside class="sidebar">
+                <div class="toc-header">
+                    <span>📑</span> Table of Contents
+                </div>
+                <nav id="toc" class="toc-list">
+                    <!-- TOC will be generated here -->
+                </nav>
+            </aside>
+
+            <!-- Content -->
+            <article class="content">
+                <div class="content-wrapper">
+                    <div id="content" class="markdown-body">
+                        <div class="loading">
+                            <div class="loading-spinner"></div>
+                            <div>Loading review result...</div>
+                        </div>
+                    </div>
+                </div>
+            </article>
+        </main>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script>
+        // ─────────────────────────────────────────────────────────────
+        //  STATE
+        // ─────────────────────────────────────────────────────────────
+
+        let sessionId = null;
+        let markdownContent = '';
+        let sessionData = null;
+
+        // ─────────────────────────────────────────────────────────────
+        //  INIT
+        // ─────────────────────────────────────────────────────────────
+
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Get session ID from URL
+            const params = new URLSearchParams(window.location.search);
+            sessionId = params.get('session');
+
+            if (!sessionId) {
+                showError('No session ID provided');
+                return;
+            }
+
+            await loadResult();
+            setupScrollSpy();
+        });
+
+        // ─────────────────────────────────────────────────────────────
+        //  LOAD RESULT
+        // ─────────────────────────────────────────────────────────────
+
+        async function loadResult() {
+            try {
+                // Load session info
+                const sessionsRes = await fetch('/api/sessions');
+                const sessions = await sessionsRes.json();
+                sessionData = sessions.find(s => s.id === sessionId);
+
+                if (sessionData) {
+                    document.getElementById('title').textContent = sessionData.title || 'Review Result';
+                    document.getElementById('meta').textContent = 
+                        `${sessionData.type} · ${sessionData.venueType} · ${sessionData.status}`;
+                    document.title = `${sessionData.title} - Review Result`;
+                }
+
+                // Load result content
+                const res = await fetch(`/api/sessions/${sessionId}/result`);
+                const result = await res.json();
+
+                if (result.content) {
+                    markdownContent = result.content;
+                    renderContent(result.content);
+                } else if (result.error) {
+                    showError(result.error);
+                } else {
+                    showError('No result available yet');
+                }
+            } catch (err) {
+                console.error('Failed to load result:', err);
+                showError('Failed to load result');
+            }
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  RENDER
+        // ─────────────────────────────────────────────────────────────
+
+        function renderContent(markdown) {
+            const contentEl = document.getElementById('content');
+            
+            // Configure marked
+            marked.setOptions({
+                breaks: true,
+                gfm: true
+            });
+
+            // Render markdown
+            let html = marked.parse(markdown);
+
+            // Add section anchors to headings
+            html = addSectionAnchors(html);
+
+            contentEl.innerHTML = html;
+
+            // Generate TOC
+            generateTOC();
+        }
+
+        function addSectionAnchors(html) {
+            let counter = 0;
+            return html.replace(/<h([1-4])>(.*?)<\/h\1>/gi, (match, level, text) => {
+                const id = `section-${counter++}`;
+                const cleanText = text.replace(/<[^>]*>/g, '').trim();
+                return `<h${level} id="${id}" class="section-anchor">${cleanText}</h${level}>`;
+            });
+        }
+
+        function generateTOC() {
+            const tocEl = document.getElementById('toc');
+            const headings = document.querySelectorAll('.markdown-body h1, .markdown-body h2, .markdown-body h3');
+
+            if (headings.length === 0) {
+                tocEl.innerHTML = '<div style="padding: 20px; color: var(--text-muted); font-size: 12px;">No sections found</div>';
+                return;
+            }
+
+            let html = '';
+            headings.forEach(h => {
+                const level = parseInt(h.tagName[1]);
+                const id = h.id;
+                const text = h.textContent;
+
+                html += `<a href="#${id}" class="toc-item level-${level}" data-id="${id}">${text}</a>`;
+            });
+
+            tocEl.innerHTML = html;
+
+            // Add click handlers
+            tocEl.querySelectorAll('.toc-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const targetId = item.getAttribute('data-id');
+                    const target = document.getElementById(targetId);
+                    if (target) {
+                        target.scrollIntoView({ behavior: 'smooth' });
+                        // Update active state
+                        tocEl.querySelectorAll('.toc-item').forEach(i => i.classList.remove('active'));
+                        item.classList.add('active');
+                    }
+                });
+            });
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  SCROLL SPY
+        // ─────────────────────────────────────────────────────────────
+
+        function setupScrollSpy() {
+            const headings = document.querySelectorAll('.section-anchor');
+            const tocItems = document.querySelectorAll('.toc-item');
+
+            if (headings.length === 0) return;
+
+            const observer = new IntersectionObserver(
+                (entries) => {
+                    entries.forEach(entry => {
+                        if (entry.isIntersecting) {
+                            const id = entry.target.id;
+                            tocItems.forEach(item => {
+                                item.classList.toggle('active', item.getAttribute('data-id') === id);
+                            });
+                        }
+                    });
+                },
+                { rootMargin: '-80px 0px -80% 0px' }
+            );
+
+            headings.forEach(h => observer.observe(h));
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  ACTIONS
+        // ─────────────────────────────────────────────────────────────
+
+        function printResult() {
+            window.print();
+        }
+
+        async function copyToClipboard() {
+            try {
+                await navigator.clipboard.writeText(markdownContent);
+                alert('Copied to clipboard!');
+            } catch (err) {
+                console.error('Failed to copy:', err);
+            }
+        }
+
+        function downloadMarkdown() {
+            const filename = sessionData?.title 
+                ? `${sessionData.title.replace(/[^a-z0-9]/gi, '_')}_review.md`
+                : 'review_result.md';
+
+            const blob = new Blob([markdownContent], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        //  ERROR
+        // ─────────────────────────────────────────────────────────────
+
+        function showError(message) {
+            document.getElementById('content').innerHTML = `
+                <div class="error">
+                    <div style="font-size: 48px; margin-bottom: 16px;">⚠️</div>
+                    <div style="font-size: 18px; font-weight: 600; margin-bottom: 8px;">Error</div>
+                    <div>${message}</div>
+                </div>
+            `;
+        }
+    </script>
+</body>
+</html>

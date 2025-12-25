@@ -1,19 +1,23 @@
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.GodChat;
+using Aevatar.Agents.GodGPT.Protos.ChatManager;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
+using Aevatar.Agents.Abstractions.Extensions;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager;
 
 public partial class ChatGAgentManager
 {
-    public async Task<List<SessionInfoDto>> SearchSessionsAsync(string keyword, int maxResults = 1000)
+    public async Task<SessionListProto> SearchSessionsAsync(string keyword, int maxResults = 1000)
     {
         Logger.LogDebug($"[ChatGAgentManager][SearchSessionsAsync] keyword: {keyword}, maxResults: {maxResults}");
 
         if (string.IsNullOrWhiteSpace(keyword))
         {
-            return new List<SessionInfoDto>();
+            return new SessionListProto();
         }
 
         // Use the complete keyword for matching (no word splitting)
@@ -24,10 +28,10 @@ public partial class ChatGAgentManager
         {
             Logger.LogWarning(
                 $"[ChatGAgentManager][SearchSessionsAsync] Keyword too long: {searchKeyword.Length} chars");
-            return new List<SessionInfoDto>();
+            return new SessionListProto();
         }
 
-        var searchResults = new List<(SessionInfoDto dto, int matchScore)>();
+        var searchResults = new List<(SessionInfoProto proto, int matchScore)>();
 
         // Search through sessions (limit to most recent 1000 for performance)
         var sessionsToSearch = State.SessionInfoList
@@ -55,8 +59,8 @@ public partial class ChatGAgentManager
                 string contentPreview = "";
                 try
                 {
-                    var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(Guid.Parse(sessionInfo.SessionId));
-                    var godChat = (IGodChat)godChatActor.GetAgent();
+                    var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionInfo.SessionId);
+                    var godChat = godChatActor.As<IGodChat>();
                     var chatMessages = await godChat.GetChatMessageAsync();
                     contentPreview = ChatContentHelper.ExtractChatContent(chatMessages);
                 }
@@ -82,24 +86,18 @@ public partial class ChatGAgentManager
                 {
                     matchScore = titleMatchScore * 2 + contentMatchScore; // Title matching gets higher priority
 
-                    var createAt = sessionInfo.CreateAt?.ToDateTime() ?? DateTime.MinValue;
-                    if (createAt == default || createAt == DateTime.MinValue)
-                    {
-                        // Use a reasonable fallback time instead of hardcoded future date
-                        createAt = DateTime.UtcNow.AddDays(-365); // 1 year ago as fallback
-                    }
+                    var createAt = sessionInfo.CreateAt ?? Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow.AddDays(-365), DateTimeKind.Utc));
 
-                    var dto = new SessionInfoDto
+                    var proto = new SessionInfoProto
                     {
-                        SessionId = Guid.Parse(sessionInfo.SessionId),
+                        SessionId = sessionInfo.SessionId,
                         Title = sessionInfo.Title,
                         CreateAt = createAt,
-                        Guider = sessionInfo.Guider,
-                        Content = contentPreview,
-                        IsMatch = true
+                        Guider = sessionInfo.Guider ?? string.Empty,
+                        ShareId = sessionInfo.ShareId ?? string.Empty
                     };
 
-                    searchResults.Add((dto, matchScore));
+                    searchResults.Add((proto, matchScore));
                 }
             }
             catch (Exception ex)
@@ -112,16 +110,18 @@ public partial class ChatGAgentManager
         }
 
         // Sort by match score (descending) then by creation time (descending)
-        var result = searchResults
+        var sortedResults = searchResults
             .OrderByDescending(r => r.matchScore)
-            .ThenByDescending(r => r.dto.CreateAt)
+            .ThenByDescending(r => r.proto.CreateAt?.ToDateTime() ?? DateTime.MinValue)
             .Take(maxResults)
-            .Select(r => r.dto)
+            .Select(r => r.proto)
             .ToList();
 
+        var result = new SessionListProto();
+        result.Sessions.AddRange(sortedResults);
+
         Logger.LogDebug(
-            $"[ChatGAgentManager][SearchSessionsAsync] Found {result.Count} matches for keyword: {keyword}");
+            $"[ChatGAgentManager][SearchSessionsAsync] Found {result.Sessions.Count} matches for keyword: {keyword}");
         return result;
     }
 }
-

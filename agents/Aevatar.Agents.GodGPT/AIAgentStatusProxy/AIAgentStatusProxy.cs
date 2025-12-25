@@ -1,170 +1,120 @@
-using Aevatar.AI.Exceptions;
-using Aevatar.AI.Feature.StreamSyncWoker;
+using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Attributes;
+using Aevatar.Agents.Abstractions.Extensions;
+using Aevatar.Agents.AI;
+using Aevatar.Agents.AI.Abstractions;
+using Aevatar.Agents.AI.Core;
+using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
-using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.Dtos;
-using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.ProxySEvents;
 using Aevatar.Application.Grains.Common;
 using Aevatar.Application.Grains.Common.Constants;
-using Aevatar.Core.Abstractions;
 using Aevatar.GAgents.AI.Common;
 using Aevatar.GAgents.AI.Options;
-using Aevatar.GAgents.AIGAgent.Agent;
 using Aevatar.GAgents.AIGAgent.Dtos;
+using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Orleans.Concurrency;
 using System.Diagnostics;
-using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent.GEvents;
-using Aevatar.Agents.Abstractions;
+using ChatMessage = Aevatar.GAgents.AI.Abstractions.ChatMessage;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
 
-[GAgent]
+/// <summary>
+/// AI Agent Status Proxy - Migrated to new Aevatar.Agents.AI framework.
+/// Manages AI agent availability status and proxies chat requests.
+/// </summary>
+[GAgent(nameof(AIAgentStatusProxy))]
 [Reentrant]
-public class AIAgentStatusProxy :
-    AIGAgentBase<AIAgentStatusProxyState, AIAgentStatusProxyLogEvent, EventBase, AIAgentStatusProxyConfig>,
+public class AIAgentStatusProxy : 
+    AIGAgentBase<AIAgentStatusProxyStateProto, AIAgentStatusProxyConfigProto>,
     IAIAgentStatusProxy
 {
-    // Injected by OrleansGAgentGrain via reflection (see InjectActorFactory)
+    // Injected by OrleansGAgentGrain via reflection
     public IGAgentActorFactory? ActorFactory { get; set; }
+
+    #region Activation
+
+    protected override async Task OnActivateAsync(CancellationToken ct = default)
+    {
+        await base.OnActivateAsync(ct);
+
+        // Initialize default state values
+        if (CustomState.RecoveryDelay == null)
+        {
+            CustomState.RecoveryDelay = Duration.FromTimeSpan(TimeSpan.FromSeconds(60));
+        }
+
+        // Initialize AI with default LLM provider
+        await InitializeAsync(AevatarAgentsConstants.DefaultProviderName, cancellationToken: ct);
+        
+        Logger.LogInformation("[AIAgentStatusProxyNew] Activated with Id={AgentId}", Id);
+    }
+
     public override Task<string> GetDescriptionAsync()
     {
-        return Task.FromResult("AIGAgent supporting state management");
+        return Task.FromResult($"AI Agent Status Proxy (Available: {CustomState.IsAvailable}, Exceptions: {CustomState.ExceptionCount})");
     }
-    
+
+    #endregion
+
+    #region Configuration
+
     /// <summary>
-    /// Public interface method for configuration - delegates to PerformConfigAsync
+    /// Configure the proxy agent
     /// </summary>
-    public new async Task ConfigAsync(AIAgentStatusProxyConfig config)
+    public async Task ConfigAsync(AIAgentStatusProxyConfigProto config)
     {
-        await PerformConfigAsync(config);
-    }
-
-    protected sealed override async Task PerformConfigAsync(AIAgentStatusProxyConfig configuration)
-    {
-        RaiseEvent(new SetStatusProxyConfigLogEvent
+        Logger.LogDebug("[AIAgentStatusProxyNew][ConfigAsync] Configuring proxy with ParentId={ParentId}", config.ParentId);
+        
+        RaiseEvent(new SetStatusProxyConfigEvent
         {
-            RecoveryDelay = configuration.RequestRecoveryDelay,
-            ParentId = configuration.ParentId
+            RecoveryDelay = config.RequestRecoveryDelay,
+            ParentId = config.ParentId
         });
-    }
-    [EventHandler]
-    private async Task HandlerEventAsync(AIAgentStatusProxyInitializeGEvent @event)
-    {
-        var stopwatch = Stopwatch.StartNew();
-        Logger.LogDebug($"[HandlerEventAsync][AIAgentStatusProxyInitializeGEvent] Start- SessionId:{Id}, event:{JsonConvert.SerializeObject(@event)}");
-        //await SendProxyInitStatusUpdateAsync(ProxyInitStatus.Initializing);
 
-        await InitializeAsync(@event.InitializeDto);
-        // Send status update to GodChatGAgent - Initialized
-        await SendProxyInitStatusUpdateAsync(ProxyInitStatus.Initialized);
-        stopwatch.Stop();
-        Logger.LogDebug($"[HandlerEventAsync][AIAgentStatusProxyInitializeGEvent] End - SessionId: {Id} ,Duration: {stopwatch.ElapsedMilliseconds}ms");
-    }
-    
-    private async Task SendProxyInitStatusUpdateAsync(ProxyInitStatus status)
-    {
-        try
-        {
-            if (State.ParentId != Guid.Empty)
-            {
-                // Use new framework IGAgentActorFactory to get GodChatGAgent
-                if (ActorFactory == null)
-                {
-                    Logger.LogError("[AIAgentStatusProxy][SendProxyInitStatusUpdateAsync] ActorFactory is not injected");
-                    return;
-                }
-                
-                var godChatActor = await ActorFactory.CreateGAgentActorAsync<GodChatGAgent>(State.ParentId);
-                var godChat = (IGodChat)godChatActor.GetAgent();
-                await godChat.UpdateProxyInitStatusAsync(Id, status);
-
-                Logger.LogDebug($"[AIAgentStatusProxy][SendProxyInitStatusUpdateAsync] Sent status update: {status} for proxy: {Id} to GodChatGAgent: {State.ParentId}");
-            }
-            else
-            {
-                Logger.LogWarning($"[AIAgentStatusProxy][SendProxyInitStatusUpdateAsync] ParentId is empty, cannot send status update");
-            }
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, $"[AIAgentStatusProxy][SendProxyInitStatusUpdateAsync] Failed to send status update: {status} for proxy: {Id}");
-        }
-    }
-    public new async Task<List<ChatMessage>?> ChatWithHistory(string prompt, List<ChatMessage>? history = null,
-        ExecutionPromptSettings? promptSettings = null, AIChatContextDto? context = null)
-    {
-        var systemPrompt = State.PromptTemplate;
-        var selectedHistory = TokenHelper.SelectHistoryMessages(history, prompt, systemPrompt);
-        Logger.LogDebug($"[AIAgentStatusProxy][ChatWithHistory] Original history count: {history?.Count ?? 0}, Selected history count: {selectedHistory.Count}");
-        
-        return await base.ChatWithHistory(prompt, selectedHistory, promptSettings, context: context);
+        await ConfirmEventsAsync();
     }
 
-    public new async Task<bool> PromptWithStreamAsync(string prompt, List<ChatMessage>? history = null,
-        ExecutionPromptSettings? promptSettings = null, AIChatContextDto? context = null, List<string>? imageKeys = null)
+    /// <summary>
+    /// Set the prompt template
+    /// </summary>
+    public async Task SetPromptTemplateAsync(string promptTemplate)
     {
-        // Get system prompt
-        var systemPrompt = State.PromptTemplate;
-        
-        // Intelligently select historical messages
-        var selectedHistory = TokenHelper.SelectHistoryMessages(history, prompt, systemPrompt);
-        
-        Logger.LogDebug($"[AIAgentStatusProxy][PromptWithStreamAsync] Original history count: {history?.Count ?? 0}, Selected history count: {selectedHistory.Count}");
-        
-        // Call base method with filtered history messages
-        return await base.PromptWithStreamAsync(prompt, selectedHistory, promptSettings, context, imageKeys: imageKeys);
+        RaiseEvent(new SetPromptTemplateEvent
+        {
+            PromptTemplate = promptTemplate
+        });
+
+        await ConfirmEventsAsync();
     }
 
-    protected override async Task AIChatHandleStreamAsync(AIChatContextDto context, AIExceptionEnum errorEnum,
-        string? errorMessage,
-        AIStreamChatContent? content)
-    {
-        Logger.LogDebug(
-            $"[AIAgentStatusProxy][AIChatHandleStreamAsync] sessionId {context?.RequestId.ToString()}, chatId {context?.ChatId}, errorEnum {errorEnum}, errorMessage {errorMessage}: {JsonConvert.SerializeObject(content)}");
-        if (errorEnum == AIExceptionEnum.RequestLimitError)
-        {
-            RaiseEvent(new SetAvailableLogEvent
-            {
-                IsAvailable = false,
-                ExceptionCount = 1
-            });
-            await ConfirmEventsAsync();
-        }
-        
-        if (ActorFactory == null)
-        {
-            Logger.LogError("[AIAgentStatusProxy][AIChatHandleStreamAsync] ActorFactory is not injected");
-            return;
-        }
-        
-        var godChatActor = await ActorFactory.CreateGAgentActorAsync<GodChatGAgent>(State.ParentId);
-        var godChat = (IGodChat)godChatActor.GetAgent();
-        await godChat.ChatMessageCallbackAsync(context, errorEnum, errorMessage, content);
-    }
+    #endregion
+
+    #region Availability
 
     public async Task<bool> IsAvailableAsync()
     {
-        if (State.IsAvailable)
+        if (CustomState.IsAvailable)
         {
             return true;
         }
 
-        if (State.UnavailableSince == null)
+        if (CustomState.UnavailableSince == null)
         {
-            Logger.LogDebug($"[AIAgentStatusProxy][IsAvailableAsync] State.UnavailableSince is null");
+            Logger.LogDebug("[AIAgentStatusProxyNew][IsAvailableAsync] UnavailableSince is null");
             return true;
         }
 
         var now = DateTime.UtcNow;
-        var unavailableSince = State.UnavailableSince;
+        var unavailableSince = CustomState.UnavailableSince.ToDateTime();
+        var recoveryDelay = CustomState.RecoveryDelay?.ToTimeSpan() ?? TimeSpan.FromSeconds(60);
         var timeElapsed = now - unavailableSince;
-        if (timeElapsed > State.RecoveryDelay)
+        
+        if (timeElapsed > recoveryDelay)
         {
-            RaiseEvent(new SetAvailableLogEvent
-            {
-                IsAvailable = true
-            });
+            RaiseEvent(new SetAvailableEvent { IsAvailable = true });
             await ConfirmEventsAsync();
             return true;
         }
@@ -172,48 +122,397 @@ public class AIAgentStatusProxy :
         return false;
     }
 
-    protected override void AIGAgentTransitionState(AIAgentStatusProxyState state,
-        StateLogEventBase<AIAgentStatusProxyLogEvent> @event)
+    private async Task MarkUnavailableAsync(int exceptionCount = 1)
     {
-        switch (@event)
+        RaiseEvent(new SetAvailableEvent
         {
-            case SetStatusProxyConfigLogEvent setStatusProxyConfigLogEvent:
-                if (setStatusProxyConfigLogEvent.RecoveryDelay != null)
-                {
-                    state.RecoveryDelay = (TimeSpan)setStatusProxyConfigLogEvent.RecoveryDelay;
-                }
+            IsAvailable = false,
+            ExceptionCount = exceptionCount
+        });
+        await ConfirmEventsAsync();
+    }
 
-                state.ParentId = setStatusProxyConfigLogEvent.ParentId;
+    #endregion
+
+    #region Chat Methods
+
+    /// <summary>
+    /// Chat with history (Proto version for RPC)
+    /// </summary>
+    public async Task<ChatWithHistoryResultProto> ChatWithHistoryProtoAsync(ChatWithHistoryInputProto input)
+    {
+        // Convert proto to internal types
+        var prompt = input.Prompt;
+        var history = input.History?.Select(h => new ChatMessage
+        {
+            Role = h.Role,
+            Content = h.Content,
+            Timestamp = new DateTime(h.TimestampTicks, DateTimeKind.Utc),
+            ChatRole = (Aevatar.GAgents.ChatAgent.Dtos.ChatRole)h.ChatRole,
+            ImageKeys = h.ImageKeys?.ToList()
+        }).ToList();
+        
+        ExecutionPromptSettings? promptSettings = null;
+        if (input.PromptSettings != null)
+        {
+            promptSettings = new ExecutionPromptSettings
+            {
+                Temperature = input.PromptSettings.HasTemperature ? input.PromptSettings.Temperature : null,
+                MaxTokens = input.PromptSettings.HasMaxTokens ? input.PromptSettings.MaxTokens : null,
+                TopP = input.PromptSettings.HasTopP ? input.PromptSettings.TopP : null,
+                FrequencyPenalty = input.PromptSettings.HasFrequencyPenalty ? input.PromptSettings.FrequencyPenalty : null,
+                PresencePenalty = input.PromptSettings.HasPresencePenalty ? input.PromptSettings.PresencePenalty : null,
+                StopSequences = input.PromptSettings.StopSequences?.ToList(),
+                Model = input.PromptSettings.HasModel ? input.PromptSettings.Model : null
+            };
+        }
+        
+        AIChatContextDto? context = null;
+        if (input.Context != null)
+        {
+            context = new AIChatContextDto
+            {
+                AgentId = input.Context.HasAgentId ? input.Context.AgentId : null,
+                SessionId = input.Context.HasSessionId ? input.Context.SessionId : null,
+                UserId = input.Context.HasUserId ? input.Context.UserId : null,
+                Metadata = input.Context.Metadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                SystemPrompt = input.Context.HasSystemPrompt ? input.Context.SystemPrompt : null,
+                RequestId = Guid.TryParse(input.Context.RequestId, out var reqId) ? reqId : Guid.NewGuid(),
+                ChatId = input.Context.HasChatId ? input.Context.ChatId : null,
+                MessageId = input.Context.HasMessageId ? input.Context.MessageId : null
+            };
+        }
+        
+        return await ChatWithHistoryInternalAsync(prompt, history, promptSettings, context);
+    }
+
+    /// <summary>
+    /// Internal chat with history implementation
+    /// </summary>
+    private async Task<ChatWithHistoryResultProto> ChatWithHistoryInternalAsync(
+        string prompt, 
+        List<ChatMessage>? history = null,
+        ExecutionPromptSettings? promptSettings = null, 
+        AIChatContextDto? context = null)
+    {
+        var systemPrompt = CustomState.PromptTemplate;
+        var selectedHistory = TokenHelper.SelectHistoryMessages(history, prompt, systemPrompt);
+        Logger.LogDebug("[AIAgentStatusProxyNew][ChatWithHistoryAsync] Original: {Original}, Selected: {Selected}", 
+            history?.Count ?? 0, selectedHistory.Count);
+
+        try
+        {
+            // Build chat request
+            var request = new ChatRequest
+            {
+                Message = prompt,
+                RequestId = context?.ChatId ?? Guid.NewGuid().ToString()
+            };
+
+            if (promptSettings?.Temperature != null && double.TryParse(promptSettings.Temperature, out var temp))
+            {
+                request.Temperature = (float)temp;
+            }
+
+            // Use the AI framework's ChatAsync
+            var response = await ChatAsync(request);
+
+            // Convert to proto format
+            var result = new ChatWithHistoryResultProto();
+            result.Messages.Add(new ChatMessageProto
+            {
+                Role = "assistant",
+                Content = response.Content,
+                TimestampTicks = DateTime.UtcNow.Ticks,
+                ChatRole = (int)Aevatar.GAgents.ChatAgent.Dtos.ChatRole.Assistant
+            });
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[AIAgentStatusProxyNew][ChatWithHistoryAsync] Error");
+            await HandleChatErrorAsync(context, AIExceptionEnum.Unknown, ex.Message, null);
+            return new ChatWithHistoryResultProto(); // Return empty result on error
+        }
+    }
+
+    /// <summary>
+    /// Prompt with streaming response (Proto version for RPC)
+    /// </summary>
+    public async Task<bool> PromptWithStreamProtoAsync(PromptWithStreamInputProto input)
+    {
+        // Convert proto to internal types
+        var prompt = input.Prompt;
+        var history = input.History?.Select(h => new ChatMessage
+        {
+            Role = h.Role,
+            Content = h.Content,
+            Timestamp = new DateTime(h.TimestampTicks, DateTimeKind.Utc),
+            ChatRole = (Aevatar.GAgents.ChatAgent.Dtos.ChatRole)h.ChatRole,
+            ImageKeys = h.ImageKeys?.ToList()
+        }).ToList();
+        
+        ExecutionPromptSettings? promptSettings = null;
+        if (input.PromptSettings != null)
+        {
+            promptSettings = new ExecutionPromptSettings
+            {
+                Temperature = input.PromptSettings.HasTemperature ? input.PromptSettings.Temperature : null,
+                MaxTokens = input.PromptSettings.HasMaxTokens ? input.PromptSettings.MaxTokens : null,
+                TopP = input.PromptSettings.HasTopP ? input.PromptSettings.TopP : null,
+                FrequencyPenalty = input.PromptSettings.HasFrequencyPenalty ? input.PromptSettings.FrequencyPenalty : null,
+                PresencePenalty = input.PromptSettings.HasPresencePenalty ? input.PromptSettings.PresencePenalty : null,
+                StopSequences = input.PromptSettings.StopSequences?.ToList(),
+                Model = input.PromptSettings.HasModel ? input.PromptSettings.Model : null
+            };
+        }
+        
+        AIChatContextDto? context = null;
+        if (input.Context != null)
+        {
+            context = new AIChatContextDto
+            {
+                AgentId = input.Context.HasAgentId ? input.Context.AgentId : null,
+                SessionId = input.Context.HasSessionId ? input.Context.SessionId : null,
+                UserId = input.Context.HasUserId ? input.Context.UserId : null,
+                Metadata = input.Context.Metadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                SystemPrompt = input.Context.HasSystemPrompt ? input.Context.SystemPrompt : null,
+                RequestId = Guid.TryParse(input.Context.RequestId, out var reqId) ? reqId : Guid.NewGuid(),
+                ChatId = input.Context.HasChatId ? input.Context.ChatId : null,
+                MessageId = input.Context.HasMessageId ? input.Context.MessageId : null
+            };
+        }
+        
+        var imageKeys = input.ImageKeys?.ToList();
+        
+        return await PromptWithStreamInternalAsync(prompt, history, promptSettings, context, imageKeys);
+    }
+
+    /// <summary>
+    /// Internal streaming implementation
+    /// </summary>
+    private async Task<bool> PromptWithStreamInternalAsync(
+        string prompt, 
+        List<ChatMessage>? history = null,
+        ExecutionPromptSettings? promptSettings = null, 
+        AIChatContextDto? context = null, 
+        List<string>? imageKeys = null)
+    {
+        var systemPrompt = CustomState.PromptTemplate;
+        var selectedHistory = TokenHelper.SelectHistoryMessages(history, prompt, systemPrompt);
+        
+        Logger.LogDebug("[AIAgentStatusProxyNew][PromptWithStreamAsync] Original: {Original}, Selected: {Selected}", 
+            history?.Count ?? 0, selectedHistory.Count);
+
+        try
+        {
+            var request = new ChatRequest
+            {
+                Message = prompt,
+                RequestId = context?.ChatId ?? Guid.NewGuid().ToString()
+            };
+
+            if (promptSettings?.Temperature != null && double.TryParse(promptSettings.Temperature, out var temp))
+            {
+                request.Temperature = (float)temp;
+            }
+
+            var fullResponse = new System.Text.StringBuilder();
+            var serialNumber = 0;
+
+            // Use the AI framework's streaming capability
+            await foreach (var token in ChatStreamAsync(request))
+            {
+                serialNumber++;
+                fullResponse.Append(token);
+                
+                var streamContent = new AIStreamChatContent
+                {
+                    Content = token,  // Use Content field (consistent with original implementation)
+                    IsComplete = false,
+                    SerialNumber = serialNumber,
+                    IsLastChunk = false
+                };
+
+                await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, streamContent);
+            }
+
+            // Send final chunk
+            var finalContent = new AIStreamChatContent
+            {
+                Content = fullResponse.ToString(),  // Use Content field (consistent with original implementation)
+                IsComplete = true,
+                IsLastChunk = true,
+                SerialNumber = serialNumber + 1
+            };
+
+            await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, finalContent);
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[AIAgentStatusProxyNew][PromptWithStreamAsync] Error");
+            
+            if (ex.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
+            {
+                await MarkUnavailableAsync();
+                await HandleChatErrorAsync(context, AIExceptionEnum.RequestLimitError, ex.Message, null);
+            }
+            else
+            {
+                await HandleChatErrorAsync(context, AIExceptionEnum.Unknown, ex.Message, null);
+            }
+            
+            return false;
+        }
+    }
+
+    private async Task HandleChatErrorAsync(
+        AIChatContextDto? context, 
+        AIExceptionEnum errorEnum,
+        string? errorMessage,
+        AIStreamChatContent? content)
+    {
+        Logger.LogDebug("[AIAgentStatusProxyNew][HandleChatErrorAsync] Error: {Error}, Message: {Message}", 
+            errorEnum, errorMessage);
+
+        if (errorEnum == AIExceptionEnum.RequestLimitError)
+        {
+            await MarkUnavailableAsync();
+        }
+
+        await SendStreamCallbackAsync(context, errorEnum, errorMessage, content);
+    }
+
+    private async Task SendStreamCallbackAsync(
+        AIChatContextDto? context,
+        AIExceptionEnum errorEnum,
+        string? errorMessage,
+        AIStreamChatContent? content)
+    {
+        if (string.IsNullOrEmpty(CustomState.ParentId))
+        {
+            Logger.LogWarning("[AIAgentStatusProxyNew] ParentId is empty, cannot send callback");
+            return;
+        }
+
+        if (ActorFactory == null)
+        {
+            Logger.LogError("[AIAgentStatusProxyNew] ActorFactory is not injected");
+            return;
+        }
+
+        try
+        {
+            var godChatActor = await ActorFactory.CreateGAgentActorAsync<GodChatGAgent>(CustomState.ParentId);
+            var godChat = godChatActor.As<IGodChat>();
+            
+            // Convert AIChatContextDto to AIChatContextProto for RPC
+            AIChatContextProto? contextProto = null;
+            if (context != null)
+            {
+                contextProto = new AIChatContextProto
+                {
+                    AgentId = context.AgentId ?? "",
+                    SessionId = context.SessionId ?? "",
+                    UserId = context.UserId ?? "",
+                    SystemPrompt = context.SystemPrompt ?? "",
+                    RequestId = context.RequestId.ToString(),
+                    ChatId = context.ChatId ?? "",
+                    MessageId = context.MessageId ?? ""
+                };
+                if (context.Metadata != null)
+                {
+                    foreach (var kvp in context.Metadata)
+                    {
+                        contextProto.Metadata[kvp.Key] = kvp.Value;
+                    }
+                }
+            }
+            
+            // Convert AIStreamChatContent to AIStreamChatContentProto for RPC
+            AIStreamChatContentProto? contentProto = null;
+            if (content != null)
+            {
+                contentProto = new AIStreamChatContentProto
+                {
+                    Content = content.Content ?? "",
+                    IsComplete = content.IsComplete,
+                    TokenCount = content.TokenCount,
+                    Error = content.Error ?? "",
+                    IsLastChunk = content.IsLastChunk,
+                    ResponseContent = content.ResponseContent ?? "",
+                    AggregationMsg = content.AggregationMsg ?? "",
+                    SerialNumber = content.SerialNumber,
+                    IsAggregationMsg = content.IsAggregationMsg
+                };
+            }
+            
+            await godChat.ChatMessageCallbackAsync(contextProto, errorEnum, errorMessage, contentProto);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[AIAgentStatusProxyNew] Failed to send callback to parent {ParentId}", CustomState.ParentId);
+        }
+    }
+
+    #endregion
+
+    #region State Transition
+
+    protected override void TransitionState(AIAgentStatusProxyStateProto state, IMessage evt)
+    {
+        switch (evt)
+        {
+            case SetStatusProxyConfigEvent configEvt:
+                if (configEvt.RecoveryDelay != null)
+                {
+                    state.RecoveryDelay = configEvt.RecoveryDelay;
+                }
+                state.ParentId = configEvt.ParentId;
                 break;
-            case SetAvailableLogEvent setAvailableLogEvent:
-                state.IsAvailable = setAvailableLogEvent.IsAvailable;
+
+            case SetAvailableEvent availableEvt:
+                state.IsAvailable = availableEvt.IsAvailable;
                 if (state.IsAvailable)
                 {
                     state.UnavailableSince = null;
                 }
                 else
                 {
-                    state.UnavailableSince = DateTime.UtcNow;
-                    state.UnavailableCount += 1;
-                    state.ExceptionCount += setAvailableLogEvent.ExceptionCount;
+                    state.UnavailableSince = Timestamp.FromDateTime(DateTime.UtcNow);
+                    state.UnavailableCount++;
+                    state.ExceptionCount += availableEvt.ExceptionCount;
                 }
+                break;
+
+            case SetPromptTemplateEvent promptEvt:
+                state.PromptTemplate = promptEvt.PromptTemplate;
                 break;
         }
     }
+
+    #endregion
 }
 
-public interface IAIAgentStatusProxy : IGAgent, IAIGAgent
+/// <summary>
+/// Interface for the AI Agent Status Proxy
+/// </summary>
+public interface IAIAgentStatusProxy
 {
     Task<bool> IsAvailableAsync();
-
-    Task<List<ChatMessage>?> ChatWithHistory(string prompt, List<ChatMessage>? history = null,
-        ExecutionPromptSettings? promptSettings = null, AIChatContextDto? context = null);
-
-    Task<bool> PromptWithStreamAsync(string prompt, List<ChatMessage>? history = null,
-        ExecutionPromptSettings? promptSettings = null, AIChatContextDto? context = null, List<string>? imageKeys = null);
+    Task ConfigAsync(AIAgentStatusProxyConfigProto config);
+    Task SetPromptTemplateAsync(string promptTemplate);
     
     /// <summary>
-    /// Configure the proxy agent
+    /// Prompt with streaming response (Proto version for RPC)
     /// </summary>
-    Task ConfigAsync(AIAgentStatusProxyConfig config);
+    Task<bool> PromptWithStreamProtoAsync(PromptWithStreamInputProto input);
+    
+    /// <summary>
+    /// Chat with history (Proto version for RPC)
+    /// </summary>
+    Task<ChatWithHistoryResultProto> ChatWithHistoryProtoAsync(ChatWithHistoryInputProto input);
 }
+

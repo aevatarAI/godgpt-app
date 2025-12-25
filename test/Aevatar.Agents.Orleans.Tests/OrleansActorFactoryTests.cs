@@ -1,6 +1,7 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Attributes;
 using Aevatar.Agents.Abstractions.Extensions;
+using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.Agents.AI.Core;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.Core.Extensions;
@@ -38,7 +39,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddSingleton<IGAgentFactory, AIGAgentFactory>();
-        services.AddGAgentActorFactoryProvider(); // 使用自动发现
+        services.AddGAgentActorFactoryProvider(); // Use auto-discovery
 
         serviceProvider = services.BuildServiceProvider();
         var logger = serviceProvider.GetRequiredService<ILogger<OrleansGAgentActorFactory>>();
@@ -64,7 +65,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         Assert.NotNull(actor);
         Assert.IsAssignableFrom<IGAgentActor>(actor);
         Assert.IsType<OrleansGAgentActor>(actor);
-        Assert.Equal(agentId, actor.Id);
+        Assert.Equal(AgentId.Normalize<OrleansTestAgent>(agentId), actor.Id);
     }
 
     [Fact]
@@ -81,7 +82,7 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         // Assert
         Assert.NotNull(actor);
         Assert.IsAssignableFrom<IGAgentActor>(actor);
-        Assert.Equal(agentId, actor.Id);
+        Assert.Equal(AgentId.Normalize<OrleansTestAgent>(agentId), actor.Id);
 
         // In new architecture, Agent runs in Silo (Grain)
         // GetAgent() is not available on client-side actor
@@ -109,8 +110,8 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         var childrenIds = await parent.GetChildrenAsync();
         var parentFromChild = await child.GetParentAsync();
 
-        Assert.Contains(childId, childrenIds);
-        Assert.Equal(parentId, parentFromChild);
+        Assert.Contains(child.Id, childrenIds);
+        Assert.Equal(parent.Id, parentFromChild);
     }
 
     [Fact]
@@ -168,11 +169,11 @@ public class OrleansActorFactoryTests : AevatarAgentsTestBase
         var children2 = await actor2.GetChildrenAsync();
 
         Assert.Single(children1);
-        Assert.Contains(child1, children1);
+        Assert.Contains(childActor1.Id, children1);
 
         Assert.Equal(2, children2.Count);
-        Assert.Contains(child2, children2);
-        Assert.Contains(child3, children2);
+        Assert.Contains(childActor2.Id, children2);
+        Assert.Contains(childActor3.Id, children2);
     }
 
     [Fact]

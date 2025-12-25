@@ -6,9 +6,9 @@ namespace Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent;
 /// </summary>
 public interface IConfigurationGAgent : Aevatar.Agents.Abstractions.IGAgent
 {
-    string GetSystemLLM();
-    bool GetStreamingModeEnabled();
-    string GetPrompt();
-    string GetUserProfilePrompt();
+    Task<string> GetSystemLLMAsync();
+    Task<bool> GetStreamingModeEnabledAsync();
+    Task<string> GetPromptAsync();
+    Task<string> GetUserProfilePromptAsync();
     Task UpdateSystemPromptAsync(string systemPrompt);
 }

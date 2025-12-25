@@ -1,0 +1,296 @@
+# ============================================================
+#  AXIOM REASONING - Stepwise Proof with Multi-Agent Consensus
+#
+#  目标：
+#  - 输入：少量公理 axioms + 目标 goal
+#  - 输出：逐步推理 steps（每一步都通过 vote 达成共识）+ 最终结论
+#
+#  共识机制：
+#  - 使用 vote 原语（First-to-ahead-by-K）
+#  - 若启用 embeddings，则自动使用语义聚类（similarity 阈值）
+#
+#  递归推进：
+#  - 使用 workflow_call 递归执行“下一步”
+#  - max_depth 控制最大推理步数/递归深度（由输入驱动）
+# ============================================================
+
+name: axiom_reasoning
+version: "1.0"
+description: "Multi-agent axiom-based reasoning with per-step consensus (vote + optional semantic clustering)"
+
+# ============================================================
+#  输入参数
+# ============================================================
+inputs:
+  - name: task
+    type: string
+    required: true
+    description: "原始任务文本（CognitiveStrategy 默认注入 task/context）。建议格式包含 Axioms 与 Goal。"
+
+  - name: axioms
+    type: json_array
+    required: false
+    description: "最小公理列表（可选）。若未提供，workflow 将从 task 文本中解析。"
+
+  - name: goal
+    type: string
+    required: false
+    description: "目标命题/要证明的结论（可选）。若未提供，workflow 将从 task 文本中解析。"
+
+  - name: context
+    type: object
+    required: false
+    description: "可选上下文（例如：推理规则/领域约束/符号解释）"
+
+  # 递归状态（首次调用不用传）
+  - name: state
+    type: object
+    required: false
+    description: "内部状态（递归用）。首次调用请不要传。"
+
+  # vote 参数
+  - name: k
+    type: int
+    default: 3
+    description: "共识阈值 K（first-to-ahead-by-k）"
+
+  - name: max_rounds
+    type: int
+    default: 10
+    description: "每个 vote 的最大轮次"
+
+  - name: similarity
+    type: float
+    default: 0.85
+    description: "语义聚类相似度阈值（仅 embeddings 启用时生效）"
+
+  # 最大推理步数（递归深度）
+  - name: max_depth
+    type: int
+    default: 5
+    description: "最大推理步数/递归深度（与框架约定字段 max_depth 对齐）"
+
+  - name: language
+    type: string
+    default: "English"
+    description: "Natural language for statements/justifications/final_answer (JSON keys remain unchanged)."
+
+# ============================================================
+#  步骤定义
+# ============================================================
+steps:
+  # --------------------------------------------------------
+  # Step 0: 初始化 state（仅当 state 未提供时）
+  # --------------------------------------------------------
+  - id: ensure_state
+    type: conditional
+    condition: "{{ state != null }}"
+    if_false:
+      - id: init_state
+        type: llm_call
+        prompt: |
+          You are a careful formal reasoner.
+          Initialize an internal reasoning state from axioms and a goal.
+
+          IMPORTANT:
+          - If `axioms` / `goal` are not explicitly provided, you MUST extract them from the raw task text.
+          - The raw task text is authoritative.
+
+          Requirements:
+          - Return ONLY a JSON object (no markdown, no prose).
+          - Keep it minimal and machine-readable.
+          - Do NOT invent axioms; copy them as given.
+          - If the goal is directly present in axioms, set done=true.
+
+          Input:
+          raw_task: {{ task }}
+          axioms(optional): {{ axioms | json }}
+          goal(optional): {{ goal }}
+          {% if context %}
+          context: {{ context | json }}
+          {% endif %}
+
+          Output JSON schema:
+          {
+            "axioms": [string],
+            "goal": string,
+            "derived": [string],
+            "steps": [
+              {
+                "index": int,
+                "statement": string,
+                "justification": string,
+                "depends_on": [string],
+                "is_goal_reached": bool
+              }
+            ],
+            "step_count": int,
+            "done": bool,
+            "status": "in_progress" | "completed" | "step_limit",
+            "final_answer": string
+          }
+
+          Language: {{language}}
+        output: json
+        store: state
+
+  # --------------------------------------------------------
+  # Step 1: 生成下一步推理（多次采样直到达成共识）
+  # --------------------------------------------------------
+  - id: derive_next_step
+    type: vote
+    k: "{{k}}"
+    max_rounds: "{{max_rounds}}"
+    similarity: "{{similarity}}"
+    generator:
+      type: llm_call
+      prompt: |
+        You are proposing EXACTLY ONE next inference step.
+        Use only the given axioms + already derived facts.
+
+        Rules:
+        - Return ONLY a JSON object.
+        - Produce exactly ONE new statement (smallest possible step).
+        - The justification must be short but specific (which axioms/previous facts).
+        - If you believe the goal is already reached, you may set is_goal_reached=true,
+          but you must still provide the final step that closes the goal.
+        - Do not repeat statements already in derived/axioms.
+        - If you are stuck, propose the smallest useful intermediate lemma.
+
+        Axioms: {{ state.axioms | json }}
+        Goal: {{ state.goal }}
+        CurrentState: {{ state | json }}
+        {% if context %}
+        Context: {{ context | json }}
+        {% endif %}
+
+        Output JSON schema:
+        {
+          "statement": string,
+          "justification": string,
+          "depends_on": [string],
+          "is_goal_reached": bool
+        }
+
+        Language: {{language}}
+      output: json
+    store: proposed_step
+
+  # --------------------------------------------------------
+  # Step 2: 校验/修正这一步（再次 vote：让多个 AI 对“有效性”达成共识）
+  # --------------------------------------------------------
+  - id: verify_and_refine_step
+    type: vote
+    k: "{{k}}"
+    max_rounds: "{{max_rounds}}"
+    similarity: "{{similarity}}"
+    generator:
+      type: llm_call
+      prompt: |
+        You are validating a proposed inference step.
+        Decide if it is valid from axioms + derived facts.
+
+        Rules:
+        - Return ONLY a JSON object.
+        - If valid, set accepted=true and keep the step unchanged (or minimally improve wording).
+        - If invalid, set accepted=false and provide a corrected step that *is* valid,
+          or provide the smallest missing intermediate lemma.
+        - Do NOT introduce new axioms.
+
+        Axioms: {{ state.axioms | json }}
+        Goal: {{ state.goal }}
+        CurrentState: {{ state | json }}
+        ProposedStep: {{ proposed_step | json }}
+        {% if context %}
+        Context: {{ context | json }}
+        {% endif %}
+
+        Output JSON schema:
+        {
+          "accepted": bool,
+          "step": {
+            "statement": string,
+            "justification": string,
+            "depends_on": [string],
+            "is_goal_reached": bool
+          },
+          "issues": [string]
+        }
+
+        Language: {{language}}
+      output: json
+    store: verified_step
+
+  # --------------------------------------------------------
+  # Step 3: 更新 state（追加 steps/derived，判断 done / step_limit）
+  # --------------------------------------------------------
+  - id: update_state
+    type: llm_call
+    prompt: |
+      Update the reasoning state by appending the verified step.
+
+      Requirements:
+      - Return ONLY a JSON object.
+      - Append exactly one step to state.steps with index = state.step_count + 1.
+      - Update derived by adding the new statement (unless it's already present).
+      - Set step_count accordingly.
+      - Determine done/status/final_answer:
+        - If the new step reaches the goal (or goal is already reached), done=true, status="completed".
+        - Else if step_count >= max_depth, done=false, status="step_limit", and final_answer should explain the limitation.
+        - Else done=false, status="in_progress".
+
+      Inputs:
+      max_depth: {{ max_depth }}
+      language: {{ language }}
+      state: {{ state | json }}
+      verified_step: {{ verified_step | json }}
+
+      Output JSON schema: same as init_state
+    output: json
+    store: state
+
+  # --------------------------------------------------------
+  # Step 4: 结束 or 继续递归
+  # --------------------------------------------------------
+  - id: stop_or_continue
+    type: conditional
+    condition: "{{ state.done == true || state.step_count >= max_depth }}"
+    if_false:
+      - id: recurse
+        type: workflow_call
+        workflow: axiom_reasoning
+        params:
+          task: "{{task}}"
+          context: "{{context}}"
+          state: "{{state}}"
+          k: "{{k}}"
+          max_rounds: "{{max_rounds}}"
+          similarity: "{{similarity}}"
+          max_depth: "{{max_depth}}"
+          language: "{{language}}"
+        store: recursive_output
+
+# ============================================================
+#  输出定义
+#
+#  注意：
+#  - workflow_call 返回的是“子工作流 output”，不保证能把复杂 object 原样拷回父变量。
+#  - 为了可递归透传，这里把关键字段都输出为字符串（或 json 字符串）。
+# ============================================================
+output:
+  done: |
+    {{ if recursive_output != null }}{{ recursive_output.done }}{{ else }}{{ state.done }}{{ end }}
+  status: |
+    {{ if recursive_output != null }}{{ recursive_output.status }}{{ else }}{{ state.status }}{{ end }}
+  step_count: |
+    {{ if recursive_output != null }}{{ recursive_output.step_count }}{{ else }}{{ state.step_count }}{{ end }}
+  final_answer: |
+    {{ if recursive_output != null }}{{ recursive_output.final_answer }}{{ else }}{{ state.final_answer }}{{ end }}
+  steps_json: |
+    {{ if recursive_output != null }}{{ recursive_output.steps_json }}{{ else }}{{ state.steps | json }}{{ end }}
+  derived_json: |
+    {{ if recursive_output != null }}{{ recursive_output.derived_json }}{{ else }}{{ state.derived | json }}{{ end }}
+  state_json: |
+    {{ if recursive_output != null }}{{ recursive_output.state_json }}{{ else }}{{ state | json }}{{ end }}
+
+

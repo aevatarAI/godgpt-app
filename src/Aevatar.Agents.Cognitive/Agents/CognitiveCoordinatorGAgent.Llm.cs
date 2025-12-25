@@ -1,0 +1,378 @@
+using Aevatar.Agents.AI;
+using Aevatar.Agents.AI.Abstractions;
+using Aevatar.Agents.Cognitive.Messages;
+using Aevatar.Agents.Cognitive.Primitives;
+using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.Logging;
+using System.Text.Json;
+
+using StepDefinition = Aevatar.Agents.Cognitive.Primitives.StepDefinition;
+
+namespace Aevatar.Agents.Cognitive.Agents;
+
+// ============================================================
+//  CognitiveCoordinatorGAgent - LLM execution (Coordinator-side)
+//
+//  WHY:
+//  - 这段代码天然会膨胀（streaming + guardrails + UI events）。
+//  - 独立成文件，避免污染核心编排逻辑。
+// ============================================================
+
+public partial class CognitiveCoordinatorGAgent
+{
+    // ============================================================
+    //  简单步骤 - Coordinator 直接执行
+    // ============================================================
+
+    private async Task<PrimitiveResult> ExecuteLlmCallDirectAsync(
+        StepDefinition step,
+        string? preRenderedPrompt = null,
+        string? preRenderedSystem = null)
+    {
+        // 使用预渲染的 prompt（如果提供），否则现场渲染
+        var prompt = preRenderedPrompt ?? _templateEngine.Render(
+            step.Parameters.GetValueOrDefault("prompt")?.ToString() ?? "",
+            _workflowVariables);
+
+        var systemPrompt = preRenderedSystem;
+        if (systemPrompt == null && step.Parameters.TryGetValue("system", out var sysObj) && sysObj != null)
+        {
+            systemPrompt = _templateEngine.Render(sysObj.ToString()!, _workflowVariables);
+        }
+
+        // Unify all Coordinator-side LLM calls with the same reliability guardrails used by vote proposals:
+        // - max_length / timeout_seconds / idle_timeout_seconds
+        // - streaming hang protection
+        // - strict parsing for json/json_array (red-flag on parse null)
+        return await ExecuteLlmCallWithStreamingAsync(step, step, systemPrompt, prompt);
+    }
+
+    /// <summary>
+    /// 执行 LLM 调用，streaming 事件发送到指定的步骤
+    /// 用于 vote 并行生成时，每个提案有独立的事件流
+    /// </summary>
+    private async Task<PrimitiveResult> ExecuteLlmCallWithStreamingAsync(
+        StepDefinition generator,
+        StepDefinition eventStep,
+        string? systemPrompt,
+        string userPrompt)
+    {
+        // ============================================================
+        //  可靠性护栏：
+        //  - vote 会并行发起多个 LLM 调用
+        //  - 任一调用卡住不返回，会让 vote 卡死在 Task.WhenAll
+        //  - 这里统一做：超时 + 异常收敛（超时/异常→返回失败 PrimitiveResult）
+        // ============================================================
+
+        Logger.LogInformation("[LLM] ▶ ExecuteLlmCallWithStreamingAsync ENTER for {StepId} (promptLen={Len})",
+            eventStep.Id, userPrompt.Length);
+
+        var outputType = generator.Parameters.GetValueOrDefault("output")?.ToString() ?? "text";
+
+        // Guardrails (configurable via DSL / workflow defaults)
+        var maxLength = ResolveIntParameter(generator.Parameters, "max_length", 102400);
+        maxLength = Math.Clamp(maxLength, 1024, 1024 * 1024); // [1KB, 1MB]
+
+        var timeoutSeconds = ResolveIntParameter(generator.Parameters, "timeout_seconds", 360);
+        timeoutSeconds = Math.Clamp(timeoutSeconds, 5, 3600); // [5s, 1h]
+
+        var idleTimeoutSeconds = ResolveIntParameter(generator.Parameters, "idle_timeout_seconds", 30);
+        idleTimeoutSeconds = Math.Clamp(idleTimeoutSeconds, 1, timeoutSeconds);
+
+        var strictParse = ResolveBoolParameter(generator.Parameters, "strict_parse", true);
+
+        // NOTE:
+        // - 不绑定外部 CancellationToken（当前 Coordinator 执行链路未贯通），至少保证不会无限挂死
+        // - Use AIGAgentBase.ChatStreamAsync/ChatAsync for provider/tool loop/unified behavior.
+        var callTimeout = TimeSpan.FromSeconds(timeoutSeconds);
+        var idleTimeout = TimeSpan.FromSeconds(idleTimeoutSeconds);
+        using var timeoutCts = new CancellationTokenSource(callTimeout);
+        var ct = timeoutCts.Token;
+
+        // Prepare per-step chat request (system prompt is passed via Context override).
+        var chat = ChatRequest.Create(userPrompt);
+        chat.StageHint = eventStep.Id ?? string.Empty;
+        if (!string.IsNullOrWhiteSpace(systemPrompt))
+        {
+            chat.AddContext("system_prompt", systemPrompt!);
+        }
+
+        // Bind step metadata to history writes (async-local, safe for concurrent vote fan-out).
+        using var _ = BeginStepHistory(
+            stepId: eventStep.Id ?? string.Empty,
+            stepType: eventStep.Type ?? "llm_call",
+            systemPrompt: systemPrompt);
+
+        var output = string.Empty;
+        var promptTokens = 0;
+        var completionTokens = 0;
+
+        try
+        {
+            var supportsStreaming = await SupportsStreamingAsync(ct);
+
+            if (supportsStreaming)
+            {
+                var sb = new System.Text.StringBuilder();
+                var chunkIndex = 0;
+                var startAt = DateTimeOffset.UtcNow;
+
+                // Streaming events throttling (reduce event storm & threadpool starvation)
+                const int StreamPublishEveryN = 16;
+                var streamPublishMinInterval = TimeSpan.FromMilliseconds(250);
+                var lastPublishAt = DateTimeOffset.MinValue;
+
+                Logger.LogInformation("[STREAM] Starting streaming for {StepId}, Type={Type}",
+                    eventStep.Id, eventStep.Type);
+
+                var stream = ChatStreamAsync(chat, ct);
+                var enumerator = stream.GetAsyncEnumerator(ct);
+                try
+                {
+                    while (true)
+                    {
+                        var elapsed = DateTimeOffset.UtcNow - startAt;
+                        var remaining = callTimeout - elapsed;
+                        if (remaining <= TimeSpan.Zero)
+                        {
+                            return new PrimitiveResult
+                            {
+                                Success = false,
+                                Error = $"llm-timeout>{timeoutSeconds}s",
+                                SystemPrompt = systemPrompt,
+                                UserPrompt = userPrompt,
+                                AssistantResponse = output,
+                                TokensUsed = 0,
+                                LlmCalls = 1
+                            };
+                        }
+
+                        var moveNextTask = enumerator.MoveNextAsync().AsTask();
+                        var waitTimeout = remaining < idleTimeout ? remaining : idleTimeout;
+                        var completed = await Task.WhenAny(moveNextTask, Task.Delay(waitTimeout));
+                        if (completed != moveNextTask)
+                        {
+                            // No tokens for idleTimeout => treat as hang (or total timeout if remaining < idleTimeout).
+                            return new PrimitiveResult
+                            {
+                                Success = false,
+                                Error = waitTimeout == idleTimeout
+                                    ? $"llm-idle-timeout>{idleTimeoutSeconds}s"
+                                    : $"llm-timeout>{timeoutSeconds}s",
+                                SystemPrompt = systemPrompt,
+                                UserPrompt = userPrompt,
+                                AssistantResponse = output,
+                                TokensUsed = 0,
+                                LlmCalls = 1
+                            };
+                        }
+
+                        if (!await moveNextTask)
+                        {
+                            break;
+                        }
+
+                        var delta = enumerator.Current ?? string.Empty;
+                        if (string.IsNullOrEmpty(delta))
+                            continue;
+
+                        sb.Append(delta);
+                        output = sb.ToString();
+
+                        // 防止输出爆炸导致内存/渲染/日志被打穿（这类“卡住”看起来像死循环）
+                        if (output.Length > maxLength)
+                        {
+                            return PrimitiveResult.Fail($"redflag-length>{maxLength}");
+                        }
+
+                        // 流式事件发送到指定的步骤（每个提案独立显示）
+                        var now = DateTimeOffset.UtcNow;
+                        var isFirst = chunkIndex == 0;
+                        var shouldPublish =
+                            isFirst ||
+                            (chunkIndex % StreamPublishEveryN == 0) ||
+                            (now - lastPublishAt >= streamPublishMinInterval);
+
+                        if (shouldPublish)
+                        {
+                            lastPublishAt = now;
+                            EmitStepEvent(eventStep, StepStatus.Running,
+                                $"Streaming... ({Math.Max(1, output.Length / 4)} tokens)",
+                                progress: 0,
+                                systemPrompt: systemPrompt,
+                                userPrompt: userPrompt,
+                                assistantResponse: output);
+                        }
+
+                        chunkIndex++;
+
+                        // Safety stop for pathological streams
+                        if (chunkIndex > 20000)
+                        {
+                            return PrimitiveResult.Fail("llm-stream-too-long>20000");
+                        }
+                    }
+                }
+                finally
+                {
+                    // Don't allow DisposeAsync to block forever if provider is misbehaving.
+                    try
+                    {
+                        var disposeTask = enumerator.DisposeAsync().AsTask();
+                        await Task.WhenAny(disposeTask, Task.Delay(1000));
+                    }
+                    catch
+                    {
+                        // ignored
+                    }
+                }
+
+                // Token usage is not available in streaming mode; use a cheap estimate.
+                promptTokens = Math.Max(1, userPrompt.Length / 4);
+                completionTokens = Math.Max(1, output.Length / 4);
+            }
+            else
+            {
+                try
+                {
+                    var response = await ChatAsync(chat, ct).WaitAsync(callTimeout);
+                    output = response.Content ?? string.Empty;
+                    promptTokens = response.Usage?.PromptTokens ?? Math.Max(1, userPrompt.Length / 4);
+                    completionTokens = response.Usage?.CompletionTokens ?? Math.Max(1, output.Length / 4);
+                }
+                catch (TimeoutException)
+                {
+                    return new PrimitiveResult
+                    {
+                        Success = false,
+                        Error = $"llm-timeout>{timeoutSeconds}s",
+                        SystemPrompt = systemPrompt,
+                        UserPrompt = userPrompt,
+                        AssistantResponse = output,
+                        TokensUsed = 0,
+                        LlmCalls = 1
+                    };
+                }
+            }
+
+            lock (_statsLock)
+            {
+                CustomState.TotalTokensUsed += promptTokens + completionTokens;
+                CustomState.TotalLlmCalls++;
+            }
+
+            if (output.Length > maxLength)
+            {
+                return PrimitiveResult.Fail($"redflag-length>{maxLength}");
+            }
+
+            var parser = _parserFactory.Create(outputType);
+            var parsed = parser.Parse(output);
+            if (parsed == null)
+            {
+                if (!strictParse)
+                {
+                    parsed = output;
+                }
+                else
+                {
+                    return PrimitiveResult.Fail("redflag-parse-null");
+                }
+            }
+
+            // Persist a structured per-step interaction into AIMemory (optional).
+            // This is the "long-term" layer; State.History stays as a short-term window.
+            await PersistInteractionToMemoryAsync(
+                eventStep,
+                systemPrompt,
+                userPrompt,
+                output,
+                promptTokens,
+                completionTokens);
+
+            return new PrimitiveResult
+            {
+                Success = true,
+                Value = parsed,
+                TokensUsed = promptTokens + completionTokens,
+                PromptTokens = promptTokens,
+                CompletionTokens = completionTokens,
+                LlmCalls = 1,
+                SystemPrompt = systemPrompt,
+                UserPrompt = userPrompt,
+                AssistantResponse = output
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            Logger.LogWarning("[LLM] ✗ Timeout/cancel: {StepId} after {Timeout} (promptLen={Len}, outLen={OutLen})",
+                eventStep.Id, callTimeout, userPrompt.Length, output.Length);
+
+            return new PrimitiveResult
+            {
+                Success = false,
+                Error = $"llm-timeout>{(int)callTimeout.TotalSeconds}s",
+                SystemPrompt = systemPrompt,
+                UserPrompt = userPrompt,
+                AssistantResponse = output,
+                TokensUsed = 0,
+                LlmCalls = 1
+            };
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LLM] ✗ Error in {StepId}: {Message}", eventStep.Id, ex.Message);
+
+            return new PrimitiveResult
+            {
+                Success = false,
+                Error = $"llm-error:{ex.Message}",
+                SystemPrompt = systemPrompt,
+                UserPrompt = userPrompt,
+                AssistantResponse = output,
+                TokensUsed = 0,
+                LlmCalls = 1
+            };
+        }
+    }
+
+    private async Task PersistInteractionToMemoryAsync(
+        StepDefinition step,
+        string? systemPrompt,
+        string userPrompt,
+        string assistantResponse,
+        int promptTokens,
+        int completionTokens)
+    {
+        if (AIMemory == null)
+            return;
+
+        try
+        {
+            var payload = new
+            {
+                kind = "aevatar.cognitive.llm_interaction.v1",
+                agentId = Id,
+                agentKind = "cognitive_coordinator",
+                executionId = CustomState.ExecutionId ?? "",
+                stepId = step.Id ?? "",
+                stepType = step.Type ?? "",
+                systemPrompt,
+                userPrompt,
+                assistantResponse,
+                promptTokens,
+                completionTokens,
+                totalTokens = promptTokens + completionTokens,
+                timestamp = DateTimeOffset.UtcNow.ToString("O")
+            };
+
+            var json = JsonSerializer.Serialize(payload);
+            await AIMemory.AddMessageAsync("assistant", json);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogDebug(ex, "Failed to persist llm interaction to AIMemory (best-effort).");
+        }
+    }
+}
+

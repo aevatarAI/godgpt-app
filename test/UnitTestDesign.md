@@ -540,7 +540,7 @@ dotnet test --collect:"XPlat Code Coverage"
 - **GetLLMSettings_WithRequestOverrides_ShouldUseRequestValues**: 验证请求级设置覆盖
 - **SupportsStreamingAsync_ShouldReflectProviderCapability**: 测试流式支持能力查询
 
-### 13.2 AIGAgentWithToolBase Tests 🔨
+### 13.2 AIGAgentBase Tool/Function Calling Tests 🔨
 
 #### Tool Registration Tests
 - **RegisterTools_ShouldAddToManager**: 验证工具注册到管理器
@@ -617,7 +617,7 @@ dotnet test --collect:"XPlat Code Coverage"
 
 #### AI测试Agents（继承自现有Agent基类）
 - **TestAIAgent**: 基础AI测试代理（继承AIGAgentBase）
-- **TestAIAgentWithTools**: 带工具的AI测试代理（继承AIGAgentWithToolBase）
+- **TestAIAgentWithTools**: 带工具的AI测试代理（继承AIGAgentBase，工具能力已合并）
 - **TestAIAgentWithStrategy**: 带策略的AI测试代理
 - **TestCustomerServiceAgent**: 客服场景测试代理
 - **TestWeatherAgent**: 天气查询测试代理
@@ -646,7 +646,7 @@ dotnet test --collect:"XPlat Code Coverage"
 
 ### AI.Core
 - **AIGAgentBase**: 90%+ 覆盖率
-- **AIGAgentWithToolBase**: 85%+ 覆盖率
+- **工具/Function Calling**: 85%+ 覆盖率（已合并进 AIGAgentBase）
 - **策略实现**: 80%+ 覆盖率
 - **工具管理器**: 90%+ 覆盖率
 - **内置工具**: 75%+ 覆盖率

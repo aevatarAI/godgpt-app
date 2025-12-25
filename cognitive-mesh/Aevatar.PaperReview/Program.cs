@@ -1,11 +1,9 @@
-using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.AI.Abstractions.Configuration;
 using Aevatar.Agents.AI.MEAI.DependencyInjection;
 using Aevatar.Agents.Cognitive.DependencyInjection;
-using Aevatar.Agents.CreativeReasoning;
-using Aevatar.Agents.Maker;
 using Aevatar.Agents.Plugins.MassTransit.DependencyInjection;
 using Aevatar.Agents.Runtime.Local;
+using Aevatar.PaperReview.Prompty;
 using Aevatar.PaperReview.Services;
 using HealthChecks.UI.Client;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
@@ -92,11 +90,9 @@ builder.Services.AddHealthChecks();
 //  Agent Framework Infrastructure
 // ─────────────────────────────────────────────────────────────
 
-// MassTransit Stream Plugin
+// MassTransit Stream Plugin (仅 Cognitive Agents)
 builder.Services.AddMassTransitStreamPlugin(
     builder.Configuration,
-    typeof(Aevatar.Agents.Maker.Agents.MakerCoordinatorGAgent).Assembly,
-    typeof(Aevatar.Agents.CreativeReasoning.Agents.UoTCoordinatorGAgent).Assembly,
     typeof(Aevatar.Agents.Cognitive.Agents.CognitiveCoordinatorGAgent).Assembly
 );
 
@@ -106,19 +102,18 @@ builder.Services.AddAevatarLocalRuntime();
 // LLM Infrastructure (MEAI)
 builder.Services.AddMEAI();
 
-// MAKER System
-builder.Services.AddMakerSystem();
-
-// UoT Creative Reasoning
-builder.Services.AddUoTCreativeReasoning(AevatarAgentsConstants.DefaultProviderName);
-
 // Cognitive DSL System
 builder.Services.AddCognitiveAgents();
+builder.Services.AddSingleton<Aevatar.CognitiveMesh.Strategies.CognitiveStrategy>();
 
 // ─────────────────────────────────────────────────────────────
 //  Paper Review Services
 // ─────────────────────────────────────────────────────────────
 builder.Services.AddSingleton<SupabaseService>();
+builder.Services.AddSingleton<PaperUploadService>();
+builder.Services.AddSingleton<PromptyLoader>();          // Prompty 解析器
+builder.Services.AddSingleton<ReviewPromptProvider>();   // 混合 Prompty + Scriban
+builder.Services.AddSingleton<ReviewEventBridge>();
 builder.Services.AddSingleton<PaperReviewService>();
 
 // ─────────────────────────────────────────────────────────────
@@ -187,6 +182,36 @@ app.MapGet("/api/sessions/{sessionId}/status", (string sessionId, PaperReviewSer
 // 获取评审结果
 app.MapGet("/api/sessions/{sessionId}/result", (string sessionId, PaperReviewService svc) =>
     Results.Json(svc.GetResult(sessionId)));
+
+// ─────────────────────────────────────────────────────────────
+//  Deliverables (交付物下载)
+// ─────────────────────────────────────────────────────────────
+
+// 列出当前 session 已生成的文件
+app.MapGet("/api/sessions/{sessionId}/artifacts", (string sessionId, PaperReviewService svc) =>
+    Results.Json(svc.GetArtifacts(sessionId)));
+
+// 下载 compose 后的最终报告（Markdown）
+app.MapGet("/api/sessions/{sessionId}/artifacts/report", (string sessionId, PaperReviewService svc) =>
+{
+    if (!svc.TryGetFileContent(sessionId, "reports", "review_report.md", out var content))
+        return Results.NotFound(new { success = false, error = "Report not found" });
+
+    var bytes = System.Text.Encoding.UTF8.GetBytes(content ?? "");
+    var fileName = $"{sessionId}-review_report.md";
+    return Results.File(bytes, "text/markdown; charset=utf-8", fileDownloadName: fileName);
+});
+
+// 下载评审明细（Atomic Points task + consensus）
+app.MapGet("/api/sessions/{sessionId}/artifacts/details", (string sessionId, PaperReviewService svc) =>
+{
+    if (!svc.TryGetFileContent(sessionId, "details", "review_details.json", out var content))
+        return Results.NotFound(new { success = false, error = "Details not found" });
+
+    var bytes = System.Text.Encoding.UTF8.GetBytes(content ?? "");
+    var fileName = $"{sessionId}-review_details.json";
+    return Results.File(bytes, "application/json; charset=utf-8", fileDownloadName: fileName);
+});
 
 // SSE 实时事件流
 app.MapGet("/api/sessions/{sessionId}/events", async (

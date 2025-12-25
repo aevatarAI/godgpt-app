@@ -1,10 +1,11 @@
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.Agents.ChatManager.Share;
+using Aevatar.Agents.GodGPT.Protos.ChatManager;
+using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Core.Abstractions;
 using Aevatar.GAgents.AI.Common;
 using Aevatar.GAgents.AI.Options;
-using GodGPT.GAgents.DailyPush;
 using GodGPT.GAgents.SpeechChat;
 using Orleans.Concurrency;
 
@@ -16,11 +17,11 @@ public interface IChatManagerGAgent : IGAgent
         string? guider = null, DateTime? userLocalTime = null);
     Task<Tuple<string,string>> ChatWithSessionAsync(Guid sessionId, string sysmLLM, string content, ExecutionPromptSettings promptSettings = null);
     [ReadOnly]
-    Task<List<SessionInfoDto>> GetSessionListAsync();
+    Task<SessionListProto> GetSessionListAsync();
     [ReadOnly]
     Task<bool> IsUserSessionAsync(Guid sessionId);
     [ReadOnly]
-    Task<List<ChatMessage>> GetSessionMessageListAsync(Guid sessionId);
+    Task<ChatMessageListProto> GetSessionMessageListAsync(Guid sessionId);
     [ReadOnly]
     Task<List<ChatMessageWithMetaDto>> GetSessionMessageListWithMetaAsync(Guid sessionId);
     [ReadOnly]
@@ -29,7 +30,7 @@ public interface IChatManagerGAgent : IGAgent
     Task<Guid> RenameSessionAsync(Guid sessionId, string title);
     Task<UserProfileDto> GetLastSessionUserProfileAsync();
     Task<Guid> ClearAllAsync();
-    Task RenameChatTitleAsync(RenameChatTitleEvent @event);
+    Task RenameChatTitleAsync(Aevatar.Agents.GodGPT.Protos.GodChat.RenameChatTitleEvent @event);
     Task<Guid> GenerateChatShareContentAsync(Guid sessionId);
     [ReadOnly]
     Task<ShareLinkDto> GetChatShareContentAsync(Guid sessionId, Guid shareId);
@@ -41,6 +42,6 @@ public interface IChatManagerGAgent : IGAgent
     /// <param name="maxResults">Maximum number of results to return (default: 1000)</param>
     /// <returns>List of matching sessions with content preview</returns>
     [ReadOnly]
-    Task<List<SessionInfoDto>> SearchSessionsAsync(string keyword, int maxResults = 1000);
+    Task<SessionListProto> SearchSessionsAsync(string keyword, int maxResults = 1000);
     
 }

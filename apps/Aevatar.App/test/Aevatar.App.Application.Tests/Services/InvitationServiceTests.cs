@@ -36,7 +36,7 @@ public class InvitationServiceTests
     {
         // Use InvitationCodeHelper to generate a real valid code
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        return InvitationCodeHelper.GenerateOptimizedCode(InvitationCodeType.FreeTrialReward, timestamp);
+        return InvitationCodeHelper.GenerateOptimizedCode(InviteCodeType.FreeTrialReward, timestamp);
     }
 
     public InvitationServiceTests()

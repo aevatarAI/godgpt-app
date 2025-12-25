@@ -3,6 +3,7 @@ using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
 using Aevatar.App.Application.Contracts.Services.User;
+using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.GAgents.AI.Common;
 using GodGPT.GAgents.SpeechChat;

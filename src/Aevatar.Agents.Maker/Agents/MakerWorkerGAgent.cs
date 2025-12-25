@@ -166,14 +166,28 @@ public class MakerWorkerGAgent : AIGAgentBase<MakerWorkerState, MakerWorkerConfi
         //  CRITICAL: Check if request is stale BEFORE starting LLM call
         //  This prevents wasting LLM tokens on requests that would be discarded
         // ============================================================
+        var requestPrefix = ExtractPrefix(request.RequestId);
+
+        // 如果是新 Task，清理旧前缀，避免跨任务误判为 stale
+        if (!string.Equals(CustomState.CurrentTaskId, request.TaskId, StringComparison.Ordinal))
+        {
+            _activePrefix = null;
+        }
+
         var currentActivePrefix = _activePrefix;
         if (!string.IsNullOrEmpty(currentActivePrefix) && 
-            !string.IsNullOrEmpty(request.RequestId) &&
-            !request.RequestId.StartsWith(currentActivePrefix))
+            !string.IsNullOrEmpty(requestPrefix) &&
+            !string.Equals(requestPrefix, currentActivePrefix, StringComparison.Ordinal))
         {
             Logger.LogWarning(">>> [SKIP-STALE] Worker {WorkerId} skipping stale request {RequestId} (activePrefix='{Prefix}')",
                 CustomState.WorkerId, request.RequestId, currentActivePrefix);
             return; // Skip this request entirely - don't waste LLM call
+        }
+
+        // 接受本轮请求后，如果当前前缀为空，则设为本轮前缀（保持幂等，不覆盖 coordinator 下发的新前缀）
+        if (string.IsNullOrEmpty(_activePrefix))
+        {
+            _activePrefix = requestPrefix;
         }
         
         CustomState.CurrentTaskId = request.TaskId;
@@ -210,6 +224,27 @@ public class MakerWorkerGAgent : AIGAgentBase<MakerWorkerState, MakerWorkerConfi
 
         try
         {
+            // ─────────────────────────────────────────────────────────
+            //  Emit a synthetic "first token" to ensure UI gets
+            //  WorkerStarted + LlmCallStart even before real stream arrives
+            // ─────────────────────────────────────────────────────────
+            await PublishAsync(new StreamingToken
+            {
+                RequestId = CustomState.CurrentRequestId,
+                TaskId = CustomState.CurrentTaskId,
+                WorkerId = CustomState.WorkerId,
+                ProposalId = proposalId,
+                Token = string.Empty,
+                AccumulatedContent = string.Empty,
+                TokenIndex = 0,
+                IsFirstToken = true,
+                IsLastToken = false,
+                Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
+                ProviderName = CustomConfig.LlmProviderName,
+                SystemPrompt = request.SystemPrompt ?? string.Empty,
+                UserPrompt = request.UserPrompt ?? string.Empty
+            }, EventDirection.Up, cts.Token);
+
             var llmRequest = new AevatarLLMRequest
             {
                 SystemPrompt = request.SystemPrompt,
@@ -470,6 +505,14 @@ public class MakerWorkerGAgent : AIGAgentBase<MakerWorkerState, MakerWorkerConfi
         }
         
         return false;
+    }
+
+    private static string? ExtractPrefix(string? requestId)
+    {
+        if (string.IsNullOrEmpty(requestId)) return null;
+        var lastColon = requestId.LastIndexOf(':');
+        if (lastColon <= 0) return requestId;
+        return requestId[..(lastColon + 1)]; // keep trailing colon so StartsWith matches rounds
     }
 
     #endregion

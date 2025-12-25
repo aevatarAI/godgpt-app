@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 // Protobuf types aliases
 using AwakeningStateProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStateProto;
 using AwakeningStatusProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStatusProto;
+using AwakeningContentDtoProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningContentDtoProto;
 using GenerateAwakeningEvent = Aevatar.Agents.GodGPT.Protos.Awakening.GenerateAwakeningEvent;
 using LockGenerationTimestampEvent = Aevatar.Agents.GodGPT.Protos.Awakening.LockGenerationTimestampEvent;
 using UpdateAwakeningStatusEvent = Aevatar.Agents.GodGPT.Protos.Awakening.UpdateAwakeningStatusEvent;
@@ -61,6 +62,31 @@ public partial class AwakeningGAgent
             AwakeningLevel = State.AwakeningLevel,
             AwakeningMessage = State.AwakeningMessage,
             Status = FromProto(State.Status)
+        };
+    }
+
+    /// <summary>
+    /// Build awakening content Protobuf from current state (for RPC compatibility)
+    /// </summary>
+    private AwakeningContentDtoProto BuildAwakeningContentProto()
+    {
+        // If content hasn't been generated today, return empty proto with NotStarted status
+        if (!IsToday(State.LastGeneratedTimestamp))
+        {
+            return new AwakeningContentDtoProto
+            {
+                AwakeningLevel = 0,
+                AwakeningMessage = string.Empty,
+                Status = AwakeningStatusProto.AwakeningStatusNotStarted
+            };
+        }
+        
+        // Return current content with status
+        return new AwakeningContentDtoProto
+        {
+            AwakeningLevel = State.AwakeningLevel,
+            AwakeningMessage = State.AwakeningMessage,
+            Status = State.Status
         };
     }
 

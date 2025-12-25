@@ -35,7 +35,7 @@ public class UserStatisticsService : IUserStatisticsService
 
     private async Task<IUserStatisticsGAgent> GetAgentAsync(Guid userId)
     {
-        var actor = await _actorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(userId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(userId.ToString());
         return actor.As<IUserStatisticsGAgent>();
     }
 
@@ -44,8 +44,8 @@ public class UserStatisticsService : IUserStatisticsService
         _logger.LogInformation("[UserStatisticsService] Recording app rating for user {UserId}, platform {Platform}, device {DeviceId}", 
             userId, input.Platform, input.DeviceId);
         
-        var grainId = CommonHelper.StringToGuid(input.DeviceId);
-        var actor = await _actorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(grainId);
+        var agentId = input.DeviceId;
+        var actor = await _actorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(agentId);
         var agent = actor.As<IUserStatisticsGAgent>();
         
         var request = new Aevatar.Agents.GodGPT.Protos.UserStatistics.RecordAppRatingRequestProto
@@ -74,8 +74,8 @@ public class UserStatisticsService : IUserStatisticsService
             userId, input.DeviceId);
         
         // Use deviceId to get agent (agent ID is based on deviceId, not userId)
-        var grainId = CommonHelper.StringToGuid(input.DeviceId);
-        var actor = await _actorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(grainId);
+        var agentId = input.DeviceId;
+        var actor = await _actorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(agentId);
         var agent = actor.As<IUserStatisticsGAgent>();
         
         return await agent.CanUserRateAppAsync(input.DeviceId);
@@ -89,9 +89,11 @@ public class UserStatisticsService : IUserStatisticsService
         var protoResult = await agent.GetUserStatisticsAsync();
         
         // Convert Protobuf to DTO
+        // Note: protoResult.UserId may be full Agent Id (format: "AgentType:Guid"), 
+        // so we use the userId parameter directly which we already know
         return new UserStatisticsDto
         {
-            UserId = Guid.TryParse(protoResult.UserId, out var uid) ? uid : Guid.Empty,
+            UserId = userId, // Use the known userId parameter instead of parsing protoResult.UserId
             AppRatings = protoResult.AppRatings.Select(r => new AppRatingRecordDto
             {
                 Platform = r.Platform,

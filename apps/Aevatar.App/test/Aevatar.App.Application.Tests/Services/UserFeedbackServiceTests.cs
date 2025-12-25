@@ -50,7 +50,7 @@ public class UserFeedbackServiceTests
         var actor = Substitute.For<IGAgentActor, IUserFeedbackGAgent>();
         var agent = (IUserFeedbackGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new SubmitFeedbackResultProto
@@ -80,7 +80,7 @@ public class UserFeedbackServiceTests
         var actor = Substitute.For<IGAgentActor, IUserFeedbackGAgent>();
         var agent = (IUserFeedbackGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new CheckEligibilityResultProto
@@ -114,7 +114,7 @@ public class UserFeedbackServiceTests
         var actor = Substitute.For<IGAgentActor, IUserFeedbackGAgent>();
         var agent = (IUserFeedbackGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new GetFeedbackHistoryResultProto

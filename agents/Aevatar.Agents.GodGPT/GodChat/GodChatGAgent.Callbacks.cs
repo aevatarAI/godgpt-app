@@ -1,7 +1,9 @@
 using System.Text;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
+using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
 using Aevatar.AI.Exceptions;
 using Aevatar.AI.Feature.StreamSyncWoker;
+using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.GodChat.Dtos;
 using Aevatar.Application.Grains.UserInvitation;
 using Aevatar.Application.Grains.UserProfile;
@@ -10,8 +12,13 @@ using Aevatar.GAgents.ChatAgent.Dtos;
 using GodGPT.GAgents.Common.Constants;
 using GodGPT.GAgents.SpeechChat;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
+using Aevatar.Agents.Abstractions.Extensions;
+using Orleans.Streams;
+using Aevatar.Agents.Abstractions;
+using Aevatar.Agents; // For EventEnvelope
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 
@@ -20,15 +27,50 @@ namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 /// </summary>
 public partial class GodChatGAgent
 {
-    public async Task ChatMessageCallbackAsync(AIChatContextDto contextDto,
-        AIExceptionEnum aiExceptionEnum, string? errorMessage, AIStreamChatContent? chatContent)
+    public async Task ChatMessageCallbackAsync(AIChatContextProto? contextProto,
+        AIExceptionEnum aiExceptionEnum, string? errorMessage, AIStreamChatContentProto? chatContentProto)
     {
+        // Convert Proto to DTO for internal use
+        var contextDto = new AIChatContextDto();
+        if (contextProto != null)
+        {
+            contextDto = new AIChatContextDto
+            {
+                AgentId = contextProto.HasAgentId ? contextProto.AgentId : null,
+                SessionId = contextProto.HasSessionId ? contextProto.SessionId : null,
+                UserId = contextProto.HasUserId ? contextProto.UserId : null,
+                Metadata = contextProto.Metadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value),
+                SystemPrompt = contextProto.HasSystemPrompt ? contextProto.SystemPrompt : null,
+                RequestId = Guid.TryParse(contextProto.RequestId, out var reqId) ? reqId : Guid.NewGuid(),
+                ChatId = contextProto.HasChatId ? contextProto.ChatId : null,
+                MessageId = contextProto.HasMessageId ? contextProto.MessageId : null
+            };
+        }
+        
+        // Convert AIStreamChatContentProto to AIStreamChatContent for internal use
+        AIStreamChatContent? chatContent = null;
+        if (chatContentProto != null)
+        {
+            chatContent = new AIStreamChatContent
+            {
+                Content = chatContentProto.Content,
+                IsComplete = chatContentProto.IsComplete,
+                TokenCount = chatContentProto.TokenCount,
+                Error = chatContentProto.HasError ? chatContentProto.Error : null,
+                IsLastChunk = chatContentProto.IsLastChunk,
+                ResponseContent = chatContentProto.HasResponseContent ? chatContentProto.ResponseContent : null,
+                AggregationMsg = chatContentProto.HasAggregationMsg ? chatContentProto.AggregationMsg : null,
+                SerialNumber = chatContentProto.SerialNumber,
+                IsAggregationMsg = chatContentProto.IsAggregationMsg
+            };
+        }
+        
         if (aiExceptionEnum == AIExceptionEnum.RequestLimitError && !contextDto.MessageId.IsNullOrWhiteSpace())
         {
             Logger.LogError(
                 $"[GodChatGAgent][ChatMessageCallbackAsync] RequestLimitError retry. contextDto {JsonConvert.SerializeObject(contextDto)}");
             var configuration = await GetConfigurationAsync();
-            var systemLlm = configuration.GetSystemLLM();
+            var systemLlm = await configuration.GetSystemLLMAsync();
             var dictionary = JsonConvert.DeserializeObject<Dictionary<string, object>>(contextDto.MessageId);
             
             // Check if this is a voice chat retry to call the appropriate method
@@ -185,12 +227,12 @@ public partial class GodChatGAgent
 
             if (!string.IsNullOrEmpty(State.ChatManagerGuid))
             {
-                var userInvitationActor = await _actorFactory.CreateGAgentActorAsync<UserInvitationGAgent>(Guid.Parse(State.ChatManagerGuid));
-                var userInvitationGAgent = (IUserInvitationGAgent)userInvitationActor.GetAgent();
+                var userInvitationActor = await _actorFactory.CreateGAgentActorAsync<UserInvitationGAgent>(State.ChatManagerGuid);
+                var userInvitationGAgent = userInvitationActor.As<IUserInvitationGAgent>();
                 var inviterId = await userInvitationGAgent.GetInviterAsync();
                 if (inviterId != null && inviterId != Guid.Empty)
                 {
-                    var invitationGAgent = await GetInvitationAgentAsync((Guid)inviterId);
+                    var invitationGAgent = await GetInvitationAgentAsync(inviterId.Value.ToString());
                     await invitationGAgent.ProcessInviteeChatCompletionAsync(State.ChatManagerGuid.ToString());
                 }
             }
@@ -198,16 +240,23 @@ public partial class GodChatGAgent
             // Store suggestions and clean content for later use in partialMessage
             if (conversationSuggestions != null)
             {
-                RequestContext.Set("ConversationSuggestions", conversationSuggestions);
+                Context?.Set(GodGPTContextKeys.ConversationSuggestions, conversationSuggestions);
             }
 
             // Store clean content to replace the response content
-            RequestContext.Set("CleanMainContent", cleanMainContent);
+            Context?.Set(GodGPTContextKeys.CleanMainContent, cleanMainContent);
         }
 
         // Apply streaming suggestion filtering logic for text chat
-        string streamingContent = chatContent.ResponseContent;
+        // Use Content field (consistent with original implementation)
+        string streamingContent = chatContent.Content ?? "";
         bool shouldFilterStream = false;
+        
+        // 🔍 DEBUG: Log original Content
+        Logger.LogDebug(
+            $"[ChatMessageCallbackAsync][DEBUG] Original Content - Length: {chatContent.Content?.Length ?? 0}, " +
+            $"Content: '{chatContent.Content?.Substring(0, Math.Min(100, chatContent.Content?.Length ?? 0)) ?? ""}'{(chatContent.Content?.Length > 100 ? "..." : "")}', " +
+            $"IsLastChunk: {chatContent.IsLastChunk}, SerialNumber: {chatContent.SerialNumber}");
 
         // Check if this is a text chat (not voice chat)
         bool isFilteringVoiceChat = false;
@@ -239,41 +288,84 @@ public partial class GodChatGAgent
             bool ends_with_bracket = streamingContent.TrimEnd().EndsWith("[") && streamingContent.Length > 10;
 
             shouldStartAccumulating = contains_suggestions || contains_partial_marker || ends_with_bracket;
+            
+            // 🔍 DEBUG: Log suggestion detection
+            Logger.LogDebug(
+                $"[ChatMessageCallbackAsync][DEBUG] Suggestion Detection - contains_suggestions: {contains_suggestions}, " +
+                $"contains_partial_marker: {contains_partial_marker}, ends_with_bracket: {ends_with_bracket}, " +
+                $"shouldStartAccumulating: {shouldStartAccumulating}, _isAccumulatingForSuggestions: {_isAccumulatingForSuggestions}");
 
             if (shouldStartAccumulating && !_isAccumulatingForSuggestions)
             {
                 // Start accumulation - block all subsequent chunks from frontend
                 _isAccumulatingForSuggestions = true;
                 _accumulatedSuggestionContent = streamingContent;
-                RequestContext.Set("AccumulatedContent", true); // Set accumulation flag
+                Context?.Set(GodGPTContextKeys.AccumulatedContent, true); // Set accumulation flag
                 streamingContent = ""; // Block current chunk
+                
+                // 🔍 DEBUG: Log accumulation start
+                Logger.LogDebug(
+                    $"[ChatMessageCallbackAsync][DEBUG] Started accumulating - Original length: {_accumulatedSuggestionContent.Length}, " +
+                    $"streamingContent cleared, SerialNumber: {chatContent.SerialNumber}");
             }
             else if (_isAccumulatingForSuggestions)
             {
                 // Continue accumulation - block this chunk from frontend
+                var beforeLength = _accumulatedSuggestionContent.Length;
                 _accumulatedSuggestionContent += streamingContent;
                 streamingContent = ""; // Block current chunk
+                
+                // 🔍 DEBUG: Log accumulation continue
+                Logger.LogDebug(
+                    $"[ChatMessageCallbackAsync][DEBUG] Continuing accumulation - Added length: {streamingContent?.Length ?? 0}, " +
+                    $"Total accumulated: {_accumulatedSuggestionContent.Length}, SerialNumber: {chatContent.SerialNumber}");
             }
         }
 
         // Process accumulated content on final chunk
         if (_isAccumulatingForSuggestions && chatContent.IsLastChunk)
         {
+            // 🔍 DEBUG: Log before parsing
+            Logger.LogDebug(
+                $"[ChatMessageCallbackAsync][DEBUG] Processing final chunk - Accumulated length: {_accumulatedSuggestionContent.Length}, " +
+                $"Accumulated preview: '{_accumulatedSuggestionContent.Substring(0, Math.Min(200, _accumulatedSuggestionContent.Length))}{( _accumulatedSuggestionContent.Length > 200 ? "..." : "")}'");
+            
             var suggestionParseResult = SuggestionParser.ParseResponseWithSuggestions(_accumulatedSuggestionContent);
 
             // Store suggestions for response
             if (suggestionParseResult.Suggestions?.Any() == true)
             {
-                RequestContext.Set("ConversationSuggestions", suggestionParseResult.Suggestions);
+                Context?.Set(GodGPTContextKeys.ConversationSuggestions, suggestionParseResult.Suggestions);
+                Logger.LogDebug($"[ChatMessageCallbackAsync][DEBUG] Parsed {suggestionParseResult.Suggestions.Count} suggestions");
             }
 
             // Send clean content to frontend
             streamingContent = suggestionParseResult.MainContent;
+            
+            // 🔍 DEBUG: Log after parsing
+            Logger.LogDebug(
+                $"[ChatMessageCallbackAsync][DEBUG] Restored streamingContent - Length: {streamingContent?.Length ?? 0}, " +
+                $"Content: '{streamingContent?.Substring(0, Math.Min(100, streamingContent?.Length ?? 0)) ?? ""}{(streamingContent?.Length > 100 ? "..." : "")}'");
 
             // Reset accumulation state
             _isAccumulatingForSuggestions = false;
             _accumulatedSuggestionContent = "";
-            RequestContext.Remove("AccumulatedContent"); // Clean up accumulation flag
+            Context?.Remove("AccumulatedContent"); // Clean up accumulation flag
+        }
+        else if (!_isAccumulatingForSuggestions && !string.IsNullOrEmpty(streamingContent))
+        {
+            // 🔍 DEBUG: Log normal flow (no accumulation)
+            Logger.LogDebug(
+                $"[ChatMessageCallbackAsync][DEBUG] Normal flow (no accumulation) - streamingContent length: {streamingContent.Length}, " +
+                $"Content: '{streamingContent.Substring(0, Math.Min(100, streamingContent.Length))}{(streamingContent.Length > 100 ? "..." : "")}', " +
+                $"IsLastChunk: {chatContent.IsLastChunk}, SerialNumber: {chatContent.SerialNumber}");
+        }
+        else if (_isAccumulatingForSuggestions && !chatContent.IsLastChunk)
+        {
+            // 🔍 DEBUG: Log accumulation in progress (not last chunk)
+            Logger.LogDebug(
+                $"[ChatMessageCallbackAsync][DEBUG] Accumulation in progress (not last chunk) - streamingContent cleared, " +
+                $"Accumulated so far: {_accumulatedSuggestionContent.Length}, SerialNumber: {chatContent.SerialNumber}");
         }
 
         var partialMessage = new ResponseStreamGodChat()
@@ -287,6 +379,12 @@ public partial class GodChatGAgent
             VoiceContentType = VoiceContentType.VoiceResponse
         };
 
+        // 🔍 DEBUG: Log final message before sending
+        Logger.LogDebug(
+            $"[ChatMessageCallbackAsync][DEBUG] Final message - Response length: {partialMessage.Response?.Length ?? 0}, " +
+            $"ChatId: {partialMessage.ChatId}, SerialNumber: {partialMessage.SerialNumber}, " +
+            $"IsLastChunk: {partialMessage.IsLastChunk}, IsAccumulating: {_isAccumulatingForSuggestions}");
+        
         // Log final content being sent to frontend
         Logger.LogInformation(
             $"[FINAL_OUTPUT] Sending to frontend - Length: {streamingContent?.Length ?? 0}, IsLastChunk: {chatContent.IsLastChunk}");
@@ -294,6 +392,14 @@ public partial class GodChatGAgent
         {
             Logger.LogInformation(
                 $"[FINAL_OUTPUT] Content preview: '{streamingContent.Substring(0, Math.Min(100, streamingContent.Length))}{(streamingContent.Length > 100 ? "..." : "")}'");
+        }
+        else
+        {
+            // 🔍 DEBUG: Log when Response is empty
+            Logger.LogWarning(
+                $"[ChatMessageCallbackAsync][DEBUG] ⚠️ Response is EMPTY - SerialNumber: {chatContent.SerialNumber}, " +
+                $"IsLastChunk: {chatContent.IsLastChunk}, IsAccumulating: {_isAccumulatingForSuggestions}, " +
+                $"Original Content length: {chatContent.Content?.Length ?? 0}, streamingContent length: {streamingContent?.Length ?? 0}");
         }
 
         // For the last chunk, use clean content and add conversation suggestions if available
@@ -309,14 +415,14 @@ public partial class GodChatGAgent
             else
             {
                 // Add conversation suggestions to the last chunk if available
-                var storedSuggestions = RequestContext.Get("ConversationSuggestions") as List<string>;
+                var storedSuggestions = Context?.Get(GodGPTContextKeys.ConversationSuggestions);
                 if (storedSuggestions?.Any() == true)
                 {
                     partialMessage.SuggestedItems = storedSuggestions;
                     Logger.LogDebug(
                         $"[GodChatGAgent][ChatMessageCallbackAsync] Added {storedSuggestions.Count} suggestions to last chunk");
 
-                    var cleanMainContent = RequestContext.Get("CleanMainContent") as string;
+                    var cleanMainContent = Context?.Get(GodGPTContextKeys.CleanMainContent);
                     if (!string.IsNullOrEmpty(cleanMainContent))
                     {
                         // Enhanced safety check to prevent duplication
@@ -466,30 +572,91 @@ public partial class GodChatGAgent
             await PushMessageToClientAsync(partialMessage);
         }
 
-        // Clean up RequestContext when processing is complete (last chunk)
+        // Clean up agent context when processing is complete (last chunk)
         if (chatContent.IsLastChunk)
         {
-            RequestContext.Remove("CleanMainContent");
-            RequestContext.Remove("ConversationSuggestions");
-            RequestContext.Remove("IsFilteringSuggestions");
-            RequestContext.Remove("IsAccumulatingForSuggestions");
-            RequestContext.Remove("AccumulatedContent");
+            Context?.Remove("CleanMainContent");
+            Context?.Remove("ConversationSuggestions");
+            Context?.Remove("IsFilteringSuggestions");
+            Context?.Remove("IsAccumulatingForSuggestions");
+            Context?.Remove("AccumulatedContent");
             Logger.LogDebug(
-                $"[GodChatGAgent][ChatMessageCallbackAsync] Cleaned up RequestContext for completed request");
+                $"[GodChatGAgent][ChatMessageCallbackAsync] Cleaned up agent context for completed request");
         }
     }
 
     private async Task PushMessageToClientAsync(ResponseStreamGodChat chatMessage)
     {
-        var streamId = StreamId.Create(StreamNamespace, Id);
+        // Use session ID (Guid) for stream identification
+        // The Id field in new framework is string format like "GodChat:sessionGuid"
+        // Extract the actual session GUID for stream routing
+        Guid sessionGuid;
+        if (Id.Contains(':'))
+        {
+            var parts = Id.Split(':');
+            if (parts.Length >= 2 && Guid.TryParse(parts[1], out var parsed))
+            {
+                sessionGuid = parsed;
+            }
+            else
+            {
+                Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] Cannot parse session GUID from Id: {Id}");
+                sessionGuid = Guid.Empty;
+            }
+        }
+        else if (Guid.TryParse(Id, out var directParsed))
+        {
+            sessionGuid = directParsed;
+        }
+        else
+        {
+            Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] Cannot parse session GUID from Id: {Id}");
+            sessionGuid = Guid.Empty;
+        }
+        
         Logger.LogDebug(
-            $"[GodChatGAgent][PushMessageToClientAsync] sessionId {Id.ToString()}, namespace {StreamNamespace}, streamId {streamId.ToString()}");
-        // TODO: [CLIENT_STREAM] New framework doesn't inherit Grain, need alternative for client push
-        // Original: var streamProvider = this.GetStreamProvider(StreamProviderName);
-        // var stream = streamProvider.GetStream<ResponseStreamGodChat>(streamId);
-        // await stream.OnNextAsync(chatMessage);
-        // For now, use PublishAsync which broadcasts to child agents
-        await PublishAsync(chatMessage.ToProto());
+            $"[GodChatGAgent][PushMessageToClientAsync] sessionId {sessionGuid}, using MassTransit Kafka");
+        
+        try
+        {
+            // Use MassTransit Stream via IMessageStreamProvider
+            if (ServiceProvider == null)
+            {
+                Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] ServiceProvider is null, falling back to PublishAsync");
+                await PublishAsync(chatMessage.ToProto());
+                return;
+            }
+            
+            var messageStreamProvider = ServiceProvider.GetService<IMessageStreamProvider>();
+            if (messageStreamProvider == null)
+            {
+                Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] IMessageStreamProvider not found, falling back to PublishAsync");
+                await PublishAsync(chatMessage.ToProto());
+                return;
+            }
+            
+            // Create MassTransit stream with category "GodChat" (maps to "godgpt-chat-responses" topic)
+            var stream = messageStreamProvider.GetStream(sessionGuid.ToString(), "GodChat");
+            
+            // Wrap ResponseStreamGodChatProto in EventEnvelope
+            var proto = chatMessage.ToProto();
+            var envelope = new EventEnvelope
+            {
+                Id = Guid.NewGuid().ToString(),
+                Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
+                Version = 0,
+                Payload = Any.Pack(proto)
+            };
+            
+            await stream.ProduceAsync(envelope);
+            Logger.LogDebug($"[GodChatGAgent][PushMessageToClientAsync] Successfully pushed message to MassTransit Kafka stream");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, $"[GodChatGAgent][PushMessageToClientAsync] Failed to push message to MassTransit stream, falling back to PublishAsync");
+            // Fallback to PublishAsync for backward compatibility
+            await PublishAsync(chatMessage.ToProto());
+        }
     }
 }
 

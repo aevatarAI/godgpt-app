@@ -221,8 +221,8 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
             BatchId = State.HasBatchId ? State.BatchId : 0,
             TotalGenerated = State.TotalCodesGenerated,
             UsedCount = State.UsedCount,
-            CreationTime = State.CreationTime ?? Timestamp.FromDateTime(DateTime.MinValue),
-            LastGenerationTime = State.LastGenerationTime ?? Timestamp.FromDateTime(DateTime.MinValue),
+            CreationTime = State.CreationTime ?? Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc)),
+            LastGenerationTime = State.LastGenerationTime ?? Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc)),
             Status = State.Status
         };
 
@@ -329,8 +329,8 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
         }
 
         var currentTime = DateTime.UtcNow;
-        var startTime = State.BatchConfig.StartTime?.ToDateTime() ?? DateTime.MinValue;
-        var endTime = State.BatchConfig.EndTime?.ToDateTime() ?? DateTime.MaxValue;
+        var startTime = State.BatchConfig.StartTime?.ToDateTime().ToUniversalTime() ?? DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
+        var endTime = State.BatchConfig.EndTime?.ToDateTime().ToUniversalTime() ?? DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc);
 
         if (currentTime < startTime)
         {
@@ -421,9 +421,9 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
             ProductId = config.ProductId,
             PlanType = (QuotaPlanType)config.PlanType,
             IsUltimate = config.IsUltimate,
-            Platform = (PaymentPlatform)config.Platform,
-            StartTime = config.StartTime?.ToDateTime() ?? DateTime.MinValue,
-            EndTime = config.EndTime?.ToDateTime() ?? DateTime.MaxValue,
+            Platform = (Aevatar.Application.Grains.Common.Constants.PaymentPlatform)config.Platform,
+            StartTime = config.StartTime?.ToDateTime().ToUniversalTime() ?? DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc),
+            EndTime = config.EndTime?.ToDateTime().ToUniversalTime() ?? DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc),
             Description = config.Description
         };
     }

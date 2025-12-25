@@ -1,4 +1,5 @@
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
+using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.Agents.ChatManager.Share;
@@ -14,7 +15,7 @@ public partial class ChatGAgentManager
     public async Task<Guid> GenerateChatShareContentAsync(Guid sessionId)
     {
         Logger.LogDebug($"[ChatGAgentManager][GenerateChatShareContentAsync] - session: {sessionId.ToString()}");
-        var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+        var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
         if (State.CurrentShareCount >= State.MaxShareCount)
         {
             Logger.LogDebug(
@@ -29,8 +30,8 @@ public partial class ChatGAgentManager
             throw new UserFriendlyException(localizedMessage);
         }
 
-        var chatMessages = await GetSessionMessageListAsync(sessionId);
-        if (chatMessages.IsNullOrEmpty())
+        var chatMessagesProto = await GetSessionMessageListAsync(sessionId);
+        if (chatMessagesProto == null || chatMessagesProto.Messages.Count == 0)
         {
             Logger.LogDebug(
                 $"[ChatGAgentManager][GenerateChatShareContentAsync] - session: {sessionId.ToString()}, chatMessages is null");
@@ -38,12 +39,15 @@ public partial class ChatGAgentManager
                 _localizationService.GetLocalizedException(ExceptionMessageKeys.InvalidSession, language);
             throw new UserFriendlyException(localizedMessage);
         }
+        
+        // Convert Protobuf messages to ChatMessage list
+        var chatMessages = chatMessagesProto.ToList();
 
         var shareId = Guid.NewGuid();
         var shareLinkGrain = _clusterClient.GetGrain<IShareLinkGrain>(shareId);
         await shareLinkGrain.SaveShareContentAsync(new ShareLinkDto
         {
-            UserId = Id,
+            UserId = Guid.Parse(Id),
             SessionId = sessionId,
             Messages = chatMessages
         });
@@ -63,7 +67,7 @@ public partial class ChatGAgentManager
     {
         var sessionInfo = State.GetSession(sessionId);
         Logger.LogDebug($"[ChatGAgentManager][GetChatShareContentAsync] - session {sessionInfo?.SessionId.ToString()}");
-        var language = GodGPTLanguageHelper.GetGodGPTLanguageFromContext();
+        var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
         if (sessionInfo == null)
         {
             Logger.LogDebug(

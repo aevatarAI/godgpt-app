@@ -35,12 +35,12 @@ public sealed record ReasoningOptions
     /// <summary>
     /// 最大执行时长。
     /// </summary>
-    public TimeSpan MaxDuration { get; init; } = TimeSpan.FromMinutes(30);
+    public TimeSpan MaxDuration { get; init; } = TimeSpan.FromHours(1);
 
     /// <summary>
     /// 单步超时时间。
     /// </summary>
-    public TimeSpan StepTimeout { get; init; } = TimeSpan.FromMinutes(2);
+    public TimeSpan StepTimeout { get; init; } = TimeSpan.FromMinutes(10);
 
     /// <summary>
     /// 上下文键值对（传递给策略的额外信息）。

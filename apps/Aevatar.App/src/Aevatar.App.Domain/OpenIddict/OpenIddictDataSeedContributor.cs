@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -163,6 +163,11 @@ public class OpenIddictDataSeedContributor : IDataSeedContributor, ITransientDep
         if (!businessServerSwaggerClientId.IsNullOrWhiteSpace())
         {
             var businessServerSwaggerRootUrl = configurationSection["App_Swagger:RootUrl"]?.TrimEnd('/');
+            if (businessServerSwaggerRootUrl.IsNullOrWhiteSpace())
+            {
+                // 配置不完整：跳过 Swagger client seed（避免生成无效 URI）
+                return;
+            }
 
             await CreateApplicationAsync(
                 applicationType: OpenIddictConstants.ApplicationTypes.Web,

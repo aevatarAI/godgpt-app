@@ -11,6 +11,7 @@ using Microsoft.Extensions.Logging;
 // Protobuf types aliases
 using AwakeningStateProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStateProto;
 using AwakeningStatusProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStatusProto;
+using AwakeningContentDtoProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningContentDtoProto;
 using GenerateAwakeningEvent = Aevatar.Agents.GodGPT.Protos.Awakening.GenerateAwakeningEvent;
 
 namespace GodGPT.GAgents.Awakening;
@@ -132,22 +133,23 @@ public partial class AwakeningGAgent : GAgentBase<AwakeningStateProto>, IAwakeni
 
     /// <summary>
     /// Get today's awakening content, trigger async generation if not exists
+    /// Returns Protobuf type for RPC compatibility
     /// </summary>
-    public async Task<AwakeningContentDto?> GetTodayAwakeningAsync(VoiceLanguageEnum language, string? region)
+    public async Task<AwakeningContentDtoProto> GetTodayAwakeningAsync(VoiceLanguageEnum language, string? region)
     {
         try
         {
             // Check if already generated today
             if (IsToday(State.LastGeneratedTimestamp))
             {
-                return BuildAwakeningContentDto();
+                return BuildAwakeningContentProto();
             }
 
             // Try to lock today's generation
             var lockSuccessful = await TryLockTodayGenerationAsync(language);
             if (!lockSuccessful)
             {
-                return BuildAwakeningContentDto();
+                return BuildAwakeningContentProto();
             }
 
             // Get latest session content
@@ -169,11 +171,11 @@ public partial class AwakeningGAgent : GAgentBase<AwakeningStateProto>, IAwakeni
                 await SetStatusAsync(AwakeningStatus.Completed);
                 await ConfirmEventsAsync();
                 
-                return new AwakeningContentDto
+                return new AwakeningContentDtoProto
                 {
                     AwakeningLevel = 0,
                     AwakeningMessage = string.Empty,
-                    Status = AwakeningStatus.Completed
+                    Status = AwakeningStatusProto.AwakeningStatusCompleted
                 };
             }
 
@@ -192,18 +194,24 @@ public partial class AwakeningGAgent : GAgentBase<AwakeningStateProto>, IAwakeni
                 }
             });
 
-            // Return null with generating status - client should poll for completion
-            return new AwakeningContentDto
+            // Return with generating status - client should poll for completion
+            return new AwakeningContentDtoProto
             {
                 AwakeningLevel = 0,
                 AwakeningMessage = string.Empty,
-                Status = AwakeningStatus.Generating
+                Status = AwakeningStatusProto.AwakeningStatusGenerating
             };
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to get today awakening");
-            return null;
+            // Return empty proto instead of null for RPC compatibility
+            return new AwakeningContentDtoProto
+            {
+                AwakeningLevel = 0,
+                AwakeningMessage = string.Empty,
+                Status = AwakeningStatusProto.AwakeningStatusNotStarted
+            };
         }
     }
 

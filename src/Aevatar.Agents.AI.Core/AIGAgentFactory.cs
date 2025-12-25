@@ -78,6 +78,11 @@ public class AIGAgentFactory : IGAgentFactory
             AIAgentEmbeddingFactoryInjector.InjectEmbeddingFactory(agent, _serviceProvider);
         }
 
+        if (AIAgentAIMemoryInjector.HasAIMemory(agent))
+        {
+            AIAgentAIMemoryInjector.InjectAIMemory(agent, _serviceProvider);
+        }
+
         if (AgentEventStoreInjector.HasEventStore(agent))
         {
             AgentEventStoreInjector.InjectEventStore(agent, _serviceProvider);

@@ -10,10 +10,13 @@ using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.Agents.Invitation;
 using Aevatar.Application.Grains.Common;
 using Aevatar.Application.Grains.Common.Constants;
+using Aevatar.Application.Grains.Common.Helpers;
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Agents.GodGPT.Protos.FreeTrialCode;
 using Aevatar.Application.Grains.Invitation;
+using Aevatar.Application.Grains.UserInvitation;
 using Aevatar.GodGPT.Dtos;
 using Aevatar.Dtos;
 using CsPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
@@ -49,7 +52,7 @@ public class InvitationService : IInvitationService
 
     private async Task<IInvitationGAgent> GetInvitationAgentAsync(Guid userId)
     {
-        var actor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>(userId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>(userId.ToString());
         return actor.As<IInvitationGAgent>();
     }
 
@@ -78,14 +81,17 @@ public class InvitationService : IInvitationService
     {
         _logger.LogInformation("[InvitationService] Redeeming invite code for user {UserId}", userId);
 
-        var codeType = InvitationCodeHelper.GetCodeType(input.InviteCode) ?? CsInvitationCodeType.FriendInvitation;
+        var protoCodeType = InvitationCodeHelper.GetCodeType(input.InviteCode);
+        var codeType = protoCodeType.HasValue 
+            ? (CsInvitationCodeType)(int)protoCodeType.Value 
+            : CsInvitationCodeType.FriendInvitation;
         
         if (codeType == CsInvitationCodeType.FriendInvitation)
         {
-            // Use ChatManager for friend invitation redemption
-            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
-            var manager = managerActor.As<IChatManagerGAgent>();
-            var result = await manager.RedeemInviteCodeAsync(input.InviteCode);
+            // Use UserInvitationGAgent for friend invitation redemption
+            var userInvitationActor = await _actorFactory.CreateGAgentActorAsync<UserInvitationGAgent>(userId.ToString());
+            var userInvitationGAgent = userInvitationActor.As<IUserInvitationGAgent>();
+            var result = await userInvitationGAgent.RedeemInviteCodeAsync(input.InviteCode);
             
             return new RedeemInviteCodeResponse
             {
@@ -162,10 +168,13 @@ public class InvitationService : IInvitationService
 
     public Task<GetInvitationCodeTypeResponse> GetInvitationCodeTypeAsync(Guid userId, GetInvitationCodeTypeRequest request)
     {
-        var codeType = InvitationCodeHelper.GetCodeType(request.InviteCode);
+        var protoCodeType = InvitationCodeHelper.GetCodeType(request.InviteCode);
+        var codeType = protoCodeType.HasValue 
+            ? (CsInvitationCodeType)(int)protoCodeType.Value 
+            : CsInvitationCodeType.FriendInvitation;
         return Task.FromResult(new GetInvitationCodeTypeResponse
         {
-            CodeType = codeType ?? CsInvitationCodeType.FriendInvitation
+            CodeType = codeType
         });
     }
 
@@ -176,7 +185,7 @@ public class InvitationService : IInvitationService
         var batchId = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var agentId = CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId);
         
-        var actor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(agentId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(agentId.ToString());
         var agent = actor.As<IFreeTrialCodeFactoryGAgent>();
         
         // Convert DTO to Protobuf
@@ -202,7 +211,8 @@ public class InvitationService : IInvitationService
             Message = protoResult.Message,
             Codes = protoResult.Codes.ToHashSet(),
             GeneratedCount = protoResult.GeneratedCount,
-            ErrorCode = (FreeTrialCodeError)protoResult.ErrorCode
+            ErrorCode = (FreeTrialCodeError)protoResult.ErrorCode,
+            BatchId = batchId
         };
     }
 
@@ -211,7 +221,7 @@ public class InvitationService : IInvitationService
         _logger.LogInformation("[InvitationService] Getting batch info for batch {BatchId}", batchId);
         
         var agentId = CommonHelper.GetFreeTrialCodeFactoryGAgentId(long.Parse(batchId));
-        var actor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(agentId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(agentId.ToString());
         var agent = actor.As<IFreeTrialCodeFactoryGAgent>();
         
         var protoResult = await agent.GetBatchInfoAsync();
@@ -222,8 +232,8 @@ public class InvitationService : IInvitationService
             BatchId = protoResult.BatchId,
             TotalGenerated = protoResult.TotalGenerated,
             UsedCount = protoResult.UsedCount,
-            CreationTime = protoResult.CreationTime.ToDateTime(),
-            LastGenerationTime = protoResult.LastGenerationTime.ToDateTime(),
+            CreationTime = protoResult.CreationTime.ToDateTime().ToUniversalTime(),
+            LastGenerationTime = protoResult.LastGenerationTime?.ToDateTime().ToUniversalTime() ?? DateTime.MinValue.ToUniversalTime(),
             Status = (FreeTrialCodeFactoryStatus)protoResult.Status,
             GeneratedCodes = protoResult.GeneratedCodes.ToList(),
             UsedCodes = protoResult.UsedCodes.ToList()
@@ -243,11 +253,11 @@ public class InvitationService : IInvitationService
         {
             TrialDays = config.TrialDays,
             ProductId = config.ProductId,
-            PlanType = (CsPlanType)config.PlanType,
+            PlanType = (QuotaPlanType)(int)config.PlanType,
             IsUltimate = config.IsUltimate,
             Platform = (CsPaymentPlatform)config.Platform,
-            StartTime = config.StartTime?.ToDateTime() ?? DateTime.MinValue,
-            EndTime = config.EndTime?.ToDateTime() ?? DateTime.MaxValue,
+            StartTime = config.StartTime?.ToDateTime().ToUniversalTime() ?? DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc),
+            EndTime = config.EndTime?.ToDateTime().ToUniversalTime() ?? DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc),
             Description = config.Description
         };
     }

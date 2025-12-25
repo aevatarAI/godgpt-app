@@ -278,20 +278,20 @@ public class PaymentService : IPaymentService
 
     private async Task<AgentModels.IPaymentIndexGAgent> GetIndexAgentAsync(Guid userId)
     {
-        var actor = await _actorFactory.CreateGAgentActorAsync<AgentModels.PaymentIndexGAgent>(userId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<AgentModels.PaymentIndexGAgent>(userId.ToString());
         return actor.As<AgentModels.IPaymentIndexGAgent>();
     }
 
     private async Task<AgentModels.IPaymentRecordGAgent> GetRecordAgentAsync(string paymentId)
     {
-        // Convert paymentId to a stable Guid
+        // Convert paymentId to a stable Guid, then to string for agent ID
         var guidBytes = new byte[16];
         var hashBytes = System.Security.Cryptography.MD5.HashData(
             System.Text.Encoding.UTF8.GetBytes(paymentId));
         Array.Copy(hashBytes, guidBytes, 16);
         var agentId = new Guid(guidBytes);
 
-        var actor = await _actorFactory.CreateGAgentActorAsync<AgentModels.PaymentRecordGAgent>(agentId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<AgentModels.PaymentRecordGAgent>(agentId.ToString());
         return actor.As<AgentModels.IPaymentRecordGAgent>();
     }
 

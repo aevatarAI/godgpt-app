@@ -1,0 +1,290 @@
+syntax = "proto3";
+
+package aevatarkit;
+
+option csharp_namespace = "AevatarKit";
+
+import "google/protobuf/timestamp.proto";
+
+// =====================================================
+// Run / Workflow (MVP)
+// =====================================================
+
+message RunStartRequest {
+  // For MVP: allow user to paste YAML/JSON in the UI.
+  // In V1: GraphDefinition(IR) should be the SSOT and referenced by id/version.
+  string graph_source = 1;
+
+  // Optional saved graph id (Graph Library).
+  string graph_id = 4;
+
+  // Optional graph display name (for run history UI).
+  string graph_name = 5;
+
+  // Human input (e.g., question / task).
+  string input = 2;
+
+  // Optional hint for session scope.
+  string session_id = 3;
+}
+
+message RunStartResponse {
+  string run_id = 1;
+}
+
+enum WorkflowStepStatus {
+  WORKFLOW_STEP_STATUS_UNSPECIFIED = 0;
+  WORKFLOW_STEP_STATUS_RUNNING = 1;
+  WORKFLOW_STEP_STATUS_STREAMING = 2;
+  WORKFLOW_STEP_STATUS_COMPLETED = 3;
+  WORKFLOW_STEP_STATUS_FAILED = 4;
+}
+
+message WorkflowStepEvent {
+  string run_id = 1;
+  string step_id = 2;
+  string step_name = 3;
+  WorkflowStepStatus status = 4;
+
+  // Streaming delta or final output preview.
+  string output_chunk = 5;
+
+  // Optional error message (when failed).
+  string error = 6;
+
+  google.protobuf.Timestamp timestamp = 7;
+
+  map<string, string> metadata = 100;
+}
+
+message RunSummary {
+  string run_id = 1;
+  string graph_id = 2;
+  string graph_name = 3;
+  string session_id = 4;
+  string input_preview = 5;
+  google.protobuf.Timestamp created_at = 6;
+  WorkflowStepStatus last_status = 7;
+}
+
+message ListRunsResponse {
+  repeated RunSummary runs = 1;
+}
+
+message GetRunResponse {
+  string run_id = 1;
+  string graph_id = 2;
+  string graph_name = 3;
+  string session_id = 4;
+  string input = 5;
+  google.protobuf.Timestamp created_at = 6;
+  repeated WorkflowStepEvent events = 7;
+}
+
+// =====================================================
+// Memory (MVP)
+// =====================================================
+
+enum MemoryScopeType {
+  MEMORY_SCOPE_TYPE_UNSPECIFIED = 0;
+  MEMORY_SCOPE_TYPE_PRIVATE_AGENT = 1;   // private(agent)
+  MEMORY_SCOPE_TYPE_SESSION = 2;         // session(session_id)
+  MEMORY_SCOPE_TYPE_RUN = 3;             // run(run_id)
+  MEMORY_SCOPE_TYPE_GRAPH = 4;           // graph(graph_id@version)
+  MEMORY_SCOPE_TYPE_TENANT = 5;          // tenant(shared)
+}
+
+message MemoryScope {
+  MemoryScopeType type = 1;
+  string scope_id = 2; // agent_id/session_id/run_id/graph_id@version/tenant_id ...
+}
+
+message MemoryEntry {
+  string memory_id = 1;         // resource id
+  MemoryScope scope = 2;
+
+  string run_id = 3;
+  string agent_id = 4;
+
+  string role = 5;              // user/assistant/system/tool/...
+  string content = 6;
+
+  google.protobuf.Timestamp created_at = 7;
+
+  map<string, string> tags = 100;
+}
+
+message ListMemoryEntriesRequest {
+  string memory_id = 1;
+  int32 limit = 2;
+}
+
+message ListMemoryEntriesResponse {
+  repeated MemoryEntry entries = 1;
+}
+
+message MemoryResourceSummary {
+  string memory_id = 1;
+  MemoryScope scope = 2;
+  int32 entry_count = 3;
+  google.protobuf.Timestamp latest_at = 4;
+}
+
+message ListMemoryResourcesResponse {
+  repeated MemoryResourceSummary resources = 1;
+}
+
+message SearchMemoryRequest {
+  string query = 1;
+  int32 limit = 2;
+  MemoryScopeType scope_type = 3; // optional filter
+}
+
+message SearchMemoryResponse {
+  repeated MemoryEntry entries = 1;
+}
+
+// =====================================================
+// Graph Library (MVP)
+// =====================================================
+
+message GraphSummary {
+  string graph_id = 1;
+  string name = 2;
+  int32 version = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message ListGraphsResponse {
+  repeated GraphSummary graphs = 1;
+}
+
+message GraphDefinition {
+  string graph_id = 1;
+  string name = 2;
+  string description = 3;
+  int32 version = 4;
+  string source = 5;
+  google.protobuf.Timestamp created_at = 6;
+  google.protobuf.Timestamp updated_at = 7;
+}
+
+message GetGraphResponse {
+  GraphDefinition graph = 1;
+}
+
+message CreateGraphRequest {
+  string name = 1;
+  string description = 2;
+  string source = 3;
+}
+
+message CreateGraphResponse {
+  GraphDefinition graph = 1;
+}
+
+message UpdateGraphRequest {
+  string name = 1;
+  string description = 2;
+  string source = 3;
+}
+
+message UpdateGraphResponse {
+  GraphDefinition graph = 1;
+}
+
+// =====================================================
+// Workspace Management (MVP)
+// =====================================================
+
+message AgentCategory {
+  string category_id = 1;
+  string display_name = 2;
+  int32 agent_count = 3;
+}
+
+message AgentDefinition {
+  string agent_id = 1;
+  string name = 2;
+  string category_id = 3;
+  string description = 4;
+  int32 tool_count = 5;
+}
+
+message ListAgentCategoriesResponse {
+  repeated AgentCategory categories = 1;
+}
+
+message ListAgentsResponse {
+  repeated AgentDefinition agents = 1;
+}
+
+message CreateAgentRequest {
+  string name = 1;
+  string category_id = 2;
+  string description = 3;
+}
+
+message CreateAgentResponse {
+  AgentDefinition agent = 1;
+}
+
+// =====================================================
+// MCP Manager (MVP)
+// =====================================================
+
+enum McpServerTransport {
+  MCP_SERVER_TRANSPORT_UNSPECIFIED = 0;
+  MCP_SERVER_TRANSPORT_STDIO = 1;
+  MCP_SERVER_TRANSPORT_HTTP = 2;
+  MCP_SERVER_TRANSPORT_NPX = 3;
+  MCP_SERVER_TRANSPORT_UVX = 4;
+}
+
+message McpServerDefinition {
+  string server_id = 1;
+  string name = 2;
+  McpServerTransport transport = 3;
+
+  // For STDIO/NPX/UVX:
+  string command = 4;
+  repeated string args = 5;
+
+  // For HTTP:
+  string endpoint = 6;
+
+  bool enabled = 7;
+  google.protobuf.Timestamp created_at = 8;
+}
+
+message ListMcpServersResponse {
+  repeated McpServerDefinition servers = 1;
+}
+
+message CreateMcpServerRequest {
+  string name = 1;
+  McpServerTransport transport = 2;
+  string command = 3;
+  repeated string args = 4;
+  string endpoint = 5;
+  bool enabled = 6;
+}
+
+message CreateMcpServerResponse {
+  McpServerDefinition server = 1;
+}
+
+message UpdateMcpServerRequest {
+  string name = 1;
+  McpServerTransport transport = 2;
+  string command = 3;
+  repeated string args = 4;
+  string endpoint = 5;
+  bool enabled = 6;
+}
+
+message UpdateMcpServerResponse {
+  McpServerDefinition server = 1;
+}
+
+

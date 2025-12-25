@@ -1,6 +1,7 @@
 using System;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Anonymous;
 using Aevatar.Application.Grains.Agents.Anonymous;
 using Aevatar.Application.Grains.Common;
@@ -35,9 +36,9 @@ public class GodGPTGuestService : ApplicationService, IGodGPTGuestService
     /// <inheritdoc />
     public async Task<CreateGuestSessionResponseDto> CreateGuestSessionAsync(string clientIp, string? guider = null)
     {
-        var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(grainId);
-        var anonymousUserGrain = (IAnonymousUserGAgent)anonymousUserActor.GetAgent();
+        var agentId = CommonHelper.GetAnonymousUserGAgentId(clientIp);
+        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(agentId);
+        var anonymousUserGrain = anonymousUserActor.As<IAnonymousUserGAgent>();
         
         // Check if user can still chat
         if (!await anonymousUserGrain.CanChatAsync())
@@ -64,18 +65,18 @@ public class GodGPTGuestService : ApplicationService, IGodGPTGuestService
     /// <inheritdoc />
     public async Task GuestChatAsync(string clientIp, string content, string chatId)
     {
-        var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(grainId);
-        var anonymousUserGrain = (IAnonymousUserGAgent)anonymousUserActor.GetAgent();
+        var agentId = CommonHelper.GetAnonymousUserGAgentId(clientIp);
+        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(agentId);
+        var anonymousUserGrain = anonymousUserActor.As<IAnonymousUserGAgent>();
         await anonymousUserGrain.GuestChatAsync(content, chatId);
     }
 
     /// <inheritdoc />
     public async Task<GuestChatLimitsResponseDto> GetGuestChatLimitsAsync(string clientIp)
     { 
-        var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(grainId);
-        var anonymousUserGrain = (IAnonymousUserGAgent)anonymousUserActor.GetAgent();
+        var agentId = CommonHelper.GetAnonymousUserGAgentId(clientIp);
+        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(agentId);
+        var anonymousUserGrain = anonymousUserActor.As<IAnonymousUserGAgent>();
         var remaining = await anonymousUserGrain.GetRemainingChatsAsync();
         
         return new GuestChatLimitsResponseDto
@@ -88,9 +89,9 @@ public class GodGPTGuestService : ApplicationService, IGodGPTGuestService
     /// <inheritdoc />
     public async Task<bool> CanGuestChatAsync(string clientIp)
     {
-        var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId(clientIp));
-        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(grainId);
-        var anonymousUserGrain = (IAnonymousUserGAgent)anonymousUserActor.GetAgent();
+        var agentId = CommonHelper.GetAnonymousUserGAgentId(clientIp);
+        var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(agentId);
+        var anonymousUserGrain = anonymousUserActor.As<IAnonymousUserGAgent>();
         return await anonymousUserGrain.CanChatAsync();
     }
 
@@ -103,9 +104,9 @@ public class GodGPTGuestService : ApplicationService, IGodGPTGuestService
         try
         {
             // Use a dummy IP to get configuration from AnonymousUserGAgent
-            var grainId = CommonHelper.StringToGuid(CommonHelper.GetAnonymousUserGAgentId("127.0.0.1"));
-            var configActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(grainId);
-            var configGrain = (IAnonymousUserGAgent)configActor.GetAgent();
+            var agentId = CommonHelper.GetAnonymousUserGAgentId("127.0.0.1");
+            var configActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(agentId);
+            var configGrain = configActor.As<IAnonymousUserGAgent>();
             return await configGrain.GetMaxChatCountAsync();
         }
         catch (Exception ex)

@@ -40,15 +40,9 @@ public class AuthServerMenuContributor : IMenuContributor
 
         //Administration->Identity
         administration.SetSubItemOrder(IdentityMenuNames.GroupName, 1);
-    
-        if (MultiTenancyConsts.IsEnabled)
-        {
-            administration.SetSubItemOrder(TenantManagementMenuNames.GroupName, 1);
-        }
-        else
-        {
-            administration.TryRemoveMenuItem(TenantManagementMenuNames.GroupName);
-        }
+
+        // Multi-tenancy is disabled for this host.
+        administration.TryRemoveMenuItem(TenantManagementMenuNames.GroupName);
         
         administration.SetSubItemOrder(SettingManagementMenuNames.GroupName, 3);
 

@@ -1,6 +1,7 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent;
+using Aevatar.Application.Grains.Agents.ChatManager.Options;
 using Aevatar.Application.Grains.Common.Observability;
 using Aevatar.Application.Grains.Common.Service;
 using Aevatar.Application.Grains.UserInfo;
@@ -31,10 +32,18 @@ public partial class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatMana
     private readonly ILocalizationService _localizationService;
     private readonly IGAgentActorFactory _actorFactory;
     private readonly IClusterClient _clusterClient;  // Keep for traditional Orleans Grains (e.g., IShareLinkGrain)
-    private readonly IServiceProvider _serviceProvider;
     
-    // Cached ConfigurationGAgent instance (new framework)
-    private ConfigurationGAgent? _configurationAgent;
+    // Cached ConfigurationGAgent interface (new framework)
+    private IConfigurationGAgent? _configurationAgentInterface;
+    
+    #endregion
+
+    #region Configuration Properties (Injected by Orleans Grain)
+    
+    /// <summary>
+    /// Role prompt options - injected by OrleansGAgentGrain via reflection
+    /// </summary>
+    public RolePromptOptions? RolePromptOptions { get; set; }
     
     #endregion
 
@@ -43,13 +52,11 @@ public partial class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatMana
     public ChatGAgentManager(
         ILocalizationService localizationService, 
         IGAgentActorFactory actorFactory,
-        IClusterClient clusterClient,
-        IServiceProvider serviceProvider)
+        IClusterClient clusterClient)
     {
         _localizationService = localizationService;
         _actorFactory = actorFactory;
         _clusterClient = clusterClient;
-        _serviceProvider = serviceProvider;
     }
     
     #endregion
@@ -84,6 +91,7 @@ public partial class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatMana
             {
                 MaxShareCount = 10000
             });
+            await ConfirmEventsAsync();
         }
     }
 

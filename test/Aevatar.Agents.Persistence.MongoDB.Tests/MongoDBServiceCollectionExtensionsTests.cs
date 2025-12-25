@@ -1,4 +1,5 @@
 using Aevatar.Agents.Persistence.MongoDB;
+using Aevatar.Agents.AI.Abstractions;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
 using MongoDB.Driver;
@@ -176,6 +177,22 @@ public class MongoDBServiceCollectionExtensionsTests
     }
 
     [Fact]
+    public void AddMongoDBAIMemory_ShouldRegisterService()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        services.AddAevatarMongoDB("mongodb://localhost:27017");
+
+        // Act
+        services.AddMongoDBAIMemory();
+
+        // Assert - Check that the service is registered (without resolving to avoid MongoDB connection)
+        var descriptor = services.FirstOrDefault(d => d.ServiceType == typeof(IAevatarAIMemoryFactory));
+        descriptor.Should().NotBeNull();
+        descriptor!.Lifetime.Should().Be(ServiceLifetime.Singleton);
+    }
+
+    [Fact]
     public void AllExtensionMethods_ShouldSupportChaining()
     {
         // Arrange
@@ -186,7 +203,8 @@ public class MongoDBServiceCollectionExtensionsTests
             .AddAevatarMongoDB("mongodb://localhost:27017", "test_db")
             .AddMongoDBStateStore<TestState>()
             .AddMongoDBConfigStore<TestConfig>()
-            .AddMongoDBEventRouterStore();
+            .AddMongoDBEventRouterStore()
+            .AddMongoDBAIMemory();
 
         result.Should().BeSameAs(services);
     }

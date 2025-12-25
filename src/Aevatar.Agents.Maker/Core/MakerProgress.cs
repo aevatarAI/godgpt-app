@@ -97,6 +97,11 @@ public sealed record LLMProposal
     public required string ProposalId { get; init; }
     
     /// <summary>
+    /// Worker ID that generated this proposal.
+    /// </summary>
+    public string? WorkerId { get; init; }
+    
+    /// <summary>
     /// The full content of the LLM response.
     /// </summary>
     public required string Content { get; init; }
@@ -112,6 +117,11 @@ public sealed record LLMProposal
     public string? Error { get; init; }
     
     /// <summary>
+    /// Latency in milliseconds.
+    /// </summary>
+    public long LatencyMs { get; init; }
+    
+    /// <summary>
     /// Prompt tokens used.
     /// </summary>
     public int PromptTokens { get; init; }
@@ -125,11 +135,6 @@ public sealed record LLMProposal
     /// Total tokens used.
     /// </summary>
     public int TotalTokens => PromptTokens + CompletionTokens;
-    
-    /// <summary>
-    /// Latency in milliseconds.
-    /// </summary>
-    public long LatencyMs { get; init; }
     
     /// <summary>
     /// LLM provider name that generated this proposal.

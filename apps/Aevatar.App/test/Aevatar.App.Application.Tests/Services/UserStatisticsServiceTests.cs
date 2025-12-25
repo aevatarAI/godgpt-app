@@ -47,7 +47,7 @@ public class UserStatisticsServiceTests
         var actor = Substitute.For<IGAgentActor, IUserStatisticsGAgent>();
         var agent = (IUserStatisticsGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(Arg.Any<Guid>())
+        _mockActorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(Arg.Any<string>())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new AppRatingRecordProto
@@ -85,7 +85,7 @@ public class UserStatisticsServiceTests
         var actor = Substitute.For<IGAgentActor, IUserStatisticsGAgent>();
         var agent = (IUserStatisticsGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(Arg.Any<Guid>())
+        _mockActorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(Arg.Any<string>())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         agent.CanUserRateAppAsync(Arg.Any<string>())
@@ -107,7 +107,7 @@ public class UserStatisticsServiceTests
         var actor = Substitute.For<IGAgentActor, IUserStatisticsGAgent>();
         var agent = (IUserStatisticsGAgent)actor;
         
-        _mockActorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(userId)
+        _mockActorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(userId.ToString())
             .Returns(Task.FromResult((IGAgentActor)actor));
         
         var protoResponse = new UserStatisticsProto

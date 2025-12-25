@@ -1,0 +1,111 @@
+syntax = "proto3";
+option csharp_namespace = "Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos";
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// AIAgentStatusProxy State (Custom State for business logic)
+// =============================================================================
+message AIAgentStatusProxyStateProto {
+    bool is_available = 1;
+    optional google.protobuf.Timestamp unavailable_since = 2;
+    google.protobuf.Duration recovery_delay = 3;
+    int64 unavailable_count = 4;
+    int64 exception_count = 5;
+    string parent_id = 6;  // Guid as string
+    string prompt_template = 7;
+}
+
+// =============================================================================
+// AIAgentStatusProxy Config (Custom Config for configuration)
+// =============================================================================
+message AIAgentStatusProxyConfigProto {
+    google.protobuf.Duration request_recovery_delay = 1;
+    string parent_id = 2;  // Guid as string
+}
+
+// =============================================================================
+// AIAgentStatusProxy Events (for Event Sourcing)
+// =============================================================================
+message SetStatusProxyConfigEvent {
+    google.protobuf.Duration recovery_delay = 1;
+    string parent_id = 2;  // Guid as string
+}
+
+message SetAvailableEvent {
+    bool is_available = 1;
+    int32 exception_count = 2;
+}
+
+message SetPromptTemplateEvent {
+    string prompt_template = 1;
+}
+
+// =============================================================================
+// Chat Message Types (for RPC)
+// =============================================================================
+message ChatMessageProto {
+    string role = 1;
+    string content = 2;
+    int64 timestamp_ticks = 3;  // DateTime as ticks
+    int32 chat_role = 4;  // ChatRole enum as int
+    repeated string image_keys = 5;
+}
+
+message AIChatContextProto {
+    optional string agent_id = 1;
+    optional string session_id = 2;
+    optional string user_id = 3;
+    map<string, string> metadata = 4;
+    optional string system_prompt = 5;
+    repeated ChatMessageProto history = 6;
+    string request_id = 7;  // Guid as string
+    optional string chat_id = 8;
+    optional string message_id = 9;
+}
+
+message ExecutionPromptSettingsProto {
+    optional string temperature = 1;
+    optional string max_tokens = 2;
+    optional string top_p = 3;
+    optional string frequency_penalty = 4;
+    optional string presence_penalty = 5;
+    repeated string stop_sequences = 6;
+    optional string model = 7;
+}
+
+message PromptWithStreamInputProto {
+    string prompt = 1;
+    repeated ChatMessageProto history = 2;
+    optional ExecutionPromptSettingsProto prompt_settings = 3;
+    optional AIChatContextProto context = 4;
+    repeated string image_keys = 5;
+}
+
+message ChatWithHistoryInputProto {
+    string prompt = 1;
+    repeated ChatMessageProto history = 2;
+    optional ExecutionPromptSettingsProto prompt_settings = 3;
+    optional AIChatContextProto context = 4;
+}
+
+message ChatWithHistoryResultProto {
+    repeated ChatMessageProto messages = 1;
+}
+
+// =============================================================================
+// AIStreamChatContent (for callback RPC)
+// =============================================================================
+message AIStreamChatContentProto {
+    string content = 1;
+    bool is_complete = 2;
+    int32 token_count = 3;
+    optional string error = 4;
+    bool is_last_chunk = 5;
+    optional string response_content = 6;
+    optional string aggregation_msg = 7;
+    int32 serial_number = 8;
+    bool is_aggregation_msg = 9;
+}
+

@@ -1,0 +1,30 @@
+# ═══════════════════════════════════════════════════════════════════════════
+#  PROJECT: Paper Review (MAKER)
+#  ID: paper-review
+#  Strategy: Maker
+#  Note: runtime will inject paper content/title/venue via Context
+# ═══════════════════════════════════════════════════════════════════════════
+
+id: paper-review
+name: Paper Review (Cognitive DSL)
+description: Two-phase paper review using maker-v2 workflow (decompose → vote → compose)
+icon: "🧠"
+strategy: Cognitive
+task: |
+  Conduct a rigorous multi-dimensional peer review for the provided paper.
+  Use the maker-v2 workflow to decompose, gather proposals with voting,
+  and compose a final consensus review.
+options:
+  provider_name: deepseek
+  max_llm_calls: 400
+  max_tokens: 800000
+  cognitive_workflow: maker-v2
+  cognitive_worker_count: 5
+  cognitive_consensus_k: 2
+  cognitive_max_rounds: 10
+  cognitive_max_depth: 8
+  cognitive_semantic_similarity: 0.85
+  cognitive_timeout_minutes: 30
+  context:
+    paper.reviewType: Standard
+    paper.venue: AI Conference

@@ -3,210 +3,175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Paper Review - AI Academic Review Platform</title>
+    <title>Paper Review · Cognitive Mesh</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="app-layout">
-        <!-- ═══════════════════════════════════════════════════════════
-             SIDEBAR
-             ═══════════════════════════════════════════════════════════ -->
-        <aside class="sidebar">
-            <div class="brand">
-                <span class="brand-icon">📝</span>
-                <div class="brand-text">
-                    <span class="brand-name">PAPER</span>
-                    <span class="brand-sub">REVIEW</span>
+    <div class="app">
+    <header class="topbar">
+        <div class="brand">
+            <div class="brand-icon">PR</div>
+            <div>
+                <div class="brand-title">Paper Review</div>
+                <div class="brand-sub">Cognitive Mesh · MAKER v2</div>
+            </div>
+        </div>
+        <div class="actions">
+            <input id="file-input" type="file" accept=".pdf,.md,.txt" hidden>
+            <button id="btn-stop" class="btn danger">Stop</button>
+        </div>
+        </header>
+
+    <div class="layout">
+            <aside class="sidebar">
+            <!-- Sessions -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">Sessions</div>
+                        <div class="panel-subtitle">Click to switch</div>
                 </div>
+                    <button id="btn-refresh" class="icon-btn" title="Refresh">⟳</button>
+                </div>
+                <div id="session-list" class="session-list empty-state">No sessions</div>
             </div>
 
-            <!-- New Session Button -->
-            <button class="btn-new" onclick="showNewSessionModal()">
-                <span>+</span> NEW_REVIEW
-            </button>
-
-            <!-- Session List -->
-            <nav id="session-nav" class="nav-list"></nav>
-
-            <!-- System Status -->
-            <div class="sys-status">
-                <div class="sys-row">
-                    <span>SYSTEM</span>
-                    <span class="status-dot online"></span>
+            <!-- New Review -->
+            <div class="panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">New Review</div>
+                        <div class="panel-subtitle">Auto-start after upload</div>
+                        </div>
                 </div>
-                <div class="sys-row">
-                    <span>SESSIONS</span>
-                    <span id="session-count" class="status-text">0</span>
+                <div class="form">
+                    <label class="field">
+                        <span>Title</span>
+                        <input id="input-title" type="text" placeholder="Optional, defaults to filename">
+                    </label>
+                    <label class="field">
+                        <span>Authors</span>
+                        <input id="input-authors" type="text" placeholder="Optional">
+                    </label>
+                    <label class="field">
+                        <span>Review Level</span>
+                        <select id="input-review-type">
+                            <option value="Standard">Standard (K=2, N=3)</option>
+                            <option value="Quick">Quick (K=1, N=1)</option>
+                            <option value="Detailed">Detailed (K=3, N=5)</option>
+                            <option value="Rigorous">Rigorous (K=4, N=7)</option>
+                            <option value="Critical">Critical (K=5, N=9)</option>
+                        </select>
+                    </label>
+                    <button id="btn-upload-create" class="btn block">Select File & Start</button>
+                    <div class="hint">Supports PDF / Markdown / TXT</div>
                 </div>
-            </div>
+                            </div>
         </aside>
 
-        <!-- ═══════════════════════════════════════════════════════════
-             MAIN CONTENT
-             ═══════════════════════════════════════════════════════════ -->
-        <main class="main-content">
-            <!-- Empty State -->
-            <div id="empty-state" class="empty-state">
-                <div class="empty-icon">📄</div>
-                <h2>Welcome to Paper Review</h2>
-                <p>AI-powered academic paper review platform</p>
-                <button class="btn-primary" onclick="showNewSessionModal()">
-                    Start New Review
-                </button>
-            </div>
-
-            <!-- Review Dashboard (hidden by default) -->
-            <div id="dashboard" class="dashboard hidden">
-                <!-- Header -->
-                <header class="review-header">
-                    <div class="header-info">
-                        <h1 id="paper-title">Paper Title</h1>
-                        <div class="header-meta">
-                            <span id="paper-authors" class="meta-authors">Authors</span>
-                            <span id="review-type" class="meta-type">Detailed Review</span>
-                            <span id="venue-type" class="meta-venue">AI Conference</span>
-                        </div>
+        <main class="content">
+            <!-- Progress -->
+            <section class="panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">Live Progress</div>
+                        <div class="panel-subtitle" id="status-text">Waiting to start</div>
                     </div>
-                    <div class="header-actions">
-                        <button id="btn-start" class="btn-action" onclick="startReview()">
-                            <span>⚡</span> START REVIEW
-                        </button>
-                    </div>
-                </header>
-
-                <!-- Status Bar -->
-                <div class="status-bar">
-                    <div class="status-chip" id="chip-status">PENDING</div>
-                    <div class="status-chip" id="chip-phase">-</div>
-                    <div class="status-chip" id="chip-progress">0%</div>
-                    <div class="status-chip" id="chip-calls">0 calls</div>
-                    <div class="status-chip" id="chip-tokens">0 tokens</div>
-                </div>
-
-                <!-- Progress Bar -->
-                <div class="progress-container" id="progress-container">
-                    <div class="progress-bar" id="progress-bar"></div>
-                </div>
-
-                <!-- Workspace -->
-                <div class="workspace">
-                    <!-- Left: Timeline -->
-                    <section class="panel timeline-panel">
-                        <div class="panel-header">
-                            <span class="panel-title">📋 REVIEW TIMELINE</span>
-                        </div>
-                        <div class="panel-body">
-                            <ul id="timeline-list" class="timeline-list"></ul>
-                        </div>
-                    </section>
-
-                    <!-- Right: Result -->
-                    <section class="panel result-panel">
-                        <div class="panel-header">
-                            <span class="panel-title">📝 REVIEW RESULT</span>
-                            <button class="btn-copy" onclick="copyResult()" title="Copy to clipboard">
-                                📋
-                            </button>
-                        </div>
-                        <div class="panel-body">
-                            <div id="result-content" class="markdown-content">
-                                <div class="result-placeholder">
-                                    Review results will appear here after completion.
-                                </div>
-                            </div>
-                        </div>
-                    </section>
-                </div>
-            </div>
-        </main>
-    </div>
-
-    <!-- ═══════════════════════════════════════════════════════════
-         NEW SESSION MODAL
-         ═══════════════════════════════════════════════════════════ -->
-    <div id="modal-overlay" class="modal-overlay hidden" onclick="hideNewSessionModal()">
-        <div class="modal-dialog" onclick="event.stopPropagation()">
-            <div class="modal-header">
-                <span class="modal-title">📝 NEW REVIEW SESSION</span>
-                <button class="modal-close" onclick="hideNewSessionModal()">×</button>
-            </div>
-            <div class="modal-body">
-                <!-- Paper Info -->
-                <div class="form-section">
-                    <h4>📄 Paper Information</h4>
-                    <div class="form-group">
-                        <label>TITLE</label>
-                        <input type="text" id="new-title" placeholder="Paper title" />
-                    </div>
-                    <div class="form-group">
-                        <label>AUTHORS</label>
-                        <input type="text" id="new-authors" placeholder="Author names" />
+                    <div class="stats-row">
+                        <div class="stat-chip">Phase: <span id="stat-phase">-</span></div>
+                        <div class="stat-chip">Tokens: <span id="stat-tokens">0</span></div>
+                        <div class="stat-chip">LLM: <span id="stat-llm">0</span></div>
                     </div>
                 </div>
+                <div class="progress-bar">
+                    <div id="progress-bar-inner"></div>
+                </div>
+                <div class="pipeline" id="pipeline-steps"></div>
+            </section>
 
-                <!-- Review Settings -->
-                <div class="form-section">
-                    <h4>⚙️ Review Settings</h4>
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label>REVIEW TYPE</label>
-                            <select id="new-review-type">
-                                <option value="QuickReview">Quick Review - 快速预审</option>
-                                <option value="DetailedReview" selected>Detailed Review - 详细评审</option>
-                                <option value="DeepAnalysis">Deep Analysis - 深度分析</option>
-                                <option value="RevisionSuggestion">Revision Suggestion - 修改建议</option>
-                            </select>
+            <!-- Voting & Result -->
+            <div class="grid-2">
+                <div class="panel">
+                    <div class="panel-header">
+                        <div>
+                            <div class="panel-title">Voting Consensus</div>
+                            <div class="panel-subtitle">First-to-ahead-by-K</div>
                         </div>
-                        <div class="form-group">
-                            <label>VENUE TYPE</label>
-                            <select id="new-venue-type">
-                                <option value="AI Conference" selected>AI Conference (NeurIPS, ICML, etc.)</option>
-                                <option value="NLP Conference">NLP Conference (ACL, EMNLP, etc.)</option>
-                                <option value="CV Conference">CV Conference (CVPR, ICCV, etc.)</option>
-                                <option value="Journal">Journal (JMLR, TPAMI, etc.)</option>
-                                <option value="Workshop">Workshop</option>
-                            </select>
-                        </div>
+                        <div class="stat-chip">K=<span id="vote-k">-</span></div>
                     </div>
+                    <div id="voting-body" class="voting-body empty-state">Waiting for voting events</div>
                 </div>
 
-                <!-- Paper Content -->
-                <div class="form-section">
-                    <h4>📁 Paper Content</h4>
-                    <div class="content-tabs">
-                        <button type="button" class="tab-btn active" data-tab="upload" onclick="switchContentTab('upload')">Upload</button>
-                        <button type="button" class="tab-btn" data-tab="paste" onclick="switchContentTab('paste')">Paste Text</button>
-                    </div>
-                    
-                    <!-- Upload Tab -->
-                    <div id="tab-upload" class="tab-content active">
-                        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('file-input').click()">
-                            <input type="file" id="file-input" accept=".md,.txt,.tex" style="display:none" onchange="handleFileUpload(event)" />
-                            <div class="upload-icon">📤</div>
-                            <div class="upload-text">Drop paper file or click to upload</div>
-                            <div class="upload-hint">.md, .txt, .tex supported</div>
+                <div class="panel">
+                    <div class="panel-header">
+                        <div>
+                            <div class="panel-title">Result</div>
+                            <div class="panel-subtitle">Available after completion</div>
                         </div>
-                        <div id="uploaded-file" class="uploaded-file hidden"></div>
-                        <input type="hidden" id="upload-id" />
                     </div>
-
-                    <!-- Paste Tab -->
-                    <div id="tab-paste" class="tab-content hidden">
-                        <textarea id="paper-content" rows="10" placeholder="Paste paper content here (Markdown or plain text)..."></textarea>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn-cancel" onclick="hideNewSessionModal()">CANCEL</button>
-                <button class="btn-create" onclick="createSession()">CREATE & START</button>
-            </div>
+                    <div id="result-body" class="result-body empty-state">Result will appear here</div>
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+            <!-- Workers -->
+            <section class="panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">Workers</div>
+                        <div class="panel-subtitle">Click card for full history</div>
+                    </div>
+                    <div class="stat-chip"><span id="worker-count">0</span> workers</div>
+                </div>
+                <div id="worker-grid" class="worker-grid empty-state">Waiting for workers</div>
+            </section>
+            
+            <!-- Atomic Points -->
+            <section class="panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">Atomic Points</div>
+                        <div class="panel-subtitle">Mind-map of arguments · expand recursively</div>
+                    </div>
+                    <div class="stat-chip"><span id="points-count">0</span> points</div>
+                </div>
+                <div id="points-body" class="points-body empty-state">Waiting for decomposition</div>
+            </section>
+
+            <!-- Stage Log -->
+            <section class="panel">
+                <div class="panel-header">
+                    <div>
+                        <div class="panel-title">Stage Log</div>
+                        <div class="panel-subtitle">Click to expand details</div>
+                    </div>
+                </div>
+                <div id="stage-log" class="stage-log empty-state">No logs yet</div>
+            </section>
+        </main>
+                </div>
+            </div>
+
+<!-- Worker Detail Modal -->
+<div id="modal" class="modal hidden">
+    <div id="modal-backdrop" class="modal-backdrop"></div>
+    <div class="modal-content">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title" id="modal-title">Worker</div>
+                <div class="modal-subtitle" id="modal-subtitle">Chat History</div>
+            </div>
+            <button id="modal-close" class="icon-btn">✕</button>
+        </div>
+        <div id="modal-body" class="modal-body"></div>
+    </div>
+</div>
+
+<!-- Toast Container -->
+<div id="toast-container" class="toast-container"></div>
+
     <script src="app.js"></script>
 </body>
 </html>

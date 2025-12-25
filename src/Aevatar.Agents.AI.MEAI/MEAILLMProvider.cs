@@ -39,7 +39,7 @@ public sealed class MEAILLMProvider : AevatarLLMProviderBase
     /// <summary>
     /// Get model info - MEAI supports streaming for most models.
     /// </summary>
-    public Task<AevatarModelInfo> GetModelInfoAsync(CancellationToken cancellationToken = default)
+    public override Task<AevatarModelInfo> GetModelInfoAsync(CancellationToken cancellationToken = default)
     {
         return Task.FromResult(new AevatarModelInfo
         {
@@ -375,7 +375,7 @@ public sealed class MEAILLMProvider : AevatarLLMProviderBase
 
         var result = new AevatarLLMResponse
         {
-            Content = content,
+            Content = content ?? string.Empty,
             ModelName = response.ModelId ?? _config.Model,
             AevatarStopReason = AevatarStopReason.Complete,
             Usage = CreateTokenUsage(

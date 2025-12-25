@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Aevatar.Agents.AI.Abstractions;
 using Aevatar.Agents.AI.Abstractions.Providers;
-using Aevatar.Agents.AI.Core.Messages;
 using Aevatar.Agents.AI.WithTool.Abstractions;
 using Aevatar.Agents.AI.WithTool.Exceptions;
 using Aevatar.Agents.AI.WithTool.Messages;
@@ -51,6 +50,7 @@ public class ToolExecutionCoordinator
     public async Task<(ToolExecutionResult Result, AevatarLLMResponse FinalResponse)> ExecuteToolWorkflowAsync(
         AevatarFunctionCall functionCall,
         AevatarLLMRequest llmRequest,
+        ToolExecutionContext? executionContext = null,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(functionCall);
@@ -61,7 +61,7 @@ public class ToolExecutionCoordinator
         var toolCallMsg = _historyManager.AddToolCallMessage(functionCall);
 
         // 2. Execute tool
-        var result = await ExecuteToolAsync(functionCall, cancellationToken);
+        var result = await ExecuteToolAsync(functionCall, executionContext, cancellationToken);
 
         // 3. Add tool result to history
         var toolResultMsg = _historyManager.AddToolResultMessage(functionCall.Name, result);
@@ -83,6 +83,7 @@ public class ToolExecutionCoordinator
     /// </summary>
     private async Task<ToolExecutionResult> ExecuteToolAsync(
         AevatarFunctionCall functionCall,
+        ToolExecutionContext? executionContext,
         CancellationToken cancellationToken)
     {
         // Parse arguments with proper error handling
@@ -100,7 +101,7 @@ public class ToolExecutionCoordinator
         return await _toolManager.ExecuteToolAsync(
             functionCall.Name,
             parseResult.Parameters,
-            context: null,
+            context: executionContext,
             cancellationToken: cancellationToken);
     }
 

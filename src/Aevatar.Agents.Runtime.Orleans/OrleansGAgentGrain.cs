@@ -1,6 +1,9 @@
 using Aevatar.Agents;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Context;
 using Aevatar.Agents.Abstractions.CQRS;
+using Aevatar.Agents.Abstractions.Helpers;
+using Aevatar.Agents.AI.Core.Helpers;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.Core.Helpers;
 using Aevatar.Agents.Core.Rpc;
@@ -12,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Orleans;
+using Orleans.Concurrency;
 using Orleans.Runtime;
 using Orleans.Streams;
 
@@ -69,6 +73,7 @@ public class OrleansAgentState
 /// 3. 存储层级关系 (Parent/Children)
 /// 4. 管理 Orleans Streams 订阅
 /// </summary>
+[Reentrant]
 public class OrleansGAgentGrain : Grain, IGAgentGrain
 {
     // Grain 持久化状态
@@ -328,30 +333,19 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
     public Task<bool> InitializeAgentAsync(string agentTypeName)
     {
-        // Grain Key format:
-        // - Preferred: "AgentId" (string guid)  ✅ consistent with P2P routing (targetAgentId only)
-        // - Backward compatible: "AgentTypeShortName:AgentId"
+        // ============================================================
+        //  AgentId 统一规范（对齐 docs/AGENT_ID_GUIDE.md）
         //
-        // Always extract AgentId from the Grain key for consistency.
+        //  Orleans GrainKey / StreamKey 统一使用完整 ActorId：
+        //    "AgentTypeShortName:RawId"
+        //
+        //  WHY:
+        //  - 仅使用 RawId 会导致跨类型冲突（同 RawId 不同 AgentType 会复用同一个 Grain）
+        //  - PublisherId / self-handling / StreamKey 必须一致，否则会出现“自发事件无法识别为 self”的隐性 bug
+        // ============================================================
         var grainKey = this.GetPrimaryKeyString();
-        var agentId = ExtractAgentIdFromGrainKey(grainKey).ToString();
-        return InitializeAgentInternalAsync(agentTypeName, agentId, persistState: true);
-    }
-
-    /// <summary>
-    /// Extract Agent ID from Grain Key
-    /// Grain Key format: "AgentTypeShortName:AgentId" or just "AgentId" (for backwards compatibility)
-    /// </summary>
-    private static Guid ExtractAgentIdFromGrainKey(string grainKey)
-    {
-        var colonIndex = grainKey.LastIndexOf(':');
-        if (colonIndex >= 0 && colonIndex < grainKey.Length - 1)
-        {
-            // New format: "AgentType:AgentId"
-            return Guid.Parse(grainKey.Substring(colonIndex + 1));
-        }
-        // Legacy format: just the GUID
-        return Guid.Parse(grainKey);
+        var actorId = NormalizeActorId(agentTypeName, grainKey);
+        return InitializeAgentInternalAsync(agentTypeName, actorId, persistState: true);
     }
 
     private async Task<bool> InitializeAgentInternalAsync(string agentTypeName, string agentId, bool persistState = false)
@@ -365,6 +359,9 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         {
             _logger.LogInformation("🔧 Initializing Agent in Grain {GrainId}, Type: {AgentType}", 
                 this.GetGrainId(), agentTypeName);
+
+            // Ensure agentId is in normalized ActorId format for consistent self-handling and stream routing.
+            agentId = NormalizeActorId(agentTypeName, agentId);
 
             // Resolve Agent type
             var agentType = ResolveAgentType(agentTypeName);
@@ -408,6 +405,21 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
             _logger.LogError(ex, "Error initializing Agent in Grain {GrainId}", this.GetGrainId());
             return false;
         }
+    }
+
+    private static string NormalizeActorId(string agentTypeName, string idOrActorId)
+    {
+        if (string.IsNullOrWhiteSpace(idOrActorId))
+            return string.Empty;
+
+        var id = idOrActorId.Trim();
+        if (id.Contains(AgentId.Separator))
+            return id;
+
+        var shortName = AgentId.GetAgentTypeShortName(agentTypeName);
+        return string.IsNullOrWhiteSpace(shortName)
+            ? id
+            : $"{shortName}{AgentId.Separator}{id}";
     }
 
     private System.Type? ResolveAgentType(string agentTypeName)
@@ -530,6 +542,159 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         // Inject ActorFactory (for Agents that need to create child Agents)
         InjectActorFactory(agent);
 
+        // Inject Configuration Options (preferred over ServiceProvider)
+        InjectConfigurationOptions(agent);
+
+        // Inject AgentContextAccessor for context propagation in event handlers
+        var contextAccessor = ServiceProvider.GetService<IAgentContextAccessor>();
+        if (contextAccessor != null)
+        {
+            AgentContextAccessorInjector.InjectContextAccessor(agent, contextAccessor);
+        }
+        // Inject AI-related dependencies (LLMProviderFactory, EmbeddingFactory)
+        // Only inject if agent is an AI Agent (inherits from AIGAgentBase)
+        if (AIAgentLLMProviderFactoryInjector.HasLLMProviderFactory(agent))
+        {
+            AIAgentLLMProviderFactoryInjector.InjectLLMProviderFactory(agent, ServiceProvider);
+            _logger.LogDebug("✅ Injected LLMProviderFactory into AI Agent {AgentType}", agent.GetType().Name);
+        }
+
+        if (AIAgentEmbeddingFactoryInjector.HasEmbeddingFactory(agent))
+        {
+            AIAgentEmbeddingFactoryInjector.InjectEmbeddingFactory(agent, ServiceProvider);
+            _logger.LogDebug("✅ Injected EmbeddingFactory into AI Agent {AgentType}", agent.GetType().Name);
+        }
+
+        // Inject ToolManager for AI Agents with Tool support
+        AIAgentToolManagerInjector.InjectToolManager(agent, ServiceProvider);
+        
+        // Inject ServiceProvider for agents that need direct service resolution (e.g., for IStreamProviderManager)
+        // This is specifically for agents like GodChatGAgent that need to publish to Orleans Streams directly
+        InjectServiceProviderProperty(agent);
+    }
+    
+    /// <summary>
+    /// Inject ServiceProvider into agents that have a public settable ServiceProvider property.
+    /// This is a targeted injection for agents that need direct access to IStreamProviderManager or other runtime services.
+    /// </summary>
+    private void InjectServiceProviderProperty(IGAgent agent)
+    {
+        var agentType = agent.GetType();
+        var serviceProviderProperty = agentType.GetProperty(
+            "ServiceProvider", 
+            System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+        
+        if (serviceProviderProperty != null && 
+            serviceProviderProperty.CanWrite &&
+            serviceProviderProperty.PropertyType == typeof(IServiceProvider))
+        {
+            serviceProviderProperty.SetValue(agent, ServiceProvider);
+            _logger.LogDebug("✅ Injected ServiceProvider into Agent {AgentType}", agentType.Name);
+        }
+    }
+    
+    /// <summary>
+    /// Inject configuration options into Agent properties.
+    /// Supports:
+    /// 1. IOptionsMonitor&lt;T&gt; properties - inject the IOptionsMonitor directly
+    /// 2. IOptions&lt;T&gt; properties - inject the IOptions directly  
+    /// 3. T properties (where T is an options class) - inject the CurrentValue/Value
+    /// </summary>
+    private void InjectConfigurationOptions(IGAgent agent)
+    {
+        var agentType = agent.GetType();
+        var properties = agentType.GetProperties(
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public);
+        
+        _logger.LogInformation("🔍 InjectConfigurationOptions scanning {PropertyCount} properties in {AgentType}", 
+            properties.Length, agentType.Name);
+        
+        foreach (var property in properties)
+        {
+            if (!property.CanWrite) continue;
+            
+            var propertyType = property.PropertyType;
+            
+            // Skip common non-option types
+            if (propertyType == typeof(string) || propertyType.IsPrimitive)
+                continue;
+            
+            // Case 1: Property is IOptionsMonitor<T> - inject the IOptionsMonitor directly
+            if (propertyType.IsGenericType && propertyType.GetGenericTypeDefinition() == typeof(IOptionsMonitor<>))
+            {
+                var service = ServiceProvider.GetService(propertyType);
+                var innerType = propertyType.GetGenericArguments()[0];
+                if (service != null)
+                {
+                    property.SetValue(agent, service);
+                    _logger.LogInformation("✅ Injected IOptionsMonitor<{OptionType}> into {AgentType}.{Property}", 
+                        innerType.Name, agentType.Name, property.Name);
+                }
+                else
+                {
+                    _logger.LogWarning("⚠️ IOptionsMonitor<{OptionType}> not found in DI for {AgentType}.{Property}",
+                        innerType.Name, agentType.Name, property.Name);
+                }
+                continue;
+            }
+            
+            // Case 2: Property is IOptions<T> - inject the IOptions directly
+            if (propertyType.IsGenericType && propertyType.GetGenericTypeDefinition() == typeof(IOptions<>))
+            {
+                var service = ServiceProvider.GetService(propertyType);
+                if (service != null)
+                {
+                    property.SetValue(agent, service);
+                    var innerType = propertyType.GetGenericArguments()[0];
+                    _logger.LogDebug("✅ Injected IOptions<{OptionType}> into {AgentType}.{Property}", 
+                        innerType.Name, agentType.Name, property.Name);
+                }
+                continue;
+            }
+            
+            // Skip other interface types
+            if (propertyType.IsInterface)
+                continue;
+                
+            // Case 3: Property is a concrete options class T - inject CurrentValue from IOptionsMonitor<T> or Value from IOptions<T>
+            // Try to get IOptionsMonitor<T> first
+            var optionsMonitorType = typeof(IOptionsMonitor<>).MakeGenericType(propertyType);
+            var optionsMonitor = ServiceProvider.GetService(optionsMonitorType);
+            if (optionsMonitor != null)
+            {
+                // Get CurrentValue from IOptionsMonitor<T>
+                var currentValueProp = optionsMonitorType.GetProperty("CurrentValue");
+                if (currentValueProp != null)
+                {
+                    var value = currentValueProp.GetValue(optionsMonitor);
+                    if (value != null)
+                    {
+                        property.SetValue(agent, value);
+                        _logger.LogDebug("✅ Injected {OptionType} (from IOptionsMonitor) into {AgentType}.{Property}", 
+                            propertyType.Name, agentType.Name, property.Name);
+                    }
+                }
+                continue;
+            }
+            
+            // Try to get IOptions<T>
+            var optionsType = typeof(IOptions<>).MakeGenericType(propertyType);
+            var options = ServiceProvider.GetService(optionsType);
+            if (options != null)
+            {
+                var valueProp = optionsType.GetProperty("Value");
+                if (valueProp != null)
+                {
+                    var value = valueProp.GetValue(options);
+                    if (value != null)
+                    {
+                        property.SetValue(agent, value);
+                        _logger.LogDebug("✅ Injected {OptionType} (from IOptions) into {AgentType}.{Property}", 
+                            propertyType.Name, agentType.Name, property.Name);
+                    }
+                }
+            }
+        }
     }
 
     private void InjectActorFactory(IGAgent agent)
@@ -665,7 +830,8 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         var grainKey = this.GetPrimaryKeyString();
         try
         {
-            return Task.FromResult(ExtractAgentIdFromGrainKey(grainKey).ToString());
+            // 与 Actor.Id / StreamId 对齐：返回完整 ActorId（"Type:RawId"）
+            return Task.FromResult(NormalizeActorId(_grainState.State.AgentTypeName ?? string.Empty, grainKey));
         }
         catch (Exception ex)
         {
@@ -725,13 +891,13 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
     #endregion
 
-    #region Interface Required Methods
+    #region Lifecycle Control
 
-    [Obsolete("Use InitializeAgentAsync instead")]
-    public Task ActivateAsync(string? agentTypeName = null, string? stateTypeName = null)
-        => throw new NotSupportedException("Use InitializeAgentAsync instead");
-
-    public Task DeactivateAsync() => Task.CompletedTask;
+    public Task DeactivateAsync()
+    {
+        _logger.LogInformation("Grain {GrainId} deactivate requested", this.GetGrainId());
+        return Task.CompletedTask;
+    }
 
     /// <summary>
     /// Protobuf RPC method invocation - delegates to shared RpcInvoker

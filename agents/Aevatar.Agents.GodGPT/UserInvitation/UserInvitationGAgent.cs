@@ -1,4 +1,5 @@
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Agents.GodGPT.Protos.UserInvitation;
@@ -20,11 +21,12 @@ namespace Aevatar.Application.Grains.UserInvitation;
 [GAgent(nameof(UserInvitationGAgent))]
 public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvitationGAgent
 {
-    private readonly IGAgentActorFactory _actorFactory;
+    // Use property injection for Orleans compatibility (parameterless constructor required)
+    public IGAgentActorFactory ActorFactory { get; set; } = null!;
 
-    public UserInvitationGAgent(Guid id, IGAgentActorFactory actorFactory) : base(id)
+    // Parameterless constructor required for Orleans activation
+    public UserInvitationGAgent() : base()
     {
-        _actorFactory = actorFactory;
     }
 
     public override Task<string> GetDescriptionAsync()
@@ -33,12 +35,33 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
     }
 
     /// <summary>
+    /// Extract raw Guid from Agent Id (format: "AgentType:Guid" or just "Guid")
+    /// </summary>
+    private string ExtractRawGuidFromAgentId(string agentId)
+    {
+        var colonIndex = agentId.IndexOf(':');
+        if (colonIndex >= 0 && colonIndex < agentId.Length - 1)
+        {
+            // Format: "AgentType:Guid" - extract Guid part
+            return agentId[(colonIndex + 1)..];
+        }
+        // Format: "Guid" - return as is
+        return agentId;
+    }
+
+    /// <summary>
     /// Generates invite code for the current user
     /// </summary>
     public async Task<string> GenerateInviteCodeAsync()
     {
-        var invitationActor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>(Id);
-        var invitationAgent = (IInvitationGAgent)invitationActor.GetAgent();
+        // Extract raw Guid from Agent Id for CreateGAgentActorAsync (expects simple Guid string)
+        var rawUserId = ExtractRawGuidFromAgentId(Id);
+        if (ActorFactory == null)
+        {
+            throw new InvalidOperationException("ActorFactory is not injected. Cannot create InvitationGAgent.");
+        }
+        var invitationActor = await ActorFactory.CreateGAgentActorAsync<InvitationGAgent>(rawUserId);
+        var invitationAgent = invitationActor.As<IInvitationGAgent>();
         var inviteCode = await invitationAgent.GenerateInviteCodeAsync();
         return inviteCode;
     }
@@ -48,11 +71,17 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
     /// </summary>
     public async Task<bool> RedeemInviteCodeAsync(string inviteCode)
     {
+        if (ActorFactory == null)
+        {
+            throw new InvalidOperationException("ActorFactory is not injected. Cannot create InviteCodeGAgent.");
+        }
         var codeGrainId = CommonHelper.StringToGuid(inviteCode);
-        var codeActor = await _actorFactory.CreateGAgentActorAsync<InviteCodeGAgent>(codeGrainId);
-        var codeGrain = (IInviteCodeGAgent)codeActor.GetAgent();
+        var codeActor = await ActorFactory.CreateGAgentActorAsync<InviteCodeGAgent>(codeGrainId.ToString());
+        var codeGrain = codeActor.As<IInviteCodeGAgent>();
 
-        var (isValid, inviterId) = await codeGrain.ValidateAndGetInviterAsync();
+        var response = await codeGrain.ValidateAndGetInviterAsync();
+        var isValid = response.IsValid;
+        var inviterId = response.InviterId;
 
         if (!isValid)
         {
@@ -61,16 +90,19 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
         }
 
 
-        if (inviterId.Equals(Id.ToString()))
+        // Extract raw Guid from Agent Id for comparison and CreateGAgentActorAsync
+        var rawUserId = ExtractRawGuidFromAgentId(Id);
+        
+        if (inviterId.Equals(rawUserId))
         {
             Logger.LogWarning(
-                $"Invalid invite code,the code belongs to the user themselves. userId:{Id.ToString()} InviteCode:{inviteCode}");
+                $"Invalid invite code,the code belongs to the user themselves. userId:{rawUserId} InviteCode:{inviteCode}");
             return false;
         }
 
         // Step 1: First, check if the current user (invitee) is eligible for the reward.
-        var userQuotaActor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(Id);
-        var userQuotaGAgent = (IUserQuotaGAgent)userQuotaActor.GetAgent();
+        var userQuotaActor = await ActorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(rawUserId);
+        var userQuotaGAgent = userQuotaActor.As<IUserQuotaGAgent>();
 
         if (State.RegisteredAtUtc == null) //&& State.SessionInfoList.IsNullOrEmpty())
         {
@@ -87,15 +119,15 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
 
         if (registeredAtUtc == null)
         {
-            Logger.LogWarning($"State.RegisteredAtUtc == null userId:{Id.ToString()}");
+            Logger.LogWarning($"State.RegisteredAtUtc == null userId:{rawUserId}");
             redeemResult = false;
         }
 
         Logger.LogDebug(
-            $"[UserInvitationGAgent][RedeemInviteCodeAsync] User {Id} RegisteredAtUtc={registeredAtUtc.ToDateTime()}");
+            $"[UserInvitationGAgent][RedeemInviteCodeAsync] User {rawUserId} RegisteredAtUtc={registeredAtUtc.ToDateTime()}");
 
         // Attempt to redeem initial reward
-        redeemResult = await userQuotaGAgent.RedeemInitialRewardAsync(Id.ToString(), registeredAtUtc.ToDateTime());
+        redeemResult = await userQuotaGAgent.RedeemInitialRewardAsync(rawUserId, registeredAtUtc.ToDateTime());
 
         if (!redeemResult)
         {
@@ -105,10 +137,11 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
         }
 
         // Record invitee in inviter's InvitationGAgent
-        var inviterGuid = Guid.Parse(inviterId);
-        var inviterActor = await _actorFactory.CreateGAgentActorAsync<InvitationGAgent>(inviterGuid);
-        var inviterGrain = (IInvitationGAgent)inviterActor.GetAgent();
-        await inviterGrain.ProcessInviteeRegistrationAsync(Id.ToString());
+        // Extract raw Guid from inviterId (may be full Agent Id format: "AgentType:Guid")
+        var rawInviterId = ExtractRawGuidFromAgentId(inviterId);
+        var inviterActor = await ActorFactory.CreateGAgentActorAsync<InvitationGAgent>(rawInviterId);
+        var inviterGrain = inviterActor.As<IInvitationGAgent>();
+        await inviterGrain.ProcessInviteeRegistrationAsync(rawUserId);
 
         // Record redemption event
         RaiseEvent(new RedeemInviteCodeEvent
@@ -125,7 +158,7 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
         await ConfirmEventsAsync();
 
         Logger.LogInformation(
-            $"[UserInvitationGAgent][RedeemInviteCodeAsync] User {Id} successfully redeemed invite code from {inviterId}");
+            $"[UserInvitationGAgent][RedeemInviteCodeAsync] User {rawUserId} successfully redeemed invite code from {rawInviterId}");
         return true;
     }
 
@@ -139,7 +172,18 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
             return Task.FromResult<Guid?>(null);
         }
 
-        return Task.FromResult<Guid?>(Guid.Parse(State.InviterId));
+        // State.InviterId should be raw Guid (stored from inviterId parameter which is already raw Guid)
+        // But handle both formats for safety
+        var inviterIdStr = State.InviterId;
+        var colonIndex = inviterIdStr.IndexOf(':');
+        if (colonIndex >= 0 && colonIndex < inviterIdStr.Length - 1)
+        {
+            inviterIdStr = inviterIdStr[(colonIndex + 1)..];
+        }
+        
+        return Guid.TryParse(inviterIdStr, out var guid) 
+            ? Task.FromResult<Guid?>(guid) 
+            : Task.FromResult<Guid?>(null);
     }
 
     // #region Event Handlers

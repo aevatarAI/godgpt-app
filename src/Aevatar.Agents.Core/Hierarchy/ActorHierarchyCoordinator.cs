@@ -5,7 +5,8 @@ using Microsoft.Extensions.Logging;
 namespace Aevatar.Agents.Core.Hierarchy;
 
 /// <summary>
-/// 公共工具类：保证父子关系操作一次完成，内部会同时触达双方的 EventRouter。
+/// Public utility class: Ensures parent-child relationship operations complete atomically,
+/// internally touches both parties' EventRouter simultaneously.
 /// </summary>
 public static class ActorHierarchyCoordinator
 {

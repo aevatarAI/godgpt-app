@@ -1,3 +1,4 @@
+using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.GAgents.AI.Abstractions;
 using Aevatar.GAgents.ChatAgent.Dtos;
 
@@ -12,6 +13,29 @@ public static class ChatContentHelper
     private const int DefaultMaxPreviewLength = 60;
     private const int MinimumSubstantialContentLength = 5;
 
+    /// <summary>
+    /// Extract chat content preview from chat messages (Protobuf version)
+    /// </summary>
+    /// <param name="messagesProto">Protobuf wrapper of chat messages</param>
+    /// <returns>Content preview (first 60 characters)</returns>
+    public static string ExtractChatContent(ChatMessageListProto messagesProto, int maxLength = DefaultMaxPreviewLength)
+    {
+        if (messagesProto == null || messagesProto.Messages.Count == 0)
+        {
+            return string.Empty;
+        }
+        
+        // Convert to regular ChatMessage list and use existing logic
+        var messages = messagesProto.Messages.Select(p => new ChatMessage
+        {
+            Role = p.Role,
+            Content = p.Content,
+            ChatRole = (ChatRole)p.ChatRole
+        }).ToList();
+        
+        return ExtractChatContent(messages, maxLength);
+    }
+    
     /// <summary>
     /// Extract chat content preview from chat messages
     /// </summary>

@@ -85,7 +85,7 @@ public partial class MakerCoordinatorGAgent
 
             _cachedResult = new MakerResult
             {
-                Success = CustomState.Status == 3,
+                Success = CustomState.ExecutionState == MakerExecutionState.MakerStateCompleted,
                 Content = CustomState.ResultContent,
                 Error = string.IsNullOrEmpty(CustomState.ResultError) ? null : CustomState.ResultError,
                 Trace = deserializedTrace ?? defaultTrace
@@ -103,8 +103,8 @@ public partial class MakerCoordinatorGAgent
             });
         }
 
-        Logger.LogDebug("Runtime state restored for execution {ExecutionId}, status={Status}",
-            CustomState.ExecutionId, CustomState.Status);
+        Logger.LogDebug("Runtime state restored for execution {ExecutionId}, state={State}",
+            CustomState.ExecutionId, CustomState.ExecutionState);
     }
 
     /// <summary>
@@ -112,7 +112,18 @@ public partial class MakerCoordinatorGAgent
     /// </summary>
     public bool HasInterruptedExecution()
     {
-        return CustomState.Status is 1 or 2 && !string.IsNullOrEmpty(CustomState.ExecutionId);
+        if (string.IsNullOrEmpty(CustomState.ExecutionId))
+        {
+            return false;
+        }
+
+        return CustomState.ExecutionState is
+            MakerExecutionState.MakerStateInitializingWorkers or
+            MakerExecutionState.MakerStateAssessingAtomicity or
+            MakerExecutionState.MakerStateDecomposing or
+            MakerExecutionState.MakerStateSolvingAtomic or
+            MakerExecutionState.MakerStateVoting or
+            MakerExecutionState.MakerStateComposing;
     }
 
     // ============================================================

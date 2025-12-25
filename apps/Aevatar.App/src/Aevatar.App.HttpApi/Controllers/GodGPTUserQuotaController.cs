@@ -2,19 +2,22 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using Aevatar.Agents.Abstractions.Context;
+using Aevatar.Agents.Core.Context;
 using Aevatar.App.Application.Contracts.BlobStorings;
 using Aevatar.App.Application.Contracts.Services;
 using Aevatar.App.HttpApi.Controllers;
 using Aevatar.App.HttpApi.Extensions;
+using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
+using Aevatar.Application.Grains.UserQuota;
 using Aevatar.Dtos;
 using Aevatar.GodGPT.Dtos;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
-using Orleans.Runtime;
 using Volo.Abp;
 
 namespace Aevatar.Controllers;
@@ -27,13 +30,16 @@ public class GodGPTUserQuotaController : AevatarController
 {
     private readonly IUserQuotaService _userQuotaService;
     private readonly ILogger<GodGPTUserQuotaController> _logger;
+    private readonly IAgentContextAccessor _agentContextAccessor;
 
     public GodGPTUserQuotaController(
         IUserQuotaService userQuotaService,
-        ILogger<GodGPTUserQuotaController> logger)
+        ILogger<GodGPTUserQuotaController> logger,
+        IAgentContextAccessor agentContextAccessor)
     {
         _userQuotaService = userQuotaService;
         _logger = logger;
+        _agentContextAccessor = agentContextAccessor;
     }
 
     [HttpPost("godgpt/account/show-toast")]
@@ -84,9 +90,10 @@ public class GodGPTUserQuotaController : AevatarController
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
 
-        // Preserve language context for agent localization
+        // Preserve language context for agent localization using IAgentContext API
         var language = HttpContext.GetGodGPTLanguage();
-        RequestContext.Set("GodGPTLanguage", language.ToString());
+        var agentContext = _agentContextAccessor.GetOrCreate();
+        agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
 
         var response = await _userQuotaService.CanUploadImageAsync(currentUserId);
 

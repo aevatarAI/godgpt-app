@@ -26,11 +26,12 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
         await base.OnActivateAsync(ct);
         
         // Initialize UserId through Event Sourcing if not set
+        // Store complete Agent Id for consistency and direct Agent lookup
         if (string.IsNullOrEmpty(State.UserId))
         {
             RaiseEvent(new PaymentIndexInitializedEvent
             {
-                UserId = Id.ToString(),
+                UserId = Id,
                 InitializedAt = Timestamp.FromDateTime(DateTime.UtcNow)
             });
             await ConfirmEventsAsync();
