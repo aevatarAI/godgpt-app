@@ -210,15 +210,6 @@ public static class AgentRuntimeExtensions
     /// </summary>
     private static void RegisterOrleansRuntime(IServiceCollection services, OrleansRuntimeOptions orleansOptions)
     {
-        // Configure StreamingOptions for Orleans
-        services.Configure<Aevatar.Agents.StreamingOptions>(options =>
-        {
-            options.StreamProviderName = orleansOptions.StreamProviderName;
-            // Get DefaultNamespace from Streaming configuration
-            var config = services.BuildServiceProvider().GetRequiredService<IConfiguration>();
-            options.DefaultStreamNamespace = config.GetValue("Streaming:DefaultNamespace", "AevatarAgents");
-        });
-
         // Orleans runtime requires Orleans Silo to be configured via UseOrleansClient
         // The actual grain factory comes from Orleans
         services.AddSingleton<IGAgentActorFactory, Aevatar.Agents.Runtime.Orleans.OrleansGAgentActorFactory>();
@@ -228,6 +219,11 @@ public static class AgentRuntimeExtensions
 
         // Ensure IGrainFactory is available (forward from IClusterClient if needed)
         services.TryAddSingleton<IGrainFactory>(sp => sp.GetRequiredService<IClusterClient>());
+        
+        // Configure MessageStreamProviderOptions from configuration (required for OrleansGAgentActor to use MassTransit)
+        var config = services.BuildServiceProvider().GetRequiredService<IConfiguration>();
+        services.Configure<MessageStreamProviderOptions>(config.GetSection("MessageStream"));
+        Log.Information("   ✅ MessageStreamProviderOptions configured");
 
         // Agent Context for Orleans runtime (bridges with Orleans RequestContext)
         services.AddOrleansAgentContext();

@@ -9,7 +9,6 @@ using Microsoft.Extensions.Hosting;
 using Orleans;
 using Orleans.Configuration;
 using Orleans.Hosting;
-using Orleans.Streams.Kafka.Config;
 using Serilog;
 using Serilog.Events;
 using Orleans.Serialization;
@@ -112,82 +111,8 @@ public class Program
                 options.ClusterId = orleansOptions.ClusterId;
                 options.ServiceId = orleansOptions.ServiceId;
             });
-            
-            // 4. Configure Kafka Stream Provider (MUST match Silo configuration!)
-                var bootstrapServers = config.GetValue<string>("Kafka:BootstrapServers") ?? "localhost:9092";
-                var consumerGroupId = config.GetValue<string>("Kafka:ConsumerGroupId") ?? "aevatar-client-consumers";
-            var defaultPartitions = config.GetValue<int>("Kafka:DefaultPartitions", 8);
-            var defaultReplicationFactor = config.GetValue<int>("Kafka:DefaultReplicationFactor", 1);
-                
-                // Read topics from config (comma-separated list or fallback to DefaultNamespace)
-                var topicsConfig = config.GetValue<string>("Streaming:Topics");
-                if (string.IsNullOrEmpty(topicsConfig))
-                {
-                    topicsConfig = config.GetValue<string>("Streaming:DefaultNamespace") ?? "agent-events";
-                }
-                
-            Log.Information("🌊 Configuring Kafka Stream Provider");
-                Log.Information("   BootstrapServers: {Servers}", bootstrapServers);
-                Log.Information("   ConsumerGroupId: {GroupId}", consumerGroupId);
-                Log.Information("   Topics: {Topics}", topicsConfig);
-                
-            // Primary stream provider
-                clientBuilder
-                    .AddKafka(orleansOptions.StreamProviderName)
-                    .WithOptions(options =>
-                    {
-                        options.BrokerList = new List<string> { bootstrapServers };
-                        options.ConsumerGroupId = consumerGroupId;
-                        options.ConsumeMode = ConsumeMode.LastCommittedMessage;
-                        
-                        foreach (var topic in topicsConfig.Split(','))
-                        {
-                            var topicName = topic.Trim();
-                            if (!string.IsNullOrEmpty(topicName))
-                            {
-                                options.AddTopic(topicName, new TopicCreationConfig
-                                {
-                                    AutoCreate = true,
-                                Partitions = defaultPartitions,
-                                ReplicationFactor = (short)defaultReplicationFactor
-                                });
-                                Log.Information("      ✅ Configured topic: {Topic}", topicName);
-                            }
-                        }
-                    })
-                    .AddJson()
-                    .Build();
-            
-            Log.Information("   ✅ Added primary Kafka stream provider: {Provider}", orleansOptions.StreamProviderName);
-            
-            // AevatarAgents stream provider for GodChat client streaming
-            // (used by ChatMiddleware to subscribe to GodChatGAgent responses)
-            const string agentStreamProvider = "AevatarAgents";
-            if (orleansOptions.StreamProviderName != agentStreamProvider)
-            {
-                clientBuilder
-                    .AddKafka(agentStreamProvider)
-                    .WithOptions(options =>
-                    {
-                        options.BrokerList = new List<string> { bootstrapServers };
-                        options.ConsumerGroupId = $"{consumerGroupId}-agents";
-                        options.ConsumeMode = ConsumeMode.LastCommittedMessage;
-                        
-                        // AevatarAgents topic for client streaming
-                        options.AddTopic(agentStreamProvider, new TopicCreationConfig
-                        {
-                            AutoCreate = true,
-                            Partitions = defaultPartitions,
-                            ReplicationFactor = (short)defaultReplicationFactor
-                        });
-                    })
-                    .AddJson()
-                    .Build();
-                
-                Log.Information("   ✅ Added agent Kafka stream provider: {Provider}", agentStreamProvider);
-            }
 
-            // 5. Add Protobuf serializer
+            // 4. Add Protobuf serializer
             clientBuilder.ConfigureServices(services =>
             {
                 services.AddSerializer(serializerBuilder =>

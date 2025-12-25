@@ -152,11 +152,15 @@ public class Program
                 Log.Information("✅ Aevatar Agent System configured with MongoDB stores");
 
                 // CQRS State Projection (Orleans Stream)
-                services.AddOrleansCQRS(options =>
+                // When MessageStream.Provider=MassTransit, Orleans Streaming is disabled, so skip Orleans CQRS streaming.
+                if (!string.Equals(messageStreamProvider, "MassTransit", StringComparison.OrdinalIgnoreCase))
                 {
-                    options.StreamProviderName = "Default";
-                    options.StreamNamespace = "StateProjection";
-                });
+                    services.AddOrleansCQRS(options =>
+                    {
+                        options.StreamProviderName = "Default";
+                        options.StreamNamespace = "StateProjection";
+                    });
+                }
                 
                 // Use Core's CQRS implementation (same as HttpApi.Host in Local mode)
                 var esUrl = context.Configuration.GetValue<string>("Elasticsearch:Url") ?? "http://localhost:9200";

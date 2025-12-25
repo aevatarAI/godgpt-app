@@ -35,7 +35,7 @@ public static class OrleansHostExtension
         return hostBuilder.UseOrleans((context, siloBuilder) =>
         {
             var configuration = context.Configuration;
-            var orleansConfig = configuration.GetSection("Orleans");
+            var orleansConfig = configuration.GetSection("AgentRuntime").GetSection("Orleans");
             var clusterId = orleansConfig.GetValue("ClusterId", "aevatar-cluster");
             var serviceId = orleansConfig.GetValue("ServiceId", "aevatar-service");
             var siloPort = orleansConfig.GetValue("SiloPort", 11111);

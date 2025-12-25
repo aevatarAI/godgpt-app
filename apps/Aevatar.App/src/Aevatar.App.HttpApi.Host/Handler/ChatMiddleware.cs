@@ -56,8 +56,6 @@ public class ChatMiddleware
     private const string DefaultRegion = "DEFAULT";
     private const string CNConsoleRegion = "CNCONSOLE";
     private const string ConsoleRegion = "CONSOLE";
-    private const string StreamNamespace = "AevatarAgents";
-    private const string StreamProviderName = "AevatarAgents";
 
     public ChatMiddleware(
         RequestDelegate next,
@@ -199,7 +197,7 @@ public class ChatMiddleware
             context.Response.Headers.Connection = "keep-alive";
             context.Response.Headers.CacheControl = "no-cache";
 
-            // Use MassTransit Stream if available, otherwise fallback to Orleans Stream
+            // MassTransit stream is required (no Orleans Stream fallback)
             IMessageStream? messageStream = null;
             if (_messageStreamProvider != null)
             {
@@ -209,16 +207,15 @@ public class ChatMiddleware
                     request.SessionId);
             }
             
-            // Fallback to Orleans Stream if MassTransit not available
-            IAsyncStream<ResponseStreamGodChat>? responseStream = null;
             if (messageStream == null)
             {
-                var streamProvider = _clusterClient.GetStreamProvider(StreamProviderName);
-                var streamId = StreamId.Create(StreamNamespace, request.SessionId);
-                responseStream = streamProvider.GetStream<ResponseStreamGodChat>(streamId);
-                _logger.LogDebug(
-                    "[ChatMiddleware][HandleAuthenticatedChatAsync] Using Orleans Stream for SessionId={SessionId}, Namespace={Namespace}",
-                    request.SessionId, StreamNamespace);
+                _logger.LogError(
+                    "[ChatMiddleware][HandleAuthenticatedChatAsync] MassTransit stream provider is not configured. SessionId={SessionId}",
+                    request.SessionId);
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                await context.Response.WriteAsync("Streaming is not available (MassTransit stream provider is not configured).");
+                await context.Response.Body.FlushAsync();
+                return;
             }
             var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(request.SessionId.ToString());
             var godChat = godChatActor.As<IGodChat>();
@@ -257,72 +254,25 @@ public class ChatMiddleware
 
             var exitSignal = new TaskCompletionSource();
             IMessageStreamSubscription? messageSubscription = null;
-            StreamSubscriptionHandle<ResponseStreamGodChat>? orleansSubscription = null;
             var firstFlag = false;
             var ifLastChunk = false;
 
             // CRITICAL: Subscribe BEFORE calling StartStreamChatAsync to avoid race condition
             // Messages may arrive immediately after StartStreamChatAsync is called
-            if (messageStream != null)
+            // Subscribe to MassTransit Stream
+            messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
             {
-                // Subscribe to MassTransit Stream
-                messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
+                try
                 {
-                    try
+                    // Unpack ResponseStreamGodChatProto from EventEnvelope
+                    if (!envelope.Payload.Is(ResponseStreamGodChatProto.Descriptor))
                     {
-                        // Unpack ResponseStreamGodChatProto from EventEnvelope
-                        if (!envelope.Payload.Is(ResponseStreamGodChatProto.Descriptor))
-                        {
-                            return;
-                        }
-
-                        var proto = envelope.Payload.Unpack<ResponseStreamGodChatProto>();
-                        var chatResponse = GodChatConversions.FromProto(proto); // Convert to ResponseStreamGodChat
-
-                        if (chatResponse.ChatId != chatId)
-                        {
-                            return;
-                        }
-
-                        if (!firstFlag)
-                        {
-                            await context.Response.StartAsync();
-                            firstFlag = true;
-                            _logger.LogDebug(
-                                "[ChatMiddleware][HandleAuthenticatedChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
-                                request.SessionId, stopwatch.ElapsedMilliseconds);
-                        }
-
-                        var responseData = $"data: {JsonConvert.SerializeObject(chatResponse.ConvertToHttpResponse())}\n\n";
-                        await context.Response.WriteAsync(responseData);
-                        await context.Response.Body.FlushAsync();
-
-                        if (chatResponse.IsLastChunk)
-                        {
-                            await context.Response.WriteAsync("event: completed\n");
-                            context.Response.Body.Close();
-                            ifLastChunk = true;
-                            exitSignal.TrySetResult();
-                            if (messageSubscription != null)
-                            {
-                                await messageSubscription.UnsubscribeAsync();
-                            }
-                        }
+                        return;
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex,
-                            "[ChatMiddleware][HandleAuthenticatedChatAsync] Error processing MassTransit message: SessionId={SessionId}, ChatId={ChatId}",
-                            request.SessionId, chatId);
-                        exitSignal.TrySetException(ex);
-                    }
-                });
-            }
-            else if (responseStream != null)
-            {
-                // Fallback to Orleans Stream
-                orleansSubscription = await responseStream.SubscribeAsync(async (chatResponse, token) =>
-                {
+
+                    var proto = envelope.Payload.Unpack<ResponseStreamGodChatProto>();
+                    var chatResponse = GodChatConversions.FromProto(proto); // Convert to ResponseStreamGodChat
+
                     if (chatResponse.ChatId != chatId)
                     {
                         return;
@@ -333,7 +283,7 @@ public class ChatMiddleware
                         await context.Response.StartAsync();
                         firstFlag = true;
                         _logger.LogDebug(
-                            "[ChatMiddleware][HandleAuthenticatedChatAsync] Orleans Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
+                            "[ChatMiddleware][HandleAuthenticatedChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
                             request.SessionId, stopwatch.ElapsedMilliseconds);
                     }
 
@@ -347,31 +297,20 @@ public class ChatMiddleware
                         context.Response.Body.Close();
                         ifLastChunk = true;
                         exitSignal.TrySetResult();
-                        if (orleansSubscription != null)
+                        if (messageSubscription != null)
                         {
-                            await orleansSubscription.UnsubscribeAsync();
+                            await messageSubscription.UnsubscribeAsync();
                         }
                     }
-                }, ex =>
+                }
+                catch (Exception ex)
                 {
-                    _logger.LogError(
-                        "[ChatMiddleware][HandleAuthenticatedChatAsync] Orleans Stream error: {Error} - SessionId={SessionId}, ChatId={ChatId}",
-                        ex.Message, request.SessionId, chatId);
+                    _logger.LogError(ex,
+                        "[ChatMiddleware][HandleAuthenticatedChatAsync] Error processing MassTransit message: SessionId={SessionId}, ChatId={ChatId}",
+                        request.SessionId, chatId);
                     exitSignal.TrySetException(ex);
-                    return Task.CompletedTask;
-                }, () =>
-                {
-                    _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] Orleans Stream oncomplete");
-                    exitSignal.TrySetResult();
-                    return Task.CompletedTask;
-                });
-                _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] Subscribed to MassTransit Stream for SessionId={SessionId}", request.SessionId);
-            }
-            else if (responseStream != null)
-            {
-                // Fallback to Orleans Stream subscription already handled above
-                _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] Subscribed to Orleans Stream for SessionId={SessionId}", request.SessionId);
-            }
+                }
+            });
 
             // Now that subscription is active, trigger the chat
             await godChat.StartStreamChatAsync(protoInput);
@@ -390,10 +329,6 @@ public class ChatMiddleware
                 if (messageSubscription != null)
                 {
                     await messageSubscription.UnsubscribeAsync();
-                }
-                if (orleansSubscription != null)
-                {
-                    await orleansSubscription.UnsubscribeAsync();
                 }
             }
 
@@ -509,7 +444,7 @@ public class ChatMiddleware
             context.Response.Headers.Connection = "keep-alive";
             context.Response.Headers.CacheControl = "no-cache";
 
-            // Use MassTransit Stream if available, otherwise fallback to Orleans Stream
+            // MassTransit stream is required (no Orleans Stream fallback)
             IMessageStream? messageStream = null;
             if (_messageStreamProvider != null)
             {
@@ -519,86 +454,38 @@ public class ChatMiddleware
                     sessionId);
             }
 
-            // Fallback to Orleans Stream if MassTransit not available
-            IAsyncStream<ResponseStreamGodChat>? responseStream = null;
             if (messageStream == null)
             {
-                var streamProvider = _clusterClient.GetStreamProvider(StreamProviderName);
-                var streamId = StreamId.Create(StreamNamespace, sessionId);
-                responseStream = streamProvider.GetStream<ResponseStreamGodChat>(streamId);
-                _logger.LogDebug(
-                    "[ChatMiddleware][HandleGuestChatAsync] Using Orleans Stream for SessionId={SessionId}, Namespace={Namespace}",
-                    sessionId, StreamNamespace);
+                _logger.LogError(
+                    "[ChatMiddleware][HandleGuestChatAsync] MassTransit stream provider is not configured. SessionId={SessionId}",
+                    sessionId);
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                await context.Response.WriteAsync("Streaming is not available (MassTransit stream provider is not configured).");
+                await context.Response.Body.FlushAsync();
+                return;
             }
 
             // Handle streaming response
             var exitSignal = new TaskCompletionSource();
             IMessageStreamSubscription? messageSubscription = null;
-            StreamSubscriptionHandle<ResponseStreamGodChat>? orleansSubscription = null;
             var firstFlag = false;
             var ifLastChunk = false;
 
             // CRITICAL: Subscribe BEFORE calling GuestChatAsync to avoid race condition
-            if (messageStream != null)
+            // Subscribe to MassTransit Stream
+            messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
             {
-                // Subscribe to MassTransit Stream
-                messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
+                try
                 {
-                    try
+                    // Unpack ResponseStreamGodChatProto from EventEnvelope
+                    if (!envelope.Payload.Is(ResponseStreamGodChatProto.Descriptor))
                     {
-                        // Unpack ResponseStreamGodChatProto from EventEnvelope
-                        if (!envelope.Payload.Is(ResponseStreamGodChatProto.Descriptor))
-                        {
-                            return;
-                        }
-
-                        var proto = envelope.Payload.Unpack<ResponseStreamGodChatProto>();
-                        var chatResponse = GodChatConversions.FromProto(proto);
-
-                        if (chatResponse.ChatId != chatId)
-                        {
-                            return;
-                        }
-
-                        if (!firstFlag)
-                        {
-                            await context.Response.StartAsync();
-                            firstFlag = true;
-                            _logger.LogDebug(
-                                "[ChatMiddleware][HandleGuestChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
-                                sessionId, stopwatch.ElapsedMilliseconds);
-                        }
-
-                        var responseData = $"data: {JsonConvert.SerializeObject(chatResponse.ConvertToHttpResponse())}\n\n";
-                        await context.Response.WriteAsync(responseData);
-                        await context.Response.Body.FlushAsync();
-
-                        if (chatResponse.IsLastChunk)
-                        {
-                            await context.Response.WriteAsync("event: completed\n");
-                            context.Response.Body.Close();
-                            ifLastChunk = true;
-                            exitSignal.TrySetResult();
-                            if (messageSubscription != null)
-                            {
-                                await messageSubscription.UnsubscribeAsync();
-                            }
-                        }
+                        return;
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex,
-                            "[ChatMiddleware][HandleGuestChatAsync] Error processing MassTransit message: SessionId={SessionId}, ChatId={ChatId}",
-                            sessionId, chatId);
-                        exitSignal.TrySetException(ex);
-                    }
-                });
-            }
-            else if (responseStream != null)
-            {
-                // Fallback to Orleans Stream
-                orleansSubscription = await responseStream.SubscribeAsync(async (chatResponse, token) =>
-                {
+
+                    var proto = envelope.Payload.Unpack<ResponseStreamGodChatProto>();
+                    var chatResponse = GodChatConversions.FromProto(proto);
+
                     if (chatResponse.ChatId != chatId)
                     {
                         return;
@@ -608,7 +495,8 @@ public class ChatMiddleware
                     {
                         await context.Response.StartAsync();
                         firstFlag = true;
-                        _logger.LogDebug("[ChatMiddleware][HandleGuestChatAsync] Orleans Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
+                        _logger.LogDebug(
+                            "[ChatMiddleware][HandleGuestChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
                             sessionId, stopwatch.ElapsedMilliseconds);
                     }
 
@@ -622,24 +510,20 @@ public class ChatMiddleware
                         context.Response.Body.Close();
                         ifLastChunk = true;
                         exitSignal.TrySetResult();
-                        if (orleansSubscription != null)
+                        if (messageSubscription != null)
                         {
-                            await orleansSubscription.UnsubscribeAsync();
+                            await messageSubscription.UnsubscribeAsync();
                         }
                     }
-                }, ex =>
+                }
+                catch (Exception ex)
                 {
-                    _logger.LogError("[ChatMiddleware][HandleGuestChatAsync] Orleans Stream error: SessionId={SessionId}, ChatId={ChatId}, Error={Error}",
-                        sessionId, chatId, ex.Message);
+                    _logger.LogError(ex,
+                        "[ChatMiddleware][HandleGuestChatAsync] Error processing MassTransit message: SessionId={SessionId}, ChatId={ChatId}",
+                        sessionId, chatId);
                     exitSignal.TrySetException(ex);
-                    return Task.CompletedTask;
-                }, () =>
-                {
-                    _logger.LogDebug("[ChatMiddleware][HandleGuestChatAsync] Orleans Stream completed for user: {UserHashId}", userHashId);
-                    exitSignal.TrySetResult();
-                    return Task.CompletedTask;
-                });
-            }
+                }
+            });
 
             // Now that subscription is active, trigger the chat
             await anonymousUserGrain.GuestChatAsync(request.Content, chatId);
@@ -658,10 +542,6 @@ public class ChatMiddleware
                 if (messageSubscription != null)
                 {
                     await messageSubscription.UnsubscribeAsync();
-                }
-                if (orleansSubscription != null)
-                {
-                    await orleansSubscription.UnsubscribeAsync();
                 }
             }
 
@@ -826,16 +706,15 @@ public class ChatMiddleware
                     request.SessionId);
             }
 
-            // Fallback to Orleans Stream if MassTransit not available
-            IAsyncStream<ResponseStreamGodChat>? responseStream = null;
             if (messageStream == null)
             {
-                var streamProvider = _clusterClient.GetStreamProvider(StreamProviderName);
-                var streamId = StreamId.Create(StreamNamespace, request.SessionId);
-                responseStream = streamProvider.GetStream<ResponseStreamGodChat>(streamId);
-                _logger.LogDebug(
-                    "[ChatMiddleware][HandleVoiceChatAsync] Using Orleans Stream for SessionId={SessionId}, Namespace={Namespace}",
-                    request.SessionId, StreamNamespace);
+                _logger.LogError(
+                    "[ChatMiddleware][HandleVoiceChatAsync] MassTransit stream provider is not configured. SessionId={SessionId}",
+                    request.SessionId);
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                await context.Response.WriteAsync("Streaming is not available (MassTransit stream provider is not configured).");
+                await context.Response.Body.FlushAsync();
+                return;
             }
 
             var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(request.SessionId.ToString());
@@ -853,71 +732,24 @@ public class ChatMiddleware
             // Handle streaming response
             var exitSignal = new TaskCompletionSource();
             IMessageStreamSubscription? messageSubscription = null;
-            StreamSubscriptionHandle<ResponseStreamGodChat>? orleansSubscription = null;
             var firstFlag = false;
             var ifLastChunk = false;
 
             // CRITICAL: Subscribe BEFORE calling StreamVoiceChatWithSessionAsync to avoid race condition
-            if (messageStream != null)
+            // Subscribe to MassTransit Stream
+            messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
             {
-                // Subscribe to MassTransit Stream
-                messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
+                try
                 {
-                    try
+                    // Unpack ResponseStreamGodChatProto from EventEnvelope
+                    if (!envelope.Payload.Is(ResponseStreamGodChatProto.Descriptor))
                     {
-                        // Unpack ResponseStreamGodChatProto from EventEnvelope
-                        if (!envelope.Payload.Is(ResponseStreamGodChatProto.Descriptor))
-                        {
-                            return;
-                        }
-
-                        var proto = envelope.Payload.Unpack<ResponseStreamGodChatProto>();
-                        var chatResponse = GodChatConversions.FromProto(proto);
-
-                        if (chatResponse.ChatId != chatId)
-                        {
-                            return;
-                        }
-
-                        if (!firstFlag)
-                        {
-                            await context.Response.StartAsync();
-                            firstFlag = true;
-                            _logger.LogDebug(
-                                "[ChatMiddleware][HandleVoiceChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
-                                request.SessionId, stopwatch.ElapsedMilliseconds);
-                        }
-
-                        var responseData = $"data: {JsonConvert.SerializeObject(chatResponse.ConvertToHttpResponse())}\n\n";
-                        await context.Response.WriteAsync(responseData);
-                        await context.Response.Body.FlushAsync();
-
-                        if (chatResponse.IsLastChunk)
-                        {
-                            await context.Response.WriteAsync("event: completed\n");
-                            context.Response.Body.Close();
-                            ifLastChunk = true;
-                            exitSignal.TrySetResult();
-                            if (messageSubscription != null)
-                            {
-                                await messageSubscription.UnsubscribeAsync();
-                            }
-                        }
+                        return;
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex,
-                            "[ChatMiddleware][HandleVoiceChatAsync] Error processing MassTransit message: SessionId={SessionId}, ChatId={ChatId}",
-                            request.SessionId, chatId);
-                        exitSignal.TrySetException(ex);
-                    }
-                });
-            }
-            else if (responseStream != null)
-            {
-                // Fallback to Orleans Stream
-                orleansSubscription = await responseStream.SubscribeAsync(async (chatResponse, token) =>
-                {
+
+                    var proto = envelope.Payload.Unpack<ResponseStreamGodChatProto>();
+                    var chatResponse = GodChatConversions.FromProto(proto);
+
                     if (chatResponse.ChatId != chatId)
                     {
                         return;
@@ -927,7 +759,8 @@ public class ChatMiddleware
                     {
                         await context.Response.StartAsync();
                         firstFlag = true;
-                        _logger.LogDebug("[ChatMiddleware][HandleVoiceChatAsync] Orleans Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
+                        _logger.LogDebug(
+                            "[ChatMiddleware][HandleVoiceChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
                             request.SessionId, stopwatch.ElapsedMilliseconds);
                     }
 
@@ -941,35 +774,20 @@ public class ChatMiddleware
                         context.Response.Body.Close();
                         ifLastChunk = true;
                         exitSignal.TrySetResult();
-                        if (orleansSubscription != null)
+                        if (messageSubscription != null)
                         {
-                            await orleansSubscription.UnsubscribeAsync();
+                            await messageSubscription.UnsubscribeAsync();
                         }
                     }
-                }, ex =>
+                }
+                catch (Exception ex)
                 {
-                    _logger.LogError("[ChatMiddleware][HandleVoiceChatAsync] Orleans Stream error: SessionId={SessionId}, ChatId={ChatId}, Error={Error}",
-                        request.SessionId, chatId, ex.Message);
-
-                    if (ex is OperationCanceledException || ex is TaskCanceledException)
-                    {
-                        _logger.LogInformation("[ChatMiddleware][HandleVoiceChatAsync] Stream cancelled - SessionId={SessionId}, ChatId={ChatId}",
-                            request.SessionId, chatId);
-                        exitSignal.TrySetCanceled();
-                    }
-                    else
-                    {
-                        exitSignal.TrySetException(ex);
-                    }
-
-                    return Task.CompletedTask;
-                }, () =>
-                {
-                    _logger.LogDebug("[ChatMiddleware][HandleVoiceChatAsync] Orleans Stream completed - SessionId={SessionId}", request.SessionId);
-                    exitSignal.TrySetResult();
-                    return Task.CompletedTask;
-                });
-            }
+                    _logger.LogError(ex,
+                        "[ChatMiddleware][HandleVoiceChatAsync] Error processing MassTransit message: SessionId={SessionId}, ChatId={ChatId}",
+                        request.SessionId, chatId);
+                    exitSignal.TrySetException(ex);
+                }
+            });
 
             // Now that subscription is active, initiate voice chat
             try
@@ -1018,10 +836,6 @@ public class ChatMiddleware
                 if (messageSubscription != null)
                 {
                     await messageSubscription.UnsubscribeAsync();
-                }
-                if (orleansSubscription != null)
-                {
-                    await orleansSubscription.UnsubscribeAsync();
                 }
             }
 

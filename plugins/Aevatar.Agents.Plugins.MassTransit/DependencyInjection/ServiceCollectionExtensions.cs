@@ -162,6 +162,19 @@ public static class ServiceCollectionExtensions
         options.TopicMapping = topicMapping;
         options.Producer ??= new ProducerOptions();
         options.Consumer ??= new ConsumerOptions();
+
+        // ============================================================
+        // De-duplicate Kafka bootstrap config:
+        // Prefer MassTransit:Stream:Kafka:* but fallback to top-level Kafka:* when missing
+        // ============================================================
+        if (options.TransportType == MassTransitTransportType.Kafka)
+        {
+            options.Kafka ??= new KafkaOptions();
+            if (string.IsNullOrWhiteSpace(options.Kafka.BootstrapServers))
+            {
+                options.Kafka.BootstrapServers = configuration.GetValue<string>("Kafka:BootstrapServers") ?? "localhost:9092";
+            }
+        }
         
         // ============================================================
         // Collect Producer Topics (for sending messages)

@@ -103,9 +103,9 @@ public class AppHttpApiHostModule : AbpModule
         // Add Agent Runtime based on configuration
         context.Services.AddAgentRuntime(configuration);
         
-        // Configure MassTransit Stream Plugin for chat responses (with Consumer)
-        var massTransitConfig = configuration.GetSection("MassTransit:Stream");
-        if (massTransitConfig.Exists())
+        // Configure MassTransit Stream Plugin only when MessageStream.Provider=MassTransit
+        var messageStreamProvider = configuration.GetSection("MessageStream").GetValue("Provider", "");
+        if (string.Equals(messageStreamProvider, "MassTransit", StringComparison.OrdinalIgnoreCase))
         {
             context.Services.AddMassTransitStreamPlugin(configuration);
         }
