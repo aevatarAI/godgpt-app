@@ -159,9 +159,6 @@ public static class ServiceCollectionExtensions
         // NOTE:
         // - Configuration binding can still set reference-type properties to null at runtime.
         // - Keep a local non-null reference to avoid nullable warnings + NREs.
-        var topicMapping = options.TopicMapping ?? new Dictionary<string, string>();
-        options.TopicMapping = topicMapping;
-        
         // Ensure non-null references
         var topicMapping = options.TopicMapping ?? new Dictionary<string, string>();
         options.TopicMapping = topicMapping;
