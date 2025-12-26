@@ -1,4 +1,4 @@
-namespace Aevatar.AuthServer.Grants;
+namespace Aevatar.App;
 
 /// <summary>
 /// Constants for OAuth extension grant types

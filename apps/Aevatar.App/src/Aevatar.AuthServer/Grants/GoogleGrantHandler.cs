@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using Aevatar.App;
 using Aevatar.AuthServer.Grants.Providers;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;

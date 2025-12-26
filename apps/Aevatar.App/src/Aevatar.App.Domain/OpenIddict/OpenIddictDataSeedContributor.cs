@@ -185,7 +185,7 @@ public class OpenIddictDataSeedContributor : IDataSeedContributor, ITransientDep
             );
         }
 
-        // AevatarAuthServer - Public client for password grant (API testing)
+        // AevatarAuthServer - Public client for password grant and OAuth (Google/Apple) grant types
         var aevatarAuthServerClientId = configurationSection["AevatarAuthServer:ClientId"];
         if (!aevatarAuthServerClientId.IsNullOrWhiteSpace())
         {
@@ -201,7 +201,9 @@ public class OpenIddictDataSeedContributor : IDataSeedContributor, ITransientDep
                 grantTypes: new List<string> {
                     OpenIddictConstants.GrantTypes.Password,
                     OpenIddictConstants.GrantTypes.RefreshToken,
-                    OpenIddictConstants.GrantTypes.ClientCredentials
+                    OpenIddictConstants.GrantTypes.ClientCredentials,
+                    GrantTypeConstants.GOOGLE,  // Google OAuth extension grant
+                    GrantTypeConstants.APPLE    // Apple OAuth extension grant
                 },
                 scopes: commonScopes,
                 redirectUri: aevatarAuthServerRootUrl,
