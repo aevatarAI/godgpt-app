@@ -5,7 +5,7 @@ namespace Aevatar.AuthServer.Grants;
 /// </summary>
 public static class GrantTypeConstants
 {
-    public const string GOOGLE = "urn:ietf:params:oauth:grant-type:google";
-    public const string APPLE = "urn:ietf:params:oauth:grant-type:apple";
+    public const string GOOGLE = "google";
+    public const string APPLE = "apple";
 }
 

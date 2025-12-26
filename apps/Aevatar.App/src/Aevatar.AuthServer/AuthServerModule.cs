@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Hosting;
@@ -154,6 +155,7 @@ public class AuthServerModule : AbpModule
         ConfigureBundles();
         ConfigureUrls(configuration);
         ConfigureAuthentication(context);
+        ConfigureCors(context, configuration);
         ConfigureVirtualFileSystem();
         ConfigureNavigationServices();
         ConfigureSwaggerServices(context.Services);
@@ -259,6 +261,27 @@ public class AuthServerModule : AbpModule
         });
     }
 
+    private void ConfigureCors(ServiceConfigurationContext context, IConfiguration configuration)
+    {
+        context.Services.AddCors(options =>
+        {
+            options.AddDefaultPolicy(builder =>
+            {
+                var origins = configuration["App:CorsOrigins"]?
+                    .Split(",", StringSplitOptions.RemoveEmptyEntries)
+                    .Select(o => o.RemovePostFix("/"))
+                    .ToArray() ?? Array.Empty<string>();
+                
+                builder
+                    .WithOrigins(origins)
+                    .SetIsOriginAllowedToAllowWildcardSubdomains()
+                    .AllowAnyHeader()
+                    .AllowAnyMethod()
+                    .AllowCredentials();
+            });
+        });
+    }
+
     private void ConfigureVirtualFileSystem()
     {
         Configure<AbpVirtualFileSystemOptions>(options =>
@@ -310,6 +333,7 @@ public class AuthServerModule : AbpModule
         app.UseCorrelationId();
         app.MapAbpStaticAssets();
         app.UseRouting();
+        app.UseCors();
         app.UseAbpSecurityHeaders();
         app.UseAuthentication();
         app.UseAbpOpenIddictValidation();
