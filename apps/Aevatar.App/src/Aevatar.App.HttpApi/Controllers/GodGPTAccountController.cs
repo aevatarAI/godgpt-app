@@ -103,4 +103,31 @@ public class GodGPTAccountController : AevatarController
         _logger.LogDebug($"[GodGPTAccountController][SetVoiceLanguageAsync] userId: {currentUserId},voiceLanguage:{request.VoiceLanguage} duration: {stopwatch.ElapsedMilliseconds}ms");
         return userProfileDto;
     }
+
+    /// <summary>
+    /// Get user profile information (ProfileController endpoint)
+    /// </summary>
+    [HttpGet("profile/user-info")]
+    public async Task<UserProfileDto> GetUserInfoAsync()
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var userId = (Guid)CurrentUser.Id!;
+        _logger.LogDebug("[GodGPTAccountController][GetUserInfoAsync] UserId: {UserId}", userId);
+        
+        var userProfile = await _userService.GetUserProfileAsync(userId);
+        
+        _logger.LogDebug("[GodGPTAccountController][GetUserInfoAsync] UserId: {UserId}, duration: {Duration}ms",
+            userId, stopwatch.ElapsedMilliseconds);
+        
+        return userProfile;
+    }
+
+    /// <summary>
+    /// Get current user ID (QueryController endpoint)
+    /// </summary>
+    [HttpGet("query/user-id")]
+    public Task<Guid> GetUserId()
+    {
+        return Task.FromResult((Guid)CurrentUser.Id!);
+    }
 }
