@@ -83,6 +83,19 @@ public static class OrleansHostExtension
                 options.ServiceId = serviceId;
             });
 
+            // 4.5. Configure Cluster Membership Options (Handle defunct silo cleanup)
+            // This prevents "target silo is no longer active" errors when silo restarts
+            siloBuilder.Configure<ClusterMembershipOptions>(options =>
+            {
+                // Default is 7 days, but we set to 5 minutes for faster cleanup during development
+                // This ensures old silo records are cleaned up quickly when silo restarts
+                options.DefunctSiloExpiration = TimeSpan.FromMinutes(5);
+                
+                // Time between membership table updates
+                // Shorter refresh interval helps detect dead silos faster
+                options.TableRefreshTimeout = TimeSpan.FromSeconds(10);
+            });
+
             // 5. Configure Storage (Using shared client)
             Log.Information("💾 Configuring MongoDB Storage (Using Shared Client)...");
             
