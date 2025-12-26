@@ -28,6 +28,7 @@ using Volo.Abp.BlobStoring;
 using Volo.Abp.BlobStoring.Aws;
 using Aevatar.App.HttpApi.Host.Handler;
 using Aevatar.Agents.Plugins.MassTransit.DependencyInjection;
+using AutoResponseWrapper;
 
 namespace Aevatar.App.HttpApi.Host;
 
@@ -78,6 +79,17 @@ public class AppHttpApiHostModule : AbpModule
         
         // Configure AWS S3 Blob Storage
         ConfigureBlobStorage(context, configuration);
+        
+        // Configure AutoResponseWrapper for consistent API response formatting
+        ConfigureAutoResponseWrapper(context);
+        
+        // Configure Health Checks
+        context.Services.AddHealthChecks();
+    }
+    
+    private static void ConfigureAutoResponseWrapper(ServiceConfigurationContext context)
+    {
+        context.Services.AddAutoResponseWrapper();
     }
     
     private void ConfigureBlobStorage(ServiceConfigurationContext context, IConfiguration configuration)
@@ -251,6 +263,7 @@ public class AppHttpApiHostModule : AbpModule
                 options.OAuthClientId(swaggerClientId);
             }
         });
+        app.UseHealthChecks("/health");
         app.UseAuditing();
         app.UseAbpSerilogEnrichers();
         app.UseConfiguredEndpoints();
