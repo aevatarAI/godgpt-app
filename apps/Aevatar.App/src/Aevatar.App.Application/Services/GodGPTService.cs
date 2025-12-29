@@ -360,7 +360,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
             _logger.LogError(e,"IAwakeningGAgent ResetTodayContentAsync error currentUserId:"+currentUserId);
         }
         var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId.ToString());
-        var manager = (IChatManagerGAgent)managerActor.As<IChatManagerGAgent>();
+        var manager = managerActor.As<IChatManagerGAgent>();
         return await manager.ClearAllAsync();
     }
 
@@ -369,7 +369,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         try
         {
             var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId.ToString());
-            var manager = (IChatManagerGAgent)managerActor.As<IChatManagerGAgent>();
+            var manager = managerActor.As<IChatManagerGAgent>();
             var agentContext = _agentContextAccessor.GetOrCreate();
             agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
             var shareId = await manager.GenerateChatShareContentAsync(request.SessionId);
@@ -409,7 +409,7 @@ public class GodGPTService : ApplicationService, IGodGPTService
         try
         {
             var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
-            var manager = (IChatManagerGAgent)managerActor.As<IChatManagerGAgent>();
+            var manager = managerActor.As<IChatManagerGAgent>();
             var agentContext = _agentContextAccessor.GetOrCreate();
             agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
             var shareLinkProto = await manager.GetChatShareContentAsync(sessionId, shareId);
@@ -696,7 +696,8 @@ public class GodGPTService : ApplicationService, IGodGPTService
         var responseContent = "";
         try
         {
-            var godChat = _clusterClient.GetGrain<IGodChat>(sessionId);
+            var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionId.ToString());
+            var godChat = godChatActor.As<IGodChat>();
             var chatId = Guid.NewGuid().ToString();
             var response = await godChat.ChatWithHistory(sessionId, string.Empty, content,
                 chatId, null, true, region);

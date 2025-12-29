@@ -130,7 +130,8 @@ public class GodGPTShareService : ApplicationService, IGodGPTShareService
         var responseContent = "";
         try
         {
-            var godChat = _clusterClient.GetGrain<IGodChat>(sessionId);
+            var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionId.ToString());
+            var godChat = godChatActor.As<IGodChat>();
             var chatId = Guid.NewGuid().ToString();
             var response = await godChat.ChatWithHistory(sessionId, string.Empty, content,
                 chatId, null, true, region);

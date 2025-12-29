@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
+using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Context;
 using Aevatar.Agents.Core.Context;
 using Aevatar.App.Application.Common;
@@ -36,6 +37,7 @@ public class GodGPTSessionController : AevatarController
 {
     private readonly IGodGPTSessionService _sessionService;
     private readonly IClusterClient _clusterClient;
+    private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<GodGPTSessionController> _logger;
     private readonly IIpLocationService _ipLocationService;
     private readonly IAgentContextAccessor _agentContextAccessor;
@@ -45,12 +47,14 @@ public class GodGPTSessionController : AevatarController
     public GodGPTSessionController(
         IGodGPTSessionService sessionService,
         IClusterClient clusterClient,
+        IGAgentActorFactory actorFactory,
         ILogger<GodGPTSessionController> logger,
         IIpLocationService ipLocationService,
         IAgentContextAccessor agentContextAccessor)
     {
         _sessionService = sessionService;
         _clusterClient = clusterClient;
+        _actorFactory = actorFactory;
         _logger = logger;
         _ipLocationService = ipLocationService;
         _agentContextAccessor = agentContextAccessor;
@@ -195,7 +199,8 @@ public class GodGPTSessionController : AevatarController
         var chatMessages = new List<ChatMessageWithMetaDto>();
         try
         {
-            var manager = _clusterClient.GetGrain<IChatManagerGAgent>(currentUserId);
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId.ToString());
+            var manager = managerActor.As<IChatManagerGAgent>();
             var language = HttpContext.GetGodGPTLanguage();
             _logger.LogDebug(
                 $"[GodGPTSessionController][GetSessionMessageListAsync] sessionId: {sessionId}, language:{language}");
