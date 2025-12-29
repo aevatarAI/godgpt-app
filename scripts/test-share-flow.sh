@@ -22,7 +22,8 @@ create_test_session() {
     
     local response=$(api_post "/api/godgpt/create-session" '{"guider": "", "userLocalTime": "2024-12-22T10:00:00Z"}' "X-GodGPT-Language: English"$'\n'"X-GodGPT-AppType: ios")
     
-    SESSION_ID=$(echo "$response" | tr -d '"')
+    # Response is {"code":"20000","data":"guid-string","message":""} - extract .data
+    SESSION_ID=$(echo "$response" | jq -r '.data // empty' 2>/dev/null)
     
     if [ -z "$SESSION_ID" ] || [ "$SESSION_ID" == "null" ]; then
         log_error "Failed to create test session"
@@ -44,21 +45,24 @@ test_create_share() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.shareId' > /dev/null 2>&1; then
-        SHARE_ID=$(echo "$response" | jq -r '.shareId')
-        log_info "Share link created successfully ✓"
-        log_info "Share ID: $SHARE_ID"
-        return 0
-    else
-        # Check if this is a 500 error - could be "Invalid session" for empty sessions
-        if echo "$response" | jq -e '.error' > /dev/null 2>&1; then
-            # Empty sessions cannot be shared - this is expected behavior
-            log_warn "Share request failed - empty sessions cannot be shared (expected) ✓"
+    # Response is {"code":"20000","data":"share-id-string","message":""} - check .data
+    if echo "$response" | jq -e '.data' > /dev/null 2>&1; then
+        local share_data=$(echo "$response" | jq -r '.data // empty')
+        if [ -n "$share_data" ] && [ "$share_data" != "null" ]; then
+            SHARE_ID="$share_data"
+            log_info "Share link created successfully ✓"
+            log_info "Share ID: $SHARE_ID"
             return 0
         fi
-        log_error "Failed to create share link"
-        return 1
     fi
+    # Check if this is an error or empty session scenario
+    if echo "$response" | jq -e '.error' > /dev/null 2>&1 || echo "$response" | jq -e '.code != "20000"' > /dev/null 2>&1; then
+        # Empty sessions cannot be shared - this is expected behavior
+        log_warn "Share request failed - empty sessions cannot be shared (expected) ✓"
+        return 0
+    fi
+    log_error "Failed to create share link"
+    return 1
 }
 
 # Test 2: Get Shared Messages (Anonymous)

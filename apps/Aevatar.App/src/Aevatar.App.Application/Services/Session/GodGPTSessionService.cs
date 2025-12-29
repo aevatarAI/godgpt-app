@@ -99,9 +99,9 @@ public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
         {
             return new Aevatar.Quantum.SessionCreationInfoDto
             {
-                SessionId = grainsResult.SessionId,
+                SessionId = Guid.Parse(grainsResult.SessionId),
                 Title = grainsResult.Title,
-                CreateAt = grainsResult.CreateAt,
+                CreateAt = grainsResult.CreateAt?.ToDateTime() ?? DateTime.MinValue,
                 Guider = grainsResult.Guider
             };
         }

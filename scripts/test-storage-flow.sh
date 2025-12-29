@@ -41,9 +41,13 @@ test_upload_file() {
     
     log_response "$response"
     
-    # Response should be a file name (GUID + extension)
-    if [ -n "$response" ] && [[ "$response" =~ \.png$ ]]; then
-        UPLOADED_FILE_NAME=$(echo "$response" | tr -d '"')
+    # Extract file name from JSON response: {"code":"20000","data":"filename.png","message":""}
+    local code=$(echo "$response" | jq -r '.code // empty' 2>/dev/null)
+    local file_name=$(echo "$response" | jq -r '.data // empty' 2>/dev/null)
+    
+    # Response should be successful (code 20000) and contain a file name
+    if [ "$code" == "20000" ] && [ -n "$file_name" ] && [[ "$file_name" =~ \.png$ ]]; then
+        UPLOADED_FILE_NAME="$file_name"
         log_info "File uploaded successfully ✓"
         log_info "File name: $UPLOADED_FILE_NAME"
         return 0

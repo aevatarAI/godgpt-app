@@ -23,8 +23,8 @@ create_session() {
     
     RESPONSE=$(api_post "/api/godgpt/create-session" '{"guider": "", "userLocalTime": "2024-12-22T10:00:00Z"}' "X-GodGPT-Language: English"$'\n'"X-GodGPT-AppType: ios")
     
-    # Response is a raw GUID string
-    SESSION_ID=$(echo "$RESPONSE" | tr -d '"')
+    # Response is {"code":"20000","data":"guid-string","message":""} - extract .data
+    SESSION_ID=$(echo "$RESPONSE" | jq -r '.data // empty' 2>/dev/null)
     
     if [ -z "$SESSION_ID" ] || [ "$SESSION_ID" == "null" ]; then
         log_error "Failed to create session"
@@ -44,7 +44,8 @@ get_session_list() {
     
     RESPONSE=$(api_get "/api/godgpt/session-list" "X-GodGPT-Language: English")
     
-    SESSION_COUNT=$(echo "$RESPONSE" | jq '. | length' 2>/dev/null || echo "0")
+    # Response is {"code":"20000","data":[...],"message":""} - extract .data
+    SESSION_COUNT=$(echo "$RESPONSE" | jq '.data | length' 2>/dev/null || echo "0")
     
     log_info "Found ${SESSION_COUNT} session(s)"
     log_response "$RESPONSE"
@@ -70,7 +71,8 @@ get_session_messages() {
     
     RESPONSE=$(api_get "/api/godgpt/chat/${SESSION_ID}" "X-GodGPT-Language: English")
     
-    MESSAGE_COUNT=$(echo "$RESPONSE" | jq '. | length' 2>/dev/null || echo "0")
+    # Response is {"code":"20000","data":[...],"message":""} - extract .data
+    MESSAGE_COUNT=$(echo "$RESPONSE" | jq '.data | length' 2>/dev/null || echo "0")
     
     log_info "Found ${MESSAGE_COUNT} message(s) in session"
     log_response "$RESPONSE"
@@ -84,7 +86,8 @@ search_sessions() {
     
     RESPONSE=$(api_get "/api/godgpt/sessions/search?keyword=test")
     
-    RESULT_COUNT=$(echo "$RESPONSE" | jq '. | length' 2>/dev/null || echo "0")
+    # Response is {"code":"20000","data":[...],"message":""} - extract .data
+    RESULT_COUNT=$(echo "$RESPONSE" | jq '.data | length' 2>/dev/null || echo "0")
     
     log_info "Found ${RESULT_COUNT} matching session(s)"
     log_response "$RESPONSE"
@@ -98,7 +101,8 @@ rename_session() {
     
     RESPONSE=$(api_put "/api/godgpt/chat/rename" "{\"sessionId\": \"${SESSION_ID}\", \"title\": \"Test Session Renamed\"}")
     
-    RENAMED_ID=$(echo "$RESPONSE" | tr -d '"')
+    # Response is {"code":"20000","data":"guid-string","message":""} - extract .data
+    RENAMED_ID=$(echo "$RESPONSE" | jq -r '.data // empty' 2>/dev/null)
     
     if [ "$RENAMED_ID" == "$SESSION_ID" ]; then
         log_info "Successfully renamed session"
@@ -115,7 +119,8 @@ delete_session() {
     
     RESPONSE=$(api_delete "/api/godgpt/chat/${SESSION_ID}")
     
-    DELETED_ID=$(echo "$RESPONSE" | tr -d '"')
+    # Response is {"code":"20000","data":"guid-string","message":""} - extract .data
+    DELETED_ID=$(echo "$RESPONSE" | jq -r '.data // empty' 2>/dev/null)
     
     if [ "$DELETED_ID" == "$SESSION_ID" ]; then
         log_info "Successfully deleted session"
@@ -132,8 +137,8 @@ verify_deletion() {
     
     RESPONSE=$(api_get "/api/godgpt/session-list")
     
-    # Check if session still exists
-    if echo "$RESPONSE" | jq -e ".[] | select(.sessionId == \"${SESSION_ID}\")" > /dev/null 2>&1; then
+    # Check if session still exists in .data array
+    if echo "$RESPONSE" | jq -e ".data[] | select(.sessionId == \"${SESSION_ID}\")" > /dev/null 2>&1; then
         log_warn "Session still exists in list"
     else
         log_info "Session successfully removed from list"

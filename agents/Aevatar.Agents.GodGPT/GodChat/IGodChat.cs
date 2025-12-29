@@ -1,9 +1,9 @@
 using Aevatar.Agents.GodGPT.Protos;
+using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
 using Aevatar.AI.Exceptions;
 using Aevatar.AI.Feature.StreamSyncWoker;
-using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.GodChat.Dtos;
 using Aevatar.Core.Abstractions;
@@ -39,7 +39,7 @@ public interface IGodChat : IGAgent
     Task<ChatMessageListProto> GetChatMessageAsync();
     
     [ReadOnly]
-    Task<List<ChatMessageWithMetaDto>> GetChatMessageWithMetaAsync();
+    Task<ChatMessageWithMetaListProto> GetChatMessageWithMetaAsync();
 
     [Obsolete("Recommend using StartStreamChatAsync")]
     Task StreamChatWithSessionAsync(Guid sessionId, string sysmLLM, string content, string chatId,

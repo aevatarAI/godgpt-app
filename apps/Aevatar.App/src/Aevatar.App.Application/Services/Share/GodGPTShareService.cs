@@ -104,8 +104,17 @@ public class GodGPTShareService : ApplicationService, IGodGPTShareService
             var manager = managerActor.As<IChatManagerGAgent>();
             var agentContext = _agentContextAccessor.GetOrCreate();
             agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
-            var shareLinkDto = await manager.GetChatShareContentAsync(sessionId, shareId);
-            return shareLinkDto.Messages;
+            var shareLinkProto = await manager.GetChatShareContentAsync(sessionId, shareId);
+            
+            // Convert ChatMessageProto (from god_chat.proto) to ChatMessage
+            return shareLinkProto.Messages.Select(m => new ChatMessage
+            {
+                Role = m.Role,
+                Content = m.Content,
+                Timestamp = m.Timestamp?.ToDateTime() ?? DateTime.MinValue,
+                ChatRole = (Aevatar.GAgents.ChatAgent.Dtos.ChatRole)m.ChatRole,
+                ImageKeys = m.ImageKeys?.ToList()
+            }).ToList();
         }
         catch (Exception ex)
         {

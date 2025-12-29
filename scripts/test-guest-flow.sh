@@ -20,9 +20,10 @@ test_get_guest_limits() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.remainingChats' > /dev/null 2>&1; then
-        local remaining=$(echo "$response" | jq -r '.remainingChats')
-        local total=$(echo "$response" | jq -r '.totalAllowed')
+    # Response is {"code":"20000","data":{"remainingChats":...,"totalAllowed":...},"message":""} - check .data
+    if echo "$response" | jq -e '.data.remainingChats' > /dev/null 2>&1; then
+        local remaining=$(echo "$response" | jq -r '.data.remainingChats')
+        local total=$(echo "$response" | jq -r '.data.totalAllowed')
         log_info "Guest limits retrieved successfully ✓"
         log_info "Remaining chats: $remaining / $total"
         return 0
@@ -40,13 +41,14 @@ test_create_guest_session() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.remainingChats' > /dev/null 2>&1; then
-        local remaining=$(echo "$response" | jq -r '.remainingChats')
+    # Response is {"code":"20000","data":{"remainingChats":...},"message":""} - check .data
+    if echo "$response" | jq -e '.data.remainingChats' > /dev/null 2>&1; then
+        local remaining=$(echo "$response" | jq -r '.data.remainingChats')
         log_info "Guest session created successfully ✓"
         log_info "Remaining chats: $remaining"
         
-        if echo "$response" | jq -e '.sessionId' > /dev/null 2>&1; then
-            local session_id=$(echo "$response" | jq -r '.sessionId')
+        if echo "$response" | jq -e '.data.sessionId' > /dev/null 2>&1; then
+            local session_id=$(echo "$response" | jq -r '.data.sessionId')
             log_info "Session ID: $session_id"
         fi
         

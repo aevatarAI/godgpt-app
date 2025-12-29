@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text;
 using Aevatar.Agents.GodGPT.Protos;
+using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
 using Aevatar.AI.Exceptions;
@@ -227,24 +228,30 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
         return Task.FromResult(State.ChatHistory.ToChatMessageListProto());
     }
 
-    public Task<List<ChatMessageWithMetaDto>> GetChatMessageWithMetaAsync()
+    public Task<ChatMessageWithMetaListProto> GetChatMessageWithMetaAsync()
     {
         Logger.LogDebug(
             $"[GodChatGAgent][GetChatMessageWithMetaAsync] - sessionId: {Id}, messageCount: {State.ChatHistory.Count}, metaCount: {State.ChatMessageMetas.Count}");
 
-        var result = new List<ChatMessageWithMetaDto>();
+        var result = new ChatMessageWithMetaListProto();
 
-        // Combine ChatHistory with ChatMessageMetas
+        // Combine ChatHistory with ChatMessageMetas (reusing existing Proto types)
         for (int i = 0; i < State.ChatHistory.Count; i++)
         {
-            var message = State.ChatHistory[i].FromProto();
-            var meta = i < State.ChatMessageMetas.Count ? State.ChatMessageMetas[i].FromProto() : null;
+            var msgProto = State.ChatHistory[i];
+            var metaProto = i < State.ChatMessageMetas.Count 
+                ? State.ChatMessageMetas[i] 
+                : new Aevatar.Agents.GodGPT.Protos.GodChat.ChatMessageMetaProto();
 
-            result.Add(ChatMessageWithMetaDto.Create(message, meta));
+            result.Entries.Add(new ChatMessageWithMetaEntryProto
+            {
+                Message = msgProto,
+                Meta = metaProto
+            });
         }
 
         Logger.LogDebug(
-            $"[GodChatGAgent][GetChatMessageWithMetaAsync] - sessionId: {Id}, returned {result.Count} messages with metadata");
+            $"[GodChatGAgent][GetChatMessageWithMetaAsync] - sessionId: {Id}, returned {result.Entries.Count} messages with metadata");
 
         return Task.FromResult(result);
     }

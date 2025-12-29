@@ -38,12 +38,13 @@ test_query_config() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.version' > /dev/null 2>&1; then
-        local version=$(echo "$response" | jq -r '.version')
+    # Response is {"code":"20000","data":{"version":"...","features":{...}},"message":""} - check .data.version
+    if echo "$response" | jq -e '.data.version' > /dev/null 2>&1; then
+        local version=$(echo "$response" | jq -r '.data.version')
         log_info "Configuration retrieved successfully ✓"
         log_info "Version: $version"
         
-        if echo "$response" | jq -e '.features' > /dev/null 2>&1; then
+        if echo "$response" | jq -e '.data.features' > /dev/null 2>&1; then
             log_info "Features configuration found ✓"
         fi
         

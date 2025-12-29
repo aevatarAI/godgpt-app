@@ -23,18 +23,18 @@ public partial class ChatGAgentManager
 {
     #region User Profile
 
-    public async Task<UserProfileDto> GetLastSessionUserProfileAsync()
+    public async Task<UserProfileResponseProto> GetLastSessionUserProfileAsync()
     {
         var sessionInfo = State.SessionInfoList.LastOrDefault();
         if (sessionInfo == null || string.IsNullOrEmpty(sessionInfo.SessionId))
         {
-            return new UserProfileDto();
+            return new UserProfileResponseProto();
         }
 
         var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionInfo.SessionId);
         var godChat = godChatActor.As<IGodChat>();
         var userProfileDto = await godChat.GetUserProfileAsync();
-        return userProfileDto ?? new UserProfileDto();
+        return userProfileDto?.ToProto() ?? new UserProfileResponseProto();
     }
     
     #endregion
@@ -205,7 +205,7 @@ public partial class ChatGAgentManager
         return await godChat.GetChatMessageAsync();
     }
 
-    public async Task<List<ChatMessageWithMetaDto>> GetSessionMessageListWithMetaAsync(Guid sessionId)
+    public async Task<ChatMessageWithMetaListProto> GetSessionMessageListWithMetaAsync(Guid sessionId)
     {
         Logger.LogDebug($"[ChatManagerGAgent][GetSessionMessageListWithMetaAsync] - sessionId: {sessionId}");
         var sessionInfo = State.GetSession(sessionId);
@@ -231,11 +231,11 @@ public partial class ChatGAgentManager
         var result = await godChat.GetChatMessageWithMetaAsync();
 
         Logger.LogDebug(
-            $"[ChatManagerGAgent][GetSessionMessageListWithMetaAsync] - sessionId: {sessionId}, returned {result.Count} messages with audio metadata");
+            $"[ChatManagerGAgent][GetSessionMessageListWithMetaAsync] - sessionId: {sessionId}, returned {result.Entries.Count} messages with audio metadata");
         return result;
     }
 
-    public async Task<SessionCreationInfoDto?> GetSessionCreationInfoAsync(Guid sessionId)
+    public async Task<SessionCreationInfoProto?> GetSessionCreationInfoAsync(Guid sessionId)
     {
         Logger.LogDebug($"[ChatGAgentManager][GetSessionCreationInfoAsync] - session:ID {sessionId.ToString()}");
         var sessionInfo = State.GetSession(sessionId);
@@ -247,12 +247,12 @@ public partial class ChatGAgentManager
             return null;
         }
 
-        return new SessionCreationInfoDto
+        return new SessionCreationInfoProto
         {
-            SessionId = Guid.Parse(sessionInfo.SessionId),
+            SessionId = sessionInfo.SessionId,
             Title = sessionInfo.Title,
-            CreateAt = sessionInfo.CreateAt?.ToDateTime() ?? DateTime.MinValue,
-            Guider = sessionInfo.Guider
+            CreateAt = sessionInfo.CreateAt ?? Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc)),
+            Guider = sessionInfo.Guider ?? string.Empty
         };
     }
 

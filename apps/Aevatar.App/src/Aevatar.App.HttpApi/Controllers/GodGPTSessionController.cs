@@ -2,6 +2,7 @@ using Aevatar.App.HttpApi.Controllers;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions.Context;
 using Aevatar.Agents.Core.Context;
@@ -200,7 +201,20 @@ public class GodGPTSessionController : AevatarController
                 $"[GodGPTSessionController][GetSessionMessageListAsync] sessionId: {sessionId}, language:{language}");
             var agentContext = _agentContextAccessor.GetOrCreate();
             agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
-            chatMessages = await manager.GetSessionMessageListWithMetaAsync(sessionId);
+            var protoResult = await manager.GetSessionMessageListWithMetaAsync(sessionId);
+            
+            // Convert Proto to DTO for HTTP response
+            chatMessages = protoResult.Entries.Select(e => new ChatMessageWithMetaDto
+            {
+                ChatRole = (Aevatar.GAgents.ChatAgent.Dtos.ChatRole)e.Message.ChatRole,
+                Content = e.Message.Content,
+                IsVoiceMessage = e.Meta?.IsVoiceMessage ?? false,
+                VoiceLanguage = (global::GodGPT.GAgents.SpeechChat.VoiceLanguageEnum)(e.Meta?.VoiceLanguage ?? 0),
+                VoiceParseSuccess = e.Meta?.VoiceParseSuccess ?? true,
+                VoiceParseErrorMessage = e.Meta?.VoiceParseErrorMessage,
+                VoiceDurationSeconds = e.Meta?.VoiceDurationSeconds ?? 0.0,
+                ImageKeys = e.Message.ImageKeys?.ToList() ?? new List<string>()
+            }).ToList();
         }
         catch (InvalidOperationException ex)
         {

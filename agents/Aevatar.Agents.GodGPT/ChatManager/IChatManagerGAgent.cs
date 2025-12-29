@@ -1,12 +1,8 @@
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
-using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
-using Aevatar.Application.Grains.Agents.ChatManager.Share;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Core.Abstractions;
-using Aevatar.GAgents.AI.Common;
 using Aevatar.GAgents.AI.Options;
-using GodGPT.GAgents.SpeechChat;
 using Orleans.Concurrency;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager;
@@ -23,17 +19,17 @@ public interface IChatManagerGAgent : IGAgent
     [ReadOnly]
     Task<ChatMessageListProto> GetSessionMessageListAsync(Guid sessionId);
     [ReadOnly]
-    Task<List<ChatMessageWithMetaDto>> GetSessionMessageListWithMetaAsync(Guid sessionId);
+    Task<ChatMessageWithMetaListProto> GetSessionMessageListWithMetaAsync(Guid sessionId);
     [ReadOnly]
-    Task<SessionCreationInfoDto?> GetSessionCreationInfoAsync(Guid sessionId);
+    Task<SessionCreationInfoProto?> GetSessionCreationInfoAsync(Guid sessionId);
     Task<Guid> DeleteSessionAsync(Guid sessionId);
     Task<Guid> RenameSessionAsync(Guid sessionId, string title);
-    Task<UserProfileDto> GetLastSessionUserProfileAsync();
+    Task<UserProfileResponseProto> GetLastSessionUserProfileAsync();
     Task<Guid> ClearAllAsync();
     Task RenameChatTitleAsync(Aevatar.Agents.GodGPT.Protos.GodChat.RenameChatTitleEvent @event);
     Task<Guid> GenerateChatShareContentAsync(Guid sessionId);
     [ReadOnly]
-    Task<ShareLinkDto> GetChatShareContentAsync(Guid sessionId, Guid shareId);
+    Task<ShareLinkProto> GetChatShareContentAsync(Guid sessionId, Guid shareId);
 
     /// <summary>
     /// Search sessions by keyword with fuzzy matching

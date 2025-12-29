@@ -3,6 +3,8 @@ syntax = "proto3";
 package aevatar.agents.godgpt.protos.chatmanager;
 
 import "google/protobuf/timestamp.proto";
+import "Protos/user_quota.proto";
+import "Protos/god_chat.proto";
 
 option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.ChatManager";
 
@@ -41,6 +43,53 @@ message SessionInfoProto {
 
 message SessionListProto {
   repeated SessionInfoProto sessions = 1;
+}
+
+// Response type for GetSessionCreationInfoAsync
+message SessionCreationInfoProto {
+  string session_id = 1;  // Guid as string
+  string title = 2;
+  google.protobuf.Timestamp create_at = 3;
+  optional string guider = 4;
+}
+
+// =============================================================================
+// DTO Types for RPC (reusing types from god_chat.proto)
+// =============================================================================
+
+// Combined message + meta for history with voice info
+// Reuses ChatMessageProto and ChatMessageMetaProto from god_chat.proto
+message ChatMessageWithMetaEntryProto {
+  aevatar.agents.godgpt.godchat.ChatMessageProto message = 1;
+  aevatar.agents.godgpt.godchat.ChatMessageMetaProto meta = 2;
+}
+
+// List wrapper for ChatMessageWithMeta
+message ChatMessageWithMetaListProto {
+  repeated ChatMessageWithMetaEntryProto entries = 1;
+}
+
+// Share link data (reuses ChatMessageProto from god_chat.proto)
+message ShareLinkProto {
+  string user_id = 1;      // Guid as string
+  string session_id = 2;   // Guid as string
+  repeated aevatar.agents.godgpt.godchat.ChatMessageProto messages = 3;
+  google.protobuf.Timestamp create_time = 4;
+}
+
+// User profile DTO for RPC responses
+message UserProfileResponseProto {
+  string gender = 1;
+  google.protobuf.Timestamp birth_date = 2;
+  string birth_place = 3;
+  string full_name = 4;
+  aevatar.agents.godgpt.userquota.CreditsInfoProto credits = 5;
+  aevatar.agents.godgpt.userquota.SubscriptionInfoProto subscription = 6;
+  aevatar.agents.godgpt.userquota.SubscriptionInfoProto ultimate_subscription = 7;
+  string id = 8;                    // Guid as string
+  optional string inviter_id = 9;   // Guid? as string
+  int32 voice_language = 10;        // VoiceLanguageEnum as int (has -1 value)
+  optional bool is_first_conversation = 11;
 }
 
 // =============================================================================
@@ -109,9 +158,4 @@ message ResponseStreamGodChatProto {
   int32 serial_number = 6;
   string session_id = 7;
   bytes audio_data = 8;
-}
-
-message ChatMessageProto {
-  string role = 1;  // user/assistant/system
-  string content = 2;
 }

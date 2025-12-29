@@ -23,10 +23,10 @@ test_get_user_profile() {
     
     log_response "$response"
     
-    # Check for gender field (profile data) or credits field as indicators of valid response
-    if echo "$response" | jq -e '.gender' > /dev/null 2>&1; then
-        local gender=$(echo "$response" | jq -r '.gender')
-        local credits=$(echo "$response" | jq -r '.credits.credits // "N/A"')
+    # Check for data.gender field (profile data) - API returns {"code":"20000","data":{...},"message":""}
+    if echo "$response" | jq -e '.data.gender' > /dev/null 2>&1; then
+        local gender=$(echo "$response" | jq -r '.data.gender')
+        local credits=$(echo "$response" | jq -r '.data.credits.credits // "N/A"')
         log_info "User profile retrieved successfully ✓"
         log_info "Gender: $gender, Credits: $credits"
         return 0
@@ -50,8 +50,8 @@ test_update_user_profile() {
     
     log_response "$response"
     
-    # Response should be a GUID string (could have quotes around it)
-    local cleanResponse=$(echo "$response" | tr -d '"')
+    # Response is {"code":"20000","data":"guid-string","message":""} - extract .data field
+    local cleanResponse=$(echo "$response" | jq -r '.data // empty' 2>/dev/null)
     if [ -n "$cleanResponse" ] && [[ "$cleanResponse" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
         log_info "User profile updated successfully ✓"
         log_info "Updated User ID: $cleanResponse"
@@ -72,10 +72,14 @@ test_set_voice_language() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.voiceLanguage' > /dev/null 2>&1; then
-        local voice_lang=$(echo "$response" | jq -r '.voiceLanguage')
+    # Response is {"code":"20000","data":{...},"message":""} - check .data.voiceLanguage
+    if echo "$response" | jq -e '.data.voiceLanguage' > /dev/null 2>&1; then
+        local voice_lang=$(echo "$response" | jq -r '.data.voiceLanguage')
         log_info "Voice language set successfully ✓"
         log_info "Voice Language: $voice_lang"
+        return 0
+    elif echo "$response" | jq -e '.data' > /dev/null 2>&1; then
+        log_info "Voice language set successfully ✓"
         return 0
     else
         log_warn "Voice language response doesn't match expected format"

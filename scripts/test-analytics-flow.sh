@@ -27,8 +27,9 @@ test_track_gtag_event() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.success' > /dev/null 2>&1; then
-        local success=$(echo "$response" | jq -r '.success')
+    # Response is {"code":"20000","data":{"success":true},"message":""} - check .data.success
+    if echo "$response" | jq -e '.data.success' > /dev/null 2>&1; then
+        local success=$(echo "$response" | jq -r '.data.success')
         if [ "$success" == "true" ]; then
             log_info "Google Analytics event tracked successfully ✓"
             return 0
@@ -57,8 +58,9 @@ test_track_firebase_event() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.success' > /dev/null 2>&1; then
-        local success=$(echo "$response" | jq -r '.success')
+    # Response is {"code":"20000","data":{"success":true},"message":""} - check .data.success
+    if echo "$response" | jq -e '.data.success' > /dev/null 2>&1; then
+        local success=$(echo "$response" | jq -r '.data.success')
         if [ "$success" == "true" ]; then
             log_info "Firebase Analytics event tracked successfully ✓"
             return 0

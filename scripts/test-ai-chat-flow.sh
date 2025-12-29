@@ -122,7 +122,8 @@ test_create_ai_session() {
         -H "GodgptLanguage: en" \
         -d '{"guider": "", "userLocalTime": "2024-12-23T10:00:00Z"}')
     
-    SESSION_ID=$(echo "$response" | tr -d '"')
+    # Response is {"code":"20000","data":"guid-string","message":""} - extract .data
+    SESSION_ID=$(echo "$response" | jq -r '.data // empty' 2>/dev/null)
     
     if [ -z "$SESSION_ID" ] || [ "$SESSION_ID" == "null" ]; then
         log_error "Failed to create session"
@@ -222,7 +223,8 @@ test_language_context_chinese() {
         -H "GodgptLanguage: CN" \
         -d '{"guider": "", "userLocalTime": "2024-12-23T10:00:00Z"}')
     
-    local cn_session=$(echo "$response" | tr -d '"')
+    # Response is {"code":"20000","data":"guid-string","message":""} - extract .data
+    local cn_session=$(echo "$response" | jq -r '.data // empty' 2>/dev/null)
     
     if [ -z "$cn_session" ] || [ "$cn_session" == "null" ]; then
         log_error "Failed to create Chinese session"
