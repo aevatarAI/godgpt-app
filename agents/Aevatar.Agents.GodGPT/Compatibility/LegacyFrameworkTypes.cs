@@ -1,64 +1,7 @@
 // Compatibility layer for legacy Aevatar framework types
-// NOTE: Unused types removed. Only keeping types that are actually being used.
+// NOTE: Most types removed - only keeping ChatMessage which is widely used (170+)
 
 using Orleans;
-
-// ============================================================================
-// Aevatar.Core.Abstractions namespace
-// ============================================================================
-namespace Aevatar.Core.Abstractions
-{
-    // NOTE: StateBase removed - GodChatState deleted, all agents use Protobuf state
-
-    /// <summary>
-    /// Legacy event log base class for event sourcing
-    /// Used by GodChatEventLog, ChatManageEventLog, AwakeningLogEvent
-    /// </summary>
-    [GenerateSerializer]
-    public abstract class StateLogEventBase<TEventLog> where TEventLog : StateLogEventBase<TEventLog>
-    {
-    }
-
-    // NOTE: EventBase removed - AIStreamingErrorResponseGEvent no longer inherits
-    
-    /// <summary>
-    /// Legacy IGAgent interface
-    /// Referenced via GlobalUsings.cs alias
-    /// </summary>
-    public interface IGAgent : IGrainWithGuidKey
-    {
-        Task<string> GetDescriptionAsync();
-    }
-}
-
-// ============================================================================
-// Aevatar.Core namespace
-// ============================================================================
-namespace Aevatar.Core
-{
-    /// <summary>
-    /// Legacy GAgent attribute for marking GAgent classes
-    /// Used by 13 agents in the codebase
-    /// </summary>
-    [AttributeUsage(AttributeTargets.Class)]
-    public class GAgentAttribute : Attribute
-    {
-        public string Name { get; }
-        
-        public GAgentAttribute(string name)
-        {
-            Name = name;
-        }
-        
-        // Parameterless constructor for compatibility
-        public GAgentAttribute() : this(string.Empty)
-        {
-        }
-    }
-    
-    // NOTE: EventHandlerAttribute was removed - use new framework's EventHandlerAttribute
-    // NOTE: GAgentBase<TState, TEventLog> was removed - all agents now use new framework's GAgentBase
-}
 
 // ============================================================================
 // Aevatar.GAgents.AI.Abstractions namespace
@@ -67,7 +10,7 @@ namespace Aevatar.GAgents.AI.Abstractions
 {
     /// <summary>
     /// Legacy chat message type - matches old framework exactly
-    /// Widely used across the codebase
+    /// Widely used across the codebase (170+ references)
     /// </summary>
     [GenerateSerializer]
     public class ChatMessage
@@ -78,8 +21,11 @@ namespace Aevatar.GAgents.AI.Abstractions
         [Id(3)] public Aevatar.GAgents.ChatAgent.Dtos.ChatRole ChatRole { get; set; }
         [Id(4)] public List<string>? ImageKeys { get; set; }
     }
-    
-    // NOTE: AIGAgentStateBase was removed - unused
 }
 
-// NOTE: ChatGAgentState namespace removed - GodChatState deleted, all agents use Protobuf state
+// NOTE: All other types removed:
+// - StateLogEventBase<T> - all RaiseEvent uses Proto events
+// - IGAgent - replaced with Aevatar.Agents.Abstractions.IGAgent
+// - GAgentAttribute - runtime never reads it
+// - EventBase - no inheritors
+// - StateBase, ChatGAgentState - all agents use Protobuf state

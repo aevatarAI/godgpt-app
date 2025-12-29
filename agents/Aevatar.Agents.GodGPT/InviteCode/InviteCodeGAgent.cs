@@ -1,7 +1,6 @@
 using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.InviteCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
-using Aevatar.Core.Abstractions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
@@ -13,7 +12,6 @@ using CsPaymentPlatform = Aevatar.Application.Grains.Common.Constants.PaymentPla
 
 namespace Aevatar.Application.Grains.Agents.Invitation;
 
-[GAgent(nameof(InviteCodeGAgent))]
 public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
 {
     public InviteCodeGAgent() : base()

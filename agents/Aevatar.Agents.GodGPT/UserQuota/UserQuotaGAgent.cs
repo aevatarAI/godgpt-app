@@ -77,7 +77,6 @@ public interface IUserQuotaGAgent : Aevatar.Agents.Abstractions.IGAgent
     Task<FreeTrialInfoDto> GetFreeTrialInfoAsync();
 }
 
-[GAgent(nameof(UserQuotaGAgent))]
 public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 {
     // Dependency injection via properties for Orleans compatibility

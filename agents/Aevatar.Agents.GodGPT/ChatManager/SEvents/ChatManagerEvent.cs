@@ -1,6 +1,5 @@
 using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
-using Aevatar.Core.Abstractions;
 using Aevatar.GAgents.AI.Common;
 using GodGPT.GAgents.SpeechChat;
 

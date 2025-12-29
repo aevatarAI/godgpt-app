@@ -50,7 +50,6 @@ public interface IUserInfoCollectionGAgent : Aevatar.Agents.Abstractions.IGAgent
     Task<GenerateUserInfoPromptResponseProto> GenerateUserInfoPromptAsync(GenerateUserInfoPromptRequestProto request);
 }
 
-[GAgent(nameof(UserInfoCollectionGAgent))]
 public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUserInfoCollectionGAgent
 {
     // Parameterless constructor required for Orleans activation

@@ -20,7 +20,6 @@ using InvitationProtos = Aevatar.Agents.GodGPT.Protos.Invitation;
 
 namespace Aevatar.Application.Grains.Invitation;
 
-[GAgent(nameof(InvitationGAgent))]
 public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
 {
     private readonly DateTime DefaultIssueAt = new DateTime(2025, 7, 8, 0, 0, 0, DateTimeKind.Utc);

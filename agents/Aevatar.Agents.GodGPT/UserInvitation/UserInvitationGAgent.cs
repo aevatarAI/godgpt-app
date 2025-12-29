@@ -18,7 +18,6 @@ namespace Aevatar.Application.Grains.UserInvitation;
 /// User Invitation GAgent implementation
 /// Manages the invitation information for the current user
 /// </summary>
-[GAgent(nameof(UserInvitationGAgent))]
 public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvitationGAgent
 {
     // Use property injection for Orleans compatibility (parameterless constructor required)

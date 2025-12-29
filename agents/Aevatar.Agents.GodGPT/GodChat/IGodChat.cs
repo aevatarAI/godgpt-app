@@ -4,7 +4,6 @@ using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.GodChat.Dtos;
-using Aevatar.Core.Abstractions;
 using Aevatar.GAgents.AI.Common;
 using Aevatar.GAgents.AI.Options;
 using Aevatar.GAgents.AIGAgent.Dtos;

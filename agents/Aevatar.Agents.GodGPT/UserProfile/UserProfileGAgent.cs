@@ -21,7 +21,6 @@ namespace Aevatar.Application.Grains.UserProfile;
 /// User Profile GAgent implementation
 /// Manages user basic information and voice preference settings
 /// </summary>
-[GAgent(nameof(UserProfileGAgent))]
 public class UserProfileGAgent : GAgentBase<UserProfileState>, IUserProfileGAgent
 {
     // Injected by OrleansGAgentGrain via reflection

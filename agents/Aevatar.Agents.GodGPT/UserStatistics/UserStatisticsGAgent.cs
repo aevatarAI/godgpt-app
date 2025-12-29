@@ -2,7 +2,6 @@ using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.UserStatistics;
 using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.UserStatistics.Dtos;
-using Aevatar.Core.Abstractions;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
@@ -44,7 +43,6 @@ public interface IUserStatisticsGAgent : Aevatar.Agents.Abstractions.IGAgent
 /// <summary>
 /// User Statistics GAgent - manages user behavior statistics including app ratings
 /// </summary>
-[GAgent(nameof(UserStatisticsGAgent))]
 public class UserStatisticsGAgent : GAgentBase<UserStatisticsState>, IUserStatisticsGAgent
 {
     // Dependency injection via properties for Orleans compatibility

@@ -25,7 +25,6 @@ namespace Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
 /// AI Agent Status Proxy - Migrated to new Aevatar.Agents.AI framework.
 /// Manages AI agent availability status and proxies chat requests.
 /// </summary>
-[GAgent(nameof(AIAgentStatusProxy))]
 [Reentrant]
 public class AIAgentStatusProxy : 
     AIGAgentBase<AIAgentStatusProxyStateProto, AIAgentStatusProxyConfigProto>,

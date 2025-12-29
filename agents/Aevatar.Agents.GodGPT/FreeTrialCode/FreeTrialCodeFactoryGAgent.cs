@@ -33,7 +33,6 @@ public interface IFreeTrialCodeFactoryGAgent : Aevatar.Agents.Abstractions.IGAge
     Task<bool> ValidateCodeAvailableAsync(ValidateCodeRequestProto request);
 }
 
-[GAgent(nameof(FreeTrialCodeFactoryGAgent))]
 public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>, IFreeTrialCodeFactoryGAgent
 {
     // Dependency injection via properties for Orleans compatibility

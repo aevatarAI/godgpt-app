@@ -44,7 +44,6 @@ public interface IUserFeedbackGAgent : Aevatar.Agents.Abstractions.IGAgent
     Task<GetFeedbackHistoryResultProto> GetFeedbackHistoryAsync(GetFeedbackHistoryRequestProto request);
 }
 
-[GAgent(nameof(UserFeedbackGAgent))]
 public class UserFeedbackGAgent : GAgentBase<UserFeedbackState>, IUserFeedbackGAgent
 {
     // Dependency injection via properties for Orleans compatibility

@@ -22,7 +22,6 @@ namespace Aevatar.Application.Grains.Agents.Anonymous;
 /// Follows the same patterns as ChatManagerGAgent but simplified for anonymous users
 /// </summary>
 [Description("Anonymous user chat agent for guest access")]
-[GAgent(nameof(AnonymousUserGAgent))]
 public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUserGAgent
 {
     // Injected by OrleansGAgentGrain via reflection

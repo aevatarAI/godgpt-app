@@ -1,7 +1,6 @@
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
-using Aevatar.Core.Abstractions;
 using Aevatar.GAgents.AI.Options;
 using Orleans.Concurrency;
 

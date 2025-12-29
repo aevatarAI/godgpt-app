@@ -39,7 +39,6 @@ using Volo.Abp.Threading;
 namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 
 [Description("god chat agent")]
-[GAgent(nameof(GodChatGAgent))]
 [Reentrant]
 public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatStateProto, GodChatConfig>, IGodChat
 {

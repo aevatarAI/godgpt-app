@@ -15,7 +15,6 @@ using Orleans.Concurrency;
 namespace Aevatar.Application.Grains.Agents.ChatManager;
 
 [Description("manage chat agent")]
-[GAgent(nameof(ChatGAgentManager))]
 [Reentrant]
 public partial class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatManagerStateProto>,
     IChatManagerGAgent
