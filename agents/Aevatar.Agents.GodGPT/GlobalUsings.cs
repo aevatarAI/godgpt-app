@@ -18,7 +18,6 @@ global using Aevatar.GAgents.AI.Options;
 global using Aevatar.GAgents.AIGAgent.Dtos;
 global using Aevatar.GAgents.AIGAgent.GEvents;
 global using Aevatar.GAgents.ChatAgent.Dtos;
-global using Aevatar.GAgents.ChatAgent.GAgent.State;
 
 // Type aliases to resolve ambiguity
 global using IGAgent = Aevatar.Core.Abstractions.IGAgent;

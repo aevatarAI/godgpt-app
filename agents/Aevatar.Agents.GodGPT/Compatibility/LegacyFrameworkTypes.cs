@@ -8,14 +8,7 @@ using Orleans;
 // ============================================================================
 namespace Aevatar.Core.Abstractions
 {
-    /// <summary>
-    /// Legacy state base class - marker for Orleans serialization
-    /// Used by ChatGAgentState
-    /// </summary>
-    [GenerateSerializer]
-    public abstract class StateBase
-    {
-    }
+    // NOTE: StateBase removed - GodChatState deleted, all agents use Protobuf state
 
     /// <summary>
     /// Legacy event log base class for event sourcing
@@ -96,19 +89,4 @@ namespace Aevatar.GAgents.AI.Abstractions
     // NOTE: AIGAgentStateBase was removed - unused
 }
 
-// ============================================================================
-// Aevatar.GAgents.ChatAgent.GAgent.State namespace
-// ============================================================================
-namespace Aevatar.GAgents.ChatAgent.GAgent.State
-{
-    /// <summary>
-    /// Legacy Chat GAgent state base - used by GodChatState
-    /// </summary>
-    [GenerateSerializer]
-    public class ChatGAgentState : Aevatar.Core.Abstractions.StateBase
-    {
-        [Id(0)] public List<Aevatar.GAgents.AI.Abstractions.ChatMessage> ChatHistory { get; set; } = new();
-        [Id(1)] public int MaxHistoryCount { get; set; } = 50;
-        [Id(2)] public string? PromptTemplate { get; set; }
-    }
-}
+// NOTE: ChatGAgentState namespace removed - GodChatState deleted, all agents use Protobuf state

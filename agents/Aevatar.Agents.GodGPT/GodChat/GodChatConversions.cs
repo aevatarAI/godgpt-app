@@ -13,33 +13,7 @@ namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 /// </summary>
 public static class GodChatConversions
 {
-    // =============================================================================
-    // UserProfile Conversions
-    // =============================================================================
-    
-    public static UserProfileProto? ToProto(this UserProfile? profile)
-    {
-        if (profile == null) return null;
-        return new UserProfileProto
-        {
-            Gender = profile.Gender ?? "",
-            BirthDate = Timestamp.FromDateTime(DateTime.SpecifyKind(profile.BirthDate, DateTimeKind.Utc)),
-            BirthPlace = profile.BirthPlace ?? "",
-            FullName = profile.FullName ?? ""
-        };
-    }
-    
-    public static UserProfile? FromProto(this UserProfileProto? proto)
-    {
-        if (proto == null) return null;
-        return new UserProfile
-        {
-            Gender = proto.Gender,
-            BirthDate = proto.BirthDate?.ToDateTime() ?? DateTime.MinValue,
-            BirthPlace = proto.BirthPlace,
-            FullName = proto.FullName
-        };
-    }
+    // NOTE: UserProfile conversions removed - State.UserProfile is already UserProfileProto
     
     // =============================================================================
     // ChatMessageMeta Conversions
