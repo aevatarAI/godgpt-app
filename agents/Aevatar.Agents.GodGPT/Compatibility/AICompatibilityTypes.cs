@@ -31,9 +31,8 @@ namespace Aevatar.GAgents.AI.Common
 
     /// <summary>
     /// Legacy AI stream chat content - matches old framework exactly
-    /// Widely used across the codebase
+    /// Internal use only, converted to Proto before RPC
     /// </summary>
-    [GenerateSerializer]
     public class AIStreamChatContent
     {
         [Id(0)] public string Content { get; set; } = string.Empty;
@@ -55,9 +54,9 @@ namespace Aevatar.GAgents.AI.Options
 {
     /// <summary>
     /// Legacy execution prompt settings
-    /// Widely used across the codebase
+    /// Internal use only, converted to Proto before RPC
+    /// NOTE: Interface methods use null default, actual values converted internally
     /// </summary>
-    [GenerateSerializer]
     public class ExecutionPromptSettings
     {
         [Id(0)] public string? Temperature { get; set; }
@@ -79,9 +78,8 @@ namespace Aevatar.GAgents.AIGAgent.Dtos
 {
     /// <summary>
     /// Legacy AI chat context DTO - matches old framework exactly
-    /// Widely used across the codebase
+    /// Internal use only, converted to Proto before RPC
     /// </summary>
-    [GenerateSerializer]
     public class AIChatContextDto
     {
         [Id(0)] public string? AgentId { get; set; }

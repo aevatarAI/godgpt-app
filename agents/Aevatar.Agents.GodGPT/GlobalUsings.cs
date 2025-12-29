@@ -12,7 +12,6 @@ global using Aevatar.GAgents.AI.Abstractions;
 global using Aevatar.GAgents.AI.Common;
 global using Aevatar.GAgents.AI.Options;
 global using Aevatar.GAgents.AIGAgent.Dtos;
-global using Aevatar.GAgents.AIGAgent.GEvents;
 global using Aevatar.GAgents.ChatAgent.Dtos;
 
 // New Framework - use new IGAgent
