@@ -15,18 +15,10 @@ global using Aevatar.Core.Abstractions;
 global using Aevatar.GAgents.AI.Abstractions;
 global using Aevatar.GAgents.AI.Common;
 global using Aevatar.GAgents.AI.Options;
-global using Aevatar.GAgents.AIGAgent;
-global using Aevatar.GAgents.AIGAgent.Agent;
 global using Aevatar.GAgents.AIGAgent.Dtos;
 global using Aevatar.GAgents.AIGAgent.GEvents;
-global using Aevatar.GAgents.AIGAgent.State;
 global using Aevatar.GAgents.ChatAgent.Dtos;
-global using Aevatar.GAgents.ChatAgent.GAgent;
 global using Aevatar.GAgents.ChatAgent.GAgent.State;
-
-// Legacy Compatibility Layer - AI Features
-global using Aevatar.AI.Feature.StreamSyncWoker;
-global using Aevatar.AI.Exceptions;
 
 // Type aliases to resolve ambiguity
 global using IGAgent = Aevatar.Core.Abstractions.IGAgent;

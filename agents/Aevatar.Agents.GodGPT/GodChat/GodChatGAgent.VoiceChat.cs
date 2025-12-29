@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
-using Aevatar.AI.Exceptions;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
 using Aevatar.Application.Grains.GodChat.Dtos;

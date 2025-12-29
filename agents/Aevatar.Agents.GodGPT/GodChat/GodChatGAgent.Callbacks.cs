@@ -1,8 +1,6 @@
 using System.Text;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
-using Aevatar.AI.Exceptions;
-using Aevatar.AI.Feature.StreamSyncWoker;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.GodChat.Dtos;
 using Aevatar.Application.Grains.UserInvitation;

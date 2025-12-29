@@ -24,42 +24,50 @@ public enum VoiceContentType
 }
 
 [GenerateSerializer]
-public class ResponseCreateGod : ResponseToPublisherEventBase
+public class ResponseCreateGod
 {
-    [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.CreateSession;
-    [Id(1)] public Guid SessionId { get; set; }
-    [Id(2)] public String SessionVersion { get; set; }
+    // Base fields (from removed ResponseToPublisherEventBase)
+    [Id(0)] public string? CorrelationId { get; set; }
+    [Id(1)] public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    
+    // Specific fields
+    [Id(2)] public ResponseType ResponseType { get; set; } = ResponseType.CreateSession;
+    [Id(3)] public Guid SessionId { get; set; }
+    [Id(4)] public String SessionVersion { get; set; }
 }
 
 [GenerateSerializer]
-public class ResponseStreamGodChat : ResponseToPublisherEventBase
+public class ResponseStreamGodChat
 {
-    [Id(0)] public ResponseType ResponseType { get; set; } = ResponseType.ChatResponse;
-    [Id(1)] public string Response { get; set; }
-    [Id(2)] public string NewTitle { get; set; }
-    [Id(3)] public string ChatId { get; set; }
-    [Id(4)] public bool IsLastChunk { get; set; }
-
-    [Id(5)] public int SerialNumber { get; set; }
-
-    [Id(6)] public Guid SessionId { get; set; }
+    // Base fields (from removed ResponseToPublisherEventBase)
+    [Id(0)] public string? CorrelationId { get; set; }
+    [Id(1)] public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    
+    // Specific fields (IDs start from 2)
+    [Id(2)] public ResponseType ResponseType { get; set; } = ResponseType.ChatResponse;
+    [Id(3)] public string Response { get; set; }
+    [Id(4)] public string NewTitle { get; set; }
+    [Id(5)] public string ChatId { get; set; }
+    [Id(6)] public bool IsLastChunk { get; set; }
+    [Id(7)] public int SerialNumber { get; set; }
+    [Id(8)] public Guid SessionId { get; set; }
     
     /// <summary>
     /// Binary MP3 audio data for voice response
     /// </summary>
-    [Id(7)] public byte[]? AudioData { get; set; }
+    [Id(9)] public byte[]? AudioData { get; set; }
     
     /// <summary>
     /// Audio metadata including duration, format, language etc.
     /// </summary>
-    [Id(8)] public AudioMetadata? AudioMetadata { get; set; }
-    [Id(9)] public ChatErrorCode ErrorCode { get; set; }
-    [Id(10)] public VoiceContentType VoiceContentType { get; set; } = VoiceContentType.VoiceResponse;
+    [Id(10)] public AudioMetadata? AudioMetadata { get; set; }
+    [Id(11)] public ChatErrorCode ErrorCode { get; set; }
+    [Id(12)] public VoiceContentType VoiceContentType { get; set; } = VoiceContentType.VoiceResponse;
     
     /// <summary>
     /// AI-generated conversation suggestions (text chat only, present in last chunk if generated)
     /// </summary>
-    [Id(11)] public List<string>? SuggestedItems { get; set; }
+    [Id(13)] public List<string>? SuggestedItems { get; set; }
 
     public ResponseStreamGodChatForHttp ConvertToHttpResponse()
     {

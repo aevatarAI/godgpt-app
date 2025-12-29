@@ -2,8 +2,6 @@ using Aevatar.Agents.GodGPT.Protos;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
-using Aevatar.AI.Exceptions;
-using Aevatar.AI.Feature.StreamSyncWoker;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.GodChat.Dtos;
 using Aevatar.Core.Abstractions;
