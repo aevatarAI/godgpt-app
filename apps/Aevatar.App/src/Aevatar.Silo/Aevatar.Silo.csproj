@@ -25,6 +25,7 @@
     <PackageReference Include="Serilog.Sinks.Console" />
     <PackageReference Include="Serilog.Sinks.File" />
     <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Serilog.Formatting.Compact" />
     
     <!-- Protobuf -->
     <PackageReference Include="Google.Protobuf" />

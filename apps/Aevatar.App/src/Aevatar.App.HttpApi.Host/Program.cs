@@ -22,10 +22,7 @@ public class Program
 {
     public async static Task<int> Main(string[] args)
     {
-        Log.Logger = new LoggerConfiguration()
-            .WriteTo.Async(c => c.File("Logs/logs.txt"))
-            .WriteTo.Async(c => c.Console())
-            .CreateBootstrapLogger();
+        ConfigureLogger();
 
         try
         {
@@ -46,21 +43,7 @@ public class Program
             builder.Host
                 .AddAppSettingsSecretsJson()
                 .UseAutofac()
-                .UseSerilog((context, services, loggerConfiguration) =>
-                {
-                    loggerConfiguration
-                    #if DEBUG
-                        .MinimumLevel.Debug()
-                    #else
-                        .MinimumLevel.Information()
-                    #endif
-                        .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
-                        .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
-                        .Enrich.FromLogContext()
-                        .WriteTo.Async(c => c.File("Logs/logs.txt"))
-                        .WriteTo.Async(c => c.Console())
-                        .WriteTo.Async(c => c.AbpStudio(services));
-                });
+                .UseSerilog();
             await builder.AddApplicationAsync<AppHttpApiHostModule>();
             var app = builder.Build();
             await app.InitializeApplicationAsync();
@@ -76,6 +59,20 @@ public class Program
         {
             Log.CloseAndFlush();
         }
+    }
+
+    private static void ConfigureLogger(LoggerConfiguration? loggerConfiguration = null)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddJsonFile("appsettings.json")
+            .Build();
+        Log.Logger = (loggerConfiguration ?? new LoggerConfiguration())
+            .ReadFrom.Configuration(configuration)
+            .MinimumLevel.Information()
+            .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
+            .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
+            .Enrich.FromLogContext()
+            .CreateLogger();
     }
 
     /// <summary>

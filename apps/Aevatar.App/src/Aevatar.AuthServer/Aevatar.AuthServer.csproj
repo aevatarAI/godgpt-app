@@ -39,6 +39,7 @@
   <ItemGroup>
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Serilog.Sinks.Async" />
+    <PackageReference Include="Serilog.Formatting.Compact" />
   </ItemGroup>
 
   <!-- OAuth / Third-party Authentication -->

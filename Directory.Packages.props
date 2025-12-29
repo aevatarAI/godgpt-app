@@ -93,6 +93,7 @@
     <PackageVersion Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageVersion Include="Serilog.Sinks.File" Version="6.0.0" />
     <PackageVersion Include="Serilog.Sinks.Async" Version="2.0.0" />
+    <PackageVersion Include="Serilog.Formatting.Compact" Version="3.0.0" />
     <!-- log4net (override transitive vulnerable versions) -->
     <PackageVersion Include="log4net" Version="2.0.17" />
     <!-- ABP Framework - Using version 10.0.1 -->
