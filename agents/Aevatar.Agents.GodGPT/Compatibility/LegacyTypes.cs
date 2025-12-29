@@ -1,14 +1,35 @@
-// AI Compatibility Types for legacy GodGPT framework
-// NOTE: These types are used internally and converted to Proto before RPC.
-// They do NOT need Orleans serialization since they never cross RPC boundaries directly.
+// =============================================================================
+// Legacy Compatibility Types for GodGPT
+// =============================================================================
+// These types are internal DTOs, converted to Proto before any RPC/serialization.
+// They do NOT need Orleans serialization.
 
-// ============================================================================
+// =============================================================================
+// Aevatar.GAgents.AI.Abstractions namespace
+// =============================================================================
+namespace Aevatar.GAgents.AI.Abstractions
+{
+    /// <summary>
+    /// Legacy chat message - internal DTO
+    /// Converted to ChatMessageProto before RPC
+    /// </summary>
+    public class ChatMessage
+    {
+        public string Role { get; set; } = string.Empty;
+        public string Content { get; set; } = string.Empty;
+        public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+        public Aevatar.GAgents.ChatAgent.Dtos.ChatRole ChatRole { get; set; }
+        public List<string>? ImageKeys { get; set; }
+    }
+}
+
+// =============================================================================
 // Aevatar.GAgents.AI.Common namespace
-// ============================================================================
+// =============================================================================
 namespace Aevatar.GAgents.AI.Common
 {
     /// <summary>
-    /// Legacy AI exception enum - widely used across the codebase
+    /// AI exception enum - widely used across the codebase
     /// </summary>
     public enum AIExceptionEnum
     {
@@ -24,8 +45,8 @@ namespace Aevatar.GAgents.AI.Common
     }
 
     /// <summary>
-    /// Legacy AI stream chat content
-    /// Internal use only, converted to AIStreamChatContentProto before RPC
+    /// AI stream chat content - internal DTO
+    /// Converted to AIStreamChatContentProto before RPC
     /// </summary>
     public class AIStreamChatContent
     {
@@ -41,15 +62,14 @@ namespace Aevatar.GAgents.AI.Common
     }
 }
 
-// ============================================================================
+// =============================================================================
 // Aevatar.GAgents.AI.Options namespace
-// ============================================================================
+// =============================================================================
 namespace Aevatar.GAgents.AI.Options
 {
     /// <summary>
-    /// Legacy execution prompt settings
-    /// Internal use only, converted to ExecutionPromptSettingsProto before RPC
-    /// NOTE: Interface methods use null default, actual values converted internally
+    /// Execution prompt settings - internal DTO
+    /// Converted to ExecutionPromptSettingsProto before RPC
     /// </summary>
     public class ExecutionPromptSettings
     {
@@ -63,14 +83,14 @@ namespace Aevatar.GAgents.AI.Options
     }
 }
 
-// ============================================================================
+// =============================================================================
 // Aevatar.GAgents.AIGAgent.Dtos namespace
-// ============================================================================
+// =============================================================================
 namespace Aevatar.GAgents.AIGAgent.Dtos
 {
     /// <summary>
-    /// Legacy AI chat context DTO
-    /// Internal use only, converted to AIChatContextProto before RPC
+    /// AI chat context - internal DTO
+    /// Converted to AIChatContextProto before RPC
     /// </summary>
     public class AIChatContextDto
     {
@@ -86,13 +106,13 @@ namespace Aevatar.GAgents.AIGAgent.Dtos
     }
 }
 
-// ============================================================================
+// =============================================================================
 // Aevatar.GAgents.ChatAgent.Dtos namespace
-// ============================================================================
+// =============================================================================
 namespace Aevatar.GAgents.ChatAgent.Dtos
 {
     /// <summary>
-    /// Legacy chat role enum - widely used across the codebase
+    /// Chat role enum - widely used across the codebase
     /// </summary>
     public enum ChatRole
     {
@@ -102,3 +122,4 @@ namespace Aevatar.GAgents.ChatAgent.Dtos
         Tool = 3
     }
 }
+
