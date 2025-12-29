@@ -30,7 +30,7 @@ public partial class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatMana
     
     private readonly ILocalizationService _localizationService;
     private readonly IGAgentActorFactory _actorFactory;
-    private readonly IClusterClient _clusterClient;  // Keep for traditional Orleans Grains (e.g., IShareLinkGrain)
+    private readonly IClusterClient _clusterClient;  // Keep for future traditional Orleans Grains if needed
     
     // Cached ConfigurationGAgent interface (new framework)
     private IConfigurationGAgent? _configurationAgentInterface;

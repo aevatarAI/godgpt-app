@@ -1,3 +1,4 @@
+using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
@@ -40,18 +41,24 @@ public partial class ChatGAgentManager
                 _localizationService.GetLocalizedException(ExceptionMessageKeys.InvalidSession, language);
             throw new UserFriendlyException(localizedMessage);
         }
-        
-        // Convert Protobuf messages to ChatMessage list
-        var chatMessages = chatMessagesProto.ToList();
 
         var shareId = Guid.NewGuid();
-        var shareLinkGrain = _clusterClient.GetGrain<IShareLinkGrain>(shareId);
-        await shareLinkGrain.SaveShareContentAsync(new ShareLinkDto
+        
+        // Use new ShareLinkGAgent instead of Orleans Grain
+        var shareLinkActor = await _actorFactory.CreateGAgentActorAsync<ShareLinkGAgent>(shareId.ToString());
+        var shareLink = shareLinkActor.As<IShareLinkGAgent>();
+        
+        // Build ShareLinkProto directly
+        var shareLinkProto = new ShareLinkProto
         {
-            UserId = Guid.Parse(Id),
-            SessionId = sessionId,
-            Messages = chatMessages
-        });
+            UserId = Id,
+            SessionId = sessionId.ToString(),
+            CreateTime = Timestamp.FromDateTime(DateTime.UtcNow)
+        };
+        shareLinkProto.Messages.AddRange(chatMessagesProto.Messages);
+        
+        await shareLink.SaveShareContentAsync(shareLinkProto);
+        
         Logger.LogDebug(
             $"[ChatGAgentManager][GenerateChatShareContentAsync] - session: {sessionId.ToString()}, save success");
         RaiseEvent(new GenerateChatShareContentEvent
@@ -88,33 +95,10 @@ public partial class ChatGAgentManager
             throw new UserFriendlyException(localizedMessage);
         }
 
-        var shareLinkGrain = _clusterClient.GetGrain<IShareLinkGrain>(shareId);
-        var shareLinkDto = await shareLinkGrain.GetShareContentAsync();
+        // Use new ShareLinkGAgent instead of Orleans Grain
+        var shareLinkActor = await _actorFactory.CreateGAgentActorAsync<ShareLinkGAgent>(shareId.ToString());
+        var shareLink = shareLinkActor.As<IShareLinkGAgent>();
         
-        // Convert ShareLinkDto to ShareLinkProto (reusing ChatMessageProto from god_chat.proto)
-        var proto = new ShareLinkProto
-        {
-            UserId = shareLinkDto.UserId.ToString(),
-            SessionId = shareLinkDto.SessionId.ToString(),
-            CreateTime = Timestamp.FromDateTime(DateTime.SpecifyKind(shareLinkDto.CreateTime, DateTimeKind.Utc))
-        };
-        
-        if (shareLinkDto.Messages != null)
-        {
-            foreach (var msg in shareLinkDto.Messages)
-            {
-                proto.Messages.Add(new Aevatar.Agents.GodGPT.Protos.GodChat.ChatMessageProto
-                {
-                    Role = msg.Role ?? string.Empty,
-                    Content = msg.Content ?? string.Empty,
-                    Timestamp = Timestamp.FromDateTime(DateTime.SpecifyKind(msg.Timestamp, DateTimeKind.Utc)),
-                    ChatRole = (int)msg.ChatRole,
-                    ImageKeys = { msg.ImageKeys ?? new List<string>() }
-                });
-            }
-        }
-        
-        return proto;
+        return await shareLink.GetShareContentAsync();
     }
 }
-

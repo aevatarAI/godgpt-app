@@ -42,8 +42,7 @@ public class GodGPTSerializationBinder : DefaultSerializationBinder
         "Aevatar.Application.Grains.Agents.ChatManager.ResponseGetUserProfile",
         "Aevatar.Application.Grains.Agents.ChatManager.UserProfileDto",
         "Aevatar.Application.Grains.Agents.ChatManager.ResponseType",
-        "Aevatar.Application.Grains.Agents.ChatManager.Share.ShareLinkDto",
-        "Aevatar.Application.Grains.Agents.ChatManager.Share.ShareState",
+        // ShareLinkDto and ShareState removed - now using ShareLinkGAgent with Proto
         "Aevatar.Application.Grains.Agents.ChatManager.ManagerConfigDto",
         "Aevatar.Application.Grains.Agents.ChatManager.SessionInfoDto",
         "Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent.SetLLMEvent",
