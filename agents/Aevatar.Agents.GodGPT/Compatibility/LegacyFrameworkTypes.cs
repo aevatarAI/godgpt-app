@@ -69,16 +69,8 @@ namespace Aevatar.Core
         }
     }
     
-    /// <summary>
-    /// Legacy EventHandler attribute for marking event handler methods
-    /// Note: This conflicts with System.EventHandler, so we use full namespace
-    /// </summary>
-    [AttributeUsage(AttributeTargets.Method)]
-    public class EventHandlerAttribute : Attribute
-    {
-        public bool AllowSelfHandling { get; set; }
-        public int Priority { get; set; } = 0;
-    }
+    // NOTE: EventHandlerAttribute was removed - use Aevatar.Agents.Abstractions.Attributes.EventHandlerAttribute instead
+    // (configured via global using in GlobalUsings.cs)
 
     /// <summary>
     /// Legacy GAgent base class with state and event log support

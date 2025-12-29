@@ -50,7 +50,7 @@ test_get_keys() {
     
     if [ "$code" == "20000" ]; then
         if [ -n "$key" ] && [ "$key" != "null" ]; then
-            log_info "Payment keys retrieved successfully ✓"
+        log_info "Payment keys retrieved successfully ✓"
             log_info "PublishableKey: ${key:0:20}..."
         else
             log_warn "PublishableKey is empty (check Stripe config)"
@@ -80,7 +80,7 @@ test_get_products() {
         log_info "Products retrieved successfully ✓"
         log_info "Product count: $product_count"
         if [ -n "$FIRST_PRICE_ID" ] && [ "$FIRST_PRICE_ID" != "null" ]; then
-            log_info "Saved first priceId: $FIRST_PRICE_ID"
+        log_info "Saved first priceId: $FIRST_PRICE_ID"
         fi
         return 0
     else
@@ -125,7 +125,7 @@ test_get_customer() {
     
     if [ "$code" == "20000" ]; then
         if [ -n "$customer" ] && [ "$customer" != "null" ]; then
-            log_info "Customer retrieved successfully ✓"
+        log_info "Customer retrieved successfully ✓"
             log_info "Customer ID: ${customer:0:20}..."
         else
             log_info "Customer endpoint works (no existing customer)"
@@ -168,7 +168,7 @@ test_create_checkout_session() {
     
     if [ "$code" == "20000" ]; then
         if [ -n "$session_id" ] && [ "$session_id" != "null" ]; then
-            log_info "Checkout session created successfully ✓"
+        log_info "Checkout session created successfully ✓"
             log_info "Session: ${session_id:0:30}..."
         else
             log_info "Checkout endpoint works (check Stripe config for actual session)"
@@ -210,9 +210,9 @@ test_create_subscription() {
     CREATED_SUBSCRIPTION_ID=$(echo "$response" | jq -r '.data.subscriptionId // .subscriptionId // empty' 2>/dev/null)
     
     if [ "$code" == "20000" ]; then
-        if [ -n "$CREATED_SUBSCRIPTION_ID" ] && [ "$CREATED_SUBSCRIPTION_ID" != "null" ]; then
-            log_info "Subscription created successfully ✓"
-            log_info "Saved subscriptionId: $CREATED_SUBSCRIPTION_ID"
+    if [ -n "$CREATED_SUBSCRIPTION_ID" ] && [ "$CREATED_SUBSCRIPTION_ID" != "null" ]; then
+        log_info "Subscription created successfully ✓"
+        log_info "Saved subscriptionId: $CREATED_SUBSCRIPTION_ID"
         else
             log_info "Subscription endpoint works (no subscription ID returned - might need payment method)"
         fi

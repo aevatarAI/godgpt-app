@@ -50,19 +50,19 @@ test_create_share() {
         local share_data=$(echo "$response" | jq -r '.data // empty')
         if [ -n "$share_data" ] && [ "$share_data" != "null" ]; then
             SHARE_ID="$share_data"
-            log_info "Share link created successfully ✓"
-            log_info "Share ID: $SHARE_ID"
-            return 0
+        log_info "Share link created successfully ✓"
+        log_info "Share ID: $SHARE_ID"
+        return 0
         fi
     fi
     # Check if this is an error or empty session scenario
     if echo "$response" | jq -e '.error' > /dev/null 2>&1 || echo "$response" | jq -e '.code != "20000"' > /dev/null 2>&1; then
-        # Empty sessions cannot be shared - this is expected behavior
-        log_warn "Share request failed - empty sessions cannot be shared (expected) ✓"
-        return 0
-    fi
-    log_error "Failed to create share link"
-    return 1
+            # Empty sessions cannot be shared - this is expected behavior
+            log_warn "Share request failed - empty sessions cannot be shared (expected) ✓"
+            return 0
+        fi
+        log_error "Failed to create share link"
+        return 1
 }
 
 # Test 2: Get Shared Messages (Anonymous)

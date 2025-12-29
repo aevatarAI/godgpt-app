@@ -28,9 +28,11 @@ global using Aevatar.GAgents.ChatAgent.GAgent.State;
 global using Aevatar.AI.Feature.StreamSyncWoker;
 global using Aevatar.AI.Exceptions;
 
-// Type aliases to resolve ambiguity - use Legacy types
+// Type aliases to resolve ambiguity
 global using IGAgent = Aevatar.Core.Abstractions.IGAgent;
-global using EventHandlerAttribute = Aevatar.Core.EventHandlerAttribute;
+
+// New Framework - EventHandler should use the new framework attribute
+global using EventHandlerAttribute = Aevatar.Agents.Abstractions.Attributes.EventHandlerAttribute;
 
 // Application namespaces (actual business logic)
 global using Aevatar.Application.Grains.Agents.ChatManager.Common;

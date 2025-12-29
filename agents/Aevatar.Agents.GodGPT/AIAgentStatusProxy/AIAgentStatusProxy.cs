@@ -415,49 +415,57 @@ public class AIAgentStatusProxy :
     {
         // Use event-driven callback via PublishAsync to avoid deadlock
         // Parent (GodChatGAgent) receives this event through [EventHandler]
-        
+            
         // Convert AIChatContextDto to AIChatContextProto
-        AIChatContextProto? contextProto = null;
-        if (context != null)
-        {
-            contextProto = new AIChatContextProto
+            AIChatContextProto? contextProto = null;
+            if (context != null)
             {
-                AgentId = context.AgentId ?? "",
-                SessionId = context.SessionId ?? "",
-                UserId = context.UserId ?? "",
-                SystemPrompt = context.SystemPrompt ?? "",
-                RequestId = context.RequestId.ToString(),
-                ChatId = context.ChatId ?? "",
-                MessageId = context.MessageId ?? ""
-            };
-            if (context.Metadata != null)
-            {
-                foreach (var kvp in context.Metadata)
+                contextProto = new AIChatContextProto
                 {
-                    contextProto.Metadata[kvp.Key] = kvp.Value;
+                    AgentId = context.AgentId ?? "",
+                    SessionId = context.SessionId ?? "",
+                    UserId = context.UserId ?? "",
+                    SystemPrompt = context.SystemPrompt ?? "",
+                    RequestId = context.RequestId.ToString(),
+                    ChatId = context.ChatId ?? "",
+                    MessageId = context.MessageId ?? ""
+                };
+                if (context.Metadata != null)
+                {
+                    foreach (var kvp in context.Metadata)
+                    {
+                        contextProto.Metadata[kvp.Key] = kvp.Value;
+                    }
                 }
             }
-        }
-        
+            
         // Convert AIStreamChatContent to AIStreamChatContentProto
-        AIStreamChatContentProto? contentProto = null;
-        if (content != null)
-        {
-            contentProto = new AIStreamChatContentProto
+            AIStreamChatContentProto? contentProto = null;
+            if (content != null)
             {
-                Content = content.Content ?? "",
-                IsComplete = content.IsComplete,
-                TokenCount = content.TokenCount,
-                Error = content.Error ?? "",
-                IsLastChunk = content.IsLastChunk,
-                ResponseContent = content.ResponseContent ?? "",
-                AggregationMsg = content.AggregationMsg ?? "",
-                SerialNumber = content.SerialNumber,
-                IsAggregationMsg = content.IsAggregationMsg
-            };
+                contentProto = new AIStreamChatContentProto
+                {
+                    Content = content.Content ?? "",
+                    IsComplete = content.IsComplete,
+                    TokenCount = content.TokenCount,
+                    Error = content.Error ?? "",
+                    IsLastChunk = content.IsLastChunk,
+                    ResponseContent = content.ResponseContent ?? "",
+                    AggregationMsg = content.AggregationMsg ?? "",
+                    SerialNumber = content.SerialNumber,
+                    IsAggregationMsg = content.IsAggregationMsg
+                };
+            }
+            
+        // Send callback event via MassTransit Stream (event-driven, non-blocking)
+        // This uses the agent framework's stream mechanism
+        var parentId = CustomState.ParentId;
+        if (string.IsNullOrEmpty(parentId))
+        {
+            Logger.LogWarning("[AIAgentStatusProxyNew] ParentId not configured, cannot send callback event");
+            return;
         }
         
-        // Publish event to parent via Stream (non-blocking, avoids deadlock)
         var callbackEvent = new ChatMessageCallbackEvent
         {
             Context = contextProto,
@@ -466,7 +474,8 @@ public class AIAgentStatusProxy :
             Content = contentProto
         };
         
-        await PublishAsync(callbackEvent, Aevatar.Agents.Abstractions.EventDirection.Up);
+        Logger.LogInformation("[AIAgentStatusProxyNew] Sending ChatMessageCallbackEvent to parent {ParentId} via SendToAsync", parentId);
+        await SendToAsync(parentId, callbackEvent);
     }
 
     #endregion
