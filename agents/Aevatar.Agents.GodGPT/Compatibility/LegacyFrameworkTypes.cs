@@ -19,14 +19,7 @@ namespace Aevatar.Core.Abstractions
     {
     }
 
-    /// <summary>
-    /// Legacy event base class
-    /// Used by AIStreamingErrorResponseGEvent, RenameChatTitleEvent
-    /// </summary>
-    [GenerateSerializer]
-    public abstract class EventBase
-    {
-    }
+    // NOTE: EventBase removed - AIStreamingErrorResponseGEvent no longer inherits
     
     /// <summary>
     /// Legacy IGAgent interface

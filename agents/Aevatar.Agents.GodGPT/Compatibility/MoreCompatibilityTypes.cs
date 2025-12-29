@@ -1,6 +1,5 @@
 // Additional compatibility types for legacy GodGPT framework
 // NOTE: This file only contains types that are actually being used.
-// Unused types have been removed to reduce confusion.
 
 using Orleans;
 
@@ -10,11 +9,10 @@ using Orleans;
 namespace Aevatar.GAgents.AIGAgent.GEvents
 {
     /// <summary>
-    /// Legacy AI streaming error response event - matches old framework exactly
-    /// Used by ChatManagerGAgent.Handlers.cs
+    /// AI streaming error response event - used by ChatManagerGAgent.Handlers.cs
     /// </summary>
     [GenerateSerializer]
-    public class AIStreamingErrorResponseGEvent : Aevatar.Core.Abstractions.EventBase
+    public class AIStreamingErrorResponseGEvent
     {
         [Id(0)] public string ErrorMessage { get; set; } = string.Empty;
         [Id(1)] public Aevatar.GAgents.AI.Common.AIExceptionEnum ErrorType { get; set; }
