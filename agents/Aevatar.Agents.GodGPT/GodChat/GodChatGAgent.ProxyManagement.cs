@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
@@ -6,6 +7,7 @@ using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
 using Aevatar.Application.Grains.Common.Constants;
 using GodGPT.GAgents.Common.Constants;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
@@ -178,12 +180,25 @@ public partial class GodChatGAgent
             var proxyActor = await _actorFactory.CreateGAgentActorAsync<AIAgentStatusProxy>(newProxyId);
             var proxy = proxyActor.As<IAIAgentStatusProxy>();
             
+            // Establish Parent-Child relationship for event-driven callbacks
+            // This allows AIAgentStatusProxy to use PublishAsync(event, Up) instead of direct RPC
+            var actorManager = ServiceProvider?.GetService<IGAgentActorManager>();
+            if (actorManager != null)
+            {
+                await actorManager.LinkParentChildAsync(Id, proxyActor.Id);
+                Logger.LogDebug("[GodChatGAgent][InitializeRegionProxiesAsync] Linked parent {ParentId} with child {ChildId}", Id, proxyActor.Id);
+            }
+            else
+            {
+                Logger.LogWarning("[GodChatGAgent][InitializeRegionProxiesAsync] IGAgentActorManager not available, Parent-Child link skipped");
+            }
+            
             // Configure with Protobuf config - pass GodChat's ID as ParentId for callbacks
             // MUST await to ensure ParentId is set before any chat calls
             await proxy.ConfigAsync(new AIAgentStatusProxyConfigProto
             {
                 RequestRecoveryDelay = Duration.FromTimeSpan(RequestRecoveryDelay),
-                ParentId = Id.ToString(),  // Convert Guid to string
+                ParentId = Id.ToString(),  // Convert Guid to string (kept for backward compatibility)
                 ProviderName = llm  // Use LLM from region config
             });
             

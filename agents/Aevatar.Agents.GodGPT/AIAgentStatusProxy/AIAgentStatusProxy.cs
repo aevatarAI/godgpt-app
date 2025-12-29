@@ -413,70 +413,60 @@ public class AIAgentStatusProxy :
         string? errorMessage,
         AIStreamChatContent? content)
     {
-        if (string.IsNullOrEmpty(CustomState.ParentId))
+        // Use event-driven callback via PublishAsync to avoid deadlock
+        // Parent (GodChatGAgent) receives this event through [EventHandler]
+        
+        // Convert AIChatContextDto to AIChatContextProto
+        AIChatContextProto? contextProto = null;
+        if (context != null)
         {
-            Logger.LogWarning("[AIAgentStatusProxyNew] ParentId is empty, cannot send callback");
-            return;
-        }
-
-        if (ActorFactory == null)
-        {
-            Logger.LogError("[AIAgentStatusProxyNew] ActorFactory is not injected");
-            return;
-        }
-
-        try
-        {
-            var godChatActor = await ActorFactory.CreateGAgentActorAsync<GodChatGAgent>(CustomState.ParentId);
-            var godChat = godChatActor.As<IGodChat>();
-            
-            // Convert AIChatContextDto to AIChatContextProto for RPC
-            AIChatContextProto? contextProto = null;
-            if (context != null)
+            contextProto = new AIChatContextProto
             {
-                contextProto = new AIChatContextProto
+                AgentId = context.AgentId ?? "",
+                SessionId = context.SessionId ?? "",
+                UserId = context.UserId ?? "",
+                SystemPrompt = context.SystemPrompt ?? "",
+                RequestId = context.RequestId.ToString(),
+                ChatId = context.ChatId ?? "",
+                MessageId = context.MessageId ?? ""
+            };
+            if (context.Metadata != null)
+            {
+                foreach (var kvp in context.Metadata)
                 {
-                    AgentId = context.AgentId ?? "",
-                    SessionId = context.SessionId ?? "",
-                    UserId = context.UserId ?? "",
-                    SystemPrompt = context.SystemPrompt ?? "",
-                    RequestId = context.RequestId.ToString(),
-                    ChatId = context.ChatId ?? "",
-                    MessageId = context.MessageId ?? ""
-                };
-                if (context.Metadata != null)
-                {
-                    foreach (var kvp in context.Metadata)
-                    {
-                        contextProto.Metadata[kvp.Key] = kvp.Value;
-                    }
+                    contextProto.Metadata[kvp.Key] = kvp.Value;
                 }
             }
-            
-            // Convert AIStreamChatContent to AIStreamChatContentProto for RPC
-            AIStreamChatContentProto? contentProto = null;
-            if (content != null)
-            {
-                contentProto = new AIStreamChatContentProto
-                {
-                    Content = content.Content ?? "",
-                    IsComplete = content.IsComplete,
-                    TokenCount = content.TokenCount,
-                    Error = content.Error ?? "",
-                    IsLastChunk = content.IsLastChunk,
-                    ResponseContent = content.ResponseContent ?? "",
-                    AggregationMsg = content.AggregationMsg ?? "",
-                    SerialNumber = content.SerialNumber,
-                    IsAggregationMsg = content.IsAggregationMsg
-                };
-            }
-            
-            await godChat.ChatMessageCallbackAsync(contextProto, errorEnum, errorMessage, contentProto);
         }
-        catch (Exception ex)
+        
+        // Convert AIStreamChatContent to AIStreamChatContentProto
+        AIStreamChatContentProto? contentProto = null;
+        if (content != null)
         {
-            Logger.LogError(ex, "[AIAgentStatusProxyNew] Failed to send callback to parent {ParentId}", CustomState.ParentId);
+            contentProto = new AIStreamChatContentProto
+            {
+                Content = content.Content ?? "",
+                IsComplete = content.IsComplete,
+                TokenCount = content.TokenCount,
+                Error = content.Error ?? "",
+                IsLastChunk = content.IsLastChunk,
+                ResponseContent = content.ResponseContent ?? "",
+                AggregationMsg = content.AggregationMsg ?? "",
+                SerialNumber = content.SerialNumber,
+                IsAggregationMsg = content.IsAggregationMsg
+            };
         }
+        
+        // Publish event to parent via Stream (non-blocking, avoids deadlock)
+        var callbackEvent = new ChatMessageCallbackEvent
+        {
+            Context = contextProto,
+            AiExceptionEnum = (int)errorEnum,
+            ErrorMessage = errorMessage ?? "",
+            Content = contentProto
+        };
+        
+        await PublishAsync(callbackEvent, Aevatar.Agents.Abstractions.EventDirection.Up);
     }
 
     #endregion

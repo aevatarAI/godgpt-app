@@ -96,7 +96,7 @@ message ChatWithHistoryResultProto {
 }
 
 // =============================================================================
-// AIStreamChatContent (for callback RPC)
+// AIStreamChatContent (for callback)
 // =============================================================================
 message AIStreamChatContentProto {
     string content = 1;
@@ -108,5 +108,16 @@ message AIStreamChatContentProto {
     optional string aggregation_msg = 7;
     int32 serial_number = 8;
     bool is_aggregation_msg = 9;
+}
+
+// =============================================================================
+// ChatMessageCallbackEvent - Published via Stream (EventDirection.Up) to Parent
+// Replaces direct RPC callback to avoid deadlock
+// =============================================================================
+message ChatMessageCallbackEvent {
+    optional AIChatContextProto context = 1;
+    int32 ai_exception_enum = 2;  // AIExceptionEnum as int
+    optional string error_message = 3;
+    optional AIStreamChatContentProto content = 4;
 }
 

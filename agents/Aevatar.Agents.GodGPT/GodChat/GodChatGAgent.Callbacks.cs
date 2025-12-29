@@ -16,6 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Aevatar.Agents.Abstractions.Extensions;
+using Aevatar.Agents.Abstractions.Attributes;
 using Orleans.Streams;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents; // For EventEnvelope
@@ -27,6 +28,22 @@ namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 /// </summary>
 public partial class GodChatGAgent
 {
+    /// <summary>
+    /// Event-driven callback handler for AI stream responses.
+    /// Receives ChatMessageCallbackEvent from AIAgentStatusProxy via Stream (EventDirection.Up).
+    /// This avoids deadlock that would occur with direct RPC callback.
+    /// </summary>
+    [EventHandler]
+    public async Task HandleChatMessageCallbackEvent(ChatMessageCallbackEvent evt)
+    {
+        // Delegate to existing implementation
+        await ChatMessageCallbackAsync(
+            evt.Context,
+            (AIExceptionEnum)evt.AiExceptionEnum,
+            evt.HasErrorMessage ? evt.ErrorMessage : null,
+            evt.Content);
+    }
+    
     public async Task ChatMessageCallbackAsync(AIChatContextProto? contextProto,
         AIExceptionEnum aiExceptionEnum, string? errorMessage, AIStreamChatContentProto? chatContentProto)
     {
