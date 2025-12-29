@@ -73,7 +73,9 @@ public class OrleansAgentState
 /// 3. 存储层级关系 (Parent/Children)
 /// 4. 管理 Orleans Streams 订阅
 /// </summary>
-[Reentrant]
+// Note: Removed [Reentrant] to ensure single-threaded execution per Grain.
+// This prevents version conflicts during activation (ReplayEventsAsync must complete
+// before any other request can modify state).
 public class OrleansGAgentGrain : Grain, IGAgentGrain
 {
     // Grain 持久化状态
