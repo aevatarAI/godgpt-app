@@ -183,7 +183,8 @@ public partial class GodChatGAgent
             await proxy.ConfigAsync(new AIAgentStatusProxyConfigProto
             {
                 RequestRecoveryDelay = Duration.FromTimeSpan(RequestRecoveryDelay),
-                ParentId = Id.ToString()  // Convert Guid to string
+                ParentId = Id.ToString(),  // Convert Guid to string
+                ProviderName = llm  // Use LLM from region config
             });
             
             // Set the prompt template (can fire and forget as it's not critical for callbacks)

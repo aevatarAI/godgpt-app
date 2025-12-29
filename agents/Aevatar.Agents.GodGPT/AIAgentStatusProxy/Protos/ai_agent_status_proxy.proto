@@ -23,6 +23,7 @@ message AIAgentStatusProxyStateProto {
 message AIAgentStatusProxyConfigProto {
     google.protobuf.Duration request_recovery_delay = 1;
     string parent_id = 2;  // Guid as string
+    string provider_name = 3;  // LLM provider name from LLMRegion config (e.g., "GodGPT", "GodGPTDouBao")
 }
 
 // =============================================================================

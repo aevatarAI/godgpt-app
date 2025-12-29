@@ -46,9 +46,8 @@ public class AIAgentStatusProxy :
             CustomState.RecoveryDelay = Duration.FromTimeSpan(TimeSpan.FromSeconds(60));
         }
 
-        // Initialize AI with default LLM provider
-        await InitializeAsync(AevatarAgentsConstants.DefaultProviderName, cancellationToken: ct);
-        
+        // AI initialization is deferred to ConfigAsync to allow specifying provider
+        // ConfigAsync will use specified provider or fallback to default
         Logger.LogInformation("[AIAgentStatusProxyNew] Activated with Id={AgentId}", Id);
     }
 
@@ -66,7 +65,30 @@ public class AIAgentStatusProxy :
     /// </summary>
     public async Task ConfigAsync(AIAgentStatusProxyConfigProto config)
     {
-        Logger.LogDebug("[AIAgentStatusProxyNew][ConfigAsync] Configuring proxy with ParentId={ParentId}", config.ParentId);
+        Logger.LogDebug("[AIAgentStatusProxyNew][ConfigAsync] Configuring proxy with ParentId={ParentId}, ProviderName={ProviderName}", 
+            config.ParentId, config.ProviderName);
+        
+        // Initialize AI with specified provider or fallback to default
+        // InitializeAsync has internal guard: if (_isInitialized) return;
+        var factory = RequireLLMProviderFactory();
+        if (!string.IsNullOrWhiteSpace(config.ProviderName))
+        {
+            if (factory.HasProvider(config.ProviderName))
+            {
+                await InitializeAsync(config.ProviderName, cancellationToken: default);
+            }
+            else
+            {
+                Logger.LogWarning("[AIAgentStatusProxyNew][ConfigAsync] Provider '{ProviderName}' not found, using default", config.ProviderName);
+                await InitializeAsync(factory.GetDefaultProviderConfig(), cancellationToken: default);
+            }
+        }
+        else
+        {
+            // Fallback: if no provider specified, ensure AI is initialized with default
+            // This handles the case where proxy is restored from persistence
+            await InitializeAsync(factory.GetDefaultProviderConfig(), cancellationToken: default);
+        }
         
         RaiseEvent(new SetStatusProxyConfigEvent
         {
