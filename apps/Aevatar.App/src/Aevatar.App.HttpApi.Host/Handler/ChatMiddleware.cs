@@ -201,10 +201,11 @@ public class ChatMiddleware
             IMessageStream? messageStream = null;
             if (_messageStreamProvider != null)
             {
-                messageStream = _messageStreamProvider.GetStream(request.SessionId.ToString(), "GodChat");
-                _logger.LogDebug(
-                    "[ChatMiddleware][HandleAuthenticatedChatAsync] Using MassTransit Stream for SessionId={SessionId}",
-                    request.SessionId);
+                var streamId = request.SessionId.ToString();
+                messageStream = _messageStreamProvider.GetStream(streamId, "GodChat");
+                _logger.LogInformation(
+                    "[ChatMiddleware][HandleAuthenticatedChatAsync] Registered MassTransit Stream for StreamId='{StreamId}', SessionId={SessionId}",
+                    streamId, request.SessionId);
             }
             
             if (messageStream == null)
@@ -260,6 +261,10 @@ public class ChatMiddleware
             // CRITICAL: Subscribe BEFORE calling StartStreamChatAsync to avoid race condition
             // Messages may arrive immediately after StartStreamChatAsync is called
             // Subscribe to MassTransit Stream
+            var streamId = request.SessionId.ToString();
+            _logger.LogInformation(
+                "[ChatMiddleware][HandleAuthenticatedChatAsync] Subscribing to StreamId='{StreamId}', ChatId={ChatId}",
+                streamId, chatId);
             messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
             {
                 try

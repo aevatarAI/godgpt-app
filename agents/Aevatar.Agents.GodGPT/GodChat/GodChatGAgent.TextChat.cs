@@ -110,7 +110,6 @@ public partial class GodChatGAgent
             {
                 await PublishAsync(chatMessage.ToProto());
             }
-
             return;
         }
 

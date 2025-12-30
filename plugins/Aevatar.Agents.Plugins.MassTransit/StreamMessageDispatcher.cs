@@ -109,22 +109,43 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
     {
         if (_serviceProvider == null)
         {
+            _logger.LogWarning("LocalHandler: ServiceProvider is null for StreamId {StreamId}", streamId);
             return false;
         }
         
         try
         {
             var streamProvider = _serviceProvider.GetService<MassTransitMessageStreamProvider>();
-            if (streamProvider != null)
+            if (streamProvider == null)
             {
-                var localStream = streamProvider.GetStreamInternal(streamId);
-                if (localStream != null)
+                _logger.LogWarning("LocalHandler: MassTransitMessageStreamProvider not found for StreamId {StreamId}", streamId);
+                return false;
+            }
+            
+            var localStream = streamProvider.GetStreamInternal(streamId);
+            if (localStream != null)
+            {
+                var handlerCount = localStream.GetHandlerCount();
+                _logger.LogDebug("LocalHandler: Found local stream for StreamId {StreamId} with {HandlerCount} handlers", 
+                    streamId, handlerCount);
+                    
+                if (handlerCount == 0)
                 {
-                    await localStream.DispatchAsync(data);
-                    _logger.LogDebug("Event {EventId} dispatched to local stream subscribers for StreamId {StreamId}", 
-                        envelope.Id, streamId);
-                    return true;
+                    _logger.LogWarning("LocalHandler: Local stream found but no handlers registered for StreamId {StreamId}", streamId);
+                    return false;
                 }
+                
+                await localStream.DispatchAsync(data);
+                _logger.LogDebug("Event {EventId} dispatched to local stream subscribers for StreamId {StreamId}", 
+                    envelope.Id, streamId);
+                return true;
+            }
+            else
+            {
+                // Log all registered stream IDs to help diagnose mismatch
+                var registeredIds = streamProvider.GetAllStreamIds();
+                _logger.LogWarning("LocalHandler: No local stream found for StreamId '{StreamId}'. Registered streams: [{RegisteredIds}]", 
+                    streamId, string.Join(", ", registeredIds));
             }
         }
         catch (System.Exception ex)

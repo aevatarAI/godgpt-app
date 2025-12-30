@@ -159,13 +159,29 @@ public partial class GodChatGAgent
                 IsLastChunk = true,
                 SerialNumber = -2
             };
-            if (contextDto.MessageId.IsNullOrWhiteSpace())
+            
+            // Check if this is an HTTP request
+            bool isErrorHttpRequest = false;
+            if (!contextDto.MessageId.IsNullOrWhiteSpace())
+            {
+                try
+                {
+                    var messageData = JsonConvert.DeserializeObject<Dictionary<string, object>>(contextDto.MessageId);
+                    isErrorHttpRequest = messageData != null && 
+                                        messageData.ContainsKey("IsHttpRequest") && 
+                                        (bool)messageData["IsHttpRequest"];
+                }
+                catch { /* ignore parse errors */ }
+            }
+            
+            if (isErrorHttpRequest)
+            {
+                await PushMessageToClientAsync(chatMessage);
+            }
+            else
             {
                 await PublishAsync(chatMessage.ToProto());
-                return;
             }
-
-            await PushMessageToClientAsync(chatMessage);
             return;
         }
 
@@ -578,13 +594,36 @@ public partial class GodChatGAgent
             }
         }
 
-        if (contextDto.MessageId.IsNullOrWhiteSpace())
+        // Determine if this is an HTTP request by checking MessageId (contains IsHttpRequest flag)
+        // MessageId is a JSON string like: {"IsHttpRequest":true, "LLM":"...", ...}
+        bool isHttpRequest = false;
+        if (!contextDto.MessageId.IsNullOrWhiteSpace())
         {
-            await PublishAsync(partialMessage.ToProto());
+            try
+            {
+                var messageData = JsonConvert.DeserializeObject<Dictionary<string, object>>(contextDto.MessageId);
+                isHttpRequest = messageData != null && 
+                               messageData.ContainsKey("IsHttpRequest") && 
+                               (bool)messageData["IsHttpRequest"];
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "[ChatMessageCallbackAsync] Failed to parse MessageId for IsHttpRequest check");
+            }
+        }
+        
+        Logger.LogDebug("[ChatMessageCallbackAsync] ChatId={ChatId}, SerialNumber={SerialNumber}, IsHttpRequest={IsHttpRequest}", 
+            partialMessage.ChatId, chatContent.SerialNumber, isHttpRequest);
+        
+        if (isHttpRequest)
+        {
+            // HTTP request: send to client via MassTransit Kafka
+            await PushMessageToClientAsync(partialMessage);
         }
         else
         {
-            await PushMessageToClientAsync(partialMessage);
+            // Internal agent communication: publish to downstream agents
+            await PublishAsync(partialMessage.ToProto());
         }
 
         // Clean up agent context when processing is complete (last chunk)
@@ -615,8 +654,8 @@ public partial class GodChatGAgent
             }
             else
             {
-                Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] Cannot parse session GUID from Id: {Id}");
-                sessionGuid = Guid.Empty;
+                Logger.LogError($"[GodChatGAgent][PushMessageToClientAsync] Cannot parse session GUID from Id: {Id}");
+                throw new InvalidOperationException($"Cannot parse session GUID from Id: {Id}");
             }
         }
         else if (Guid.TryParse(Id, out var directParsed))
@@ -625,53 +664,41 @@ public partial class GodChatGAgent
         }
         else
         {
-            Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] Cannot parse session GUID from Id: {Id}");
-            sessionGuid = Guid.Empty;
+            Logger.LogError($"[GodChatGAgent][PushMessageToClientAsync] Cannot parse session GUID from Id: {Id}");
+            throw new InvalidOperationException($"Cannot parse session GUID from Id: {Id}");
         }
         
+        var streamId = sessionGuid.ToString();
         Logger.LogDebug(
-            $"[GodChatGAgent][PushMessageToClientAsync] sessionId {sessionGuid}, using MassTransit Kafka");
+            $"[GodChatGAgent][PushMessageToClientAsync] Publishing to StreamId='{streamId}', sessionGuid={sessionGuid}, Id={Id}");
         
-        try
+        // Use MassTransit Stream via IMessageStreamProvider (no Orleans Stream fallback)
+        if (ServiceProvider == null)
         {
-            // Use MassTransit Stream via IMessageStreamProvider
-            if (ServiceProvider == null)
-            {
-                Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] ServiceProvider is null, falling back to PublishAsync");
-                await PublishAsync(chatMessage.ToProto());
-                return;
-            }
-            
-            var messageStreamProvider = ServiceProvider.GetService<IMessageStreamProvider>();
-            if (messageStreamProvider == null)
-            {
-                Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] IMessageStreamProvider not found, falling back to PublishAsync");
-                await PublishAsync(chatMessage.ToProto());
-                return;
-            }
-            
-            // Create MassTransit stream with category "GodChat" (maps to "godgpt-chat-responses" topic)
-            var stream = messageStreamProvider.GetStream(sessionGuid.ToString(), "GodChat");
-            
-            // Wrap ResponseStreamGodChatProto in EventEnvelope
-            var proto = chatMessage.ToProto();
-            var envelope = new EventEnvelope
-            {
-                Id = Guid.NewGuid().ToString(),
-                Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
-                Version = 0,
-                Payload = Any.Pack(proto)
-            };
-            
-            await stream.ProduceAsync(envelope);
-            Logger.LogDebug($"[GodChatGAgent][PushMessageToClientAsync] Successfully pushed message to MassTransit Kafka stream");
+            throw new InvalidOperationException("[PushMessageToClientAsync] ServiceProvider is null. MassTransit Stream requires ServiceProvider.");
         }
-        catch (Exception ex)
+        
+        var messageStreamProvider = ServiceProvider.GetService<IMessageStreamProvider>();
+        if (messageStreamProvider == null)
         {
-            Logger.LogError(ex, $"[GodChatGAgent][PushMessageToClientAsync] Failed to push message to MassTransit stream, falling back to PublishAsync");
-            // Fallback to PublishAsync for backward compatibility
-            await PublishAsync(chatMessage.ToProto());
+            throw new InvalidOperationException("[PushMessageToClientAsync] IMessageStreamProvider not found. MassTransit Stream is required.");
         }
+        
+        // Create MassTransit stream with category "GodChat" (maps to "godgpt-chat-responses" topic)
+        var stream = messageStreamProvider.GetStream(streamId, "GodChat");
+        
+        // Wrap ResponseStreamGodChatProto in EventEnvelope
+        var proto = chatMessage.ToProto();
+        var envelope = new EventEnvelope
+        {
+            Id = Guid.NewGuid().ToString(),
+            Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
+            Version = 0,
+            Payload = Any.Pack(proto)
+        };
+        
+        await stream.ProduceAsync(envelope);
+        Logger.LogDebug($"[GodChatGAgent][PushMessageToClientAsync] Successfully pushed message to MassTransit stream, StreamId={streamId}");
     }
 }
 
