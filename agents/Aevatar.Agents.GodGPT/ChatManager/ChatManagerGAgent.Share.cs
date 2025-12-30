@@ -74,23 +74,54 @@ public partial class ChatGAgentManager
 
     public async Task<ShareLinkProto> GetChatShareContentAsync(Guid sessionId, Guid shareId)
     {
+        // Enhanced diagnostic logging for share link issues
+        Logger.LogInformation(
+            "[ChatGAgentManager][GetChatShareContentAsync] START - UserId: {UserId}, SessionId: {SessionId}, ShareId: {ShareId}, " +
+            "State.SessionCount: {SessionCount}, State.CurrentShareCount: {CurrentShareCount}",
+            Id, sessionId, shareId, State.SessionInfoList.Count, State.CurrentShareCount);
+        
+        // Log all sessions in state for debugging
+        foreach (var s in State.SessionInfoList.Take(10))
+        {
+            Logger.LogInformation(
+                "[ChatGAgentManager][GetChatShareContentAsync] Session in State: SessionId={SId}, Title={Title}, ShareId={ShareId}",
+                s.SessionId, s.Title ?? "(empty)", s.ShareId ?? "(none)");
+        }
+        if (State.SessionInfoList.Count > 10)
+        {
+            Logger.LogInformation("[ChatGAgentManager][GetChatShareContentAsync] ... and {More} more sessions", 
+                State.SessionInfoList.Count - 10);
+        }
+        
         var sessionInfo = State.GetSession(sessionId);
-        Logger.LogDebug($"[ChatGAgentManager][GetChatShareContentAsync] - session {sessionInfo?.SessionId.ToString()}");
+        Logger.LogInformation(
+            "[ChatGAgentManager][GetChatShareContentAsync] GetSession result: Found={Found}, SessionId={FoundSessionId}",
+            sessionInfo != null, sessionInfo?.SessionId ?? "(null)");
+        
         var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
         if (sessionInfo == null)
         {
-            Logger.LogDebug(
-                $"[ChatGAgentManager][GetChatShareContentAsync] - session {sessionId.ToString()}, session not found.");
+            Logger.LogWarning(
+                "[ChatGAgentManager][GetChatShareContentAsync] FAIL - Session NOT FOUND in State. " +
+                "RequestedSessionId: {SessionId}, AvailableSessionIds: [{AvailableIds}]",
+                sessionId, string.Join(", ", State.SessionInfoList.Select(s => s.SessionId).Take(5)));
             var localizedMessage =
                 _localizationService.GetLocalizedException(ExceptionMessageKeys.ConversationDeleted, language);
             throw new UserFriendlyException(localizedMessage);
         }
 
         var shareIds = sessionInfo.GetShareIds();
+        Logger.LogInformation(
+            "[ChatGAgentManager][GetChatShareContentAsync] ShareId check - StoredShareId: {StoredShareId}, " +
+            "RequestedShareId: {RequestedShareId}, Match: {Match}",
+            sessionInfo.ShareId ?? "(empty)", shareId, shareIds.Contains(shareId));
+        
         if (shareIds.IsNullOrEmpty() || !shareIds.Contains(shareId))
         {
-            Logger.LogDebug(
-                $"[ChatGAgentManager][GetChatShareContentAsync] - session {sessionId.ToString()}, shareId not found.");
+            Logger.LogWarning(
+                "[ChatGAgentManager][GetChatShareContentAsync] FAIL - ShareId NOT FOUND. " +
+                "StoredShareId: {StoredShareId}, RequestedShareId: {RequestedShareId}",
+                sessionInfo.ShareId ?? "(empty)", shareId);
             var localizedMessage =
                 _localizationService.GetLocalizedException(ExceptionMessageKeys.ConversationDeleted, language);
             throw new UserFriendlyException(localizedMessage);
