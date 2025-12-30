@@ -18,7 +18,17 @@ public abstract class LLMProviderFactoryBase : ILLMProviderFactory
     {
         Config = config.Value ?? throw new ArgumentNullException(nameof(config));
         Logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        ProviderConfigs = new Dictionary<string, LLMProviderConfig>(Config.Providers);
+        
+        // Copy providers and ensure Name property is set from dictionary key
+        // (ASP.NET Config binding doesn't auto-populate Name from the key)
+        ProviderConfigs = new Dictionary<string, LLMProviderConfig>();
+        foreach (var kvp in Config.Providers)
+        {
+            var providerConfig = kvp.Value;
+            providerConfig.Name = kvp.Key;  // Set Name from dictionary key
+            ProviderConfigs[kvp.Key] = providerConfig;
+        }
+        
         RegisterProviders();
     }
 
