@@ -9,7 +9,7 @@ namespace Aevatar.Agents.Runtime.Orleans;
 /// Silo-side IGAgentActorFactory implementation (for OrleansGrain internal use).
 /// Creates <see cref="SiloGAgentActor"/> which delegates to <see cref="IGAgentGrain"/> via <see cref="IGrainFactory"/>.
 /// </summary>
-internal sealed class SiloGAgentActorFactory : IGAgentActorFactory
+public sealed class SiloGAgentActorFactory : IGAgentActorFactory
 {
     private readonly IGrainFactory _grainFactory;
     private readonly ILogger<SiloGAgentActorFactory> _logger;

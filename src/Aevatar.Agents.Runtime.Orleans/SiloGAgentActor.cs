@@ -14,7 +14,7 @@ namespace Aevatar.Agents.Runtime.Orleans;
 /// - When running inside Silo, avoid creating client proxies (IClusterClient)
 /// - Delegate all operations to the underlying IGAgentGrain
 /// </summary>
-internal sealed class SiloGAgentActor : IGAgentActor
+public sealed class SiloGAgentActor : IGAgentActor
 {
     private readonly IGrainFactory _grainFactory;
     private readonly string _rawId;
