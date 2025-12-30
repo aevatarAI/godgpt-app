@@ -357,54 +357,81 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
             return true;
         }
 
+        var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        
         try
         {
-            _logger.LogInformation("🔧 Initializing Agent in Grain {GrainId}, Type: {AgentType}", 
+            _logger.LogInformation("[PERF][GrainInit] Starting for Grain {GrainId}, Type: {AgentType}", 
                 this.GetGrainId(), agentTypeName);
 
             // Ensure agentId is in normalized ActorId format for consistent self-handling and stream routing.
             agentId = NormalizeActorId(agentTypeName, agentId);
 
             // Resolve Agent type
+            var resolveStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var agentType = ResolveAgentType(agentTypeName);
+            resolveStopwatch.Stop();
+            
             if (agentType == null)
             {
                 _logger.LogError("Failed to resolve Agent type: {AgentType}", agentTypeName);
                 return false;
             }
+            _logger.LogDebug("[PERF][GrainInit] Type resolve for {GrainId}: {Duration}ms", 
+                this.GetGrainId(), resolveStopwatch.ElapsedMilliseconds);
 
             // Create Agent instance using DI
+            var createStopwatch = System.Diagnostics.Stopwatch.StartNew();
             _agent = CreateAgentInstance(agentType, agentId);
+            createStopwatch.Stop();
+            
             if (_agent == null)
             {
                 _logger.LogError("Failed to create Agent instance: {AgentType}", agentTypeName);
                 return false;
             }
+            _logger.LogDebug("[PERF][GrainInit] Instance creation for {GrainId}: {Duration}ms", 
+                this.GetGrainId(), createStopwatch.ElapsedMilliseconds);
 
             // Inject dependencies
+            var injectStopwatch = System.Diagnostics.Stopwatch.StartNew();
             InjectAgentDependencies(_agent);
+            injectStopwatch.Stop();
+            _logger.LogDebug("[PERF][GrainInit] Dependency injection for {GrainId}: {Duration}ms", 
+                this.GetGrainId(), injectStopwatch.ElapsedMilliseconds);
 
-            // Activate Agent
+            // Activate Agent (this includes event replay!)
+            var activateStopwatch = System.Diagnostics.Stopwatch.StartNew();
             await _agent.ActivateAsync(CancellationToken.None);
+            activateStopwatch.Stop();
+            _logger.LogInformation("[PERF][GrainInit] Agent activation for {GrainId} ({AgentType}): {Duration}ms", 
+                this.GetGrainId(), agentType.Name, activateStopwatch.ElapsedMilliseconds);
 
             _isInitialized = true;
 
             // Persist Agent info for recovery
             if (persistState)
             {
+                var persistStopwatch = System.Diagnostics.Stopwatch.StartNew();
                 _grainState.State.AgentTypeName = agentTypeName;
                 _grainState.State.AgentId = agentId;
                 await _grainState.WriteStateAsync();
+                persistStopwatch.Stop();
+                _logger.LogDebug("[PERF][GrainInit] State persistence for {GrainId}: {Duration}ms", 
+                    this.GetGrainId(), persistStopwatch.ElapsedMilliseconds);
             }
 
-            _logger.LogInformation("✅ Agent initialized successfully in Grain {GrainId}, Type: {AgentType}", 
-                this.GetGrainId(), agentType.Name);
+            totalStopwatch.Stop();
+            _logger.LogInformation("[PERF][GrainInit] ✅ Completed for {GrainId} ({AgentType}): total={Duration}ms", 
+                this.GetGrainId(), agentType.Name, totalStopwatch.ElapsedMilliseconds);
 
             return true;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error initializing Agent in Grain {GrainId}", this.GetGrainId());
+            totalStopwatch.Stop();
+            _logger.LogError(ex, "[PERF][GrainInit] ❌ Failed for {GrainId} after {Duration}ms", 
+                this.GetGrainId(), totalStopwatch.ElapsedMilliseconds);
             return false;
         }
     }

@@ -28,10 +28,17 @@ public static class RpcInvoker
             Success = false
         };
 
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var agentId = agent?.Id ?? "unknown";
+        var agentType = agent?.GetType().Name ?? "unknown";
+        
         try
         {
             if (agent == null)
                 throw new InvalidOperationException("Agent not initialized");
+
+            logger?.LogDebug("[PERF][RPC] Starting {Method} on {AgentId} ({AgentType})", 
+                request.MethodName, agentId, agentType);
 
             // Pass argument count to select correct method overload
             var method = GetCachedMethod(agent.GetType(), request.MethodName, request.Args.Count);
@@ -48,9 +55,23 @@ public static class RpcInvoker
             // Always pack result (even if null, it will be packed as Empty)
             response.Result = ProtobufPacker.Pack(result);
             response.Success = true;
+            
+            stopwatch.Stop();
+            // Log warning if RPC takes more than 1 second
+            if (stopwatch.ElapsedMilliseconds > 1000)
+            {
+                logger?.LogWarning("[PERF][RPC] ⚠️ SLOW: {Method} on {AgentId} ({AgentType}) took {Duration}ms", 
+                    request.MethodName, agentId, agentType, stopwatch.ElapsedMilliseconds);
+            }
+            else
+            {
+                logger?.LogDebug("[PERF][RPC] Completed {Method} on {AgentId}: {Duration}ms", 
+                    request.MethodName, agentId, stopwatch.ElapsedMilliseconds);
+            }
         }
         catch (Exception ex)
         {
+            stopwatch.Stop();
             var innerEx = ex is TargetInvocationException tie ? tie.InnerException ?? ex : ex;
             response.Error = new RpcError
             {
@@ -58,7 +79,8 @@ public static class RpcInvoker
                 Message = innerEx.Message,
                 StackTrace = innerEx.StackTrace ?? string.Empty
             };
-            logger?.LogError(innerEx, "RPC method {Method} failed", request.MethodName);
+            logger?.LogError(innerEx, "[PERF][RPC] ❌ {Method} on {AgentId} failed after {Duration}ms: {Error}", 
+                request.MethodName, agentId, stopwatch.ElapsedMilliseconds, innerEx.Message);
         }
 
         return response.ToByteArray();

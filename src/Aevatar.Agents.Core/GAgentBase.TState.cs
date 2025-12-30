@@ -133,6 +133,9 @@ public abstract class GAgentBase<TState> : GAgentBase, IStateGAgent<TState>
 
     protected override async Task OnActivateAsync(CancellationToken ct = default)
     {
+        var activationStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        Logger?.LogInformation("[PERF][Activation] Starting for {AgentId} ({AgentType})", Id, GetType().Name);
+        
         await base.OnActivateAsync(ct);
         
         // StateProjector is injected by StateProjectorInjector after agent creation
@@ -153,6 +156,7 @@ public abstract class GAgentBase<TState> : GAgentBase, IStateGAgent<TState>
             // Simple state mode: Load state directly from StateStore
             // Only load if there's persisted state, otherwise keep current state
             // (allows subclass to set default values before calling base.OnActivateAsync)
+            var stateLoadStopwatch = System.Diagnostics.Stopwatch.StartNew();
             using (StateProtectionContext.BeginEventHandlerScope())
             {
                 var loadedState = await StateStore.LoadAsync(Id, ct);
@@ -161,7 +165,14 @@ public abstract class GAgentBase<TState> : GAgentBase, IStateGAgent<TState>
                     _state = loadedState;
                 }
             }
+            stateLoadStopwatch.Stop();
+            Logger?.LogInformation("[PERF][Activation] StateStore load for {AgentId}: {Duration}ms", 
+                Id, stateLoadStopwatch.ElapsedMilliseconds);
         }
+        
+        activationStopwatch.Stop();
+        Logger?.LogInformation("[PERF][Activation] Completed for {AgentId} ({AgentType}): {Duration}ms", 
+            Id, GetType().Name, activationStopwatch.ElapsedMilliseconds);
     }
 
     // ============ IStateGAgent Implementation ============
@@ -464,46 +475,64 @@ public abstract class GAgentBase<TState> : GAgentBase, IStateGAgent<TState>
     /// </summary>
     public async Task ReplayEventsAsync(CancellationToken ct = default)
     {
+        var totalStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        
         if (EventStore == null)
         {
             Logger?.LogWarning("EventStore not configured, cannot replay events");
             return;
         }
 
-        Logger.LogInformation("Replaying events for agent {AgentId}, starting from version {CurrentVersion}", Id,
-            _currentVersion);
+        Logger.LogInformation("[PERF][ReplayEvents] Starting for agent {AgentId} ({AgentType}), from version {CurrentVersion}", 
+            Id, GetType().Name, _currentVersion);
 
         // Step 1: Load latest snapshot from StateStore (if available)
         // StateStore provides per-type collections (agent_snapshots_{StateType})
         if (StateStore != null)
         {
+            var snapshotStopwatch = System.Diagnostics.Stopwatch.StartNew();
             await LoadSnapshotFromStateStoreAsync(ct);
+            snapshotStopwatch.Stop();
+            Logger.LogInformation("[PERF][ReplayEvents] Snapshot load for {AgentId}: {Duration}ms, version after snapshot: {Version}", 
+                Id, snapshotStopwatch.ElapsedMilliseconds, _currentVersion);
         }
 
         // Step 2: Replay events after snapshot (pass agent type name for per-type collection routing)
         var fromVersion = _currentVersion + 1;
         var agentTypeName = GetType().FullName;
+        
+        var queryStopwatch = System.Diagnostics.Stopwatch.StartNew();
         var events = await EventStore.GetEventsAsync(
             Id,
             fromVersion: fromVersion,
             agentTypeName: agentTypeName,
             ct: ct);
+        queryStopwatch.Stop();
+        
+        Logger.LogInformation("[PERF][ReplayEvents] EventStore query for {AgentId}: {Duration}ms, events found: {Count}, from version: {FromVersion}", 
+            Id, queryStopwatch.ElapsedMilliseconds, events.Count, fromVersion);
 
         if (!events.Any())
         {
+            totalStopwatch.Stop();
+            Logger.LogInformation("[PERF][ReplayEvents] No events to replay for {AgentId}, total: {Duration}ms", 
+                Id, totalStopwatch.ElapsedMilliseconds);
             return;
         }
 
         // Step 3: Apply events
+        var applyStopwatch = System.Diagnostics.Stopwatch.StartNew();
         foreach (var evt in events.OrderBy(e => e.Version))
         {
             await ApplyEventInternalAsync(evt, ct);
             _currentVersion = evt.Version;
         }
-
+        applyStopwatch.Stop();
+        
+        totalStopwatch.Stop();
         Logger.LogInformation(
-            "Replayed {Count} events for agent {AgentId}, current version: {Version}",
-            events.Count, Id, _currentVersion);
+            "[PERF][ReplayEvents] Completed for {AgentId} ({AgentType}): total={TotalMs}ms, apply={ApplyMs}ms, events={Count}, version={Version}",
+            Id, GetType().Name, totalStopwatch.ElapsedMilliseconds, applyStopwatch.ElapsedMilliseconds, events.Count, _currentVersion);
     }
 
     /// <summary>

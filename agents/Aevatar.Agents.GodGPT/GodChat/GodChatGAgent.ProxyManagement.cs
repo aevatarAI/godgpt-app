@@ -146,67 +146,71 @@ public partial class GodChatGAgent
         }
         
         var oldSystemPrompt = await (await GetConfigurationAsync()).GetPromptAsync();
+        var baseSystemPrompt = rolePrompts.IsNullOrWhiteSpace() ? State.PromptTemplate : rolePrompts;
+        var dateInfo = $"Today's date is: {DateTime.UtcNow:yyyy-MM-dd}. Please use this date as reference for time-related questions.";
 
-        var proxies = new List<string>();
+        // ✅ 并行创建所有 Proxy（性能优化：从串行 N*T 变为并行 T）
         var totalProxyStopwatch = Stopwatch.StartNew();
-        foreach (var llm in llmsForRegion)
+        var proxyTasks = llmsForRegion.Select(async llm =>
         {
-            var systemPrompt = rolePrompts.IsNullOrWhiteSpace() ? State.PromptTemplate : rolePrompts;
-            
-            // Add conversation suggestions prompt and timestamp to system prompt
-            var dateInfo = $"Today's date is: {DateTime.UtcNow:yyyy-MM-dd}. Please use this date as reference for time-related questions.";
-            
-            var isDailyGuide = systemPrompt == DailyGuide;
+            // Build system prompt for this LLM
+            string systemPrompt;
+            var isDailyGuide = baseSystemPrompt == DailyGuide;
             if (isDailyGuide)
             {
                 systemPrompt = @"Generate a personalized ""Today's Dos and Don'ts"" for the user based on their information and cosmological theories.";
             }
+            else if (llm != LocalBackupModel)
+            {
+                systemPrompt = $"{baseSystemPrompt}\n\n{ChatPrompts.ConversationSuggestionsPrompt}\n\n{dateInfo}";
+            }
             else
             {
-                if (llm != LocalBackupModel)
-                {
-                    systemPrompt = $"{systemPrompt}\n\n{ChatPrompts.ConversationSuggestionsPrompt}\n\n{dateInfo}";
-                }
-                else
-                {
-                    systemPrompt = $"{oldSystemPrompt} {systemPrompt}\n\n{ChatPrompts.ConversationSuggestionsPrompt}\n\n{dateInfo}";
-                }
+                systemPrompt = $"{oldSystemPrompt} {baseSystemPrompt}\n\n{ChatPrompts.ConversationSuggestionsPrompt}\n\n{dateInfo}";
             }
             
-            // Use new framework to create proxy
+            // Create and configure proxy in parallel
             var newProxyId = Guid.NewGuid().ToString();
             var proxyActor = await _actorFactory.CreateGAgentActorAsync<AIAgentStatusProxy>(newProxyId);
             var proxy = proxyActor.As<IAIAgentStatusProxy>();
             
             // Configure with Protobuf config - pass GodChat's ID as ParentId for callbacks
-            // AIAgentStatusProxy will use SendToAsync(ParentId, event) for direct P2P messaging
-            // MUST await to ensure ParentId is set before any chat calls
             await proxy.ConfigAsync(new AIAgentStatusProxyConfigProto
             {
                 RequestRecoveryDelay = Duration.FromTimeSpan(RequestRecoveryDelay),
-                ParentId = Id.ToString(),  // Convert Guid to string (kept for backward compatibility)
-                ProviderName = llm  // Use LLM from region config
+                ParentId = Id.ToString(),
+                ProviderName = llm
             });
             
-            // Set the prompt template (can fire and forget as it's not critical for callbacks)
+            // Set the prompt template
             await proxy.SetPromptTemplateAsync(systemPrompt);
             
-            RaiseEvent(new UpdateProxyInitStatusEvent
-            {
-                ProxyId = newProxyId,
-                Status = ProxyInitStatus.Initializing.ToProto()
-            });
-            await ConfirmEventsAsync();
-            Logger.LogDebug(
-                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, UpdateProxyInitStatusEvent status Initializing proxyId {newProxyId}");
-            proxies.Add(newProxyId);
             Logger.LogDebug(
                 $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, initialized proxy for region {region} with LLM {llm}. id {newProxyId}");
-        }
+            
+            return newProxyId;
+        }).ToList();
+        
+        // 等待所有 Proxy 并行创建完成
+        var proxyIds = await Task.WhenAll(proxyTasks);
         totalProxyStopwatch.Stop();
+        
+        // ✅ 批量记录事件（性能优化：从 N 次 ConfirmEvents 变为 1 次）
+        foreach (var proxyId in proxyIds)
+        {
+            RaiseEvent(new UpdateProxyInitStatusEvent
+            {
+                ProxyId = proxyId,
+                Status = ProxyInitStatus.Initializing.ToProto()
+            });
+            Logger.LogDebug(
+                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, UpdateProxyInitStatusEvent status Initializing proxyId {proxyId}");
+        }
+        await ConfirmEventsAsync(); // 一次性确认所有事件
+        
         stopwatch.Stop();
-        Logger.LogDebug($"[GodChatGAgent][InitializeRegionProxiesAsync] End - Total Duration: {stopwatch.ElapsedMilliseconds}ms, ProxyCount: {proxies.Count}, TotalProxyTime: {totalProxyStopwatch.ElapsedMilliseconds}ms");
-        return proxies;
+        Logger.LogDebug($"[GodChatGAgent][InitializeRegionProxiesAsync] End - Total Duration: {stopwatch.ElapsedMilliseconds}ms, ProxyCount: {proxyIds.Length}, TotalProxyTime: {totalProxyStopwatch.ElapsedMilliseconds}ms (parallel)");
+        return proxyIds.ToList();
     }
     
     private List<string> GetLLMsForRegion(string region)

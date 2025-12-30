@@ -106,6 +106,8 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
     
     /// <summary>
     /// New framework ConfigAsync - replaces PerformConfigAsync
+    /// ✅ 优化：延迟初始化 Proxy，不在 ConfigAsync 中创建
+    /// Proxy 会在第一次聊天时通过 GetProxyByRegionAsync 懒加载
     /// </summary>
     public new async Task ConfigAsync(GodChatConfig configuration)
     {
@@ -125,9 +127,11 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
             defaultRegion = CNDefaultRegion;
         }
         Logger.LogDebug(
-            $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()},isCN:{isCN}, region:{defaultRegion}");
+            $"[GodChatGAgent][ConfigAsync] session {Id.ToString()}, isCN:{isCN}, region:{defaultRegion} (Proxy will be lazy-loaded on first chat)");
 
-        var proxyIds = await InitializeRegionProxiesAsync(defaultRegion, configuration.Instructions);
+        // ✅ 延迟初始化：不再在这里创建 Proxy
+        // Proxy 会在第一次聊天调用 GetProxyByRegionAsync 时懒加载
+        // var proxyIds = await InitializeRegionProxiesAsync(defaultRegion, configuration.Instructions);
         
         // Optimize: Use combined event to reduce RaiseEvent calls from 3 to 1
         var maxHistoryCount = configuration.MaxHistoryCount;
@@ -141,11 +145,11 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
             maxHistoryCount = 10;
         }
         
-        // Use Protobuf event
+        // Use Protobuf event - 保存配置，但不创建 Proxy
         RaiseEvent(new PerformConfigCombinedEvent
         {
             Region = defaultRegion,
-            ProxyIds = { proxyIds.Select(g => g.ToString()) },
+            ProxyIds = { }, // ✅ 空列表，Proxy 会懒加载
             PromptTemplate = configuration.Instructions ?? "",
             MaxHistoryCount = maxHistoryCount
         });
@@ -153,7 +157,7 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
         await ConfirmEventsAsync();
         
         stopwatch.Stop();
-        Logger.LogDebug($"[GodChatGAgent][ConfigAsync] End - Total Duration: {stopwatch.ElapsedMilliseconds}ms, SessionId: {Id}");
+        Logger.LogDebug($"[GodChatGAgent][ConfigAsync] End - Total Duration: {stopwatch.ElapsedMilliseconds}ms (no Proxy creation), SessionId: {Id}");
     }
 
     public override Task<string> GetDescriptionAsync()
