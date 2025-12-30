@@ -60,8 +60,16 @@ public partial class ChatGAgentManager
         
         await shareLink.SaveShareContentAsync(shareLinkProto);
         
-        Logger.LogDebug(
-            $"[ChatGAgentManager][GenerateChatShareContentAsync] - session: {sessionId.ToString()}, save success");
+        Logger.LogInformation(
+            "[ChatGAgentManager][GenerateChatShareContentAsync] ShareLinkGAgent saved. SessionId: {SessionId}, ShareId: {ShareId}",
+            sessionId, shareId);
+        
+        // Log state before raising event
+        var sessionBeforeEvent = State.GetSession(sessionId);
+        Logger.LogInformation(
+            "[ChatGAgentManager][GenerateChatShareContentAsync] State BEFORE RaiseEvent - SessionExists: {Exists}, CurrentShareId: {CurrentShareId}",
+            sessionBeforeEvent != null, sessionBeforeEvent?.ShareId ?? "(null)");
+        
         RaiseEvent(new GenerateChatShareContentEvent
         {
             SessionId = sessionId.ToString(),
@@ -69,6 +77,21 @@ public partial class ChatGAgentManager
         });
 
         await ConfirmEventsAsync();
+        
+        // Log state after confirming event
+        var sessionAfterEvent = State.GetSession(sessionId);
+        Logger.LogInformation(
+            "[ChatGAgentManager][GenerateChatShareContentAsync] State AFTER ConfirmEvents - SessionExists: {Exists}, CurrentShareId: {CurrentShareId}, Expected: {Expected}",
+            sessionAfterEvent != null, sessionAfterEvent?.ShareId ?? "(null)", shareId);
+        
+        // Verify the shareId was actually saved
+        if (sessionAfterEvent?.ShareId != shareId.ToString())
+        {
+            Logger.LogError(
+                "[ChatGAgentManager][GenerateChatShareContentAsync] CRITICAL - ShareId NOT SAVED! Expected: {Expected}, Actual: {Actual}",
+                shareId, sessionAfterEvent?.ShareId ?? "(null)");
+        }
+        
         return shareId;
     }
 

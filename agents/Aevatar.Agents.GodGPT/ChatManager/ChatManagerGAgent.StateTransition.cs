@@ -79,17 +79,27 @@ public partial class ChatGAgentManager
                 state.CurrentShareCount = 0;
                 break;
             case GenerateChatShareContentEvent generateChatShareContentLogEvent:
+                Logger.LogInformation(
+                    "[ChatGAgentManager][StateTransition][GenerateChatShareContentEvent] Processing - SessionId: {SessionId}, ShareId: {ShareId}, SessionCount: {Count}",
+                    generateChatShareContentLogEvent.SessionId, generateChatShareContentLogEvent.ShareId, state.SessionInfoList.Count);
+                
                 var session = state.GetSession(generateChatShareContentLogEvent.SessionId);
                 if (session == null)
                 {
-                    Logger.LogDebug(
-                        $"[ChatGAgentManager][GenerateChatShareContentEvent] session not fuound: {generateChatShareContentLogEvent.SessionId.ToString()}");
+                    Logger.LogError(
+                        "[ChatGAgentManager][StateTransition][GenerateChatShareContentEvent] FAIL - Session NOT FOUND! SessionId: {SessionId}, AvailableSessions: [{Available}]",
+                        generateChatShareContentLogEvent.SessionId,
+                        string.Join(", ", state.SessionInfoList.Select(s => s.SessionId).Take(5)));
                     break;
                 }
 
+                var oldShareId = session.ShareId;
                 state.CurrentShareCount += 1;
                 // SessionInfoProto has single ShareId field
                 session.AddShareId(Guid.Parse(generateChatShareContentLogEvent.ShareId));
+                Logger.LogInformation(
+                    "[ChatGAgentManager][StateTransition][GenerateChatShareContentEvent] SUCCESS - OldShareId: {Old}, NewShareId: {New}",
+                    oldShareId ?? "(empty)", session.ShareId);
                 break;
             case SetMaxShareCountEvent setMaxShareCountLogEvent:
                 state.MaxShareCount = setMaxShareCountLogEvent.MaxShareCount;
