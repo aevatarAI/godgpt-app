@@ -46,6 +46,29 @@ public interface IGAgentGrain : IGrainWithStringKey
     Task HandleEventAsync(byte[] envelopeBytes);
 
     /// <summary>
+    /// Publish event by envelope bytes (non-blocking, via Stream).
+    /// Used by Silo-internal actor to keep a single IGAgentActor API surface.
+    /// </summary>
+    /// <param name="envelopeBytes">EventEnvelope serialized bytes</param>
+    /// <param name="direction">Propagation direction</param>
+    /// <param name="isInternalCall">
+    /// If true, keeps PublisherId for self-handling check; if false, clears PublisherId so Agent can handle the event.
+    /// </param>
+    /// <returns>Event ID</returns>
+    Task<string> PublishEventAsync(byte[] envelopeBytes, EventDirection direction = EventDirection.Down, bool isInternalCall = false);
+
+    /// <summary>
+    /// Point-to-point send by envelope bytes (non-blocking, via Stream).
+    /// Used by Silo-internal actor to keep a single IGAgentActor API surface.
+    /// </summary>
+    /// <param name="targetAgentId">Target agent id (full ActorId)</param>
+    /// <param name="envelopeBytes">EventEnvelope serialized bytes</param>
+    /// <param name="onArrivalDirection">Propagation direction after arrival</param>
+    /// <param name="isInternalCall">Same semantics as PublishEventAsync</param>
+    /// <returns>Event ID</returns>
+    Task<string> SendToAsync(string targetAgentId, byte[] envelopeBytes, EventDirection onArrivalDirection = EventDirection.Unspecified, bool isInternalCall = false);
+
+    /// <summary>
     /// 添加子 Agent
     /// </summary>
     Task AddChildAsync(string childId);

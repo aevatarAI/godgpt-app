@@ -4,6 +4,9 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPORT_FILE="$SCRIPT_DIR/test-results-$(date +%Y%m%d-%H%M%S).txt"
 
+# Change to script directory so test-*.sh glob works correctly
+cd "$SCRIPT_DIR"
+
 echo "Running all test scripts..." | tee "$REPORT_FILE"
 echo "Started at: $(date)" | tee -a "$REPORT_FILE"
 echo "" | tee -a "$REPORT_FILE"
