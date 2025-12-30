@@ -55,7 +55,7 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
             return;
         }
         
-        _logger.LogDebug("Received message for StreamId {StreamId}, DispatchHandler: {DispatchHandler}", streamId, _dispatchHandler);
+        _logger.LogInformation("Received message for StreamId {StreamId}, DispatchHandler: {DispatchHandler}", streamId, _dispatchHandler);
         
         // Parse the envelope first
         EventEnvelope envelope;
@@ -126,7 +126,7 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
             if (localStream != null)
             {
                 var handlerCount = localStream.GetHandlerCount();
-                _logger.LogDebug("LocalHandler: Found local stream for StreamId {StreamId} with {HandlerCount} handlers", 
+                _logger.LogInformation("LocalHandler: Found local stream for StreamId {StreamId} with {HandlerCount} handlers", 
                     streamId, handlerCount);
                     
                 if (handlerCount == 0)
@@ -136,7 +136,7 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
                 }
                 
                 await localStream.DispatchAsync(data);
-                _logger.LogDebug("Event {EventId} dispatched to local stream subscribers for StreamId {StreamId}", 
+                _logger.LogInformation("Event {EventId} dispatched to local stream subscribers for StreamId {StreamId}", 
                     envelope.Id, streamId);
                 return true;
             }

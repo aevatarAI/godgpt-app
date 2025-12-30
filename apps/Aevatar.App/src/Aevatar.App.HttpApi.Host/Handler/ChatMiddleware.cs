@@ -286,7 +286,7 @@ public class ChatMiddleware
                     {
                         await context.Response.StartAsync();
                         firstFlag = true;
-                        _logger.LogDebug(
+                        _logger.LogInformation(
                             "[ChatMiddleware][HandleAuthenticatedChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
                             request.SessionId, stopwatch.ElapsedMilliseconds);
                     }
@@ -499,7 +499,7 @@ public class ChatMiddleware
                     {
                         await context.Response.StartAsync();
                         firstFlag = true;
-                        _logger.LogDebug(
+                        _logger.LogInformation(
                             "[ChatMiddleware][HandleGuestChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
                             sessionId, stopwatch.ElapsedMilliseconds);
                     }
@@ -763,7 +763,7 @@ public class ChatMiddleware
                     {
                         await context.Response.StartAsync();
                         firstFlag = true;
-                        _logger.LogDebug(
+                        _logger.LogInformation(
                             "[ChatMiddleware][HandleVoiceChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
                             request.SessionId, stopwatch.ElapsedMilliseconds);
                     }
