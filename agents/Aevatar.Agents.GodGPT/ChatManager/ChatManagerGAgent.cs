@@ -73,7 +73,23 @@ public partial class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatMana
     
     protected override async Task OnActivateAsync(CancellationToken cancellationToken = default)
     {
+        // Diagnostic logging: State BEFORE replay
+        var versionBefore = GetCurrentVersion();
+        var sessionCountBefore = State?.SessionInfoList?.Count ?? 0;
+        var sessionIds = State?.SessionInfoList?.Take(3).Select(s => $"{s.SessionId}:{s.ShareId ?? "no-share"}").ToList() ?? new List<string>();
+        Logger.LogInformation(
+            "[ChatGAgentManager][OnActivateAsync] BEFORE base.OnActivateAsync - AgentId: {AgentId}, Version: {Version}, SessionCount: {Count}, Sessions: [{Sessions}]",
+            Id, versionBefore, sessionCountBefore, string.Join(", ", sessionIds));
+        
         await base.OnActivateAsync(cancellationToken);
+        
+        // Diagnostic logging: State AFTER replay
+        var versionAfter = GetCurrentVersion();
+        var sessionCountAfter = State?.SessionInfoList?.Count ?? 0;
+        var sessionIdsAfter = State?.SessionInfoList?.Take(5).Select(s => $"{s.SessionId}:{s.ShareId ?? "no-share"}").ToList() ?? new List<string>();
+        Logger.LogInformation(
+            "[ChatGAgentManager][OnActivateAsync] AFTER base.OnActivateAsync - AgentId: {AgentId}, Version: {Version}, SessionCount: {Count}, Sessions: [{Sessions}]",
+            Id, versionAfter, sessionCountAfter, string.Join(", ", sessionIdsAfter));
         
         // Check and initialize first access status if needed
         var firstAccess = await CheckAndInitializeFirstAccessStatus();
