@@ -83,7 +83,31 @@ public sealed class MEAILLMProviderFactory : LLMProviderFactoryBase
         if (!string.IsNullOrWhiteSpace(config.Endpoint))
             clientOptions.Endpoint = new Uri(config.Endpoint);
 
-        return new ChatClient(config.Model, new ApiKeyCredential(config.ApiKey), clientOptions).AsIChatClient();
+        var innerClient = new ChatClient(config.Model, new ApiKeyCredential(config.ApiKey), clientOptions).AsIChatClient();
+
+        // Wrap with ProxyCompatibleChatClient for custom endpoints (non-OpenAI proxies)
+        // This provides better SSE parsing compatibility with proxies like hyperecho-proxy
+        // VERIFIED: hyperecho-proxy returns non-standard SSE format for streaming requests with Tools
+        // which causes JsonReaderException in OpenAI SDK's SSE parser
+        if (!string.IsNullOrWhiteSpace(config.Endpoint) && !IsOfficialOpenAIEndpoint(config.Endpoint))
+        {
+            var logger = _serviceProvider.GetService<ILogger<ProxyCompatibleChatClient>>();
+            Logger.LogInformation("[MEAIFactory] Using ProxyCompatibleChatClient for custom endpoint: {Endpoint}", config.Endpoint);
+            return new ProxyCompatibleChatClient(innerClient, config.Endpoint, config.ApiKey, config.Model, logger);
+        }
+
+        return innerClient;
+    }
+
+    /// <summary>
+    /// Check if the endpoint is an official OpenAI or Azure OpenAI endpoint
+    /// </summary>
+    private static bool IsOfficialOpenAIEndpoint(string endpoint)
+    {
+        var lowerEndpoint = endpoint.ToLowerInvariant();
+        return lowerEndpoint.Contains("api.openai.com") ||
+               lowerEndpoint.Contains("openai.azure.com") ||
+               lowerEndpoint.Contains("services.ai.azure.com");
     }
 
     private IChatClient CreateAzureOpenAIChatClient(LLMProviderConfig config)
