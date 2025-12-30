@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.Agents.GodGPT.Protos;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
@@ -108,7 +109,7 @@ public partial class ChatGAgentManager
         if (userProfile != null)
         {
             Logger.LogDebug("CreateSessionAsync set user profile. session={0}", sessionId);
-            var userProfileActor = await _actorFactory.CreateGAgentActorAsync<UserProfileGAgent>(Id);
+            var userProfileActor = await _actorFactory.CreateGAgentActorAsync<UserProfileGAgent>(AgentId.ExtractRawId(Id));
             var userProfileGAgent = userProfileActor.As<IUserProfileGAgent>();
             await userProfileGAgent.SetUserProfileAsync(userProfile.Gender, userProfile.BirthDate, userProfile.BirthPlace, userProfile.FullName);
             Logger.LogDebug("CreateSessionAsync set GodChat user profile. session={0}", sessionId);
@@ -307,7 +308,7 @@ public partial class ChatGAgentManager
         var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(Id);
         await userInfoCollectionGAgent.ClearAllAsync();
 
-        var userProfileActor = await _actorFactory.CreateGAgentActorAsync<UserProfileGAgent>(Id);
+        var userProfileActor = await _actorFactory.CreateGAgentActorAsync<UserProfileGAgent>(AgentId.ExtractRawId(Id));
         var userProfileGAgent = userProfileActor.As<IUserProfileGAgent>();
         await userProfileGAgent.ClearAsync();
 

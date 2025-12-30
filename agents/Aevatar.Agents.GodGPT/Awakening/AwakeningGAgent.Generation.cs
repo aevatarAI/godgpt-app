@@ -1,3 +1,4 @@
+using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
 using Aevatar.Application.Grains.GodChat;
@@ -40,7 +41,7 @@ public partial class AwakeningGAgent
                 var userId = Guid.Parse(Id);
                 
                 // Get IGodChat instance for current user using new framework
-                var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(Id);
+                var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(AgentId.ExtractRawId(Id));
                 var godChat = godChatActor.As<IGodChat>();
                 var chatId = Guid.NewGuid().ToString();
                 

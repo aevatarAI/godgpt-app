@@ -1,3 +1,4 @@
+using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.GAgents.AI.Common;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
@@ -22,8 +23,8 @@ public partial class AwakeningGAgent
     {
         try
         {
-            // Get current user ID through Grain's Primary Key
-            var userId = Id;
+            // Get current user ID - extract RawId from ActorId (strip type prefix)
+            var userId = AgentId.ExtractRawId(Id);
             
             // Get ChatManagerGAgent for this user using new framework
             var chatManagerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId);
