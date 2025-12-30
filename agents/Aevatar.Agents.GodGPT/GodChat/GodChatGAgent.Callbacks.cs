@@ -612,18 +612,29 @@ public partial class GodChatGAgent
             }
         }
         
-        Logger.LogDebug("[ChatMessageCallbackAsync] ChatId={ChatId}, SerialNumber={SerialNumber}, IsHttpRequest={IsHttpRequest}", 
-            partialMessage.ChatId, chatContent.SerialNumber, isHttpRequest);
+        // TTFT logging: Log time from request start to first message
+        if (chatContent.SerialNumber == 0)
+        {
+            Logger.LogInformation("[PERF][ChatMessageCallbackAsync] TTFT (First Token) - ChatId={ChatId}, IsHttpRequest={IsHttpRequest}", 
+                partialMessage.ChatId, isHttpRequest);
+        }
         
+        var sendSw = System.Diagnostics.Stopwatch.StartNew();
         if (isHttpRequest)
         {
             // HTTP request: send to client via MassTransit Kafka
             await PushMessageToClientAsync(partialMessage);
+            sendSw.Stop();
+            Logger.LogInformation("[PERF][ChatMessageCallbackAsync] PushMessageToClient - ChatId={ChatId}, SerialNumber={SerialNumber}, SendMs={SendMs}ms, IsLastChunk={IsLastChunk}", 
+                partialMessage.ChatId, chatContent.SerialNumber, sendSw.ElapsedMilliseconds, partialMessage.IsLastChunk);
         }
         else
         {
             // Internal agent communication: publish to downstream agents
             await PublishAsync(partialMessage.ToProto());
+            sendSw.Stop();
+            Logger.LogDebug("[ChatMessageCallbackAsync] PublishAsync - ChatId={ChatId}, SerialNumber={SerialNumber}, SendMs={SendMs}ms", 
+                partialMessage.ChatId, chatContent.SerialNumber, sendSw.ElapsedMilliseconds);
         }
 
         // Clean up agent context when processing is complete (last chunk)

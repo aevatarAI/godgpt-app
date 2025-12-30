@@ -215,7 +215,17 @@ public partial class GodChatGAgent
             
             // Build PromptWithStreamInputProto for RPC call
             var protoInput = BuildPromptWithStreamInputProto(enhancedMessage, State.ChatHistory.FromProtoList(), settings, aiChatContextDto, images);
+            
+            var llmStartMs = totalStopwatch.ElapsedMilliseconds;
+            Logger.LogInformation("[PERF][GodStreamChatAsync] LLM_Call_Start - SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms", 
+                sessionId, chatId, llmStartMs);
+            
             var result = await aiAgentStatusProxy.PromptWithStreamProtoAsync(protoInput);
+            
+            var llmEndMs = totalStopwatch.ElapsedMilliseconds;
+            Logger.LogInformation("[PERF][GodStreamChatAsync] LLM_Call_End - SessionId={SessionId}, ChatId={ChatId}, LLMMs={LLMMs}ms, TotalElapsedMs={TotalElapsedMs}ms", 
+                sessionId, chatId, llmEndMs - llmStartMs, llmEndMs);
+            
             if (!result)
             {
                 Logger.LogError($"Failed to initiate streaming response. {Id.ToString()}");

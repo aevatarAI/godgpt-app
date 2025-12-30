@@ -261,9 +261,10 @@ public class ChatMiddleware
             // CRITICAL: Subscribe BEFORE calling StartStreamChatAsync to avoid race condition
             // Messages may arrive immediately after StartStreamChatAsync is called
             // Subscribe to MassTransit Stream
+            var subscribeStartMs = stopwatch.ElapsedMilliseconds;
             _logger.LogInformation(
-                "[ChatMiddleware][HandleAuthenticatedChatAsync] Subscribing to StreamId='{StreamId}', ChatId={ChatId}",
-                request.SessionId, chatId);
+                "[ChatMiddleware][HandleAuthenticatedChatAsync] Subscribing to StreamId='{StreamId}', ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
+                request.SessionId, chatId, subscribeStartMs);
             messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
             {
                 try
@@ -316,9 +317,18 @@ public class ChatMiddleware
                 }
             });
 
+            var subscribeEndMs = stopwatch.ElapsedMilliseconds;
+            _logger.LogInformation(
+                "[ChatMiddleware][HandleAuthenticatedChatAsync] Subscribed - SessionId={SessionId}, SubscribeMs={SubscribeMs}ms",
+                request.SessionId, subscribeEndMs - subscribeStartMs);
+            
             // Now that subscription is active, trigger the chat
+            var chatStartMs = stopwatch.ElapsedMilliseconds;
             await godChat.StartStreamChatAsync(protoInput);
-            _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] Started chat for SessionId={SessionId}, ChatId={ChatId}", request.SessionId, chatId);
+            var chatEndMs = stopwatch.ElapsedMilliseconds;
+            _logger.LogInformation(
+                "[ChatMiddleware][HandleAuthenticatedChatAsync] StartStreamChatAsync returned - SessionId={SessionId}, ChatId={ChatId}, RpcMs={RpcMs}ms, TotalElapsedMs={TotalElapsedMs}ms", 
+                request.SessionId, chatId, chatEndMs - chatStartMs, chatEndMs);
 
             try
             {

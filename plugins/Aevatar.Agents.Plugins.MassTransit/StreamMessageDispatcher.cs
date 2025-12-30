@@ -107,6 +107,8 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
     /// </summary>
     private async Task<bool> TryDispatchToLocalStreamAsync(string streamId, byte[] data, EventEnvelope envelope)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        
         if (_serviceProvider == null)
         {
             _logger.LogWarning("LocalHandler: ServiceProvider is null for StreamId {StreamId}", streamId);
@@ -122,12 +124,13 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
                 return false;
             }
             
+            var getStreamMs = sw.ElapsedMilliseconds;
             var localStream = streamProvider.GetStreamInternal(streamId);
             if (localStream != null)
             {
                 var handlerCount = localStream.GetHandlerCount();
-                _logger.LogInformation("LocalHandler: Found local stream for StreamId {StreamId} with {HandlerCount} handlers", 
-                    streamId, handlerCount);
+                _logger.LogInformation("LocalHandler: Found local stream for StreamId {StreamId} with {HandlerCount} handlers, GetStreamMs={GetStreamMs}ms", 
+                    streamId, handlerCount, getStreamMs);
                     
                 if (handlerCount == 0)
                 {
@@ -135,9 +138,11 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
                     return false;
                 }
                 
+                var dispatchStartMs = sw.ElapsedMilliseconds;
                 await localStream.DispatchAsync(data);
-                _logger.LogInformation("Event {EventId} dispatched to local stream subscribers for StreamId {StreamId}", 
-                    envelope.Id, streamId);
+                var dispatchEndMs = sw.ElapsedMilliseconds;
+                _logger.LogInformation("Event {EventId} dispatched to local stream subscribers for StreamId {StreamId}, DispatchMs={DispatchMs}ms, TotalMs={TotalMs}ms", 
+                    envelope.Id, streamId, dispatchEndMs - dispatchStartMs, dispatchEndMs);
                 return true;
             }
             else
