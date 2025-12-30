@@ -119,7 +119,7 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
         if (registeredAtUtc == null)
         {
             Logger.LogWarning($"State.RegisteredAtUtc == null userId:{rawUserId}");
-            redeemResult = false;
+            return false;
         }
 
         Logger.LogDebug(
