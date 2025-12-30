@@ -144,7 +144,8 @@ public sealed class MEAILLMProvider : AevatarLLMProviderBase
             ModelId = _config.Model
         };
 
-        if (request.Functions is { Count: > 0 })
+        // Only add tools if EnableTools is true (some proxy models don't support function calling)
+        if (_config.EnableTools && request.Functions is { Count: > 0 })
         {
             var aiTools = ConvertFunctionsToAITools(request.Functions);
             if (aiTools.Count > 0)
@@ -152,6 +153,11 @@ public sealed class MEAILLMProvider : AevatarLLMProviderBase
                 options.Tools = aiTools;
                 _logger.LogInformation("Added {Count} tools to ChatOptions", aiTools.Count);
             }
+        }
+        else if (!_config.EnableTools && request.Functions is { Count: > 0 })
+        {
+            _logger.LogDebug("Tools disabled for provider '{Provider}', skipping {Count} functions", 
+                _config.Name, request.Functions.Count);
         }
 
         return options;

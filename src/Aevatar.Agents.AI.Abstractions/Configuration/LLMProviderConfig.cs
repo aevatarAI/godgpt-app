@@ -60,6 +60,11 @@ public class LLMProviderConfig
     public bool EnableStreaming { get; set; } = false;
 
     /// <summary>
+    /// 是否启用工具/函数调用（默认false，某些代理模型不支持）
+    /// </summary>
+    public bool EnableTools { get; set; } = false;
+
+    /// <summary>
     /// 提供商特定设置
     /// </summary>
     public Dictionary<string, object> ProviderSpecificSettings { get; set; } = new();
