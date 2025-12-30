@@ -375,7 +375,7 @@ public class ChatMiddleware
         }
         catch (Exception ex)
         {
-            _logger.LogError("[ChatMiddleware][HandleAuthenticatedChatAsync] Error in SSE stream: {Error}", ex.Message);
+            _logger.LogError(ex, "[ChatMiddleware][HandleAuthenticatedChatAsync] Error in SSE stream: {Error}", ex.Message);
         }
     }
 
