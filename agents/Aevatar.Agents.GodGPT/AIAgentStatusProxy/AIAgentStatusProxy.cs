@@ -359,13 +359,17 @@ public class AIAgentStatusProxy :
                 await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, streamContent);
             }
 
-            // Send final chunk
+            // Send final chunk with aggregation message for state persistence
+            var aggregatedResponse = fullResponse.ToString();
             var finalContent = new AIStreamChatContent
             {
-                Content = fullResponse.ToString(),  // Use Content field (consistent with original implementation)
+                Content = aggregatedResponse,  // Use Content field (consistent with original implementation)
                 IsComplete = true,
                 IsLastChunk = true,
-                SerialNumber = serialNumber + 1
+                SerialNumber = serialNumber + 1,
+                // CRITICAL: Set these fields to trigger AI message persistence in GodChatGAgent.Callbacks
+                IsAggregationMsg = true,
+                AggregationMsg = aggregatedResponse
             };
 
             await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, finalContent);

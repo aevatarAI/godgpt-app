@@ -125,7 +125,7 @@ public partial class ChatGAgentManager
             SessionId = sessionId.ToString(),
             Title = "",
             CreateAt = DateTime.UtcNow.ToProtoTimestamp(),
-            Guider = guider // Set the role information for the conversation
+            Guider = guider ?? "" // Protobuf string cannot be null
         });
         await ConfirmEventsAsync();
 

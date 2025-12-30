@@ -59,13 +59,19 @@ public static class GodChatConversions
     
     public static ChatMessageProto ToProto(this ChatMessage msg)
     {
-        return new ChatMessageProto
+        var proto = new ChatMessageProto
         {
             Id = Guid.NewGuid().ToString(),
             Role = msg.Role ?? "user",
             Content = msg.Content ?? "",
-            Timestamp = Timestamp.FromDateTime(DateTime.SpecifyKind(msg.Timestamp, DateTimeKind.Utc))
+            Timestamp = Timestamp.FromDateTime(DateTime.SpecifyKind(msg.Timestamp, DateTimeKind.Utc)),
+            ChatRole = (int)msg.ChatRole
         };
+        if (msg.ImageKeys != null)
+        {
+            proto.ImageKeys.AddRange(msg.ImageKeys);
+        }
+        return proto;
     }
     
     public static ChatMessage FromProto(this ChatMessageProto proto)
@@ -74,7 +80,9 @@ public static class GodChatConversions
         {
             Role = proto.Role,
             Content = proto.Content,
-            Timestamp = proto.Timestamp?.ToDateTime() ?? DateTime.UtcNow
+            Timestamp = proto.Timestamp?.ToDateTime() ?? DateTime.UtcNow,
+            ChatRole = (ChatRole)proto.ChatRole,
+            ImageKeys = proto.ImageKeys?.ToList()
         };
     }
     

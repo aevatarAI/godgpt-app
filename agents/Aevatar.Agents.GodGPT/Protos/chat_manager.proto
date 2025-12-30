@@ -139,6 +139,14 @@ message InitializeNewUserStatusEvent {
   int32 max_share_count = 4;
 }
 
+// ShareLinkGAgent event - persists share content
+message SaveShareContentEvent {
+  string user_id = 1;      // Guid as string
+  string session_id = 2;   // Guid as string
+  repeated aevatar.agents.godgpt.godchat.ChatMessageProto messages = 3;
+  google.protobuf.Timestamp create_time = 4;
+}
+
 // =============================================================================
 // Response Events (for PublishAsync to subscribers)
 // =============================================================================

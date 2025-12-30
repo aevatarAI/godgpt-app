@@ -1,12 +1,13 @@
 using Aevatar.Agents.Core;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.Share;
 
 /// <summary>
-/// Share Link Agent - stores shared chat content
+/// Share Link Agent - stores shared chat content using Event Sourcing
 /// </summary>
 public class ShareLinkGAgent : GAgentBase<ShareLinkProto>, IShareLinkGAgent
 {
@@ -17,16 +18,22 @@ public class ShareLinkGAgent : GAgentBase<ShareLinkProto>, IShareLinkGAgent
         return Task.FromResult($"ShareLink: User={State.UserId}, Session={State.SessionId}");
     }
 
-    public Task SaveShareContentAsync(ShareLinkProto shareLink)
+    public async Task SaveShareContentAsync(ShareLinkProto shareLink)
     {
-        State.UserId = shareLink.UserId;
-        State.SessionId = shareLink.SessionId;
-        State.Messages.Clear();
-        State.Messages.AddRange(shareLink.Messages);
-        State.CreateTime = Timestamp.FromDateTime(DateTime.UtcNow);
+        var evt = new SaveShareContentEvent
+        {
+            UserId = shareLink.UserId,
+            SessionId = shareLink.SessionId,
+            CreateTime = Timestamp.FromDateTime(DateTime.UtcNow)
+        };
+        evt.Messages.AddRange(shareLink.Messages);
         
-        Logger.LogDebug("[ShareLinkGAgent] Saved share content for session {SessionId}", shareLink.SessionId);
-        return Task.CompletedTask;
+        RaiseEvent(evt);
+        await ConfirmEventsAsync();
+        
+        Logger.LogInformation(
+            "[ShareLinkGAgent] Saved share content for session {SessionId}, MessageCount: {Count}",
+            shareLink.SessionId, shareLink.Messages.Count);
     }
 
     public Task<ShareLinkProto> GetShareContentAsync()
@@ -39,7 +46,28 @@ public class ShareLinkGAgent : GAgentBase<ShareLinkProto>, IShareLinkGAgent
         };
         result.Messages.AddRange(State.Messages);
         
+        Logger.LogDebug(
+            "[ShareLinkGAgent] GetShareContent - SessionId: {SessionId}, MessageCount: {Count}",
+            State.SessionId, State.Messages.Count);
+        
         return Task.FromResult(result);
+    }
+
+    protected override void TransitionState(ShareLinkProto state, IMessage @event)
+    {
+        switch (@event)
+        {
+            case SaveShareContentEvent saveEvt:
+                state.UserId = saveEvt.UserId;
+                state.SessionId = saveEvt.SessionId;
+                state.Messages.Clear();
+                state.Messages.AddRange(saveEvt.Messages);
+                state.CreateTime = saveEvt.CreateTime;
+                Logger.LogDebug(
+                    "[ShareLinkGAgent][TransitionState] SaveShareContentEvent - SessionId: {SessionId}, MessageCount: {Count}",
+                    saveEvt.SessionId, saveEvt.Messages.Count);
+                break;
+        }
     }
 }
 

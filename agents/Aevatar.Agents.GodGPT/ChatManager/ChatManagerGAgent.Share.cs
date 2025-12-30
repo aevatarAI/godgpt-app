@@ -84,13 +84,21 @@ public partial class ChatGAgentManager
             "[ChatGAgentManager][GenerateChatShareContentAsync] State AFTER ConfirmEvents - SessionExists: {Exists}, CurrentShareId: {CurrentShareId}, Expected: {Expected}",
             sessionAfterEvent != null, sessionAfterEvent?.ShareId ?? "(null)", shareId);
         
-        // Verify the shareId was actually saved
+        // Verify the shareId was actually saved - FAIL if not saved correctly
         if (sessionAfterEvent?.ShareId != shareId.ToString())
         {
             Logger.LogError(
                 "[ChatGAgentManager][GenerateChatShareContentAsync] CRITICAL - ShareId NOT SAVED! Expected: {Expected}, Actual: {Actual}",
                 shareId, sessionAfterEvent?.ShareId ?? "(null)");
+            
+            // Don't return invalid shareId - throw exception so client knows share failed
+            throw new InvalidOperationException(
+                $"Share link creation failed: event was not persisted correctly. Expected ShareId {shareId}, but got {sessionAfterEvent?.ShareId ?? "null"}");
         }
+        
+        Logger.LogInformation(
+            "[ChatGAgentManager][GenerateChatShareContentAsync] SUCCESS - ShareId {ShareId} saved for session {SessionId}",
+            shareId, sessionId);
         
         return shareId;
     }
