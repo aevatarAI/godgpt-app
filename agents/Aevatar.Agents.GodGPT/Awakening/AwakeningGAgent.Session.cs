@@ -1,3 +1,4 @@
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.GAgents.AI.Common;
 using Aevatar.Application.Grains.Agents.ChatManager;
