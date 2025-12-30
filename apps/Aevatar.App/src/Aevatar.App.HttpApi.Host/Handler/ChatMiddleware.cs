@@ -261,10 +261,9 @@ public class ChatMiddleware
             // CRITICAL: Subscribe BEFORE calling StartStreamChatAsync to avoid race condition
             // Messages may arrive immediately after StartStreamChatAsync is called
             // Subscribe to MassTransit Stream
-            var streamId = request.SessionId.ToString();
             _logger.LogInformation(
                 "[ChatMiddleware][HandleAuthenticatedChatAsync] Subscribing to StreamId='{StreamId}', ChatId={ChatId}",
-                streamId, chatId);
+                request.SessionId, chatId);
             messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
             {
                 try
