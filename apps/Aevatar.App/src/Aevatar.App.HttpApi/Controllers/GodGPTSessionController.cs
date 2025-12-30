@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Context;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.Core.Context;
 using Aevatar.App.Application.Common;
 using Aevatar.App.Application.Services;
