@@ -28,9 +28,12 @@ public sealed class ProxyCompatibleChatClient : DelegatingChatClient
         ILogger? logger = null) : base(innerClient)
     {
         _endpoint = endpoint?.TrimEnd('/') ?? throw new ArgumentNullException(nameof(endpoint));
-        _apiKey = apiKey ?? throw new ArgumentNullException(nameof(apiKey));
+        _apiKey = !string.IsNullOrWhiteSpace(apiKey) ? apiKey : throw new ArgumentException("API key cannot be empty", nameof(apiKey));
         _model = model ?? throw new ArgumentNullException(nameof(model));
         _logger = logger;
+        
+        _logger?.LogDebug("[ProxyCompatibleChatClient] Initialized with endpoint: {Endpoint}, model: {Model}, apiKey length: {KeyLength}",
+            _endpoint, _model, _apiKey?.Length ?? 0);
 
         _httpClient = new HttpClient
         {
@@ -71,7 +74,13 @@ public sealed class ProxyCompatibleChatClient : DelegatingChatClient
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
 
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger?.LogError("[ProxyCompatibleChatClient] Request failed: {StatusCode} {ReasonPhrase}, Body: {Body}, ApiKey length: {KeyLength}",
+                (int)response.StatusCode, response.ReasonPhrase, errorBody, _apiKey?.Length ?? 0);
+            response.EnsureSuccessStatusCode();
+        }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
         using var reader = new StreamReader(stream);
