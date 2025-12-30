@@ -654,8 +654,9 @@ public partial class GodChatGAgent
             }
             else
             {
-                Logger.LogError($"[GodChatGAgent][PushMessageToClientAsync] Cannot parse session GUID from Id: {Id}");
-                throw new InvalidOperationException($"Cannot parse session GUID from Id: {Id}");
+                Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] Cannot parse session GUID from Id: {Id}, falling back to PublishAsync");
+                await PublishAsync(chatMessage.ToProto());
+                return;
             }
         }
         else if (Guid.TryParse(Id, out var directParsed))
@@ -664,41 +665,54 @@ public partial class GodChatGAgent
         }
         else
         {
-            Logger.LogError($"[GodChatGAgent][PushMessageToClientAsync] Cannot parse session GUID from Id: {Id}");
-            throw new InvalidOperationException($"Cannot parse session GUID from Id: {Id}");
+            Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] Cannot parse session GUID from Id: {Id}, falling back to PublishAsync");
+            await PublishAsync(chatMessage.ToProto());
+            return;
         }
         
         var streamId = sessionGuid.ToString();
         Logger.LogDebug(
             $"[GodChatGAgent][PushMessageToClientAsync] Publishing to StreamId='{streamId}', sessionGuid={sessionGuid}, Id={Id}");
         
-        // Use MassTransit Stream via IMessageStreamProvider (no Orleans Stream fallback)
-        if (ServiceProvider == null)
+        try
         {
-            throw new InvalidOperationException("[PushMessageToClientAsync] ServiceProvider is null. MassTransit Stream requires ServiceProvider.");
+            // Use MassTransit Stream via IMessageStreamProvider
+            if (ServiceProvider == null)
+            {
+                Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] ServiceProvider is null, falling back to PublishAsync");
+                await PublishAsync(chatMessage.ToProto());
+                return;
+            }
+            
+            var messageStreamProvider = ServiceProvider.GetService<IMessageStreamProvider>();
+            if (messageStreamProvider == null)
+            {
+                Logger.LogWarning($"[GodChatGAgent][PushMessageToClientAsync] IMessageStreamProvider not found, falling back to PublishAsync");
+                await PublishAsync(chatMessage.ToProto());
+                return;
+            }
+            
+            // Create MassTransit stream with category "GodChat" (maps to "godgpt-chat-responses" topic)
+            var stream = messageStreamProvider.GetStream(streamId, "GodChat");
+            
+            // Wrap ResponseStreamGodChatProto in EventEnvelope
+            var proto = chatMessage.ToProto();
+            var envelope = new EventEnvelope
+            {
+                Id = Guid.NewGuid().ToString(),
+                Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
+                Version = 0,
+                Payload = Any.Pack(proto)
+            };
+            
+            await stream.ProduceAsync(envelope);
+            Logger.LogDebug($"[GodChatGAgent][PushMessageToClientAsync] Successfully pushed message to MassTransit stream, StreamId={streamId}");
         }
-        
-        var messageStreamProvider = ServiceProvider.GetService<IMessageStreamProvider>();
-        if (messageStreamProvider == null)
+        catch (Exception ex)
         {
-            throw new InvalidOperationException("[PushMessageToClientAsync] IMessageStreamProvider not found. MassTransit Stream is required.");
+            Logger.LogError(ex, $"[GodChatGAgent][PushMessageToClientAsync] Failed to push message to MassTransit stream, falling back to PublishAsync");
+            await PublishAsync(chatMessage.ToProto());
         }
-        
-        // Create MassTransit stream with category "GodChat" (maps to "godgpt-chat-responses" topic)
-        var stream = messageStreamProvider.GetStream(streamId, "GodChat");
-        
-        // Wrap ResponseStreamGodChatProto in EventEnvelope
-        var proto = chatMessage.ToProto();
-        var envelope = new EventEnvelope
-        {
-            Id = Guid.NewGuid().ToString(),
-            Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
-            Version = 0,
-            Payload = Any.Pack(proto)
-        };
-        
-        await stream.ProduceAsync(envelope);
-        Logger.LogDebug($"[GodChatGAgent][PushMessageToClientAsync] Successfully pushed message to MassTransit stream, StreamId={streamId}");
     }
 }
 
