@@ -1,4 +1,5 @@
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
