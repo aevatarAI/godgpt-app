@@ -34,6 +34,9 @@ public partial class GodChatGAgent
     [EventHandler]
     public async Task HandleChatMessageCallbackEvent(ChatMessageCallbackEvent evt)
     {
+        Logger.LogInformation("[PERF][HandleChatMessageCallbackEvent] Received callback - ChatId={ChatId}, SerialNumber={SerialNumber}, IsLastChunk={IsLastChunk}",
+            evt.Context?.ChatId ?? "null", evt.Content?.SerialNumber ?? -1, evt.Content?.IsLastChunk ?? false);
+        
         // Delegate to existing implementation
         await ChatMessageCallbackAsync(
             evt.Context,
@@ -45,6 +48,9 @@ public partial class GodChatGAgent
     public async Task ChatMessageCallbackAsync(AIChatContextProto? contextProto,
         AIExceptionEnum aiExceptionEnum, string? errorMessage, AIStreamChatContentProto? chatContentProto)
     {
+        Logger.LogInformation("[PERF][ChatMessageCallbackAsync] Entry - ChatId={ChatId}, SerialNumber={SerialNumber}",
+            contextProto?.ChatId ?? "null", chatContentProto?.SerialNumber ?? -1);
+        
         // Convert Proto to DTO for internal use
         var contextDto = new AIChatContextDto();
         if (contextProto != null)

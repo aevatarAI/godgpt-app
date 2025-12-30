@@ -343,10 +343,20 @@ public class AIAgentStatusProxy :
             var serialNumber = 0;
 
             // Use the AI framework's streaming capability
+            var firstTokenReceived = false;
+            var streamStartMs = System.Diagnostics.Stopwatch.StartNew();
+            
             await foreach (var token in ChatStreamAsync(request))
             {
                 serialNumber++;
                 fullResponse.Append(token);
+                
+                if (!firstTokenReceived)
+                {
+                    firstTokenReceived = true;
+                    Logger.LogInformation("[PERF][AIAgentStatusProxy] TTFT - First token received after {ElapsedMs}ms, ChatId={ChatId}",
+                        streamStartMs.ElapsedMilliseconds, context?.ChatId ?? "null");
+                }
                 
                 var streamContent = new AIStreamChatContent
                 {
@@ -356,7 +366,14 @@ public class AIAgentStatusProxy :
                     IsLastChunk = false
                 };
 
+                var sendStartMs = streamStartMs.ElapsedMilliseconds;
                 await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, streamContent);
+                
+                if (serialNumber <= 3) // Log first 3 callbacks for debugging
+                {
+                    Logger.LogInformation("[PERF][AIAgentStatusProxy] Callback sent - SerialNumber={SerialNumber}, SendMs={SendMs}ms, ChatId={ChatId}",
+                        serialNumber, streamStartMs.ElapsedMilliseconds - sendStartMs, context?.ChatId ?? "null");
+                }
             }
 
             // Send final chunk with aggregation message for state persistence
