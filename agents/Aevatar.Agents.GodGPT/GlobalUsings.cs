@@ -14,9 +14,10 @@ global using Aevatar.GAgents.AI.Options;
 global using Aevatar.GAgents.AIGAgent.Dtos;
 global using Aevatar.GAgents.ChatAgent.Dtos;
 
-// New Framework - use new IGAgent
+// New Framework - use new IGAgent and RPC extensions
 global using IGAgent = Aevatar.Agents.Abstractions.IGAgent;
 global using EventHandlerAttribute = Aevatar.Agents.Abstractions.Attributes.EventHandlerAttribute;
+global using Aevatar.Agents.Abstractions.Extensions;
 
 // Application namespaces (actual business logic)
 global using Aevatar.Application.Grains.Agents.ChatManager.Common;
