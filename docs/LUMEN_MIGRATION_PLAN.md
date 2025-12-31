@@ -36,7 +36,7 @@ Calculator层: 2 Calculators (可直接迁移)
 跳过     → LumenUserGAgent                (716行)  - DEPRECATED
 ```
 
-### 每个Agent的三步迁移法
+### 每个Agent的四步迁移法
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -55,7 +55,16 @@ Calculator层: 2 Calculators (可直接迁移)
 │  ├── 评估是否需要拆分为多个 Agent                            │
 │  ├── 考虑: 状态隔离、调用频率、故障隔离、扩展性               │
 │  └── 记录决策理由                                            │
+├─────────────────────────────────────────────────────────────┤
+│  Step 4: 单元测试 ✅ (迁移完成的唯一标准)                     │
+│  ├── 在 Aevatar.App.Application.Tests/Agents/ 创建测试文件  │
+│  ├── 覆盖所有 RPC 方法                                       │
+│  ├── 覆盖所有 EventHandler                                   │
+│  ├── 测试状态转换                                            │
+│  └── 测试通过 = 迁移完成                                     │
 └─────────────────────────────────────────────────────────────┘
+
+🔴 重要: 没有单元测试通过，迁移不算完成！
 ```
 
 ### 为什么这个顺序？
@@ -377,6 +386,114 @@ public override async Task OnActivateAsync(CancellationToken ct = default)
 ```
 
 **输出**: `XXXGAgent.拆分决策.md`
+
+---
+
+### Step 4: 单元测试 (迁移完成的唯一标准) ✅
+
+**目标**: 编写单元测试，验证迁移后的Agent功能正确
+
+**测试文件位置**:
+```
+apps/Aevatar.App/test/Aevatar.App.Application.Tests/Agents/Lumen/
+├── LumenStatsSnapshotGAgentTests.cs
+├── LumenDailyYearlyHistoryGAgentTests.cs
+├── LumenFavouriteGAgentTests.cs
+├── LumenPredictionHistoryGAgentTests.cs
+├── LumenFeedbackGAgentTests.cs
+├── LumenUserProfileGAgentTests.cs
+└── LumenPredictionGAgentTests.cs
+```
+
+**测试模板** (参考 `UserFeedbackGAgentTests.cs`):
+```csharp
+using System;
+using System.Threading.Tasks;
+using Aevatar.Agents.Lumen.Protos;
+using Shouldly;
+using Xunit;
+
+namespace Aevatar.App.Agents.Lumen;
+
+/// <summary>
+/// Unit tests for LumenXxxGAgent
+/// Uses TestHelpers pattern - no ABP framework dependency
+/// </summary>
+public class LumenXxxGAgentTests
+{
+    private LumenXxxGAgent CreateAgent()
+    {
+        var agent = TestHelpers.CreateAgent<LumenXxxGAgent>();
+        
+        // Setup any required dependencies using NSubstitute
+        // var mockService = Substitute.For<IXxxService>();
+        // agent.XxxService = mockService;
+        
+        return agent;
+    }
+
+    [Fact(DisplayName = "Method should do expected behavior")]
+    public async Task Method_ShouldDoExpectedBehavior()
+    {
+        // Arrange
+        var agent = CreateAgent();
+        var request = new XxxRequestProto { /* ... */ };
+
+        // Act
+        var result = await agent.MethodAsync(request);
+
+        // Assert
+        result.ShouldNotBeNull();
+        result.Success.ShouldBeTrue();
+        
+        // Verify state changes
+        var state = agent.GetState();
+        state.SomeField.ShouldBe(expectedValue);
+    }
+}
+```
+
+**测试覆盖要求**:
+
+| 类型 | 覆盖要求 | 示例 |
+|------|----------|------|
+| RPC 方法 | 100% | `ToggleFavouriteAsync`, `GetFavouritesAsync` |
+| EventHandler | 100% | `HandlePredictionFavourited`, `HandlePredictionUnfavourited` |
+| 状态转换 | Happy Path + Edge Cases | 空收藏、重复收藏、取消不存在的收藏 |
+| 边界条件 | 至少覆盖 | 空输入、无效ID、超限 |
+
+**检查清单**:
+```markdown
+- [ ] 创建测试文件: Agents/Lumen/LumenXxxGAgentTests.cs
+- [ ] 实现 CreateAgent() helper
+- [ ] 测试每个 RPC 方法的 Happy Path
+- [ ] 测试每个 RPC 方法的 Error Path
+- [ ] 测试状态初始化
+- [ ] 测试 EventHandler 处理
+- [ ] 运行 `dotnet test` 通过
+- [ ] 代码审查通过
+```
+
+**运行测试命令**:
+```bash
+# 运行所有 Lumen 相关测试
+dotnet test apps/Aevatar.App/test/Aevatar.App.Application.Tests/ \
+  --filter "FullyQualifiedName~Lumen"
+
+# 运行单个测试文件
+dotnet test apps/Aevatar.App/test/Aevatar.App.Application.Tests/ \
+  --filter "FullyQualifiedName~LumenFavouriteGAgentTests"
+```
+
+**迁移完成标准**:
+```
+🔴 以下条件全部满足才算迁移完成:
+   ✅ 代码编译通过
+   ✅ 单元测试全部通过
+   ✅ 测试覆盖所有 RPC 方法
+   ✅ 测试覆盖所有 EventHandler
+   ✅ 无 lint 错误
+```
 
 ---
 
@@ -837,7 +954,13 @@ Step 2: 代码风格修改
 
 Step 3: 拆分评估
 ├── 89行较小，无需拆分
-└── 完成单元测试
+└── 记录决策
+
+Step 4: 单元测试 ✅
+├── 创建 Agents/Lumen/LumenStatsSnapshotGAgentTests.cs
+├── 测试所有 RPC 方法
+├── 测试状态转换
+└── dotnet test 通过 → 迁移完成
 ```
 
 #### Agent 2: LumenDailyYearlyHistoryGAgent (228行)
@@ -854,6 +977,12 @@ Step 3: 拆分评估
 ├── 评估: Daily和Yearly是否应该分开?
 ├── 如果逻辑差异大 → 拆分为2个Agent
 └── 如果逻辑相似 → 保持1个Agent
+
+Step 4: 单元测试 ✅
+├── 创建 Agents/Lumen/LumenDailyYearlyHistoryGAgentTests.cs
+├── 测试 Daily 相关方法
+├── 测试 Yearly 相关方法
+└── dotnet test 通过 → 迁移完成
 ```
 
 #### Agent 3: LumenFavouriteGAgent (252行)
@@ -867,7 +996,13 @@ Step 2: 代码风格修改
 
 Step 3: 拆分评估
 ├── 252行较小，无需拆分
-└── 完成单元测试
+└── 记录决策
+
+Step 4: 单元测试 ✅
+├── 创建 Agents/Lumen/LumenFavouriteGAgentTests.cs
+├── 测试 ToggleFavourite
+├── 测试 GetFavourites
+└── dotnet test 通过 → 迁移完成
 ```
 
 ---
@@ -887,6 +1022,12 @@ Step 2: 代码风格修改
 Step 3: 拆分评估
 ├── 298行适中，暂不拆分
 └── 如果与 DailyYearlyHistory 有重叠 → 考虑合并
+
+Step 4: 单元测试 ✅
+├── 创建 Agents/Lumen/LumenPredictionHistoryGAgentTests.cs
+├── 测试历史查询方法
+├── 测试历史保存方法
+└── dotnet test 通过 → 迁移完成
 ```
 
 #### Agent 5: LumenFeedbackGAgent (375行)
@@ -903,6 +1044,12 @@ Step 3: 拆分评估
 ├── 375行适中
 ├── 如果有明显分类 → partial class
 └── 否则保持单一文件
+
+Step 4: 单元测试 ✅
+├── 创建 Agents/Lumen/LumenFeedbackGAgentTests.cs
+├── 测试反馈提交方法
+├── 测试反馈查询方法
+└── dotnet test 通过 → 迁移完成
 ```
 
 ---
@@ -936,6 +1083,15 @@ Step 3: 拆分评估
 │   ├── 状态隔离需求
 │   └── 独立演进需求
 └── 记录决策理由
+
+Step 4: 单元测试 ✅ (1712行需要更多测试)
+├── 创建 Agents/Lumen/LumenUserProfileGAgentTests.cs
+├── 测试 Profile CRUD 方法
+├── 测试 Icon 上传方法
+├── 测试 Language 切换方法
+├── 测试所有 EventHandlers
+├── 测试边界条件 (空数据、无效输入)
+└── dotnet test 通过 → 迁移完成
 ```
 
 ---
@@ -992,6 +1148,22 @@ Step 3: 拆分评估 (重要决策!)
 │       └── 使用 partial class 管理复杂度
 ├── 最终决策需要根据实际代码分析
 └── 记录决策理由和权衡
+
+Step 4: 单元测试 ✅ (6935行需要全面测试)
+├── 创建 Agents/Lumen/LumenPredictionGAgentTests.cs
+├── 如果拆分为多个文件，考虑拆分测试:
+│   ├── LumenPredictionGAgentTests.Daily.cs
+│   ├── LumenPredictionGAgentTests.Yearly.cs
+│   └── LumenPredictionGAgentTests.Lifetime.cs
+├── 测试覆盖:
+│   ├── Daily 预测生成
+│   ├── Yearly 预测生成
+│   ├── Lifetime 预测生成
+│   ├── 翻译功能
+│   ├── 所有 EventHandlers
+│   └── 边界条件和错误处理
+├── Mock AI 服务调用
+└── dotnet test 通过 → 迁移完成
 ```
 
 ---
