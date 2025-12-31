@@ -625,18 +625,15 @@ public partial class GodChatGAgent
                 partialMessage.ChatId, isHttpRequest);
         }
         
-        var sendSw = System.Diagnostics.Stopwatch.StartNew();
         if (isHttpRequest)
         {
-            // HTTP request: send to client via MassTransit Kafka
-            await PushMessageToClientAsync(partialMessage);
-            sendSw.Stop();
-            Logger.LogInformation("[PERF][ChatMessageCallbackAsync] PushMessageToClient - ChatId={ChatId}, SerialNumber={SerialNumber}, SendMs={SendMs}ms, IsLastChunk={IsLastChunk}", 
-                partialMessage.ChatId, chatContent.SerialNumber, sendSw.ElapsedMilliseconds, partialMessage.IsLastChunk);
+            // HTTP request: use message aggregation to reduce Kafka message count
+            await AggregateAndPushMessageAsync(partialMessage, chatContent.IsLastChunk);
         }
         else
         {
-            // Internal agent communication: publish to downstream agents
+            // Internal agent communication: publish to downstream agents (no aggregation needed)
+            var sendSw = System.Diagnostics.Stopwatch.StartNew();
             await PublishAsync(partialMessage.ToProto());
             sendSw.Stop();
             Logger.LogDebug("[ChatMessageCallbackAsync] PublishAsync - ChatId={ChatId}, SerialNumber={SerialNumber}, SendMs={SendMs}ms", 
@@ -653,6 +650,72 @@ public partial class GodChatGAgent
             Context?.Remove("AccumulatedContent");
             Logger.LogDebug(
                 $"[GodChatGAgent][ChatMessageCallbackAsync] Cleaned up agent context for completed request");
+        }
+    }
+
+    /// <summary>
+    /// Aggregates multiple streaming messages and sends them in batches to reduce Kafka message count.
+    /// Messages are sent when: 1) 100ms elapsed since last send, 2) 10 tokens accumulated, or 3) IsLastChunk
+    /// </summary>
+    private async Task AggregateAndPushMessageAsync(ResponseStreamGodChat message, bool isLastChunk)
+    {
+        // Accumulate message content
+        if (!string.IsNullOrEmpty(message.Response))
+        {
+            _messageAggregationBuffer.Append(message.Response);
+        }
+        _aggregatedTokenCount++;
+        
+        // Update pending message with latest metadata (keep the most recent SerialNumber, etc.)
+        _pendingAggregatedMessage = new ResponseStreamGodChat
+        {
+            ChatId = message.ChatId,
+            SessionId = message.SessionId,
+            SerialNumber = message.SerialNumber,
+            IsLastChunk = message.IsLastChunk,
+            VoiceContentType = message.VoiceContentType,
+            AudioData = message.AudioData,
+            AudioMetadata = message.AudioMetadata,
+            SuggestedItems = message.SuggestedItems,
+            ErrorCode = message.ErrorCode,
+            // Response will be set from aggregation buffer when sending
+        };
+        
+        var now = DateTime.UtcNow;
+        var elapsedMs = (now - _lastMessageSentTime).TotalMilliseconds;
+        
+        // Determine if we should send now
+        bool shouldSend = isLastChunk || 
+                          elapsedMs >= MessageAggregationIntervalMs || 
+                          _aggregatedTokenCount >= MaxAggregatedTokens;
+        
+        if (shouldSend && _pendingAggregatedMessage != null)
+        {
+            // Set aggregated content
+            _pendingAggregatedMessage.Response = _messageAggregationBuffer.ToString();
+            
+            var sendSw = System.Diagnostics.Stopwatch.StartNew();
+            await PushMessageToClientAsync(_pendingAggregatedMessage);
+            sendSw.Stop();
+            
+            Logger.LogInformation(
+                "[PERF][AggregateAndPush] Sent aggregated message - ChatId={ChatId}, SerialNumber={SerialNumber}, " +
+                "AggregatedTokens={AggregatedTokens}, ContentLength={ContentLength}, SendMs={SendMs}ms, IsLastChunk={IsLastChunk}",
+                _pendingAggregatedMessage.ChatId, _pendingAggregatedMessage.SerialNumber,
+                _aggregatedTokenCount, _pendingAggregatedMessage.Response?.Length ?? 0,
+                sendSw.ElapsedMilliseconds, isLastChunk);
+            
+            // Reset aggregation state
+            _messageAggregationBuffer.Clear();
+            _pendingAggregatedMessage = null;
+            _aggregatedTokenCount = 0;
+            _lastMessageSentTime = now;
+        }
+        else
+        {
+            Logger.LogDebug(
+                "[AggregateAndPush] Buffering - ChatId={ChatId}, AggregatedTokens={AggregatedTokens}, ElapsedMs={ElapsedMs}ms",
+                message.ChatId, _aggregatedTokenCount, elapsedMs);
         }
     }
 
