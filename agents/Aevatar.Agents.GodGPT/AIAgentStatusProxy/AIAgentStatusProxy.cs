@@ -365,11 +365,33 @@ public class AIAgentStatusProxy :
                 aggregationBuffer.Append(token);
                 aggregatedTokenCount++;
                 
+                // CRITICAL: Send first token immediately for best TTFT (Time To First Token)
+                // Users should see response start immediately, subsequent tokens can be aggregated
                 if (!firstTokenReceived)
                 {
                     firstTokenReceived = true;
                     Logger.LogInformation("[PERF][AIAgentStatusProxy] TTFT - First token received after {ElapsedMs}ms, ChatId={ChatId}",
                         streamStartMs.ElapsedMilliseconds, context?.ChatId ?? "null");
+                    
+                    // Send first token immediately
+                    var firstContent = new AIStreamChatContent
+                    {
+                        Content = aggregationBuffer.ToString(),
+                        IsComplete = false,
+                        SerialNumber = serialNumber,
+                        IsLastChunk = false
+                    };
+                    await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, firstContent);
+                    messagesSent++;
+                    
+                    Logger.LogInformation("[PERF][AIAgentStatusProxy] First token sent immediately - SerialNumber={SerialNumber}, ChatId={ChatId}",
+                        serialNumber, context?.ChatId ?? "null");
+                    
+                    // Reset aggregation for subsequent tokens
+                    aggregationBuffer.Clear();
+                    aggregatedTokenCount = 0;
+                    lastSendTime = DateTime.UtcNow;
+                    continue; // Skip the aggregation check for first token
                 }
                 
                 // Check if we should send aggregated message
@@ -390,10 +412,10 @@ public class AIAgentStatusProxy :
                     await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, streamContent);
                     messagesSent++;
                     
-                    if (messagesSent <= 3) // Log first 3 callbacks for debugging
+                    if (messagesSent <= 5) // Log first 5 callbacks for debugging
                     {
-                        Logger.LogInformation("[PERF][AIAgentStatusProxy] Aggregated callback sent - SerialNumber={SerialNumber}, Tokens={Tokens}, ChatId={ChatId}",
-                            serialNumber, aggregatedTokenCount, context?.ChatId ?? "null");
+                        Logger.LogInformation("[PERF][AIAgentStatusProxy] Aggregated callback sent - SerialNumber={SerialNumber}, Tokens={Tokens}, ElapsedMs={ElapsedMs}, ChatId={ChatId}",
+                            serialNumber, aggregatedTokenCount, timeSinceLastSend, context?.ChatId ?? "null");
                     }
                     
                     // Reset aggregation
