@@ -9,14 +9,60 @@
 ## 📊 迁移范围总览
 
 ```
-Agent层:     10 GAgents 需迁移
-State层:     8 State Classes → Protobuf
+Agent层:     7 GAgents 需迁移 (1个DEPRECATED跳过)
+State层:     7 State Classes → Protobuf
 Event层:     ~30 Events → Protobuf
 DTO层:       ~50 DTOs → Protobuf (部分可复用)
 Service层:   1 Service
 Helper层:    4 Helpers (可直接迁移)
 Calculator层: 2 Calculators (可直接迁移)
 ```
+
+---
+
+## 🎯 迁移策略
+
+### 迁移顺序: 从小到大
+
+```
+优先级 1 → LumenStatsSnapshotGAgent       (89行)   - 最小，热身
+优先级 2 → LumenDailyYearlyHistoryGAgent  (228行)  - 小型
+优先级 3 → LumenFavouriteGAgent           (252行)  - 小型
+优先级 4 → LumenPredictionHistoryGAgent   (298行)  - 中型
+优先级 5 → LumenFeedbackGAgent            (375行)  - 中型
+优先级 6 → LumenUserProfileGAgent         (1712行) - 大型 ⚠️
+优先级 7 → LumenPredictionGAgent          (6935行) - 超大 🔥
+
+跳过     → LumenUserGAgent                (716行)  - DEPRECATED
+```
+
+### 每个Agent的三步迁移法
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Step 1: Partial Class 分析                                 │
+│  ├── 分析代码结构                                            │
+│  ├── 识别方法分组 (Handlers/RPC/Business/Helpers)           │
+│  └── 决定是否需要拆分为 partial class                        │
+├─────────────────────────────────────────────────────────────┤
+│  Step 2: 代码风格修改                                        │
+│  ├── 移除 GAgentTransitionState()                           │
+│  ├── 添加 [EventHandler] 属性                               │
+│  ├── ConfirmEvents() → ConfirmEventsAsync()                 │
+│  └── 更新类型引用为 Protobuf                                 │
+├─────────────────────────────────────────────────────────────┤
+│  Step 3: 拆分评估                                            │
+│  ├── 评估是否需要拆分为多个 Agent                            │
+│  ├── 考虑: 状态隔离、调用频率、故障隔离、扩展性               │
+│  └── 记录决策理由                                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 为什么这个顺序？
+
+1. **从小到大**: 小Agent (89行) 迁移快，积累经验，建立信心
+2. **复杂的放最后**: LumenPredictionGAgent (6935行) 涉及AI集成、多语言翻译、定时任务，需要充分准备
+3. **依赖顺序**: UserProfile 被 Prediction 依赖，需要先稳定
 
 ---
 
@@ -135,18 +181,23 @@ agents/Aevatar.Agents.Lumen/
 | lumen_favourite.proto | ⏳ 待开始 | 低 | State + 2 Events + DTOs |
 | lumen_history.proto | ⏳ 待开始 | 中 | State + 3 Events + DTOs |
 
-### Phase 2: Agent 迁移 (优先级: 高)
+### Phase 2: Agent 迁移 (按行数从小到大)
 
-| Agent | 行数 | 状态 | 复杂度 | 依赖 |
-|-------|------|------|--------|------|
-| LumenUserProfileGAgent | 1712 | ⏳ 待开始 | 高 | lumen_user_profile.proto |
-| LumenPredictionGAgent | 6935 | ⏳ 待开始 | 极高 | lumen_prediction.proto, AI集成 |
-| LumenPredictionHistoryGAgent | 298 | ⏳ 待开始 | 中 | lumen_history.proto |
-| LumenFeedbackGAgent | 375 | ⏳ 待开始 | 中 | lumen_feedback.proto |
-| LumenFavouriteGAgent | 252 | ⏳ 待开始 | 低 | lumen_favourite.proto |
-| LumenStatsSnapshotGAgent | 89 | ⏳ 待开始 | 低 | lumen_common.proto |
-| LumenDailyYearlyHistoryGAgent | 228 | ⏳ 待开始 | 中 | lumen_history.proto |
-| LumenUserGAgent | 716 | ❌ 跳过 | - | DEPRECATED |
+> **迁移策略 (每个Agent必须按此顺序执行):**
+> 1. **Step 1: Partial Class 分析** - 分析代码结构，转换为 partial class
+> 2. **Step 2: 代码风格修改** - 迁移到新框架写法
+> 3. **Step 3: 拆分评估** - 考虑是否需要拆分成多个 Agent
+
+| 优先级 | Agent | 行数 | 状态 | 复杂度 | 依赖 |
+|--------|-------|------|------|--------|------|
+| 1 | LumenStatsSnapshotGAgent | 89 | ⏳ 待开始 | 低 | lumen_common.proto |
+| 2 | LumenDailyYearlyHistoryGAgent | 228 | ⏳ 待开始 | 中 | lumen_history.proto |
+| 3 | LumenFavouriteGAgent | 252 | ⏳ 待开始 | 低 | lumen_favourite.proto |
+| 4 | LumenPredictionHistoryGAgent | 298 | ⏳ 待开始 | 中 | lumen_history.proto |
+| 5 | LumenFeedbackGAgent | 375 | ⏳ 待开始 | 中 | lumen_feedback.proto |
+| **6** | **LumenUserProfileGAgent** | **1712** | ⏳ 待开始 | **高** | lumen_user_profile.proto |
+| **7** | **LumenPredictionGAgent** | **6935** | ⏳ 待开始 | **极高** | lumen_prediction.proto, AI集成 |
+| - | LumenUserGAgent | 716 | ❌ 跳过 | - | DEPRECATED |
 
 ### Phase 3: 辅助组件迁移 (优先级: 中)
 
@@ -166,6 +217,166 @@ agents/Aevatar.Agents.Lumen/
 | 创建 ILumenService | ⏳ 待开始 | 聚合接口 |
 | 注册 DI | ⏳ 待开始 | - |
 | API Controller 适配 | ⏳ 待开始 | 如有需要 |
+
+---
+
+## 🔄 单Agent迁移模板 (三步走)
+
+> **每个Agent迁移必须严格按照以下三步执行**
+
+### Step 1: Partial Class 分析 (分析阶段)
+
+**目标**: 理解代码结构，规划拆分策略
+
+**检查清单**:
+```markdown
+- [ ] 统计总行数
+- [ ] 识别方法分类:
+  - [ ] Event Handlers (处理事件)
+  - [ ] RPC Methods (对外接口)
+  - [ ] Business Logic (业务逻辑)
+  - [ ] Helper Methods (辅助方法)
+  - [ ] Constants/Dictionaries (常量)
+- [ ] 分析依赖关系:
+  - [ ] 依赖哪些其他Agent?
+  - [ ] 被哪些Agent依赖?
+  - [ ] 使用哪些外部服务?
+- [ ] 判断是否需要partial class:
+  - [ ] 行数 > 300: 建议partial
+  - [ ] 行数 > 500: 必须partial
+  - [ ] 行数 > 800: 必须拆分为多文件
+- [ ] 规划partial class文件结构
+```
+
+**输出**: `XXXGAgent.分析报告.md`
+
+---
+
+### Step 2: 代码风格修改 (迁移阶段)
+
+**目标**: 将代码从旧框架迁移到新框架
+
+**标准迁移步骤**:
+
+```csharp
+// ============ 1. 基类变更 ============
+// 旧:
+public class MyAgent : GAgentBase<MyState, MyEventLog>, IMyAgent
+// 新:
+public class MyAgent : GAgentBase<MyStateProto>, IMyAgent
+
+// ============ 2. 删除 GAgentTransitionState ============
+// 旧:
+protected sealed override void GAgentTransitionState(
+    MyState state, StateLogEventBase<MyEventLog> @event)
+{
+    switch (@event) { ... }
+}
+// 新: 删除此方法，使用 [EventHandler]
+
+// ============ 3. 添加 EventHandler ============
+// 旧: 在 switch 中处理
+// 新:
+[EventHandler]
+public Task HandleMyEvent(MyEventProto evt)
+{
+    State.SomeField = evt.Value;
+    return Task.CompletedTask;
+}
+
+// ============ 4. 事件确认方式 ============
+// 旧:
+RaiseEvent(new MyEvent { ... });
+await ConfirmEvents();
+// 新:
+RaiseEvent(new MyEventProto { ... });
+await ConfirmEventsAsync();
+
+// ============ 5. ID 获取方式 ============
+// 旧: this.GetPrimaryKey() 或 this.GetPrimaryKeyString()
+// 新: this.Id
+
+// ============ 6. 构造函数 ============
+// 新框架要求无参构造函数:
+public MyAgent() : base() { }
+
+// ============ 7. GetDescriptionAsync ============
+// 必须实现:
+public override Task<string> GetDescriptionAsync()
+    => Task.FromResult($"MyAgent: {State.SomeInfo}");
+
+// ============ 8. OnActivateAsync ============
+// 状态初始化在此进行:
+public override async Task OnActivateAsync(CancellationToken ct = default)
+{
+    await base.OnActivateAsync(ct);
+    // 初始化 State 属性 (不要赋值新对象)
+    State.UserId = Id.ToString("N")[..8];
+}
+```
+
+**检查清单**:
+```markdown
+- [ ] 更新基类签名
+- [ ] 删除 GAgentTransitionState
+- [ ] 为每个事件添加 [EventHandler]
+- [ ] 修改 ConfirmEvents → ConfirmEventsAsync
+- [ ] 更新 ID 获取方式
+- [ ] 添加无参构造函数
+- [ ] 实现 GetDescriptionAsync
+- [ ] 在 OnActivateAsync 中初始化状态
+- [ ] 更新所有类型引用为 Proto 版本
+- [ ] 处理 DateOnly/TimeOnly 转换
+- [ ] 处理 Dictionary → map 转换
+- [ ] 编译通过
+- [ ] 单元测试通过
+```
+
+---
+
+### Step 3: 拆分评估 (决策阶段)
+
+**目标**: 评估是否需要将Agent拆分为多个独立Agent
+
+**评估维度**:
+
+| 维度 | 保持单一Agent | 拆分为多个Agent |
+|------|---------------|-----------------|
+| 状态隔离 | 所有状态紧密相关 | 不同状态独立演进 |
+| 调用频率 | 各方法调用频率相近 | 部分方法调用频率高很多 |
+| 失败隔离 | 可接受单点故障 | 需要故障隔离 |
+| 扩展性 | 整体扩展即可 | 需要独立扩展 |
+| 代码复杂度 | partial class可管理 | 逻辑差异过大 |
+| 团队协作 | 单人负责 | 多人并行开发 |
+
+**决策模板**:
+```markdown
+## 拆分评估报告: XXXGAgent
+
+### 当前状态
+- 总行数: xxx
+- 方法数: xxx
+- 事件数: xxx
+- partial class 文件数: xxx
+
+### 拆分候选
+1. 候选方案A: [描述]
+   - 优点: [...]
+   - 缺点: [...]
+   
+2. 候选方案B: [描述]
+   - 优点: [...]
+   - 缺点: [...]
+
+### 决策
+- [ ] 保持单一Agent + partial class
+- [ ] 拆分为 N 个Agent
+
+### 理由
+[详细说明决策依据]
+```
+
+**输出**: `XXXGAgent.拆分决策.md`
 
 ---
 
@@ -585,43 +796,212 @@ State 中有多个 `Dictionary<string, T>` 字段：
 
 ## 🚀 执行顺序
 
-### Week 1: 基础设施
+> **核心原则: 从小到大，每个Agent三步走**
+> - 优先迁移小型Agent，积累经验
+> - LumenUserProfileGAgent (1712行) 倒数第二
+> - LumenPredictionGAgent (6935行) 最后迁移
+
+---
+
+### Week 1: 基础设施 ✅
 1. ✅ 创建分支 `feature/lumen-migration`
-2. ⏳ 创建项目结构 `agents/Aevatar.Agents.Lumen/`
-3. ⏳ 定义 `lumen_common.proto`
-4. ⏳ 配置 .csproj 文件
+2. ✅ 创建项目结构 `agents/Aevatar.Agents.Lumen/`
+3. ✅ 定义 `lumen_common.proto`
+4. ✅ 配置 .csproj 文件
 
 ### Week 2: 核心 Proto 定义
-1. ⏳ 定义 `lumen_user_profile.proto`
-2. ⏳ 定义 `lumen_prediction.proto`
-3. ⏳ 定义 `lumen_feedback.proto`
-4. ⏳ 定义 `lumen_favourite.proto`
-5. ⏳ 定义 `lumen_history.proto`
-6. ⏳ 生成 Proto 代码并验证
+1. ⏳ 定义 `lumen_stats.proto` (最简单)
+2. ⏳ 定义 `lumen_history.proto`
+3. ⏳ 定义 `lumen_favourite.proto`
+4. ⏳ 定义 `lumen_feedback.proto`
+5. ⏳ 定义 `lumen_user_profile.proto`
+6. ⏳ 定义 `lumen_prediction.proto`
+7. ⏳ 生成 Proto 代码并验证
 
-### Week 3: Agent 迁移 (Part 1)
-1. ⏳ 迁移 LumenFavouriteGAgent (最简单)
-2. ⏳ 迁移 LumenFeedbackGAgent
-3. ⏳ 迁移 LumenStatsSnapshotGAgent
-4. ⏳ 编写单元测试
+---
 
-### Week 4: Agent 迁移 (Part 2)
-1. ⏳ 迁移 LumenUserProfileGAgent
-2. ⏳ 迁移 LumenPredictionHistoryGAgent
-3. ⏳ 迁移 LumenDailyYearlyHistoryGAgent
-4. ⏳ 编写单元测试
+### Week 3: 小型Agent迁移 (1-3)
 
-### Week 5-6: LumenPredictionGAgent 迁移
-1. ⏳ 拆分并迁移 LumenPredictionGAgent
-2. ⏳ 处理 AI 集成部分
-3. ⏳ 处理 Reminder 逻辑
-4. ⏳ 编写集成测试
+#### Agent 1: LumenStatsSnapshotGAgent (89行) - 最小
+```
+Step 1: Partial Class 分析
+├── 分析现有代码结构
+├── 识别方法分组 (Event Handlers / Business Logic / Helpers)
+└── 评估是否需要拆分为 partial class
 
-### Week 7: 辅助组件 & 集成
-1. ⏳ 迁移 Calculators
-2. ⏳ 迁移 Helpers
+Step 2: 代码风格修改
+├── 移除 GAgentTransitionState()
+├── 添加 [EventHandler] 属性
+├── 修改 RaiseEvent + ConfirmEvents → RaiseEvent + ConfirmEventsAsync
+└── 更新 GetDescriptionAsync()
+
+Step 3: 拆分评估
+├── 89行较小，无需拆分
+└── 完成单元测试
+```
+
+#### Agent 2: LumenDailyYearlyHistoryGAgent (228行)
+```
+Step 1: Partial Class 分析
+├── 分析日历历史逻辑
+├── 识别是否有可复用的 Daily/Yearly 模式
+└── 考虑是否拆分为 DailyHistory + YearlyHistory
+
+Step 2: 代码风格修改
+└── 标准迁移流程
+
+Step 3: 拆分评估
+├── 评估: Daily和Yearly是否应该分开?
+├── 如果逻辑差异大 → 拆分为2个Agent
+└── 如果逻辑相似 → 保持1个Agent
+```
+
+#### Agent 3: LumenFavouriteGAgent (252行)
+```
+Step 1: Partial Class 分析
+├── 收藏逻辑相对独立
+└── 结构简单，无需partial
+
+Step 2: 代码风格修改
+└── 标准迁移流程
+
+Step 3: 拆分评估
+├── 252行较小，无需拆分
+└── 完成单元测试
+```
+
+---
+
+### Week 4: 中型Agent迁移 (4-5)
+
+#### Agent 4: LumenPredictionHistoryGAgent (298行)
+```
+Step 1: Partial Class 分析
+├── 分析历史记录管理逻辑
+├── 识别查询方法 vs 修改方法
+└── 评估是否需要分离读写操作
+
+Step 2: 代码风格修改
+└── 标准迁移流程
+
+Step 3: 拆分评估
+├── 298行适中，暂不拆分
+└── 如果与 DailyYearlyHistory 有重叠 → 考虑合并
+```
+
+#### Agent 5: LumenFeedbackGAgent (375行)
+```
+Step 1: Partial Class 分析
+├── 分析反馈收集逻辑
+├── 识别不同类型反馈的处理
+└── 是否有 RatingFeedback vs TextFeedback 差异?
+
+Step 2: 代码风格修改
+└── 标准迁移流程
+
+Step 3: 拆分评估
+├── 375行适中
+├── 如果有明显分类 → partial class
+└── 否则保持单一文件
+```
+
+---
+
+### Week 5: LumenUserProfileGAgent (1712行) 🔥 重点
+
+```
+Step 1: Partial Class 分析 (重要!)
+├── 代码量大，必须拆分为 partial class
+├── 建议拆分方案:
+│   ├── LumenUserProfileGAgent.cs           # 主类 + 生命周期
+│   ├── LumenUserProfileGAgent.Profile.cs   # 基础资料CRUD
+│   ├── LumenUserProfileGAgent.Icon.cs      # 头像管理
+│   ├── LumenUserProfileGAgent.Language.cs  # 语言切换
+│   └── LumenUserProfileGAgent.Handlers.cs  # EventHandlers
+├── 分析各方法的职责
+└── 识别可提取的辅助逻辑
+
+Step 2: 代码风格修改
+├── 按 partial class 文件逐一迁移
+├── 确保所有 State 操作正确
+└── 处理复杂的 Dictionary 字段
+
+Step 3: 拆分评估
+├── 评估是否需要拆分为多个 Agent:
+│   ├── LumenUserProfileGAgent (核心资料)
+│   ├── LumenUserIconGAgent (头像管理) - 可选
+│   └── LumenUserLanguageGAgent (语言偏好) - 可选
+├── 考虑因素:
+│   ├── 调用频率差异
+│   ├── 状态隔离需求
+│   └── 独立演进需求
+└── 记录决策理由
+```
+
+---
+
+### Week 6-7: LumenPredictionGAgent (6935行) 🔥🔥 最复杂
+
+```
+Step 1: Partial Class 分析 (核心!)
+├── 必须强制拆分为 partial class
+├── 建议拆分方案 (按职责):
+│   ├── LumenPredictionGAgent.cs              # 主类 + 生命周期
+│   ├── LumenPredictionGAgent.Daily.cs        # Daily 预测逻辑
+│   ├── LumenPredictionGAgent.Yearly.cs       # Yearly 预测逻辑
+│   ├── LumenPredictionGAgent.Lifetime.cs     # Lifetime 预测逻辑
+│   ├── LumenPredictionGAgent.Translation.cs  # 翻译逻辑
+│   ├── LumenPredictionGAgent.Dictionaries.cs # 翻译字典常量
+│   ├── LumenPredictionGAgent.AI.cs           # AI生成逻辑
+│   ├── LumenPredictionGAgent.Handlers.cs     # EventHandlers
+│   └── LumenPredictionGAgent.Helpers.cs      # 辅助方法
+├── 统计各部分行数，确保每个文件 < 800行
+└── 识别公共依赖和内部状态
+
+Step 2: 代码风格修改
+├── 按 partial class 文件逐一迁移
+├── 特殊处理:
+│   ├── IRemindable 接口 → 外部调度器
+│   ├── AI 服务集成 → 新框架 AIGAgent 模式
+│   └── 复杂字典结构 → Protobuf map 类型
+└── 确保翻译逻辑正确迁移
+
+Step 3: 拆分评估 (重要决策!)
+├── 评估是否需要拆分为多个 Agent:
+│   ├── 方案A: 保持单一 Agent (当前)
+│   │   ├── 优点: 状态共享简单
+│   │   └── 缺点: 单点故障风险
+│   │
+│   ├── 方案B: 按预测类型拆分
+│   │   ├── LumenDailyPredictionGAgent
+│   │   ├── LumenYearlyPredictionGAgent
+│   │   └── LumenLifetimePredictionGAgent
+│   │   ├── 优点: 职责清晰，可独立扩展
+│   │   └── 缺点: 需要协调 Agent 间状态
+│   │
+│   ├── 方案C: 按功能拆分
+│   │   ├── LumenPredictionGAgent (核心预测)
+│   │   ├── LumenTranslationGAgent (翻译)
+│   │   └── LumenPredictionCacheGAgent (缓存)
+│   │   ├── 优点: 翻译可复用
+│   │   └── 缺点: 增加通信开销
+│   │
+│   └── 方案D: 混合方案
+│       ├── 保持核心逻辑在一个Agent
+│       ├── 提取翻译为独立服务 (非Agent)
+│       └── 使用 partial class 管理复杂度
+├── 最终决策需要根据实际代码分析
+└── 记录决策理由和权衡
+```
+
+---
+
+### Week 8: 辅助组件 & 集成
+1. ⏳ 迁移 Calculators (直接复制)
+2. ⏳ 迁移 Helpers (直接复制)
 3. ⏳ 创建服务层适配
 4. ⏳ 端到端测试
+5. ⏳ 性能对比测试
 
 ---
 
