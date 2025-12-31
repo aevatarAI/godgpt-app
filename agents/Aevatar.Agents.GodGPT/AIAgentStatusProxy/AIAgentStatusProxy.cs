@@ -32,6 +32,11 @@ public class AIAgentStatusProxy :
 {
     // Injected by OrleansGAgentGrain via reflection
     public IGAgentActorFactory? ActorFactory { get; set; }
+    
+    // Message aggregation to reduce Kafka message count
+    // Aggregates multiple LLM tokens into fewer SendToAsync calls
+    private const int AggregationIntervalMs = 150; // Send every 150ms
+    private const int MaxAggregatedTokens = 15;    // Or every 15 tokens
 
     #region Activation
 
@@ -311,7 +316,8 @@ public class AIAgentStatusProxy :
     }
 
     /// <summary>
-    /// Internal streaming implementation
+    /// Internal streaming implementation with token aggregation
+    /// Aggregates multiple LLM tokens to reduce Kafka message count
     /// </summary>
     private async Task<bool> PromptWithStreamInternalAsync(
         string prompt, 
@@ -341,6 +347,12 @@ public class AIAgentStatusProxy :
 
             var fullResponse = new System.Text.StringBuilder();
             var serialNumber = 0;
+            var messagesSent = 0;
+
+            // Aggregation buffer
+            var aggregationBuffer = new System.Text.StringBuilder();
+            var aggregatedTokenCount = 0;
+            var lastSendTime = DateTime.UtcNow;
 
             // Use the AI framework's streaming capability
             var firstTokenReceived = false;
@@ -350,6 +362,8 @@ public class AIAgentStatusProxy :
             {
                 serialNumber++;
                 fullResponse.Append(token);
+                aggregationBuffer.Append(token);
+                aggregatedTokenCount++;
                 
                 if (!firstTokenReceived)
                 {
@@ -358,29 +372,56 @@ public class AIAgentStatusProxy :
                         streamStartMs.ElapsedMilliseconds, context?.ChatId ?? "null");
                 }
                 
-                var streamContent = new AIStreamChatContent
+                // Check if we should send aggregated message
+                var timeSinceLastSend = (DateTime.UtcNow - lastSendTime).TotalMilliseconds;
+                var shouldSend = aggregatedTokenCount >= MaxAggregatedTokens || 
+                                 timeSinceLastSend >= AggregationIntervalMs;
+                
+                if (shouldSend && aggregationBuffer.Length > 0)
                 {
-                    Content = token,  // Use Content field (consistent with original implementation)
+                    var streamContent = new AIStreamChatContent
+                    {
+                        Content = aggregationBuffer.ToString(),
+                        IsComplete = false,
+                        SerialNumber = serialNumber,
+                        IsLastChunk = false
+                    };
+
+                    await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, streamContent);
+                    messagesSent++;
+                    
+                    if (messagesSent <= 3) // Log first 3 callbacks for debugging
+                    {
+                        Logger.LogInformation("[PERF][AIAgentStatusProxy] Aggregated callback sent - SerialNumber={SerialNumber}, Tokens={Tokens}, ChatId={ChatId}",
+                            serialNumber, aggregatedTokenCount, context?.ChatId ?? "null");
+                    }
+                    
+                    // Reset aggregation
+                    aggregationBuffer.Clear();
+                    aggregatedTokenCount = 0;
+                    lastSendTime = DateTime.UtcNow;
+                }
+            }
+            
+            // Send any remaining buffered content
+            if (aggregationBuffer.Length > 0)
+            {
+                var remainingContent = new AIStreamChatContent
+                {
+                    Content = aggregationBuffer.ToString(),
                     IsComplete = false,
                     SerialNumber = serialNumber,
                     IsLastChunk = false
                 };
-
-                var sendStartMs = streamStartMs.ElapsedMilliseconds;
-                await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, streamContent);
-                
-                if (serialNumber <= 3) // Log first 3 callbacks for debugging
-                {
-                    Logger.LogInformation("[PERF][AIAgentStatusProxy] Callback sent - SerialNumber={SerialNumber}, SendMs={SendMs}ms, ChatId={ChatId}",
-                        serialNumber, streamStartMs.ElapsedMilliseconds - sendStartMs, context?.ChatId ?? "null");
-                }
+                await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, remainingContent);
+                messagesSent++;
             }
 
             // Send final chunk with aggregation message for state persistence
             var aggregatedResponse = fullResponse.ToString();
             var finalContent = new AIStreamChatContent
             {
-                Content = aggregatedResponse,  // Use Content field (consistent with original implementation)
+                Content = aggregatedResponse,
                 IsComplete = true,
                 IsLastChunk = true,
                 SerialNumber = serialNumber + 1,
@@ -390,6 +431,11 @@ public class AIAgentStatusProxy :
             };
 
             await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, finalContent);
+            messagesSent++;
+            
+            Logger.LogInformation("[PERF][AIAgentStatusProxy] Stream completed - TotalTokens={TotalTokens}, MessagesSent={MessagesSent}, ChatId={ChatId}",
+                serialNumber, messagesSent, context?.ChatId ?? "null");
+            
             return true;
         }
         catch (Exception ex)

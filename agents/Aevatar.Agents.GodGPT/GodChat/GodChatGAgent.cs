@@ -75,15 +75,8 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
     private bool _isAccumulatingForSuggestions = false;
     private string _accumulatedSuggestionContent = "";
     
-    // Message aggregation for reducing Kafka message count
-    // Aggregates multiple streaming tokens into fewer messages
-    // For AI chat, slightly larger values reduce Kafka pressure without noticeable latency impact
-    private readonly StringBuilder _messageAggregationBuffer = new();
-    private ResponseStreamGodChat? _pendingAggregatedMessage = null;
-    private DateTime _lastMessageSentTime = DateTime.MinValue;
-    private const int MessageAggregationIntervalMs = 150; // Send aggregated message every 150ms
-    private const int MaxAggregatedTokens = 15; // Or after 15 tokens, whichever comes first
-    private int _aggregatedTokenCount = 0;
+    // NOTE: Message aggregation has been moved to AIAgentStatusProxy for better efficiency
+    // This reduces Kafka messages at the source (LLM token level) rather than at the relay layer
     
     #endregion
 
