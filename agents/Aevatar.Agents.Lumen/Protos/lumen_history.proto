@@ -104,10 +104,30 @@ message PredictionHistoryClearedEvent {
 }
 
 // ============================================================
-// Request/Response DTOs for PredictionHistoryGAgent
+// Request/Response DTOs for History GAgents
 // ============================================================
 
-message PredictionResultDto {
+// Daily prediction result from yearly history
+message GetDailyPredictionResult {
+    bool success = 1;
+    string message = 2;
+    optional DailyPredictionRecord prediction = 3;
+}
+
+message GetAllDailyPredictionsResult {
+    bool success = 1;
+    string message = 2;
+    repeated DailyPredictionRecord predictions = 3;
+}
+
+message GetDailyPredictionsByRangeResult {
+    bool success = 1;
+    string message = 2;
+    repeated DailyPredictionRecord predictions = 3;
+}
+
+// Prediction history result DTO (renamed to avoid conflict with lumen_prediction.proto)
+message HistoryPredictionResultDto {
     string prediction_id = 1;
     string user_id = 2;
     DateValue prediction_date = 3;
@@ -120,5 +140,26 @@ message PredictionResultDto {
     string requested_language = 10;
     string returned_language = 11;
     bool is_fallback = 12;
+}
+
+// Get prediction by date result
+message GetPredictionByDateResult {
+    bool success = 1;
+    string message = 2;
+    optional HistoryPredictionResultDto prediction = 3;
+}
+
+// Get recent predictions result
+message GetRecentPredictionsResult {
+    bool success = 1;
+    string message = 2;
+    repeated HistoryPredictionResultDto predictions = 3;
+}
+
+// Get monthly predictions result
+message GetMonthlyPredictionsResult {
+    bool success = 1;
+    string message = 2;
+    repeated HistoryPredictionResultDto predictions = 3;
 }
 

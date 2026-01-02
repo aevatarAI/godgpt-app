@@ -13,13 +13,13 @@ namespace Aevatar.Agents.Lumen.History;
 /// </summary>
 public interface ILumenPredictionHistoryGAgent : IGAgent
 {
-    Task AddPredictionAsync(PredictionResultDto prediction);
+    Task AddPredictionAsync(HistoryPredictionResultDto prediction);
     
-    Task<PredictionResultDto?> GetPredictionByDateAsync(DateValue date);
+    Task<HistoryPredictionResultDto?> GetPredictionByDateAsync(DateValue date);
     
-    Task<List<PredictionResultDto>> GetRecentPredictionsAsync(int days = 7);
+    Task<List<HistoryPredictionResultDto>> GetRecentPredictionsAsync(int days = 7);
     
-    Task<List<PredictionResultDto>> GetMonthlyPredictionsAsync(int year, int month);
+    Task<List<HistoryPredictionResultDto>> GetMonthlyPredictionsAsync(int year, int month);
     
     Task ClearHistoryAsync();
 }
@@ -145,7 +145,7 @@ public class LumenPredictionHistoryGAgent : GAgentBase<LumenPredictionHistorySta
     // Public Methods (RPC Interface Implementation)
     // ============================================================================
 
-    public async Task AddPredictionAsync(PredictionResultDto prediction)
+    public async Task AddPredictionAsync(HistoryPredictionResultDto prediction)
     {
         try
         {
@@ -199,7 +199,7 @@ public class LumenPredictionHistoryGAgent : GAgentBase<LumenPredictionHistorySta
         }
     }
 
-    public Task<PredictionResultDto?> GetPredictionByDateAsync(DateValue date)
+    public Task<HistoryPredictionResultDto?> GetPredictionByDateAsync(DateValue date)
     {
         try
         {
@@ -217,10 +217,10 @@ public class LumenPredictionHistoryGAgent : GAgentBase<LumenPredictionHistorySta
             if (prediction == null)
             {
                 Logger.LogInformation("[LumenPredictionHistoryGAgent][GetPredictionByDateAsync] No prediction found for date: {Date}", dateKey);
-                return Task.FromResult<PredictionResultDto?>(null);
+                return Task.FromResult<HistoryPredictionResultDto?>(null);
             }
 
-            var result = new PredictionResultDto
+            var result = new HistoryPredictionResultDto
             {
                 PredictionId = prediction.PredictionId,
                 UserId = State.UserId,
@@ -241,16 +241,16 @@ public class LumenPredictionHistoryGAgent : GAgentBase<LumenPredictionHistorySta
             
             result.AvailableLanguages.AddRange(prediction.AvailableLanguages);
 
-            return Task.FromResult<PredictionResultDto?>(result);
+            return Task.FromResult<HistoryPredictionResultDto?>(result);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "[LumenPredictionHistoryGAgent][GetPredictionByDateAsync] Error getting prediction by date");
-            return Task.FromResult<PredictionResultDto?>(null);
+            return Task.FromResult<HistoryPredictionResultDto?>(null);
         }
     }
 
-    public Task<List<PredictionResultDto>> GetRecentPredictionsAsync(int days = 7)
+    public Task<List<HistoryPredictionResultDto>> GetRecentPredictionsAsync(int days = 7)
     {
         try
         {
@@ -277,7 +277,7 @@ public class LumenPredictionHistoryGAgent : GAgentBase<LumenPredictionHistorySta
                 .Take(days)
                 .Select(p => 
                 {
-                    var result = new PredictionResultDto
+                    var result = new HistoryPredictionResultDto
                     {
                         PredictionId = p.PredictionId,
                         UserId = State.UserId,
@@ -310,11 +310,11 @@ public class LumenPredictionHistoryGAgent : GAgentBase<LumenPredictionHistorySta
         catch (Exception ex)
         {
             Logger.LogError(ex, "[LumenPredictionHistoryGAgent][GetRecentPredictionsAsync] Error getting recent predictions");
-            return Task.FromResult(new List<PredictionResultDto>());
+            return Task.FromResult(new List<HistoryPredictionResultDto>());
         }
     }
 
-    public Task<List<PredictionResultDto>> GetMonthlyPredictionsAsync(int year, int month)
+    public Task<List<HistoryPredictionResultDto>> GetMonthlyPredictionsAsync(int year, int month)
     {
         try
         {
@@ -338,7 +338,7 @@ public class LumenPredictionHistoryGAgent : GAgentBase<LumenPredictionHistorySta
                     : DateOnly.MinValue)
                 .Select(p => 
                 {
-                    var result = new PredictionResultDto
+                    var result = new HistoryPredictionResultDto
                     {
                         PredictionId = p.PredictionId,
                         UserId = State.UserId,
@@ -371,7 +371,7 @@ public class LumenPredictionHistoryGAgent : GAgentBase<LumenPredictionHistorySta
         catch (Exception ex)
         {
             Logger.LogError(ex, "[LumenPredictionHistoryGAgent][GetMonthlyPredictionsAsync] Error getting monthly predictions");
-            return Task.FromResult(new List<PredictionResultDto>());
+            return Task.FromResult(new List<HistoryPredictionResultDto>());
         }
     }
     

@@ -20,13 +20,13 @@ public class LumenPredictionHistoryGAgentTests
         return TestHelpers.CreateAgent<LumenPredictionHistoryGAgent>();
     }
 
-    private PredictionResultDto CreatePredictionDto(
+    private HistoryPredictionResultDto CreatePredictionDto(
         string userId,
         string predictionId,
         DateValue date,
         PredictionType type = PredictionType.PredictionDaily)
     {
-        var dto = new PredictionResultDto
+        var dto = new HistoryPredictionResultDto
         {
             PredictionId = predictionId,
             UserId = userId,
@@ -201,7 +201,7 @@ public class LumenPredictionHistoryGAgentTests
         await agent.ActivateAsync();
 
         var date = new DateValue { Year = 2025, Month = 1, Day = 2 };
-        var prediction = new PredictionResultDto
+        var prediction = new HistoryPredictionResultDto
         {
             PredictionId = "pred-001",
             UserId = "user123",

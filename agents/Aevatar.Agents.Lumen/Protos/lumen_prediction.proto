@@ -1,0 +1,191 @@
+syntax = "proto3";
+package lumen;
+
+option csharp_namespace = "Aevatar.Agents.Lumen.Protos";
+
+import "Protos/lumen_common.proto";
+import "google/protobuf/timestamp.proto";
+
+// ============ Enum: Lifetime Batch Type ============
+enum LifetimeBatchType {
+    LIFETIME_BATCH_WESTERN_ASTROLOGY = 0;
+    LIFETIME_BATCH_CHINESE_ASTROLOGY = 1;
+    LIFETIME_BATCH_LIFE_TRAITS = 2;
+    LIFETIME_BATCH_TIMELINE_PLOT = 3;
+}
+
+// ============ State ============
+
+message LumenPredictionState {
+    // Metadata
+    string prediction_id = 1;
+    string user_id = 2;
+    DateValue prediction_date = 3;
+    google.protobuf.Timestamp created_at = 4;
+    optional google.protobuf.Timestamp profile_updated_at = 5;
+    
+    // Unified prediction results (flattened key-value pairs)
+    map<string, string> results = 6;
+    
+    // Multilingual cache (language -> flattened results)
+    map<string, MultilingualResultValue> multilingual_results = 7;
+    
+    // Language generation status
+    repeated string generated_languages = 8;
+    
+    // Idempotency protection - prevent concurrent generation
+    map<int32, GenerationLockInfo> generation_locks = 9;  // Key: PredictionType enum value
+    
+    // Prediction type
+    PredictionType type = 10;
+    
+    // Track on-demand translations in progress
+    map<string, TranslationLockInfo> translation_locks = 11;  // Key: language code
+    
+    // Daily reminder management
+    google.protobuf.Timestamp last_active_date = 12;
+    string daily_reminder_target_id = 13;
+    bool is_daily_reminder_enabled = 14;
+    optional DateValue last_generated_date = 15;
+    
+    // Prompt version tracking
+    int32 prompt_version = 16;
+    
+    // Today's processed languages
+    optional DateValue today_process_date = 17;
+    repeated string today_processed_languages = 18;
+}
+
+// Wrapper for multilingual result map values
+message MultilingualResultValue {
+    map<string, string> values = 1;
+}
+
+// ============ Events ============
+
+message PredictionGeneratedEvent {
+    string prediction_id = 1;
+    string user_id = 2;
+    DateValue prediction_date = 3;
+    google.protobuf.Timestamp created_at = 4;
+    PredictionType type = 5;
+    map<string, string> results = 6;
+    string language = 7;
+    optional google.protobuf.Timestamp profile_updated_at = 8;
+    int32 prompt_version = 9;
+}
+
+message PredictionClearedEvent {
+    google.protobuf.Timestamp cleared_at = 1;
+}
+
+message LanguagesTranslatedEvent {
+    PredictionType type = 1;
+    DateValue prediction_date = 2;
+    map<string, MultilingualResultValue> translated_languages = 3;
+    repeated string all_generated_languages = 4;
+}
+
+message GenerationLockSetEvent {
+    PredictionType type = 1;
+    google.protobuf.Timestamp started_at = 2;
+    int32 retry_count = 3;
+}
+
+message GenerationLockClearedEvent {
+    PredictionType type = 1;
+}
+
+message TranslationLockSetEvent {
+    string language = 1;
+    google.protobuf.Timestamp started_at = 2;
+    string source_language = 3;
+}
+
+message TranslationLockClearedEvent {
+    string language = 1;
+}
+
+message DailyReminderUpdatedEvent {
+    bool is_enabled = 1;
+    string target_id = 2;
+    google.protobuf.Timestamp updated_at = 3;
+}
+
+message UserActivityUpdatedEvent {
+    google.protobuf.Timestamp last_active_date = 1;
+    optional string user_time_zone = 2;
+}
+
+// ============ Request/Response DTOs ============
+
+message GetTodayPredictionResult {
+    bool success = 1;
+    string message = 2;
+    optional PredictionResultDto prediction = 3;
+    bool is_generating = 4;
+    optional string generating_language = 5;
+}
+
+message PredictionResultDto {
+    string prediction_id = 1;
+    PredictionType type = 2;
+    DateValue prediction_date = 3;
+    google.protobuf.Timestamp created_at = 4;
+    map<string, string> content = 5;
+    string language = 6;
+    repeated string available_languages = 7;
+}
+
+message PredictionStatusDto {
+    bool has_prediction = 1;
+    bool is_generating = 2;
+    bool needs_regeneration = 3;
+    optional DateValue prediction_date = 4;
+    optional DateValue last_generated_date = 5;
+    int32 prompt_version = 6;
+    repeated string available_languages = 7;
+    optional google.protobuf.Timestamp profile_updated_at = 8;
+}
+
+message LumenUserDto {
+    string user_id = 1;
+    string full_name = 2;
+    GenderEnum gender = 3;
+    DateValue birth_date = 4;
+    optional TimeValue birth_time = 5;
+    optional string birth_city = 6;
+    optional string lat_long = 7;
+    optional MbtiTypeEnum mbti_type = 8;
+    optional RelationshipStatusEnum relationship_status = 9;
+    optional string interests = 10;
+    optional CalendarTypeEnum calendar_type = 11;
+    optional string occupation = 12;
+    optional string current_time_zone = 13;
+}
+
+message CalculatedValuesDto {
+    map<string, string> values = 1;
+}
+
+message TriggerTranslationRequest {
+    LumenUserDto user_info = 1;
+    string target_language = 2;
+}
+
+message TriggerTranslationResult {
+    bool success = 1;
+    string message = 2;
+    bool already_translating = 3;
+}
+
+message UpdateTimeZoneReminderRequest {
+    string time_zone_id = 1;
+}
+
+message UpdateTimeZoneReminderResult {
+    bool success = 1;
+    string message = 2;
+}
+
+

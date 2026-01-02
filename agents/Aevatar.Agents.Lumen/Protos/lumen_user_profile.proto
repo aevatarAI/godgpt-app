@@ -1,0 +1,218 @@
+syntax = "proto3";
+package lumen;
+
+option csharp_namespace = "Aevatar.Agents.Lumen.Protos";
+
+import "Protos/lumen_common.proto";
+import "google/protobuf/timestamp.proto";
+
+// ============ State ============
+
+message WelcomeNoteValue {
+    map<string, string> values = 1;  // key-value pairs like zodiac, chineseZodiac, rhythm, essence
+}
+
+message LumenUserProfileState {
+    string user_id = 1;
+    string full_name = 2;
+    GenderEnum gender = 3;
+    DateValue birth_date = 4;
+    optional TimeValue birth_time = 5;
+    optional string birth_city = 6;
+    optional string lat_long = 7;  // Format: "34.0522, -118.2437"
+    optional MbtiTypeEnum mbti_type = 8;
+    optional RelationshipStatusEnum relationship_status = 9;
+    optional string interests = 10;
+    optional CalendarTypeEnum calendar_type = 11;
+    repeated string actions = 12;
+    optional string current_residence = 13;
+    optional string email = 14;
+    google.protobuf.Timestamp created_at = 15;
+    google.protobuf.Timestamp updated_at = 16;
+    optional string occupation = 17;
+    optional string icon = 18;  // User avatar/icon URL
+    bool is_deleted = 19;
+    map<string, WelcomeNoteValue> multilingual_welcome_note = 20;  // language -> WelcomeNoteValue
+    repeated google.protobuf.Timestamp update_history = 21;  // For rate limiting
+    repeated google.protobuf.Timestamp icon_upload_history = 22;  // For daily rate limiting
+    string current_language = 23;  // Default "en"
+    optional DateValue last_language_switch_date = 24;
+    int32 today_language_switch_count = 25;
+    optional string lat_long_inferred = 26;  // LLM inferred from BirthCity
+    optional string inferred_from_city = 27;
+    optional string current_time_zone = 28;  // IANA format, e.g., "America/New_York"
+    repeated InterestEnum interests_list = 29;  // V2: Interests as enum list
+}
+
+// ============ Events ============
+
+message UserProfileUpdatedEvent {
+    string user_id = 1;
+    string full_name = 2;
+    GenderEnum gender = 3;
+    DateValue birth_date = 4;
+    optional TimeValue birth_time = 5;
+    optional string birth_city = 6;
+    optional string lat_long = 7;
+    optional MbtiTypeEnum mbti_type = 8;
+    optional RelationshipStatusEnum relationship_status = 9;
+    optional string interests = 10;
+    optional CalendarTypeEnum calendar_type = 11;
+    google.protobuf.Timestamp updated_at = 12;
+    optional string current_residence = 13;
+    optional string email = 14;
+    optional string occupation = 15;
+    optional string icon = 16;
+    optional string current_time_zone = 17;
+    repeated InterestEnum interests_list = 18;
+}
+
+message UserProfileActionsUpdatedEvent {
+    string user_id = 1;
+    repeated string actions = 2;
+    google.protobuf.Timestamp updated_at = 3;
+}
+
+message UserProfileClearedEvent {
+    google.protobuf.Timestamp cleared_at = 1;
+}
+
+message IconUpdatedEvent {
+    string user_id = 1;
+    optional string icon_url = 2;  // null to remove
+    google.protobuf.Timestamp updated_at = 3;
+    google.protobuf.Timestamp upload_timestamp = 4;
+}
+
+message UserProfileLanguageSwitchedEvent {
+    string user_id = 1;
+    string previous_language = 2;
+    string new_language = 3;
+    google.protobuf.Timestamp switched_at = 4;
+    DateValue switch_date = 5;
+    int32 today_count = 6;
+}
+
+message TimeZoneUpdatedEvent {
+    string user_id = 1;
+    string time_zone_id = 2;  // IANA time zone ID
+    google.protobuf.Timestamp updated_at = 3;
+}
+
+message UserProfileLatLongInferredEvent {
+    string user_id = 1;
+    string lat_long_inferred = 2;  // Format: "latitude,longitude"
+    string birth_city = 3;
+    google.protobuf.Timestamp inferred_at = 4;
+}
+
+// ============ Request/Response DTOs ============
+
+message UpdateUserProfileRequest {
+    string user_id = 1;
+    string full_name = 2;
+    GenderEnum gender = 3;
+    DateValue birth_date = 4;
+    optional TimeValue birth_time = 5;
+    optional string birth_city = 6;
+    optional string lat_long = 7;
+    optional MbtiTypeEnum mbti_type = 8;
+    optional RelationshipStatusEnum relationship_status = 9;
+    optional string interests = 10;
+    optional CalendarTypeEnum calendar_type = 11;
+    optional string current_residence = 12;
+    optional string email = 13;
+    optional string occupation = 14;
+    optional string icon = 15;
+    optional string current_time_zone = 16;
+    repeated InterestEnum interests_list = 17;
+}
+
+message UpdateUserProfileResult {
+    bool success = 1;
+    string message = 2;
+    optional string user_id = 3;
+    optional google.protobuf.Timestamp created_at = 4;
+    optional google.protobuf.Timestamp updated_at = 5;
+}
+
+message GetUserProfileResult {
+    bool success = 1;
+    string message = 2;
+    optional LumenUserProfileDto user_profile = 3;
+}
+
+message LumenUserProfileDto {
+    string user_id = 1;
+    string full_name = 2;
+    GenderEnum gender = 3;
+    DateValue birth_date = 4;
+    optional TimeValue birth_time = 5;
+    string birth_city = 6;
+    string lat_long = 7;
+    optional CalendarTypeEnum calendar_type = 8;
+    google.protobuf.Timestamp created_at = 9;
+    optional string current_residence = 10;
+    google.protobuf.Timestamp updated_at = 11;
+    map<string, string> welcome_note = 12;  // zodiac, chineseZodiac, rhythm, essence
+    string zodiac_sign = 13;
+    ZodiacSignEnum zodiac_sign_enum = 14;
+    string chinese_zodiac = 15;
+    ChineseZodiacEnum chinese_zodiac_enum = 16;
+    optional string occupation = 17;
+    optional MbtiTypeEnum mbti_type = 18;
+    optional RelationshipStatusEnum relationship_status = 19;
+    optional string interests = 20;
+    repeated InterestEnum interests_list = 21;
+    optional string email = 22;
+    optional string icon = 23;
+    optional string current_time_zone = 24;
+    string current_language = 25;
+    optional string lat_long_inferred = 26;
+    optional string inferred_from_city = 27;
+}
+
+message GetRemainingUpdatesResult {
+    bool success = 1;
+    int32 used_count = 2;
+    int32 max_count = 3;
+    int32 remaining_count = 4;
+    optional google.protobuf.Timestamp next_available_at = 5;
+}
+
+message UpdateIconResult {
+    bool success = 1;
+    string message = 2;
+    optional string icon_url = 3;
+    int32 remaining_uploads = 4;
+}
+
+message SetLanguageResult {
+    bool success = 1;
+    string message = 2;
+    optional string current_language = 3;
+    int32 remaining_changes = 4;
+    int32 max_changes_per_day = 5;
+}
+
+message GetLanguageInfoResult {
+    bool success = 1;
+    string message = 2;
+    string current_language = 3;
+    int32 remaining_changes = 4;
+    int32 max_changes_per_day = 5;
+    optional google.protobuf.Timestamp last_switch_date = 6;
+}
+
+message UpdateTimeZoneRequest {
+    string user_id = 1;
+    string time_zone_id = 2;  // IANA time zone ID
+}
+
+message UpdateTimeZoneResult {
+    bool success = 1;
+    string message = 2;
+    optional string time_zone_id = 3;
+}
+
+
