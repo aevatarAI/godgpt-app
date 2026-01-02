@@ -39,13 +39,13 @@ Aevatar.Agents.Lumen/
 
 | Agent | 描述 | 状态 |
 |-------|------|------|
-| LumenUserProfileGAgent | 用户配置管理 | ⏳ 迁移中 |
-| LumenPredictionGAgent | 预测生成 | ⏳ 迁移中 |
-| LumenPredictionHistoryGAgent | 历史记录 | ⏳ 迁移中 |
-| LumenFeedbackGAgent | 反馈管理 | ⏳ 迁移中 |
-| LumenFavouriteGAgent | 收藏管理 | ⏳ 迁移中 |
-| LumenStatsSnapshotGAgent | 统计快照 | ⏳ 迁移中 |
-| LumenDailyYearlyHistoryGAgent | 日/年历史 | ⏳ 迁移中 |
+| LumenUserProfileGAgent | 用户配置管理 | ⏳ 待迁移 |
+| LumenPredictionGAgent | 预测生成 | ⏳ 待迁移 |
+| LumenPredictionHistoryGAgent | 历史记录 | ✅ 已完成 |
+| LumenFeedbackGAgent | 反馈管理 | ✅ 已完成 |
+| LumenFavouriteGAgent | 收藏管理 | ✅ 已完成 |
+| LumenStatsSnapshotGAgent | 统计快照 | ✅ 已完成 |
+| LumenDailyYearlyHistoryGAgent | 日/年历史 | ✅ 已完成 |
 
 ## 迁移进度
 

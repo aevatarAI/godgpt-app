@@ -1,0 +1,124 @@
+syntax = "proto3";
+package lumen;
+
+option csharp_namespace = "Aevatar.Agents.Lumen.Protos";
+
+import "google/protobuf/timestamp.proto";
+import "Protos/lumen_common.proto";
+
+// ============================================================
+// LumenDailyYearlyHistoryGAgent - Yearly archive of daily predictions
+// GrainId format: Guid derived from {UserId}-{YYYY}
+// ============================================================
+
+// Multilingual results container - one entry per language
+message LanguageResults {
+    map<string, string> values = 1;  // key-value pairs for prediction fields
+}
+
+// Daily prediction record for yearly history
+message DailyPredictionRecord {
+    string prediction_id = 1;
+    DateValue date = 2;
+    google.protobuf.Timestamp created_at = 3;
+    // Multilingual results: language_code -> (field_name -> value)
+    map<string, LanguageResults> multilingual_results = 4;
+    repeated string available_languages = 5;
+}
+
+// State for LumenDailyYearlyHistoryGAgent
+message LumenDailyYearlyHistoryState {
+    string user_id = 1;
+    int32 year = 2;
+    // Predictions keyed by date string (YYYY-MM-DD format)
+    map<string, DailyPredictionRecord> predictions = 3;
+    google.protobuf.Timestamp last_updated_at = 4;
+}
+
+// Event: Daily prediction added to yearly history
+message DailyPredictionAddedEvent {
+    string user_id = 1;
+    int32 year = 2;
+    string prediction_id = 3;
+    DateValue date = 4;
+    google.protobuf.Timestamp created_at = 5;
+    map<string, LanguageResults> multilingual_results = 6;
+    repeated string available_languages = 7;
+    google.protobuf.Timestamp added_at = 8;
+}
+
+// Event: Yearly history cleared
+message DailyYearlyHistoryClearedEvent {
+    google.protobuf.Timestamp cleared_at = 1;
+}
+
+// ============================================================
+// LumenPredictionHistoryGAgent - Recent 30 days of predictions
+// ============================================================
+
+// Prediction history record (lightweight)
+message PredictionHistoryRecord {
+    string prediction_id = 1;
+    DateValue prediction_date = 2;
+    google.protobuf.Timestamp created_at = 3;
+    // Flat results structure (unified format)
+    map<string, string> results = 4;
+    // Prediction type (Daily/Yearly/Lifetime)
+    PredictionType type = 5;
+    // Additional fields for complete prediction data
+    repeated string available_languages = 6;
+    string requested_language = 7;
+    string returned_language = 8;
+    bool from_cache = 9;
+    bool all_languages_generated = 10;
+    bool is_fallback = 11;
+}
+
+// State for LumenPredictionHistoryGAgent
+message LumenPredictionHistoryState {
+    string user_id = 1;
+    // Store recent predictions (max 30 days)
+    repeated PredictionHistoryRecord recent_predictions = 2;
+    google.protobuf.Timestamp last_updated_at = 3;
+}
+
+// Event: Prediction added to history
+message PredictionAddedToHistoryEvent {
+    string prediction_id = 1;
+    DateValue prediction_date = 2;
+    google.protobuf.Timestamp created_at = 3;
+    map<string, string> results = 4;
+    PredictionType type = 5;
+    string user_id = 6;
+    repeated string available_languages = 7;
+    string requested_language = 8;
+    string returned_language = 9;
+    bool from_cache = 10;
+    bool all_languages_generated = 11;
+    bool is_fallback = 12;
+}
+
+// Event: Prediction history cleared
+message PredictionHistoryClearedEvent {
+    google.protobuf.Timestamp cleared_at = 1;
+}
+
+// ============================================================
+// Request/Response DTOs for PredictionHistoryGAgent
+// ============================================================
+
+message PredictionResultDto {
+    string prediction_id = 1;
+    string user_id = 2;
+    DateValue prediction_date = 3;
+    map<string, string> results = 4;
+    google.protobuf.Timestamp created_at = 5;
+    PredictionType type = 6;
+    bool from_cache = 7;
+    repeated string available_languages = 8;
+    bool all_languages_generated = 9;
+    string requested_language = 10;
+    string returned_language = 11;
+    bool is_fallback = 12;
+}
+
