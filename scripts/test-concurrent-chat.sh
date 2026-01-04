@@ -454,6 +454,85 @@ test_concurrent_timeout_trigger() {
 }
 
 # =============================================================================
+# Test: Simulate slow response with artificial delay
+# =============================================================================
+
+test_with_delay() {
+    local delay_seconds="${1:-5}"
+    
+    log_step "Test: DELAY SIMULATION - ${delay_seconds}s delay between requests..."
+    log_info "This simulates what happens when LLM is slow"
+    echo ""
+    
+    # First request - should succeed
+    log_info "[1/2] Sending first request..."
+    local temp1=$(mktemp)
+    local start1=$(date +%s)
+    
+    curl -k -s --max-time "$CURL_TIMEOUT" -X POST "$API_URL/api/gotgpt/chat" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "GodgptLanguage: en" \
+        -d "{\"sessionId\": \"$SESSION_ID\", \"content\": \"Count from 1 to 100 slowly, one number per line with explanation.\"}" > "$temp1" 2>&1 &
+    local pid1=$!
+    
+    # Wait specified delay, then send second request (while first is still running)
+    log_info "[Wait] Sleeping ${delay_seconds}s before sending second request..."
+    sleep "$delay_seconds"
+    
+    log_info "[2/2] Sending second request while first is still running..."
+    local temp2=$(mktemp)
+    local start2=$(date +%s)
+    
+    curl -k -s --max-time "$CURL_TIMEOUT" -X POST "$API_URL/api/gotgpt/chat" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "GodgptLanguage: en" \
+        -d "{\"sessionId\": \"$SESSION_ID\", \"content\": \"What is 2+2?\"}" > "$temp2" 2>&1 &
+    local pid2=$!
+    
+    log_info "Waiting for both requests to complete..."
+    
+    wait $pid1
+    local end1=$(date +%s)
+    local dur1=$((end1 - start1))
+    
+    wait $pid2
+    local end2=$(date +%s)
+    local dur2=$((end2 - start2))
+    
+    log_info "========================================"
+    log_info "Delay Test Results:"
+    log_info "========================================"
+    
+    # Request 1
+    local size1=$(wc -c < "$temp1")
+    if grep -q "TimeoutException\|Response did not arrive" "$temp1"; then
+        log_error "Request 1: TIMEOUT after ${dur1}s (${size1} bytes)"
+    elif grep -q "data:" "$temp1"; then
+        log_info "Request 1: SUCCESS after ${dur1}s (${size1} bytes)"
+    else
+        log_warn "Request 1: UNKNOWN after ${dur1}s (${size1} bytes)"
+        head -3 "$temp1"
+    fi
+    
+    # Request 2
+    local size2=$(wc -c < "$temp2")
+    if grep -q "TimeoutException\|Response did not arrive" "$temp2"; then
+        log_error "Request 2: TIMEOUT after ${dur2}s (${size2} bytes) <<< BLOCKED BY REQUEST 1!"
+        log_error "This confirms grain blocking issue"
+        head -5 "$temp2"
+    elif grep -q "data:" "$temp2"; then
+        log_info "Request 2: SUCCESS after ${dur2}s (${size2} bytes)"
+    else
+        log_warn "Request 2: UNKNOWN after ${dur2}s (${size2} bytes)"
+        head -3 "$temp2"
+    fi
+    
+    rm -f "$temp1" "$temp2"
+}
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -495,8 +574,17 @@ main() {
         echo ""
     fi
     
-    if [ "${RUN_EXTREME_TEST:-0}" != "1" ] && [ "${RUN_TIMEOUT_TEST:-0}" != "1" ]; then
-        log_info "Skipping extreme tests. Set RUN_EXTREME_TEST=1 or RUN_TIMEOUT_TEST=1 to run them."
+    # Delay test - simulates slow LLM
+    if [ "${RUN_DELAY_TEST:-0}" == "1" ]; then
+        test_with_delay "${DELAY_SECONDS:-10}"
+        echo ""
+    fi
+    
+    if [ "${RUN_EXTREME_TEST:-0}" != "1" ] && [ "${RUN_TIMEOUT_TEST:-0}" != "1" ] && [ "${RUN_DELAY_TEST:-0}" != "1" ]; then
+        log_info "Skipping extreme tests. Options:"
+        log_info "  RUN_EXTREME_TEST=1  - stress test with many concurrent requests"
+        log_info "  RUN_TIMEOUT_TEST=1  - test with 30s+ prompts"
+        log_info "  RUN_DELAY_TEST=1 DELAY_SECONDS=10 - test with artificial delay"
     fi
     
     log_info "=========================================="

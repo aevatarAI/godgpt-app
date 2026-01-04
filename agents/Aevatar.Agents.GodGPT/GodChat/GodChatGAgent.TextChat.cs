@@ -225,15 +225,41 @@ public partial class GodChatGAgent
             Logger.LogInformation("[PERF][GodStreamChatAsync] LLM_Call_Start - SessionId={SessionId}, ChatId={ChatId}, IsHttpRequest={IsHttpRequest}, ElapsedMs={ElapsedMs}ms", 
                 sessionId, chatId, isHttpRequest, llmStartMs);
             
-            var result = await aiAgentStatusProxy.PromptWithStreamProtoAsync(protoInput);
-            
-            var llmEndMs = totalStopwatch.ElapsedMilliseconds;
-            Logger.LogInformation("[PERF][GodStreamChatAsync] LLM_Call_End - SessionId={SessionId}, ChatId={ChatId}, LLMMs={LLMMs}ms, TotalElapsedMs={TotalElapsedMs}ms", 
-                sessionId, chatId, llmEndMs - llmStartMs, llmEndMs);
-            
-            if (!result)
+            // CRITICAL FIX: Fire-and-forget for HTTP requests to prevent Orleans grain blocking
+            // For HTTP requests, AIAgentStatusProxy pushes directly to Kafka, so we don't need to wait
+            // Awaiting this call blocks GodChatGAgent for 30+ seconds (entire LLM stream duration)
+            // which causes Orleans grain timeout (30s default)
+            if (isHttpRequest)
             {
-                Logger.LogError($"Failed to initiate streaming response. {Id.ToString()}");
+                // Fire-and-forget: Start the streaming but don't wait for completion
+                _ = aiAgentStatusProxy.PromptWithStreamProtoAsync(protoInput)
+                    .ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                        {
+                            Logger.LogError(t.Exception, "[GodStreamChatAsync] Background streaming failed - SessionId={SessionId}, ChatId={ChatId}", sessionId, chatId);
+                        }
+                        else
+                        {
+                            Logger.LogDebug("[GodStreamChatAsync] Background streaming completed - SessionId={SessionId}, ChatId={ChatId}", sessionId, chatId);
+                        }
+                    });
+                Logger.LogInformation("[PERF][GodStreamChatAsync] LLM_Call_FireAndForget - SessionId={SessionId}, ChatId={ChatId}, IsHttpRequest=true, ElapsedMs={ElapsedMs}ms", 
+                    sessionId, chatId, totalStopwatch.ElapsedMilliseconds);
+            }
+            else
+            {
+                // For non-HTTP requests (internal calls), await the result
+                var result = await aiAgentStatusProxy.PromptWithStreamProtoAsync(protoInput);
+                
+                var llmEndMs = totalStopwatch.ElapsedMilliseconds;
+                Logger.LogInformation("[PERF][GodStreamChatAsync] LLM_Call_End - SessionId={SessionId}, ChatId={ChatId}, LLMMs={LLMMs}ms, TotalElapsedMs={TotalElapsedMs}ms", 
+                    sessionId, chatId, llmEndMs - llmStartMs, llmEndMs);
+                
+                if (!result)
+                {
+                    Logger.LogError($"Failed to initiate streaming response. {Id.ToString()}");
+                }
             }
 
             if (addToHistory)

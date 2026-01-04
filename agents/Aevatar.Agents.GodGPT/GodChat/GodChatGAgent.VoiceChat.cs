@@ -355,11 +355,34 @@ public partial class GodChatGAgent
             protoInput.StreamId = sessionId.ToString();
             protoInput.IsHttpRequest = isHttpRequest;
             
-            var result = await aiAgentStatusProxy.PromptWithStreamProtoAsync(protoInput);
-            if (!result)
+            // CRITICAL FIX: Fire-and-forget for HTTP requests to prevent Orleans grain blocking
+            // For HTTP requests, AIAgentStatusProxy pushes directly to Kafka, so we don't need to wait
+            // Awaiting this call blocks GodChatGAgent for 30+ seconds (entire LLM stream duration)
+            if (isHttpRequest)
             {
-                Logger.LogError(
-                    $"[GodChatGAgent][GodVoiceStreamChatAsync] Failed to initiate voice streaming response. {Id.ToString()}");
+                // Fire-and-forget: Start the streaming but don't wait for completion
+                _ = aiAgentStatusProxy.PromptWithStreamProtoAsync(protoInput)
+                    .ContinueWith(t =>
+                    {
+                        if (t.IsFaulted)
+                        {
+                            Logger.LogError(t.Exception, "[GodVoiceStreamChatAsync] Background streaming failed - SessionId={SessionId}", sessionId);
+                        }
+                        else
+                        {
+                            Logger.LogDebug("[GodVoiceStreamChatAsync] Background streaming completed - SessionId={SessionId}", sessionId);
+                        }
+                    });
+                Logger.LogInformation("[PERF][GodVoiceStreamChatAsync] LLM_Call_FireAndForget - SessionId={SessionId}, IsHttpRequest=true", sessionId);
+            }
+            else
+            {
+                var result = await aiAgentStatusProxy.PromptWithStreamProtoAsync(protoInput);
+                if (!result)
+                {
+                    Logger.LogError(
+                        $"[GodChatGAgent][GodVoiceStreamChatAsync] Failed to initiate voice streaming response. {Id.ToString()}");
+                }
             }
 
             if (!addToHistory)
