@@ -1,0 +1,93 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.godchat.stream;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.GodChatStream";
+
+import "google/protobuf/timestamp.proto";
+
+// Single, client-facing streaming envelope for GodChat.
+// This is the ONLY message type ChatMiddleware should unpack from EventEnvelope.Payload.
+message GodChatStreamEnvelopeProto {
+  // Identifies the MassTransit/Kafka stream (SessionId) used by HttpApi subscription.
+  string stream_id = 1;
+
+  // Identifies the chat conversation instance.
+  string chat_id = 2;
+
+  // Request correlation id (string form of Guid is recommended).
+  string request_id = 3;
+
+  // Monotonically increasing sequence number for deterministic ordering.
+  // Assigned by the text producer (AIAgentStatusProxy).
+  int64 seq = 4;
+
+  google.protobuf.Timestamp timestamp = 5;
+
+  oneof payload {
+    TextChunkProto text = 10;
+    AudioChunkProto audio = 11;
+    ControlProto control = 12;
+  }
+}
+
+// Streaming text chunk.
+message TextChunkProto {
+  // Text delta content (aggregated).
+  string content = 1;
+
+  // Whether this chunk is the last text chunk.
+  bool is_last = 2;
+
+  // Optional: sentence index hint for downstream TTS alignment (0-based).
+  // When omitted, consumers can treat as "unknown".
+  int32 sentence_index = 3;
+}
+
+// Streaming audio chunk produced asynchronously by voice synthesis.
+message AudioChunkProto {
+  // Audio bytes for a single audio chunk (sentence-level recommended).
+  bytes audio_data = 1;
+
+  // Audio metadata serialized as JSON for forward compatibility (temporary).
+  // NOTE: If this crosses boundaries long-term, consider a dedicated proto message.
+  string audio_metadata_json = 2;
+
+  // Reference to the text chunk sequence this audio corresponds to.
+  int64 text_seq_ref = 3;
+
+  // Sentence index this audio corresponds to (0-based).
+  int32 sentence_index = 4;
+
+  // Unique id for idempotency on the client.
+  string audio_chunk_id = 5;
+
+  // Whether this is the last audio chunk.
+  bool is_last = 6;
+}
+
+// Control signals for the stream.
+message ControlProto {
+  enum ControlType {
+    CONTROL_TYPE_UNSPECIFIED = 0;
+    CONTROL_TYPE_TEXT_COMPLETED = 1;
+    CONTROL_TYPE_AUDIO_COMPLETED = 2;
+    CONTROL_TYPE_ALL_COMPLETED = 3;
+    CONTROL_TYPE_ERROR = 4;
+  }
+
+  ControlType type = 1;
+
+  // Error scope: "text" | "audio" | "all"
+  string scope = 2;
+
+  // Optional error message.
+  string message = 3;
+
+  // Optional legacy-compatible error code for clients.
+  // Keep aligned with existing ChatErrorCode values:
+  // 0, 20001, 20002, 20003, 20004
+  int32 error_code = 4;
+}
+
+

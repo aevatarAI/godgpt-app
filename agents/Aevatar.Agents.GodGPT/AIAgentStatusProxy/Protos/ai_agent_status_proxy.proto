@@ -82,6 +82,9 @@ message PromptWithStreamInputProto {
     optional ExecutionPromptSettingsProto prompt_settings = 3;
     optional AIChatContextProto context = 4;
     repeated string image_keys = 5;
+    // New fields for direct Kafka push (bypassing GodChatGAgent callback queue)
+    optional string stream_id = 6;       // StreamId for Kafka topic routing
+    bool is_http_request = 7;            // If true, push directly to Kafka instead of SendToAsync
 }
 
 message ChatWithHistoryInputProto {

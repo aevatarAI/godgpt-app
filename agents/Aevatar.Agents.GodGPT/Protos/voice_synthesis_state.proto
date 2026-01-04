@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.godchat.voice;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.GodChatVoice";
+
+// Minimal persisted state for VoiceSynthesisGAgent.
+// Keep it small: per-stream pending text buffer + next sentence index.
+message VoiceSynthesisStateProto {
+  map<string, VoiceSynthesisStreamStateProto> streams = 1;
+}
+
+message VoiceSynthesisStreamStateProto {
+  // Pending text that has not yet been synthesized into audio (no sentence boundary yet).
+  string pending_text = 1;
+
+  // Next sentence index to emit (0-based).
+  int64 next_sentence_index = 2;
+
+  // Last observed text sequence number (from the text producer).
+  int64 last_text_seq = 3;
+}
+
+

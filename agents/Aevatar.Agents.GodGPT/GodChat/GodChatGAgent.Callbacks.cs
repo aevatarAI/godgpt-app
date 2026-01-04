@@ -9,6 +9,7 @@ using Aevatar.GAgents.AIGAgent.Dtos;
 using Aevatar.GAgents.ChatAgent.Dtos;
 using GodGPT.GAgents.Common.Constants;
 using GodGPT.GAgents.SpeechChat;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -18,6 +19,7 @@ using Aevatar.Agents.Abstractions.Attributes;
 using Orleans.Streams;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents; // For EventEnvelope
+using Aevatar.Agents.GodGPT.Protos.GodChatStream;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 
@@ -282,6 +284,13 @@ public partial class GodChatGAgent
 
             // Store clean content to replace the response content
             Context?.Set(GodGPTContextKeys.CleanMainContent, cleanMainContent);
+
+            // IMPORTANT:
+            // The aggregation message is used for persistence (store final assistant message / suggestions),
+            // but streaming to HTTP clients is produced directly by AIAgentStatusProxy/VoiceSynthesisGAgent.
+            // If we push this aggregation message to the client stream, it can emit an extra ALL_COMPLETED and
+            // prematurely close SSE (especially for voice where audio is still pending).
+            return;
         }
 
         // Apply streaming suggestion filtering logic for text chat
@@ -702,14 +711,68 @@ public partial class GodChatGAgent
         // Create MassTransit stream with category "GodChat" (maps to "godgpt-chat-responses" topic)
         var stream = messageStreamProvider.GetStream(streamId, "GodChat");
         
-        // Wrap ResponseStreamGodChatProto in EventEnvelope
-        var proto = chatMessage.ToProto();
+        // IMPORTANT: Client stream MUST only carry GodChatStreamEnvelopeProto to avoid TypeUrl ambiguity.
+        // Convert legacy ResponseStreamGodChat to unified stream envelope.
+        var streamEnvelope = new GodChatStreamEnvelopeProto
+        {
+            StreamId = streamId,
+            ChatId = chatMessage.ChatId ?? "",
+            RequestId = chatMessage.ChatId ?? "",
+            Seq = chatMessage.SerialNumber,
+            Timestamp = Timestamp.FromDateTime(DateTime.UtcNow)
+        };
+
+        if (chatMessage.ErrorCode != ChatErrorCode.Success)
+        {
+            streamEnvelope.Control = new ControlProto
+            {
+                Type = ControlProto.Types.ControlType.Error,
+                Scope = "all",
+                Message = chatMessage.Response ?? "",
+                ErrorCode = (int)chatMessage.ErrorCode
+            };
+        }
+        else if (chatMessage.IsLastChunk)
+        {
+            // Legacy voice/text code may mark last chunk; treat as terminal.
+            streamEnvelope.Control = new ControlProto
+            {
+                Type = ControlProto.Types.ControlType.AllCompleted,
+                Scope = "all",
+                Message = "",
+                ErrorCode = 0
+            };
+        }
+        else if (chatMessage.VoiceContentType == VoiceContentType.VoiceResponse &&
+                 chatMessage.AudioData != null &&
+                 chatMessage.AudioData.Length > 0)
+        {
+            streamEnvelope.Audio = new AudioChunkProto
+            {
+                AudioData = ByteString.CopyFrom(chatMessage.AudioData),
+                AudioMetadataJson = chatMessage.AudioMetadata != null ? JsonConvert.SerializeObject(chatMessage.AudioMetadata) : "",
+                TextSeqRef = chatMessage.SerialNumber,
+                SentenceIndex = 0,
+                AudioChunkId = Guid.NewGuid().ToString("N"),
+                IsLast = false
+            };
+        }
+        else
+        {
+            // Default: publish as text chunk.
+            streamEnvelope.Text = new TextChunkProto
+            {
+                Content = chatMessage.Response ?? "",
+                IsLast = false,
+                SentenceIndex = 0
+            };
+        }
         var envelope = new EventEnvelope
         {
             Id = Guid.NewGuid().ToString(),
             Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
             Version = 0,
-            Payload = Any.Pack(proto)
+            Payload = Any.Pack(streamEnvelope)
         };
         
         await stream.ProduceAsync(envelope);

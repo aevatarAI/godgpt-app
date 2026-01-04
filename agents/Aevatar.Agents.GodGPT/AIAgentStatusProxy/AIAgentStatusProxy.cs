@@ -1,3 +1,4 @@
+using Aevatar.Agents;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Attributes;
 using Aevatar.Agents.Abstractions.Extensions;
@@ -5,7 +6,13 @@ using Aevatar.Agents.AI;
 using Aevatar.Agents.AI.Abstractions;
 using Aevatar.Agents.AI.Core;
 using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
+using Aevatar.Agents.GodGPT.Protos.GodChatVoice;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
+using GodGPT.GAgents.SpeechChat;
+// Only import ResponseStreamGodChatProto for correct TypeUrl (godchat)
+// Do NOT import the whole namespace to avoid ChatMessageProto ambiguity
+using GodChatProto = Aevatar.Agents.GodGPT.Protos.GodChat;
+using Aevatar.Agents.GodGPT.Protos.GodChatStream;
 using Aevatar.Application.Grains.Common;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.GAgents.AI.Common;
@@ -13,9 +20,12 @@ using Aevatar.GAgents.AI.Options;
 using Aevatar.GAgents.AIGAgent.Dtos;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Orleans.Concurrency;
+using Orleans;
+using Aevatar.Agents.Runtime.Orleans;
 using System.Diagnostics;
 using ChatMessage = Aevatar.GAgents.AI.Abstractions.ChatMessage;
 
@@ -33,10 +43,20 @@ public class AIAgentStatusProxy :
     // Injected by OrleansGAgentGrain via reflection
     public IGAgentActorFactory? ActorFactory { get; set; }
     
+    // Injected by OrleansGAgentGrain via InjectServiceProviderProperty for direct Kafka push
+    // NOTE: Must be non-nullable IServiceProvider to match InjectServiceProviderProperty type check
+    public IServiceProvider ServiceProvider { get; set; } = null!;
+    
     // Message aggregation to reduce Kafka message count
     // Aggregates multiple LLM tokens into fewer SendToAsync calls
     private const int AggregationIntervalMs = 150; // Send every 150ms
     private const int MaxAggregatedTokens = 15;    // Or every 15 tokens
+    
+    // IMPORTANT: Do NOT store per-request data in fields.
+    // This grain is [Reentrant]; concurrent requests could corrupt shared fields and break stream semantics.
+    private bool _voiceSynthesisAgentInitialized;
+
+    private const string VoiceSynthesisAgentId = "VoiceSynthesis";
 
     #region Activation
 
@@ -312,25 +332,34 @@ public class AIAgentStatusProxy :
         
         var imageKeys = input.ImageKeys?.ToList();
         
-        return await PromptWithStreamInternalAsync(prompt, history, promptSettings, context, imageKeys);
+        // Extract new fields for direct Kafka push
+        var streamId = input.HasStreamId ? input.StreamId : null;
+        var isHttpRequest = input.IsHttpRequest;
+        
+        return await PromptWithStreamInternalAsync(prompt, history, promptSettings, context, imageKeys, streamId, isHttpRequest);
     }
 
     /// <summary>
     /// Internal streaming implementation with token aggregation
     /// Aggregates multiple LLM tokens to reduce Kafka message count
+    /// When isHttpRequest=true, pushes directly to Kafka (bypassing parent callback queue)
     /// </summary>
     private async Task<bool> PromptWithStreamInternalAsync(
         string prompt, 
         List<ChatMessage>? history = null,
         ExecutionPromptSettings? promptSettings = null, 
         AIChatContextDto? context = null, 
-        List<string>? imageKeys = null)
+        List<string>? imageKeys = null,
+        string? streamId = null,
+        bool isHttpRequest = false)
     {
+        var (isVoiceChat, voiceLanguage) = ParseVoiceChatFlags(context?.MessageId);
+        
+        Logger.LogInformation("[AIAgentStatusProxy] PromptWithStream started - IsHttpRequest={IsHttpRequest}, StreamId={StreamId}, ChatId={ChatId}",
+            isHttpRequest, streamId ?? "null", context?.ChatId ?? "null");
+        
         var systemPrompt = CustomState.PromptTemplate;
         var selectedHistory = TokenHelper.SelectHistoryMessages(history, prompt, systemPrompt);
-        
-        Logger.LogDebug("[AIAgentStatusProxyNew][PromptWithStreamAsync] Original: {Original}, Selected: {Selected}", 
-            history?.Count ?? 0, selectedHistory.Count);
 
         try
         {
@@ -381,7 +410,7 @@ public class AIAgentStatusProxy :
                         SerialNumber = serialNumber,
                         IsLastChunk = false
                     };
-                    await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, firstContent);
+                    await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, firstContent, streamId, isHttpRequest, isVoiceChat, voiceLanguage);
                     messagesSent++;
                     
                     Logger.LogInformation("[PERF][AIAgentStatusProxy] First token sent immediately - SerialNumber={SerialNumber}, ChatId={ChatId}",
@@ -409,7 +438,7 @@ public class AIAgentStatusProxy :
                         IsLastChunk = false
                     };
 
-                    await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, streamContent);
+                    await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, streamContent, streamId, isHttpRequest, isVoiceChat, voiceLanguage);
                     messagesSent++;
                     
                     if (messagesSent <= 5) // Log first 5 callbacks for debugging
@@ -435,7 +464,7 @@ public class AIAgentStatusProxy :
                     SerialNumber = serialNumber,
                     IsLastChunk = false
                 };
-                await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, remainingContent);
+                await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, remainingContent, streamId, isHttpRequest, isVoiceChat, voiceLanguage);
                 messagesSent++;
             }
 
@@ -452,7 +481,7 @@ public class AIAgentStatusProxy :
                 AggregationMsg = aggregatedResponse
             };
 
-            await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, finalContent);
+            await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, finalContent, streamId, isHttpRequest, isVoiceChat, voiceLanguage);
             messagesSent++;
             
             Logger.LogInformation("[PERF][AIAgentStatusProxy] Stream completed - TotalTokens={TotalTokens}, MessagesSent={MessagesSent}, ChatId={ChatId}",
@@ -467,11 +496,11 @@ public class AIAgentStatusProxy :
             if (ex.Message.Contains("rate limit", StringComparison.OrdinalIgnoreCase))
             {
                 await MarkUnavailableAsync();
-                await HandleChatErrorAsync(context, AIExceptionEnum.RequestLimitError, ex.Message, null);
+                await HandleChatErrorAsync(context, AIExceptionEnum.RequestLimitError, ex.Message, null, streamId, isHttpRequest);
             }
             else
             {
-                await HandleChatErrorAsync(context, AIExceptionEnum.Unknown, ex.Message, null);
+                await HandleChatErrorAsync(context, AIExceptionEnum.Unknown, ex.Message, null, streamId, isHttpRequest);
             }
             
             return false;
@@ -482,7 +511,9 @@ public class AIAgentStatusProxy :
         AIChatContextDto? context, 
         AIExceptionEnum errorEnum,
         string? errorMessage,
-        AIStreamChatContent? content)
+        AIStreamChatContent? content,
+        string? streamId = null,
+        bool isHttpRequest = false)
     {
         Logger.LogDebug("[AIAgentStatusProxyNew][HandleChatErrorAsync] Error: {Error}, Message: {Message}", 
             errorEnum, errorMessage);
@@ -492,19 +523,379 @@ public class AIAgentStatusProxy :
             await MarkUnavailableAsync();
         }
 
-        await SendStreamCallbackAsync(context, errorEnum, errorMessage, content);
+        var (isVoiceChat, voiceLanguage) = ParseVoiceChatFlags(context?.MessageId);
+        await SendStreamCallbackAsync(context, errorEnum, errorMessage, content, streamId, isHttpRequest, isVoiceChat, voiceLanguage);
     }
 
     private async Task SendStreamCallbackAsync(
         AIChatContextDto? context,
         AIExceptionEnum errorEnum,
         string? errorMessage,
-        AIStreamChatContent? content)
+        AIStreamChatContent? content,
+        string? streamId,
+        bool isHttpRequest,
+        bool isVoiceChat,
+        int voiceLanguage)
     {
-        // Use event-driven callback via PublishAsync to avoid deadlock
+        // CRITICAL: If this is an HTTP request AND we have a StreamId, push directly to Kafka
+        // This bypasses the parent (GodChatGAgent) callback queue, avoiding the Orleans Grain blocking issue
+        Logger.LogInformation("[AIAgentStatusProxy] SendStreamCallback - IsHttpRequest={IsHttpRequest}, StreamId={StreamId}, SerialNumber={SerialNumber}",
+            isHttpRequest, streamId ?? "null", content?.SerialNumber ?? 0);
+            
+        if (isHttpRequest && !string.IsNullOrEmpty(streamId))
+        {
+            // For voice chat, additionally dispatch internal TTS jobs (fire-and-forget).
+            // IMPORTANT: do NOT feed aggregated persistence message to TTS (it would duplicate audio).
+            if (isVoiceChat)
+            {
+                _ = DispatchVoiceSynthesisJobAsync(context, errorEnum, content, streamId, voiceLanguage);
+            }
+
+            await PushToClientDirectlyAsync(context, errorEnum, errorMessage, content, streamId, isVoiceChat);
+
+            // Persist assistant message/history via GodChatGAgent callback (ONLY once, at end).
+            // We keep streaming direct-to-client, but still need the final aggregation message to update session state.
+            if (content?.IsAggregationMsg == true)
+            {
+                _ = SendAggregationPersistenceCallbackAsync(context, errorEnum, errorMessage, content);
+            }
+            return;
+        }
+        
+        // Fallback: Use event-driven callback via SendToAsync to parent
         // Parent (GodChatGAgent) receives this event through [EventHandler]
             
         // Convert AIChatContextDto to AIChatContextProto
+        AIChatContextProto? contextProto = null;
+        if (context != null)
+        {
+            contextProto = new AIChatContextProto
+            {
+                AgentId = context.AgentId ?? "",
+                SessionId = context.SessionId ?? "",
+                UserId = context.UserId ?? "",
+                SystemPrompt = context.SystemPrompt ?? "",
+                RequestId = context.RequestId.ToString(),
+                ChatId = context.ChatId ?? "",
+                MessageId = context.MessageId ?? ""
+            };
+            if (context.Metadata != null)
+            {
+                foreach (var kvp in context.Metadata)
+                {
+                    contextProto.Metadata[kvp.Key] = kvp.Value;
+                }
+            }
+        }
+            
+        // Convert AIStreamChatContent to AIStreamChatContentProto
+        AIStreamChatContentProto? contentProto = null;
+        if (content != null)
+        {
+            contentProto = new AIStreamChatContentProto
+            {
+                Content = content.Content ?? "",
+                IsComplete = content.IsComplete,
+                TokenCount = content.TokenCount,
+                Error = content.Error ?? "",
+                IsLastChunk = content.IsLastChunk,
+                ResponseContent = content.ResponseContent ?? "",
+                AggregationMsg = content.AggregationMsg ?? "",
+                SerialNumber = content.SerialNumber,
+                IsAggregationMsg = content.IsAggregationMsg
+            };
+        }
+            
+        // Send callback event via MassTransit Stream (event-driven, non-blocking)
+        // This uses the agent framework's stream mechanism
+        var parentId = CustomState.ParentId;
+        if (string.IsNullOrEmpty(parentId))
+        {
+            Logger.LogWarning("[AIAgentStatusProxyNew] ParentId not configured, cannot send callback event");
+            return;
+        }
+        
+        var callbackEvent = new ChatMessageCallbackEvent
+        {
+            Context = contextProto,
+            AiExceptionEnum = (int)errorEnum,
+            ErrorMessage = errorMessage ?? "",
+            Content = contentProto
+        };
+        
+        Logger.LogInformation("[AIAgentStatusProxyNew] Sending ChatMessageCallbackEvent to parent {ParentId} via SendToAsync", parentId);
+        await SendToAsync(parentId, callbackEvent);
+    }
+    
+    /// <summary>
+    /// Push streaming content directly to Kafka, bypassing GodChatGAgent callback queue.
+    /// This solves the Orleans Grain blocking issue where GodChatGAgent awaits PromptWithStreamProtoAsync
+    /// and cannot process callback events until the stream completes.
+    /// 
+    /// NOTE: Produces EventEnvelope(Payload=Any.Pack(GodChatStreamEnvelopeProto)) to MassTransit stream category "GodChat".
+    /// ChatMiddleware MUST only unpack GodChatStreamEnvelopeProto for client-facing streaming.
+    /// </summary>
+    private async Task PushToClientDirectlyAsync(
+        AIChatContextDto? context,
+        AIExceptionEnum errorEnum,
+        string? errorMessage,
+        AIStreamChatContent? content,
+        string streamId,
+        bool isVoiceChat)
+    {
+        Logger.LogInformation("[AIAgentStatusProxy] PushToClientDirectly - START, SerialNumber={SerialNumber}, StreamId={StreamId}",
+            content?.SerialNumber ?? 0, streamId);
+            
+        if (ServiceProvider == null)
+        {
+            Logger.LogWarning("[AIAgentStatusProxy] ServiceProvider is NULL, cannot push directly to Kafka");
+            return;
+        }
+        
+        Logger.LogInformation("[AIAgentStatusProxy] PushToClientDirectly - ServiceProvider OK, getting IMessageStreamProvider");
+        
+        var messageStreamProvider = ServiceProvider.GetService<IMessageStreamProvider>();
+        if (messageStreamProvider == null)
+        {
+            Logger.LogWarning("[AIAgentStatusProxy] IMessageStreamProvider not available in ServiceProvider");
+            return;
+        }
+        
+        Logger.LogInformation("[AIAgentStatusProxy] PushToClientDirectly - IMessageStreamProvider OK, ChatId={ChatId}",
+            context?.ChatId ?? "null");
+        
+        try
+        {
+            // Get stream with GodChat category for correct topic routing
+            var stream = messageStreamProvider.GetStream(streamId, "GodChat");
+            
+            var seq = (long)(content?.SerialNumber ?? 0);
+
+            // For HTTP streaming:
+            // - Text chunks are emitted as payload=text with is_last=false
+            // - Completion is emitted as payload=control(type=ALL_COMPLETED)
+            // - Errors are emitted as payload=control(type=ERROR) and MUST be terminal
+            // This avoids closing SSE on a text chunk and keeps semantics explicit.
+            var streamEnvelope = new GodChatStreamEnvelopeProto
+            {
+                StreamId = streamId,
+                ChatId = context?.ChatId ?? "",
+                RequestId = context?.RequestId.ToString() ?? "",
+                Seq = seq,
+                Timestamp = Timestamp.FromDateTime(DateTime.UtcNow)
+            };
+
+            if (errorEnum != AIExceptionEnum.None)
+            {
+                streamEnvelope.Control = new ControlProto
+                {
+                    Type = ControlProto.Types.ControlType.Error,
+                    Scope = "all",
+                    Message = errorMessage ?? "",
+                    ErrorCode = MapLegacyChatErrorCode(errorEnum, errorMessage)
+                };
+            }
+            else if (content?.IsLastChunk == true)
+            {
+                streamEnvelope.Control = new ControlProto
+                {
+                    Type = isVoiceChat
+                        ? ControlProto.Types.ControlType.TextCompleted
+                        : ControlProto.Types.ControlType.AllCompleted,
+                    Scope = isVoiceChat ? "text" : "all",
+                    Message = "",
+                    ErrorCode = 0
+                };
+            }
+            else
+            {
+                streamEnvelope.Text = new TextChunkProto
+                {
+                    Content = content?.Content ?? "",
+                    IsLast = false,
+                    SentenceIndex = 0
+                };
+            }
+
+            var envelope = new EventEnvelope
+            {
+                Id = Guid.NewGuid().ToString(),
+                Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
+                Version = 0,
+                Payload = Any.Pack(streamEnvelope)
+            };
+            
+            Logger.LogInformation("[AIAgentStatusProxy] ProduceAsync START - TypeUrl={TypeUrl}, StreamId={StreamId}, SerialNumber={SerialNumber}",
+                envelope.Payload.TypeUrl, streamId, content?.SerialNumber ?? 0);
+            
+            await stream.ProduceAsync(envelope, CancellationToken.None);
+            
+            Logger.LogInformation("[AIAgentStatusProxy] ProduceAsync DONE - StreamId={StreamId}, SerialNumber={SerialNumber}, IsLastChunk={IsLastChunk}",
+                streamId, content?.SerialNumber ?? 0, content?.IsLastChunk ?? false);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[AIAgentStatusProxy] Failed to push message directly to Kafka - StreamId={StreamId}", streamId);
+        }
+    }
+
+    private static int MapLegacyChatErrorCode(AIExceptionEnum errorEnum, string? errorMessage)
+    {
+        // Keep aligned with legacy ChatErrorCode values for client compatibility:
+        // 20001 ParamInvalid, 20003 InsufficientCredits, 20004 RateLimitExceeded
+        if (errorEnum == AIExceptionEnum.RequestLimitError || errorEnum == AIExceptionEnum.RateLimitExceeded)
+        {
+            return (int)ChatErrorCode.RateLimitExceeded;
+        }
+
+        if (!string.IsNullOrEmpty(errorMessage) &&
+            errorMessage.Contains("credit", StringComparison.OrdinalIgnoreCase))
+        {
+            return (int)ChatErrorCode.InsufficientCredits;
+        }
+
+        return (int)ChatErrorCode.ParamInvalid;
+    }
+
+    private static (bool IsVoiceChat, int VoiceLanguage) ParseVoiceChatFlags(string? messageId)
+    {
+        if (string.IsNullOrWhiteSpace(messageId))
+        {
+            return (false, (int)VoiceLanguageEnum.English);
+        }
+
+        try
+        {
+            var dict = JsonConvert.DeserializeObject<Dictionary<string, object>>(messageId);
+            if (dict == null)
+            {
+                return (false, (int)VoiceLanguageEnum.English);
+            }
+
+            var isVoiceChat = false;
+            if (dict.TryGetValue("IsVoiceChat", out var isVoiceObj) && isVoiceObj != null)
+            {
+                _ = bool.TryParse(isVoiceObj.ToString(), out isVoiceChat);
+            }
+
+            var voiceLanguage = (int)VoiceLanguageEnum.English;
+            if (dict.TryGetValue("VoiceLanguage", out var langObj) && langObj != null &&
+                int.TryParse(langObj.ToString(), out var parsed))
+            {
+                voiceLanguage = parsed;
+            }
+
+            return (isVoiceChat, voiceLanguage);
+        }
+        catch
+        {
+            return (false, (int)VoiceLanguageEnum.English);
+        }
+    }
+
+    private async Task DispatchVoiceSynthesisJobAsync(
+        AIChatContextDto? context,
+        AIExceptionEnum errorEnum,
+        AIStreamChatContent? content,
+        string streamId,
+        int voiceLanguage)
+    {
+        // Do not synthesize audio if the stream itself errored.
+        if (errorEnum != AIExceptionEnum.None)
+        {
+            return;
+        }
+
+        if (content == null)
+        {
+            return;
+        }
+
+        await EnsureVoiceSynthesisAgentInitializedAsync();
+
+        // Skip aggregation/persistence message (full response) to avoid duplicate audio.
+        if (content.IsAggregationMsg)
+        {
+            // But we still want to flush when the text stream completes.
+            if (content.IsLastChunk)
+            {
+                await SendToAsync(VoiceSynthesisAgentId, new VoiceSynthesisJobProto
+                {
+                    StreamId = streamId,
+                    ChatId = context?.ChatId ?? "",
+                    RequestId = context?.RequestId.ToString() ?? "",
+                    TextDelta = "",
+                    TextSeq = content.SerialNumber,
+                    TextIsLast = true,
+                    VoiceLanguage = voiceLanguage,
+                    Timestamp = Timestamp.FromDateTime(DateTime.UtcNow)
+                });
+            }
+            return;
+        }
+
+        await SendToAsync(VoiceSynthesisAgentId, new VoiceSynthesisJobProto
+        {
+            StreamId = streamId,
+            ChatId = context?.ChatId ?? "",
+            RequestId = context?.RequestId.ToString() ?? "",
+            TextDelta = content.Content ?? "",
+            TextSeq = content.SerialNumber,
+            TextIsLast = content.IsLastChunk,
+            VoiceLanguage = voiceLanguage,
+            Timestamp = Timestamp.FromDateTime(DateTime.UtcNow)
+        });
+    }
+
+    private async Task EnsureVoiceSynthesisAgentInitializedAsync()
+    {
+        if (_voiceSynthesisAgentInitialized)
+        {
+            return;
+        }
+
+        try
+        {
+            var grainFactory = ServiceProvider.GetService<IGrainFactory>();
+            if (grainFactory == null)
+            {
+                Logger.LogWarning("[AIAgentStatusProxy] IGrainFactory not available, cannot init VoiceSynthesisGAgent");
+                return;
+            }
+
+            var grain = grainFactory.GetGrain<IGAgentGrain>(VoiceSynthesisAgentId);
+            if (await grain.IsInitializedAsync())
+            {
+                _voiceSynthesisAgentInitialized = true;
+                return;
+            }
+
+            var ok = await grain.InitializeAgentAsync(typeof(Aevatar.Application.Grains.Agents.ChatManager.VoiceSynthesis.VoiceSynthesisGAgent).AssemblyQualifiedName!);
+            Logger.LogInformation("[AIAgentStatusProxy] VoiceSynthesis agent initialized: {Ok}", ok);
+            _voiceSynthesisAgentInitialized = ok;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[AIAgentStatusProxy] Failed to initialize VoiceSynthesis agent");
+        }
+    }
+
+    private async Task SendAggregationPersistenceCallbackAsync(
+        AIChatContextDto? context,
+        AIExceptionEnum errorEnum,
+        string? errorMessage,
+        AIStreamChatContent content)
+    {
+        try
+        {
+            var parentId = CustomState.ParentId;
+            if (string.IsNullOrWhiteSpace(parentId))
+            {
+                Logger.LogWarning("[AIAgentStatusProxy] ParentId not configured, cannot persist aggregation callback");
+                return;
+            }
+
+            // Convert AIChatContextDto to AIChatContextProto
             AIChatContextProto? contextProto = null;
             if (context != null)
             {
@@ -526,44 +917,36 @@ public class AIAgentStatusProxy :
                     }
                 }
             }
-            
-        // Convert AIStreamChatContent to AIStreamChatContentProto
-            AIStreamChatContentProto? contentProto = null;
-            if (content != null)
+
+            // Convert AIStreamChatContent to AIStreamChatContentProto
+            var contentProto = new AIStreamChatContentProto
             {
-                contentProto = new AIStreamChatContentProto
-                {
-                    Content = content.Content ?? "",
-                    IsComplete = content.IsComplete,
-                    TokenCount = content.TokenCount,
-                    Error = content.Error ?? "",
-                    IsLastChunk = content.IsLastChunk,
-                    ResponseContent = content.ResponseContent ?? "",
-                    AggregationMsg = content.AggregationMsg ?? "",
-                    SerialNumber = content.SerialNumber,
-                    IsAggregationMsg = content.IsAggregationMsg
-                };
-            }
-            
-        // Send callback event via MassTransit Stream (event-driven, non-blocking)
-        // This uses the agent framework's stream mechanism
-        var parentId = CustomState.ParentId;
-        if (string.IsNullOrEmpty(parentId))
-        {
-            Logger.LogWarning("[AIAgentStatusProxyNew] ParentId not configured, cannot send callback event");
-            return;
+                Content = content.Content ?? "",
+                IsComplete = content.IsComplete,
+                TokenCount = content.TokenCount,
+                Error = content.Error ?? "",
+                IsLastChunk = content.IsLastChunk,
+                ResponseContent = content.ResponseContent ?? "",
+                AggregationMsg = content.AggregationMsg ?? "",
+                SerialNumber = content.SerialNumber,
+                IsAggregationMsg = content.IsAggregationMsg
+            };
+
+            var callbackEvent = new ChatMessageCallbackEvent
+            {
+                Context = contextProto,
+                AiExceptionEnum = (int)errorEnum,
+                ErrorMessage = errorMessage ?? "",
+                Content = contentProto
+            };
+
+            Logger.LogInformation("[AIAgentStatusProxy] Sending aggregation persistence callback to parent {ParentId}", parentId);
+            await SendToAsync(parentId, callbackEvent);
         }
-        
-        var callbackEvent = new ChatMessageCallbackEvent
+        catch (Exception ex)
         {
-            Context = contextProto,
-            AiExceptionEnum = (int)errorEnum,
-            ErrorMessage = errorMessage ?? "",
-            Content = contentProto
-        };
-        
-        Logger.LogInformation("[AIAgentStatusProxyNew] Sending ChatMessageCallbackEvent to parent {ParentId} via SendToAsync", parentId);
-        await SendToAsync(parentId, callbackEvent);
+            Logger.LogError(ex, "[AIAgentStatusProxy] Failed to send aggregation persistence callback");
+        }
     }
 
     #endregion

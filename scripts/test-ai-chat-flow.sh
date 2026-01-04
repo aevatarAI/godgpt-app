@@ -137,6 +137,11 @@ test_create_ai_session() {
     return 0
 }
 
+# Helper: get time in milliseconds (cross-platform)
+get_time_ms() {
+    python3 -c 'import time; print(int(time.time() * 1000))'
+}
+
 # =============================================================================
 # Test 2: Send Simple Message to AI (SSE streaming via middleware)
 # =============================================================================
@@ -148,7 +153,7 @@ test_send_message_to_ai() {
         return 0
     fi
     
-    local start_time=$(date +%s%3N)
+    local start_time=$(get_time_ms)
     
     # Use the streaming middleware endpoint - Simple question
     local response=$(curl -k -s -N -X POST "$API_URL/api/gotgpt/chat" \
@@ -166,7 +171,7 @@ test_send_message_to_ai() {
             \"userTimeZoneId\": \"UTC\"
         }" | head -n 60)
     
-    local end_time=$(date +%s%3N)
+    local end_time=$(get_time_ms)
     local duration=$((end_time - start_time))
     
     log_response "$response"
@@ -201,7 +206,7 @@ test_send_complex_message_to_ai() {
         return 0
     fi
     
-    local start_time=$(date +%s%3N)
+    local start_time=$(get_time_ms)
     local first_chunk_time=""
     local chunk_count=0
     local total_content_length=0
@@ -218,7 +223,7 @@ Please make the response comprehensive, at least 500 words."
     
     # Stream and measure timing
     while IFS= read -r line; do
-        local current_time=$(date +%s%3N)
+        local current_time=$(get_time_ms)
         
         if [ -z "$first_chunk_time" ] && echo "$line" | grep -q "^data: "; then
             first_chunk_time=$current_time
@@ -260,7 +265,7 @@ Please make the response comprehensive, at least 500 words."
             \"userTimeZoneId\": \"UTC\"
         }" 2>/dev/null)
     
-    local end_time=$(date +%s%3N)
+    local end_time=$(get_time_ms)
     local total_duration=$((end_time - start_time))
     
     echo ""
@@ -268,7 +273,9 @@ Please make the response comprehensive, at least 500 words."
     log_info "📊 Complex Response Performance Summary"
     log_info "========================================"
     log_info "⏱️  Total Duration: ${total_duration}ms"
-    log_info "🚀 TTFT: $((first_chunk_time - start_time))ms"
+    if [ -n "$first_chunk_time" ]; then
+        log_info "🚀 TTFT: $((first_chunk_time - start_time))ms"
+    fi
     log_info "📦 Total Chunks: ${chunk_count}"
     log_info "📝 Total Response Length: ${total_content_length} chars"
     if [ $chunk_count -gt 0 ]; then

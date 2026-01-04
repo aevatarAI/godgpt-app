@@ -29,7 +29,7 @@ using Orleans;
 using Orleans.Runtime;
 using Orleans.Streams;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
-using ResponseStreamGodChatProto = Aevatar.Agents.GodGPT.Protos.GodChat.ResponseStreamGodChatProto;
+using Aevatar.Agents.GodGPT.Protos.GodChatStream;
 using Google.Protobuf.WellKnownTypes;
 using Aevatar.Agents.GodGPT.Protos;
 using Aevatar.Agents; // For EventEnvelope
@@ -56,6 +56,72 @@ public class ChatMiddleware
     private const string DefaultRegion = "DEFAULT";
     private const string CNConsoleRegion = "CNCONSOLE";
     private const string ConsoleRegion = "CONSOLE";
+
+    private static ResponseStreamGodChatForHttp MapEnvelopeToHttpResponse(
+        GodChatStreamEnvelopeProto envelope)
+    {
+        // Keep the existing SSE JSON shape stable for clients/scripts.
+        // We map envelope payloads into the existing HTTP response DTO.
+        var sessionId = Guid.TryParse(envelope.StreamId, out var parsed) ? parsed : Guid.Empty;
+
+        // Default response type is ChatResponse (2).
+        var http = new ResponseStreamGodChatForHttp
+        {
+            ResponseType = ResponseType.ChatResponse,
+            ChatId = envelope.ChatId ?? string.Empty,
+            SessionId = sessionId,
+            SerialNumber = (int)Math.Min(int.MaxValue, Math.Max(0, envelope.Seq)),
+            SerialChunk = 0,
+            ErrorCode = ChatErrorCode.Success,
+            VoiceContentType = VoiceContentType.VoiceResponse
+        };
+
+        switch (envelope.PayloadCase)
+        {
+            case GodChatStreamEnvelopeProto.PayloadOneofCase.Text:
+                http.Response = envelope.Text?.Content ?? string.Empty;
+                // Completion is driven by Control payloads. Do not close SSE on text chunks.
+                http.IsLastChunk = false;
+                http.AudioData = null;
+                http.AudioMetadata = null;
+                // For voice chat, we may later use a dedicated value; for now keep default.
+                return http;
+
+            case GodChatStreamEnvelopeProto.PayloadOneofCase.Audio:
+                http.Response = string.Empty;
+                http.IsLastChunk = envelope.Audio?.IsLast ?? false;
+                http.AudioData = envelope.Audio?.AudioData?.ToByteArray();
+                http.AudioMetadata = null; // metadata json can be mapped later if needed
+                http.VoiceContentType = VoiceContentType.VoiceResponse;
+                return http;
+
+            case GodChatStreamEnvelopeProto.PayloadOneofCase.Control:
+                http.Response = string.Empty;
+                http.IsLastChunk = envelope.Control?.Type == ControlProto.Types.ControlType.AllCompleted
+                                  || envelope.Control?.Type == ControlProto.Types.ControlType.Error;
+                if (envelope.Control?.Type == ControlProto.Types.ControlType.Error)
+                {
+                    // Keep client compatibility with the legacy SSE JSON shape:
+                    // - non-zero ErrorCode indicates stream error
+                    // - Response carries the error message
+                    if (System.Enum.IsDefined(typeof(ChatErrorCode), envelope.Control.ErrorCode))
+                    {
+                        http.ErrorCode = (ChatErrorCode)envelope.Control.ErrorCode;
+                    }
+                    else
+                    {
+                        http.ErrorCode = ChatErrorCode.ParamInvalid;
+                    }
+                    http.Response = envelope.Control?.Message ?? string.Empty;
+                }
+                return http;
+
+            default:
+                http.Response = string.Empty;
+                http.IsLastChunk = false;
+                return http;
+        }
+    }
 
     public ChatMiddleware(
         RequestDelegate next,
@@ -269,19 +335,22 @@ public class ChatMiddleware
             {
                 try
                 {
-                    // Unpack ResponseStreamGodChatProto from EventEnvelope
-                    if (!envelope.Payload.Is(ResponseStreamGodChatProto.Descriptor))
+                    // Unpack unified stream envelope from EventEnvelope
+                    if (!envelope.Payload.Is(GodChatStreamEnvelopeProto.Descriptor))
+                    {
+                        _logger.LogDebug(
+                            "[ChatMiddleware][HandleAuthenticatedChatAsync] Ignored payload: TypeUrl={TypeUrl}, SessionId={SessionId}, ChatId={ChatId}",
+                            envelope.Payload.TypeUrl, request.SessionId, chatId);
+                        return;
+                    }
+
+                    var streamProto = envelope.Payload.Unpack<GodChatStreamEnvelopeProto>();
+                    if (streamProto.ChatId != chatId)
                     {
                         return;
                     }
 
-                    var proto = envelope.Payload.Unpack<ResponseStreamGodChatProto>();
-                    var chatResponse = GodChatConversions.FromProto(proto); // Convert to ResponseStreamGodChat
-
-                    if (chatResponse.ChatId != chatId)
-                    {
-                        return;
-                    }
+                    var httpResponse = MapEnvelopeToHttpResponse(streamProto);
 
                     if (!firstFlag)
                     {
@@ -292,11 +361,11 @@ public class ChatMiddleware
                             request.SessionId, stopwatch.ElapsedMilliseconds);
                     }
 
-                    var responseData = $"data: {JsonConvert.SerializeObject(chatResponse.ConvertToHttpResponse())}\n\n";
+                    var responseData = $"data: {JsonConvert.SerializeObject(httpResponse)}\n\n";
                     await context.Response.WriteAsync(responseData);
                     await context.Response.Body.FlushAsync();
 
-                    if (chatResponse.IsLastChunk)
+                    if (httpResponse.IsLastChunk)
                     {
                         await context.Response.WriteAsync("event: completed\n");
                         context.Response.Body.Close();
@@ -491,19 +560,22 @@ public class ChatMiddleware
             {
                 try
                 {
-                    // Unpack ResponseStreamGodChatProto from EventEnvelope
-                    if (!envelope.Payload.Is(ResponseStreamGodChatProto.Descriptor))
+                    // Unpack unified stream envelope from EventEnvelope
+                    if (!envelope.Payload.Is(GodChatStreamEnvelopeProto.Descriptor))
+                    {
+                        _logger.LogDebug(
+                            "[ChatMiddleware][HandleGuestChatAsync] Ignored payload: TypeUrl={TypeUrl}, SessionId={SessionId}, ChatId={ChatId}",
+                            envelope.Payload.TypeUrl, sessionId, chatId);
+                        return;
+                    }
+
+                    var streamProto = envelope.Payload.Unpack<GodChatStreamEnvelopeProto>();
+                    if (streamProto.ChatId != chatId)
                     {
                         return;
                     }
 
-                    var proto = envelope.Payload.Unpack<ResponseStreamGodChatProto>();
-                    var chatResponse = GodChatConversions.FromProto(proto);
-
-                    if (chatResponse.ChatId != chatId)
-                    {
-                        return;
-                    }
+                    var httpResponse = MapEnvelopeToHttpResponse(streamProto);
 
                     if (!firstFlag)
                     {
@@ -514,11 +586,11 @@ public class ChatMiddleware
                             sessionId, stopwatch.ElapsedMilliseconds);
                     }
 
-                    var responseData = $"data: {JsonConvert.SerializeObject(chatResponse.ConvertToHttpResponse())}\n\n";
+                    var responseData = $"data: {JsonConvert.SerializeObject(httpResponse)}\n\n";
                     await context.Response.WriteAsync(responseData);
                     await context.Response.Body.FlushAsync();
 
-                    if (chatResponse.IsLastChunk)
+                    if (httpResponse.IsLastChunk)
                     {
                         await context.Response.WriteAsync("event: completed\n");
                         context.Response.Body.Close();
@@ -755,19 +827,22 @@ public class ChatMiddleware
             {
                 try
                 {
-                    // Unpack ResponseStreamGodChatProto from EventEnvelope
-                    if (!envelope.Payload.Is(ResponseStreamGodChatProto.Descriptor))
+                    // Unpack unified stream envelope from EventEnvelope
+                    if (!envelope.Payload.Is(GodChatStreamEnvelopeProto.Descriptor))
+                    {
+                        _logger.LogDebug(
+                            "[ChatMiddleware][HandleVoiceChatAsync] Ignored payload: TypeUrl={TypeUrl}, SessionId={SessionId}, ChatId={ChatId}",
+                            envelope.Payload.TypeUrl, request.SessionId, chatId);
+                        return;
+                    }
+
+                    var streamProto = envelope.Payload.Unpack<GodChatStreamEnvelopeProto>();
+                    if (streamProto.ChatId != chatId)
                     {
                         return;
                     }
 
-                    var proto = envelope.Payload.Unpack<ResponseStreamGodChatProto>();
-                    var chatResponse = GodChatConversions.FromProto(proto);
-
-                    if (chatResponse.ChatId != chatId)
-                    {
-                        return;
-                    }
+                    var httpResponse = MapEnvelopeToHttpResponse(streamProto);
 
                     if (!firstFlag)
                     {
@@ -778,11 +853,11 @@ public class ChatMiddleware
                             request.SessionId, stopwatch.ElapsedMilliseconds);
                     }
 
-                    var responseData = $"data: {JsonConvert.SerializeObject(chatResponse.ConvertToHttpResponse())}\n\n";
+                    var responseData = $"data: {JsonConvert.SerializeObject(httpResponse)}\n\n";
                     await context.Response.WriteAsync(responseData);
                     await context.Response.Body.FlushAsync();
 
-                    if (chatResponse.IsLastChunk)
+                    if (httpResponse.IsLastChunk)
                     {
                         await context.Response.WriteAsync("event: completed\n");
                         context.Response.Body.Close();

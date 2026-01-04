@@ -349,6 +349,12 @@ public partial class GodChatGAgent
 
             // Build PromptWithStreamInputProto for RPC call
             var protoInput = BuildPromptWithStreamInputProto(promptMsg, State.ChatHistory.FromProtoList(), settings, aiChatContextDto, null);
+            
+            // Set new fields for direct Kafka push (bypasses parent callback queue)
+            // This solves the Orleans Grain blocking issue
+            protoInput.StreamId = sessionId.ToString();
+            protoInput.IsHttpRequest = isHttpRequest;
+            
             var result = await aiAgentStatusProxy.PromptWithStreamProtoAsync(protoInput);
             if (!result)
             {

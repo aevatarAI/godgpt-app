@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.godchat.voice;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.GodChatVoice";
+
+import "google/protobuf/timestamp.proto";
+
+// Internal voice synthesis job event.
+// This event is used for agent-to-agent communication and must be Protobuf.
+message VoiceSynthesisJobProto {
+  string stream_id = 1;
+  string chat_id = 2;
+  string request_id = 3;
+
+  // The aggregated text delta to append for TTS processing.
+  string text_delta = 4;
+
+  // The text producer sequence number associated with this delta.
+  int64 text_seq = 5;
+
+  // Whether text stream is completed (may be true before audio completes).
+  bool text_is_last = 6;
+
+  // Voice language enum value (serialized as int32).
+  int32 voice_language = 7;
+
+  // Timestamp for tracing.
+  google.protobuf.Timestamp timestamp = 8;
+}
+
+
