@@ -76,7 +76,7 @@ public partial class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatMana
         // Diagnostic logging: State BEFORE replay
         var versionBefore = GetCurrentVersion();
         var sessionCountBefore = State?.SessionInfoList?.Count ?? 0;
-        var sessionIds = State?.SessionInfoList?.Take(3).Select(s => $"{s.SessionId}:{s.ShareId ?? "no-share"}").ToList() ?? new List<string>();
+        var sessionIds = State?.SessionInfoList?.Take(3).Select(s => $"{s.SessionId}:shares={s.ShareIds.Count}").ToList() ?? new List<string>();
         Logger.LogInformation(
             "[ChatGAgentManager][OnActivateAsync] BEFORE base.OnActivateAsync - AgentId: {AgentId}, Version: {Version}, SessionCount: {Count}, Sessions: [{Sessions}]",
             Id, versionBefore, sessionCountBefore, string.Join(", ", sessionIds));
@@ -86,7 +86,7 @@ public partial class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatMana
         // Diagnostic logging: State AFTER replay
         var versionAfter = GetCurrentVersion();
         var sessionCountAfter = State?.SessionInfoList?.Count ?? 0;
-        var sessionIdsAfter = State?.SessionInfoList?.Take(5).Select(s => $"{s.SessionId}:{s.ShareId ?? "no-share"}").ToList() ?? new List<string>();
+        var sessionIdsAfter = State?.SessionInfoList?.Take(5).Select(s => $"{s.SessionId}:shares={s.ShareIds.Count}").ToList() ?? new List<string>();
         Logger.LogInformation(
             "[ChatGAgentManager][OnActivateAsync] AFTER base.OnActivateAsync - AgentId: {AgentId}, Version: {Version}, SessionCount: {Count}, Sessions: [{Sessions}]",
             Id, versionAfter, sessionCountAfter, string.Join(", ", sessionIdsAfter));

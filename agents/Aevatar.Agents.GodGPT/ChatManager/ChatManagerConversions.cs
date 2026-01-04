@@ -23,10 +23,10 @@ public static class ChatManagerConversions
             CreateAt = Timestamp.FromDateTime(DateTime.SpecifyKind(info.CreateAt, DateTimeKind.Utc)),
             Guider = info.Guider ?? ""
         };
-        // ShareIds is a list in C#, take first one if exists
+        // Copy all ShareIds to proto
         if (info.ShareIds != null && info.ShareIds.Any())
         {
-            proto.ShareId = info.ShareIds.First().ToString();
+            proto.ShareIds.AddRange(info.ShareIds.Select(id => id.ToString()));
         }
         return proto;
     }
@@ -39,12 +39,8 @@ public static class ChatManagerConversions
             Title = proto.Title,
             CreateAt = proto.CreateAt?.ToDateTime() ?? DateTime.MinValue,
             Guider = string.IsNullOrEmpty(proto.Guider) ? null : proto.Guider,
-            ShareIds = new List<Guid>()
+            ShareIds = proto.ShareIds.Select(id => Guid.Parse(id)).ToList()
         };
-        if (!string.IsNullOrEmpty(proto.ShareId))
-        {
-            session.ShareIds.Add(Guid.Parse(proto.ShareId));
-        }
         return session;
     }
 
@@ -185,8 +181,8 @@ public static class ChatManagerConversions
     /// </summary>
     public static List<Guid> GetShareIds(this SessionInfoProto proto)
     {
-        if (string.IsNullOrEmpty(proto.ShareId)) return new List<Guid>();
-        return new List<Guid> { Guid.Parse(proto.ShareId) };
+        if (proto.ShareIds == null || proto.ShareIds.Count == 0) return new List<Guid>();
+        return proto.ShareIds.Select(id => Guid.Parse(id)).ToList();
     }
 
     /// <summary>
@@ -194,15 +190,23 @@ public static class ChatManagerConversions
     /// </summary>
     public static bool HasShareIds(this SessionInfoProto proto)
     {
-        return !string.IsNullOrEmpty(proto.ShareId);
+        return proto.ShareIds != null && proto.ShareIds.Count > 0;
     }
 
     /// <summary>
-    /// Add a ShareId to SessionInfoProto (replaces existing since proto has single ShareId)
+    /// Add a ShareId to SessionInfoProto (appends to list, supports multiple share links)
     /// </summary>
     public static void AddShareId(this SessionInfoProto proto, Guid shareId)
     {
-        proto.ShareId = shareId.ToString();
+        proto.ShareIds.Add(shareId.ToString());
+    }
+
+    /// <summary>
+    /// Get the first ShareId (for backward compatibility in display)
+    /// </summary>
+    public static string? GetFirstShareId(this SessionInfoProto proto)
+    {
+        return proto.ShareIds.FirstOrDefault();
     }
 
     // =============================================================================

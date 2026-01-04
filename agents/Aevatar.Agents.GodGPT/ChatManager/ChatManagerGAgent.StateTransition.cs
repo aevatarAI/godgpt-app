@@ -93,13 +93,13 @@ public partial class ChatGAgentManager
                     break;
                 }
 
-                var oldShareId = session.ShareId;
+                var oldShareIdCount = session.ShareIds.Count;
                 state.CurrentShareCount += 1;
-                // SessionInfoProto has single ShareId field
+                // SessionInfoProto now supports multiple ShareIds
                 session.AddShareId(Guid.Parse(generateChatShareContentLogEvent.ShareId));
                 Logger.LogInformation(
-                    "[ChatGAgentManager][StateTransition][GenerateChatShareContentEvent] SUCCESS - OldShareId: {Old}, NewShareId: {New}",
-                    oldShareId ?? "(empty)", session.ShareId);
+                    "[ChatGAgentManager][StateTransition][GenerateChatShareContentEvent] SUCCESS - OldShareIdCount: {OldCount}, NewShareIdCount: {NewCount}, NewShareId: {NewShareId}",
+                    oldShareIdCount, session.ShareIds.Count, generateChatShareContentLogEvent.ShareId);
                 break;
             case SetMaxShareCountEvent setMaxShareCountLogEvent:
                 state.MaxShareCount = setMaxShareCountLogEvent.MaxShareCount;

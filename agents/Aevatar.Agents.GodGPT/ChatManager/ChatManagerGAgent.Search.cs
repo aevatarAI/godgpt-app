@@ -93,9 +93,13 @@ public partial class ChatGAgentManager
                         SessionId = sessionInfo.SessionId,
                         Title = sessionInfo.Title,
                         CreateAt = createAt,
-                        Guider = sessionInfo.Guider ?? string.Empty,
-                        ShareId = sessionInfo.ShareId ?? string.Empty
+                        Guider = sessionInfo.Guider ?? string.Empty
                     };
+                    // Copy all ShareIds
+                    if (sessionInfo.ShareIds.Count > 0)
+                    {
+                        proto.ShareIds.AddRange(sessionInfo.ShareIds);
+                    }
 
                     searchResults.Add((proto, matchScore));
                 }

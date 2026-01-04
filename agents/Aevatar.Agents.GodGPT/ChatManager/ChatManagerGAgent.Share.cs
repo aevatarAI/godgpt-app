@@ -66,9 +66,10 @@ public partial class ChatGAgentManager
         
         // Log state before raising event
         var sessionBeforeEvent = State.GetSession(sessionId);
+        var shareIdsBefore = sessionBeforeEvent?.GetShareIds() ?? new List<Guid>();
         Logger.LogInformation(
-            "[ChatGAgentManager][GenerateChatShareContentAsync] State BEFORE RaiseEvent - SessionExists: {Exists}, CurrentShareId: {CurrentShareId}",
-            sessionBeforeEvent != null, sessionBeforeEvent?.ShareId ?? "(null)");
+            "[ChatGAgentManager][GenerateChatShareContentAsync] State BEFORE RaiseEvent - SessionExists: {Exists}, ShareIdCount: {Count}",
+            sessionBeforeEvent != null, shareIdsBefore.Count);
         
         RaiseEvent(new GenerateChatShareContentEvent
         {
@@ -80,20 +81,21 @@ public partial class ChatGAgentManager
         
         // Log state after confirming event
         var sessionAfterEvent = State.GetSession(sessionId);
+        var shareIdsAfter = sessionAfterEvent?.GetShareIds() ?? new List<Guid>();
         Logger.LogInformation(
-            "[ChatGAgentManager][GenerateChatShareContentAsync] State AFTER ConfirmEvents - SessionExists: {Exists}, CurrentShareId: {CurrentShareId}, Expected: {Expected}",
-            sessionAfterEvent != null, sessionAfterEvent?.ShareId ?? "(null)", shareId);
+            "[ChatGAgentManager][GenerateChatShareContentAsync] State AFTER ConfirmEvents - SessionExists: {Exists}, ShareIdCount: {Count}, NewShareId: {Expected}",
+            sessionAfterEvent != null, shareIdsAfter.Count, shareId);
         
         // Verify the shareId was actually saved - FAIL if not saved correctly
-        if (sessionAfterEvent?.ShareId != shareId.ToString())
+        if (!shareIdsAfter.Contains(shareId))
         {
             Logger.LogError(
-                "[ChatGAgentManager][GenerateChatShareContentAsync] CRITICAL - ShareId NOT SAVED! Expected: {Expected}, Actual: {Actual}",
-                shareId, sessionAfterEvent?.ShareId ?? "(null)");
+                "[ChatGAgentManager][GenerateChatShareContentAsync] CRITICAL - ShareId NOT SAVED! Expected: {Expected}, StoredShareIds: [{Actual}]",
+                shareId, string.Join(", ", shareIdsAfter));
             
             // Don't return invalid shareId - throw exception so client knows share failed
             throw new InvalidOperationException(
-                $"Share link creation failed: event was not persisted correctly. Expected ShareId {shareId}, but got {sessionAfterEvent?.ShareId ?? "null"}");
+                $"Share link creation failed: event was not persisted correctly. Expected ShareId {shareId} not found in stored list.");
         }
         
         Logger.LogInformation(
@@ -114,9 +116,10 @@ public partial class ChatGAgentManager
         // Log all sessions in state for debugging
         foreach (var s in State.SessionInfoList.Take(10))
         {
+            var sShareIds = s.GetShareIds();
             Logger.LogInformation(
-                "[ChatGAgentManager][GetChatShareContentAsync] Session in State: SessionId={SId}, Title={Title}, ShareId={ShareId}",
-                s.SessionId, s.Title ?? "(empty)", s.ShareId ?? "(none)");
+                "[ChatGAgentManager][GetChatShareContentAsync] Session in State: SessionId={SId}, Title={Title}, ShareIdCount={ShareIdCount}",
+                s.SessionId, s.Title ?? "(empty)", sShareIds.Count);
         }
         if (State.SessionInfoList.Count > 10)
         {
@@ -143,16 +146,16 @@ public partial class ChatGAgentManager
 
         var shareIds = sessionInfo.GetShareIds();
         Logger.LogInformation(
-            "[ChatGAgentManager][GetChatShareContentAsync] ShareId check - StoredShareId: {StoredShareId}, " +
+            "[ChatGAgentManager][GetChatShareContentAsync] ShareId check - StoredShareIds: [{StoredShareIds}], " +
             "RequestedShareId: {RequestedShareId}, Match: {Match}",
-            sessionInfo.ShareId ?? "(empty)", shareId, shareIds.Contains(shareId));
+            string.Join(", ", shareIds), shareId, shareIds.Contains(shareId));
         
         if (shareIds.IsNullOrEmpty() || !shareIds.Contains(shareId))
         {
             Logger.LogWarning(
                 "[ChatGAgentManager][GetChatShareContentAsync] FAIL - ShareId NOT FOUND. " +
-                "StoredShareId: {StoredShareId}, RequestedShareId: {RequestedShareId}",
-                sessionInfo.ShareId ?? "(empty)", shareId);
+                "StoredShareIds: [{StoredShareIds}], RequestedShareId: {RequestedShareId}",
+                string.Join(", ", shareIds), shareId);
             var localizedMessage =
                 _localizationService.GetLocalizedException(ExceptionMessageKeys.ConversationDeleted, language);
             throw new UserFriendlyException(localizedMessage);

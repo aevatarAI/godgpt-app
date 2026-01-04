@@ -34,7 +34,7 @@ message SessionInfoProto {
   string title = 2;
   google.protobuf.Timestamp create_at = 3;
   optional string guider = 4;
-  optional string share_id = 5;  // Guid? as string
+  repeated string share_ids = 5;  // List<Guid> as strings - supports multiple share links
 }
 
 // =============================================================================

@@ -170,14 +170,19 @@ public partial class ChatGAgentManager
 
         foreach (var item in State.SessionInfoList)
         {
-            result.Sessions.Add(new SessionInfoProto
+            var sessionProto = new SessionInfoProto
             {
                 SessionId = item.SessionId,
                 Title = item.Title,
                 CreateAt = item.CreateAt ?? Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc)),
-                Guider = item.Guider ?? string.Empty,
-                ShareId = item.ShareId ?? string.Empty
-            });
+                Guider = item.Guider ?? string.Empty
+            };
+            // Copy all ShareIds
+            if (item.ShareIds != null && item.ShareIds.Count > 0)
+            {
+                sessionProto.ShareIds.AddRange(item.ShareIds);
+            }
+            result.Sessions.Add(sessionProto);
         }
 
         return result;
