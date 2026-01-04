@@ -18,9 +18,13 @@ SCOPE="Aevatar openid profile"
 # Test settings - increase these to simulate timeout scenarios
 CONCURRENT_REQUESTS="${CONCURRENT_REQUESTS:-3}"
 STRESS_CONCURRENT="${STRESS_CONCURRENT:-6}"
+# Default curl timeout (should be > 30s to catch Orleans timeout)
+CURL_TIMEOUT="${CURL_TIMEOUT:-90}"
 COMPLEX_PROMPT="${COMPLEX_PROMPT:-Write a 2000 word essay about quantum computing with detailed technical explanations.}"
 # Very long prompt to trigger slow LLM responses
 EXTRA_LONG_PROMPT="${EXTRA_LONG_PROMPT:-Write a comprehensive 5000 word technical analysis comparing quantum computing architectures. Include detailed explanations of superconducting qubits, trapped ions, topological qubits, and photonic quantum computing. Discuss error correction codes, quantum gates, entanglement, and decoherence. Compare IBM Q System, Google Sycamore, IonQ, and Rigetti systems. Include code examples in Qiskit and Cirq.}"
+# Super long prompt designed to take 30+ seconds
+TIMEOUT_TRIGGER_PROMPT="${TIMEOUT_TRIGGER_PROMPT:-Write an extremely detailed 10000+ word comprehensive research paper about the complete history and future of artificial intelligence. Start from the 1950s Dartmouth conference, cover every major milestone including perceptrons, expert systems, neural network winters, deep learning revolution, transformers, GPT models, and future AGI predictions. Include mathematical formulations for backpropagation, attention mechanisms, and reinforcement learning. Provide code examples in Python for implementing neural networks from scratch, CNNs, RNNs, LSTMs, and Transformers. Discuss ethical implications, AI safety, alignment problems, and regulatory frameworks across different countries. End with predictions for AI in 2030, 2040, and 2050.}"
 
 # Colors
 RED='\033[0;31m'
@@ -161,7 +165,7 @@ send_chat_request() {
     
     local start_time=$(date +%s)
     
-    curl -k -s --max-time 60 -X POST "$API_URL/api/gotgpt/chat" \
+    curl -k -s --max-time "$CURL_TIMEOUT" -X POST "$API_URL/api/gotgpt/chat" \
         -H "Authorization: Bearer $ACCESS_TOKEN" \
         -H "Content-Type: application/json" \
         -H "GodgptLanguage: en" \
@@ -335,6 +339,121 @@ test_extreme_stress() {
 }
 
 # =============================================================================
+# Test: Specific 30+ Second Timeout Trigger
+# =============================================================================
+
+test_timeout_trigger() {
+    log_step "Test 5: TIMEOUT TRIGGER - Single request designed to take 30+ seconds..."
+    log_info "This sends a super-long prompt that should take > 30s to complete"
+    log_info "If Orleans timeout is 30s, this should fail"
+    log_info "Curl timeout set to ${CURL_TIMEOUT}s to capture full response"
+    echo ""
+    
+    local start_time=$(date +%s)
+    
+    local temp_file=$(mktemp)
+    
+    log_info "Sending request at $(date +%H:%M:%S)..."
+    
+    curl -k -s --max-time "$CURL_TIMEOUT" -X POST "$API_URL/api/gotgpt/chat" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "GodgptLanguage: en" \
+        -d "{\"sessionId\": \"$SESSION_ID\", \"content\": \"$TIMEOUT_TRIGGER_PROMPT\"}" > "$temp_file" 2>&1
+    
+    local curl_exit=$?
+    local end_time=$(date +%s)
+    local duration=$((end_time - start_time))
+    
+    log_info "Request finished at $(date +%H:%M:%S) (duration: ${duration}s, curl exit: $curl_exit)"
+    
+    local file_size=$(wc -c < "$temp_file")
+    
+    if grep -q "TimeoutException\|Response did not arrive\|timed out" "$temp_file"; then
+        log_error "========================================"
+        log_error "ORLEANS TIMEOUT REPRODUCED!"
+        log_error "Duration: ${duration}s"
+        log_error "========================================"
+        head -20 "$temp_file"
+    elif grep -q "data:" "$temp_file"; then
+        log_info "SUCCESS - Received SSE data (${file_size} bytes)"
+        if [ $duration -ge 30 ]; then
+            log_info "Note: Response took ${duration}s (>30s) but succeeded"
+            log_info "This means Orleans timeout was NOT triggered"
+        fi
+        # Show last few lines
+        tail -5 "$temp_file"
+    else
+        log_warn "Unknown response (${file_size} bytes)"
+        head -10 "$temp_file"
+    fi
+    
+    rm -f "$temp_file"
+}
+
+# =============================================================================
+# Test: Concurrent timeout trigger (most aggressive)
+# =============================================================================
+
+test_concurrent_timeout_trigger() {
+    log_step "Test 6: CONCURRENT TIMEOUT TRIGGER - Multiple 30s+ requests..."
+    log_info "Sending 2 concurrent super-long requests to SAME session"
+    log_info "This should definitely trigger Orleans grain blocking"
+    echo ""
+    
+    local temp_dir=$(mktemp -d)
+    local pids=()
+    
+    # Send 2 concurrent VERY LONG requests
+    for i in 1 2; do
+        (
+            echo "[Request $i] Starting at $(date +%H:%M:%S)"
+            local start=$(date +%s)
+            
+            curl -k -s --max-time "$CURL_TIMEOUT" -X POST "$API_URL/api/gotgpt/chat" \
+                -H "Authorization: Bearer $ACCESS_TOKEN" \
+                -H "Content-Type: application/json" \
+                -H "GodgptLanguage: en" \
+                -d "{\"sessionId\": \"$SESSION_ID\", \"content\": \"$TIMEOUT_TRIGGER_PROMPT (Variation $i with unique request ID: $RANDOM)\"}" > "$temp_dir/response_$i.txt" 2>&1
+            
+            local end=$(date +%s)
+            local dur=$((end - start))
+            echo "[Request $i] Finished at $(date +%H:%M:%S) (duration: ${dur}s)"
+        ) &
+        pids+=($!)
+        sleep 0.1
+    done
+    
+    log_info "Waiting for both requests (may take 60-90+ seconds)..."
+    
+    for pid in "${pids[@]}"; do
+        wait $pid
+    done
+    
+    log_info "========================================"
+    log_info "Concurrent Timeout Trigger Results:"
+    log_info "========================================"
+    
+    for i in 1 2; do
+        local file="$temp_dir/response_$i.txt"
+        if [ -f "$file" ]; then
+            local size=$(wc -c < "$file")
+            if grep -q "TimeoutException\|Response did not arrive" "$file"; then
+                log_error "Request $i: TIMEOUT (${size} bytes) <<< REPRODUCED!"
+                head -5 "$file"
+            elif grep -q "data:" "$file"; then
+                log_info "Request $i: SUCCESS (${size} bytes)"
+            else
+                log_warn "Request $i: UNKNOWN (${size} bytes)"
+                head -3 "$file"
+            fi
+        fi
+    done
+    
+    rm -rf "$temp_dir"
+}
+
+# =============================================================================
 # Main
 # =============================================================================
 
@@ -363,12 +482,21 @@ main() {
     test_rapid_sequential
     echo ""
     
-    # Only run extreme test if explicitly requested
+    # Only run extreme/timeout tests if explicitly requested
     if [ "${RUN_EXTREME_TEST:-0}" == "1" ]; then
         test_extreme_stress
         echo ""
-    else
-        log_info "Skipping extreme stress test. Set RUN_EXTREME_TEST=1 to run it."
+    fi
+    
+    if [ "${RUN_TIMEOUT_TEST:-0}" == "1" ]; then
+        test_timeout_trigger
+        echo ""
+        test_concurrent_timeout_trigger
+        echo ""
+    fi
+    
+    if [ "${RUN_EXTREME_TEST:-0}" != "1" ] && [ "${RUN_TIMEOUT_TEST:-0}" != "1" ]; then
+        log_info "Skipping extreme tests. Set RUN_EXTREME_TEST=1 or RUN_TIMEOUT_TEST=1 to run them."
     fi
     
     log_info "=========================================="
