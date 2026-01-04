@@ -116,6 +116,11 @@ public abstract class GAgentBase<TState> : GAgentBase, IStateGAgent<TState>
     /// </summary>
     protected IEventStore? EventStore { get; set; }
 
+    /// <summary>
+    /// EventSourcing options (injected from configuration)
+    /// </summary>
+    protected EventSourcingOptions? EventSourcingOptions { get; set; }
+
     private long _currentVersion;
 
     // Batch event management
@@ -585,9 +590,8 @@ public abstract class GAgentBase<TState> : GAgentBase, IStateGAgent<TState>
 
     // ============ Snapshot Operations ============
 
-    // TODO: Read from configuration (EventSourcing:SnapshotFrequency)
     protected virtual ISnapshotStrategy SnapshotStrategy =>
-        new IntervalSnapshotStrategy(100);
+        new IntervalSnapshotStrategy(EventSourcingOptions?.SnapshotFrequency ?? 10);
 
     /// <summary>
     /// Create snapshot using StateStore (preferred) or EventStore (fallback)

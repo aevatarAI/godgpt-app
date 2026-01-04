@@ -26,6 +26,7 @@ using Aevatar.Agents.Plugins.CQRS.Elasticsearch;  // Use Core's CQRS implementat
 using Aevatar.Agents.AI.Abstractions.Configuration;
 using Aevatar.Agents.AI.MEAI.DependencyInjection;
 using Aevatar.Agents.GodGPT.Extensions;
+using Aevatar.Agents.Core.EventSourcing;
 
 namespace Aevatar.Silo;
 
@@ -121,6 +122,17 @@ public class Program
                 // Configure MessageStreamProviderOptions
                 services.Configure<MessageStreamProviderOptions>(context.Configuration.GetSection("MessageStream"));
                 
+                // Configure EventSourcing options
+                services.Configure<EventSourcingOptions>(context.Configuration.GetSection(EventSourcingOptions.SectionName));
+                var eventSourcingOptions = context.Configuration
+                    .GetSection(EventSourcingOptions.SectionName)
+                    .Get<EventSourcingOptions>() ?? new EventSourcingOptions();
+                
+                Log.Information("📚 EventSourcing Configuration:");
+                Log.Information("  Enabled: {Enabled}", eventSourcingOptions.Enabled);
+                Log.Information("  SnapshotFrequency: {SnapshotFrequency}", eventSourcingOptions.SnapshotFrequency);
+                Log.Information("  Provider: {Provider}", eventSourcingOptions.Provider);
+                
                 // Configure LLM Providers for AI Agents
                 services.Configure<LLMProvidersConfig>(context.Configuration.GetSection("LLMProviders"));
                 services.AddMEAI();
@@ -146,7 +158,25 @@ public class Program
                     options.StateStoreType = typeof(MongoDBStateStore<>);
                     options.ConfigStoreType = typeof(MongoDbConfigStore<>);
                     options.EventRouterStoreType = typeof(MongoDBEventRouterStore);
-                    options.EventStoreType = typeof(OrleansEventStore);
+                    
+                    // Dynamic EventStore selection based on configuration
+                    if (eventSourcingOptions.Enabled)
+                    {
+                        options.EventStoreType = eventSourcingOptions.Provider.ToUpperInvariant() switch
+                        {
+                            "MONGODB" or "ORLEANS" => typeof(OrleansEventStore),
+                            "MEMORY" => typeof(InMemoryEventStore),
+                            _ => typeof(OrleansEventStore) // Default to Orleans for production
+                        };
+                        Log.Information("✅ EventStore: {EventStoreType}", options.EventStoreType.Name);
+                    }
+                    else
+                    {
+                        // EventSourcing disabled - no EventStore registration
+                        // Agents will use simple StateStore persistence
+                        options.EventStoreType = null;
+                        Log.Information("⏸️ EventSourcing disabled - using StateStore only");
+                    }
                 }, builder => builder.UseOrleansRuntime());
                 
                 Log.Information("✅ Aevatar Agent System configured with MongoDB stores");

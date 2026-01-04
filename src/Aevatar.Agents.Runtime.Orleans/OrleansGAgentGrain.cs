@@ -558,6 +558,9 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         // IMPORTANT: Must inject StateStore BEFORE EventStore, as EventSourcing needs StateStore for snapshots
         AgentStateStoreInjector.InjectStateStore(agent, ServiceProvider);
 
+        // Inject EventSourcingOptions (must be before EventStore for SnapshotFrequency)
+        EventSourcingOptionsInjector.InjectEventSourcingOptions(agent, ServiceProvider);
+
         // Inject EventStore (only if agent supports EventSourcing)
         if (AgentEventStoreInjector.HasEventStore(agent))
         {
