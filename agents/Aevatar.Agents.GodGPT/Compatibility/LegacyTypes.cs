@@ -59,6 +59,11 @@ namespace Aevatar.GAgents.AI.Common
         public string? AggregationMsg { get; set; }
         public int SerialNumber { get; set; }
         public bool IsAggregationMsg { get; set; }
+        /// <summary>
+        /// Extracted conversation suggestions (after [SUGGESTIONS] block filtering)
+        /// Only populated when streaming filter extracts suggestions from response
+        /// </summary>
+        public List<string>? ExtractedSuggestions { get; set; }
     }
 }
 

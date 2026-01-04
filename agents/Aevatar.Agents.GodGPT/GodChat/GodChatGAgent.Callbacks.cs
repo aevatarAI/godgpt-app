@@ -609,46 +609,17 @@ public partial class GodChatGAgent
             }
         }
 
-        // Determine if this is an HTTP request by checking MessageId (contains IsHttpRequest flag)
-        // MessageId is a JSON string like: {"IsHttpRequest":true, "LLM":"...", ...}
-        bool isHttpRequest = false;
-        if (!contextDto.MessageId.IsNullOrWhiteSpace())
-        {
-            try
-            {
-                var messageData = JsonConvert.DeserializeObject<Dictionary<string, object>>(contextDto.MessageId);
-                isHttpRequest = messageData != null && 
-                               messageData.ContainsKey("IsHttpRequest") && 
-                               (bool)messageData["IsHttpRequest"];
-            }
-            catch (Exception ex)
-            {
-                Logger.LogWarning(ex, "[ChatMessageCallbackAsync] Failed to parse MessageId for IsHttpRequest check");
-            }
-        }
-        
-        // TTFT logging: Log time from request start to first message
-        if (chatContent.SerialNumber == 0)
-        {
-            Logger.LogInformation("[PERF][ChatMessageCallbackAsync] TTFT (First Token) - ChatId={ChatId}, IsHttpRequest={IsHttpRequest}", 
-                partialMessage.ChatId, isHttpRequest);
-        }
-        
+        // NOTE: In the new architecture (2025-01), HTTP requests are handled differently:
+        // - AIAgentStatusProxy pushes streaming chunks directly to Kafka (bypassing this callback)
+        // - Only aggregation messages for persistence reach this callback, and they return early (line 293)
+        // - Therefore, this callback only processes NON-HTTP internal agent communication
+        //
+        // For non-HTTP internal requests: publish to downstream agents
         var sendSw = System.Diagnostics.Stopwatch.StartNew();
-        if (isHttpRequest)
-        {
-            // HTTP request: send directly to client via MassTransit/Kafka
-            // NOTE: Message aggregation is already done in AIAgentStatusProxy, no need to aggregate again here
-            await PushMessageToClientAsync(partialMessage);
-        }
-        else
-        {
-            // Internal agent communication: publish to downstream agents
-            await PublishAsync(partialMessage.ToProto());
-        }
+        await PublishAsync(partialMessage.ToProto());
         sendSw.Stop();
-        Logger.LogDebug("[ChatMessageCallbackAsync] Send - ChatId={ChatId}, SerialNumber={SerialNumber}, SendMs={SendMs}ms, IsHttpRequest={IsHttpRequest}", 
-            partialMessage.ChatId, chatContent.SerialNumber, sendSw.ElapsedMilliseconds, isHttpRequest);
+        Logger.LogDebug("[ChatMessageCallbackAsync] Published to downstream - ChatId={ChatId}, SerialNumber={SerialNumber}, SendMs={SendMs}ms", 
+            partialMessage.ChatId, chatContent.SerialNumber, sendSw.ElapsedMilliseconds);
 
         // Clean up agent context when processing is complete (last chunk)
         if (chatContent.IsLastChunk)
