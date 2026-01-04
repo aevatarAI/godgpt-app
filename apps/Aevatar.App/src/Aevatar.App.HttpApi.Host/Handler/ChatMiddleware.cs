@@ -26,13 +26,8 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Orleans;
-using Orleans.Runtime;
-using Orleans.Streams;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
-using Aevatar.Agents.GodGPT.Protos.GodChatStream;
 using Google.Protobuf.WellKnownTypes;
-using Aevatar.Agents.GodGPT.Protos;
-using Aevatar.Agents; // For EventEnvelope
 
 namespace Aevatar.App.HttpApi.Host.Handler;
 
@@ -43,85 +38,12 @@ namespace Aevatar.App.HttpApi.Host.Handler;
 public class ChatMiddleware
 {
     private readonly RequestDelegate _next;
-    private readonly IClusterClient _clusterClient;
     private readonly ILogger<ChatMiddleware> _logger;
     private readonly ILocalizationService _localizationService;
     private readonly IIpLocationService _ipLocationService;
     private readonly IGAgentActorFactory _actorFactory;
     private readonly IMessageStreamProvider? _messageStreamProvider;
     private readonly IAgentContextAccessor _agentContextAccessor;
-
-    private const int MaxImageCount = 10;
-    private const string CNDefaultRegion = "CN";
-    private const string DefaultRegion = "DEFAULT";
-    private const string CNConsoleRegion = "CNCONSOLE";
-    private const string ConsoleRegion = "CONSOLE";
-
-    private static ResponseStreamGodChatForHttp MapEnvelopeToHttpResponse(
-        GodChatStreamEnvelopeProto envelope)
-    {
-        // Keep the existing SSE JSON shape stable for clients/scripts.
-        // We map envelope payloads into the existing HTTP response DTO.
-        var sessionId = Guid.TryParse(envelope.StreamId, out var parsed) ? parsed : Guid.Empty;
-
-        // Default response type is ChatResponse (2).
-        var http = new ResponseStreamGodChatForHttp
-        {
-            ResponseType = ResponseType.ChatResponse,
-            ChatId = envelope.ChatId ?? string.Empty,
-            SessionId = sessionId,
-            SerialNumber = (int)Math.Min(int.MaxValue, Math.Max(0, envelope.Seq)),
-            SerialChunk = 0,
-            ErrorCode = ChatErrorCode.Success,
-            VoiceContentType = VoiceContentType.VoiceResponse
-        };
-
-        switch (envelope.PayloadCase)
-        {
-            case GodChatStreamEnvelopeProto.PayloadOneofCase.Text:
-                http.Response = envelope.Text?.Content ?? string.Empty;
-                // Completion is driven by Control payloads. Do not close SSE on text chunks.
-                http.IsLastChunk = false;
-                http.AudioData = null;
-                http.AudioMetadata = null;
-                // For voice chat, we may later use a dedicated value; for now keep default.
-                return http;
-
-            case GodChatStreamEnvelopeProto.PayloadOneofCase.Audio:
-                http.Response = string.Empty;
-                http.IsLastChunk = envelope.Audio?.IsLast ?? false;
-                http.AudioData = envelope.Audio?.AudioData?.ToByteArray();
-                http.AudioMetadata = null; // metadata json can be mapped later if needed
-                http.VoiceContentType = VoiceContentType.VoiceResponse;
-                return http;
-
-            case GodChatStreamEnvelopeProto.PayloadOneofCase.Control:
-                http.Response = string.Empty;
-                http.IsLastChunk = envelope.Control?.Type == ControlProto.Types.ControlType.AllCompleted
-                                  || envelope.Control?.Type == ControlProto.Types.ControlType.Error;
-                if (envelope.Control?.Type == ControlProto.Types.ControlType.Error)
-                {
-                    // Keep client compatibility with the legacy SSE JSON shape:
-                    // - non-zero ErrorCode indicates stream error
-                    // - Response carries the error message
-                    if (System.Enum.IsDefined(typeof(ChatErrorCode), envelope.Control.ErrorCode))
-                    {
-                        http.ErrorCode = (ChatErrorCode)envelope.Control.ErrorCode;
-                    }
-                    else
-                    {
-                        http.ErrorCode = ChatErrorCode.ParamInvalid;
-                    }
-                    http.Response = envelope.Control?.Message ?? string.Empty;
-                }
-                return http;
-
-            default:
-                http.Response = string.Empty;
-                http.IsLastChunk = false;
-                return http;
-        }
-    }
 
     public ChatMiddleware(
         RequestDelegate next,
@@ -135,7 +57,6 @@ public class ChatMiddleware
     {
         _next = next;
         _logger = logger;
-        _clusterClient = clusterClient;
         _localizationService = localizationService;
         _ipLocationService = ipLocationService;
         _actorFactory = actorFactory;
@@ -149,26 +70,17 @@ public class ChatMiddleware
         var pathBase = context.Request.PathBase.Value ?? "";
         var fullPath = pathBase + path;
 
-        _logger.LogDebug("[ChatMiddleware] Processing request - PathBase: {PathBase}, Path: {Path}, FullPath: {FullPath}",
-            pathBase, path, fullPath);
-
-        // Handle regular authenticated chat
         if (pathBase == "/api/gotgpt/chat" || fullPath.Contains("/api/gotgpt/chat"))
         {
             await HandleAuthenticatedChatAsync(context);
-            return;
         }
-        // Handle voice chat
         else if (pathBase == "/api/godgpt/voice/chat" || fullPath.Contains("/api/godgpt/voice/chat"))
         {
             await HandleVoiceChatAsync(context);
-            return;
         }
-        // Handle guest (anonymous) chat
         else if (pathBase == "/api/godgpt/guest/chat" || fullPath.Contains("/api/godgpt/guest/chat"))
         {
             await HandleGuestChatAsync(context);
-            return;
         }
         else
         {
@@ -180,27 +92,9 @@ public class ChatMiddleware
     {
         var language = context.GetGodGPTLanguage();
 
-        if (context.User?.Identity == null || !context.User.Identity.IsAuthenticated)
-        {
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.Unauthorized, language);
-            _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] Unauthorized: User is not authenticated");
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsync(localizedMessage);
-            await context.Response.Body.FlushAsync();
+        // Validate authentication
+        if (!TryGetAuthenticatedUserId(context, language, out var userId))
             return;
-        }
-
-        var userIdStr = context.User.FindFirst("sub")?.Value ?? 
-                        context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
-        {
-            _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] Unauthorized: Unable to retrieve UserId.");
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.UnableToRetrieveUserId, language);
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            await context.Response.WriteAsync(localizedMessage);
-            await context.Response.Body.FlushAsync();
-            return;
-        }
 
         var body = await new StreamReader(context.Request.Body).ReadToEndAsync();
         var request = JsonConvert.DeserializeObject<QuantumChatRequestDto>(body);
@@ -214,237 +108,72 @@ public class ChatMiddleware
         var clientIp = context.GetClientIpAddress();
         var appType = context.GetGodGPTAppType();
         var isCN = await _ipLocationService.IsInMainlandChinaAsync(clientIp, appType.ToString());
-        
-        if (string.IsNullOrWhiteSpace(request.Region))
-        {
-            request.Region = isCN ? CNDefaultRegion : DefaultRegion;
-        }
-        else if (request.Region.Equals(ConsoleRegion) && isCN)
-        {
-            request.Region = CNConsoleRegion;
-        }
+        request.Region = ChatMiddlewareHelper.ResolveRegion(request.Region, isCN);
 
-        // Set context using runtime-agnostic IAgentContext API
+        // Set agent context
         var agentContext = _agentContextAccessor.GetOrCreate();
         agentContext.Set(AgentContextKeys.IsCN, isCN);
+        agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
 
-        if (request.Images != null && request.Images.Count > MaxImageCount)
+        // Validate images
+        if (request.Images != null && request.Images.Count > ChatMiddlewareHelper.MaxImageCount)
         {
-            _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] {UserId} Too many files. {Count}", userId, request.Images.Count);
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            var parameters = new Dictionary<string, string> { ["TooManyFiles"] = MaxImageCount.ToString() };
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.TooManyFiles, language, parameters);
-            await context.Response.WriteAsync(localizedMessage);
-            await context.Response.Body.FlushAsync();
+            var parameters = new Dictionary<string, string> { ["TooManyFiles"] = ChatMiddlewareHelper.MaxImageCount.ToString() };
+            await context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.TooManyFiles, language, parameters));
             return;
         }
 
         try
         {
             var stopwatch = Stopwatch.StartNew();
-            _logger.LogDebug(
-                "[ChatMiddleware][HandleAuthenticatedChatAsync] http start: SessionId={SessionId}, UserId={UserId}, ClientIp={ClientIp}, IsCN={IsCN}, Region={Region}",
-                request.SessionId, userId, clientIp, isCN, request.Region);
 
+            // Validate session
             var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
             var manager = managerActor.As<IChatManagerGAgent>();
             if (!await manager.IsUserSessionAsync(request.SessionId))
             {
-                _logger.LogError("[ChatMiddleware][HandleAuthenticatedChatAsync] sessionInfoIsNull sessionId={SessionId}", request.SessionId);
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                var parameters = new Dictionary<string, string> { ["sessionId"] = request.SessionId.ToString() };
-                var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.UnableToLoadConversation, language, parameters);
-                await context.Response.WriteAsync(localizedMessage);
-                await context.Response.Body.FlushAsync();
+                await WriteSessionError(context, request.SessionId, language);
                 return;
             }
 
-            context.Response.ContentType = "text/event-stream";
-            context.Response.Headers.Connection = "keep-alive";
-            context.Response.Headers.CacheControl = "no-cache";
-
-            // MassTransit stream is required (no Orleans Stream fallback)
-            IMessageStream? messageStream = null;
-            if (_messageStreamProvider != null)
-            {
-                var streamId = request.SessionId.ToString();
-                messageStream = _messageStreamProvider.GetStream(streamId, "GodChat");
-                _logger.LogInformation(
-                    "[ChatMiddleware][HandleAuthenticatedChatAsync] Registered MassTransit Stream for StreamId='{StreamId}', SessionId={SessionId}",
-                    streamId, request.SessionId);
-            }
-            
+            // Get message stream
+            var messageStream = GetMessageStream(request.SessionId.ToString());
             if (messageStream == null)
             {
-                _logger.LogError(
-                    "[ChatMiddleware][HandleAuthenticatedChatAsync] MassTransit stream provider is not configured. SessionId={SessionId}",
-                    request.SessionId);
-                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                await context.Response.WriteAsync("Streaming is not available (MassTransit stream provider is not configured).");
-                await context.Response.Body.FlushAsync();
+                await WriteStreamNotAvailableError(context, request.SessionId.ToString());
                 return;
             }
+
             var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(request.SessionId.ToString());
             var godChat = godChatActor.As<IGodChat>();
-
-            // Set language context using IAgentContext API
-            agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
-            _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] SessionId={SessionId}, UserId={UserId}, Language={Language}",
-                request.SessionId, userId, language);
-
             var chatId = Guid.NewGuid().ToString();
-            var protoInput = new StartStreamChatInputProto
-            {
-                SessionId = request.SessionId.ToString(),
-                SysmLlm = string.Empty,
-                Content = request.Content,
-                ChatId = chatId,
-                // PromptSettings = null means don't set the optional field
-                IsHttpRequest = true,
-                Region = request.Region ?? "",
-            };
-            // Add images if present
-            if (request.Images != null && request.Images.Count > 0)
-            {
-                protoInput.Images.AddRange(request.Images);
-            }
-            // Set user local time if present
-            if (request.UserLocalTime.HasValue)
-            {
-                protoInput.UserLocalTime = Timestamp.FromDateTime(DateTime.SpecifyKind(request.UserLocalTime.Value, DateTimeKind.Utc));
-            }
-            // Set user timezone if present
-            if (!string.IsNullOrEmpty(request.UserTimeZoneId))
-            {
-                protoInput.UserTimeZoneId = request.UserTimeZoneId;
-            }
 
-            var exitSignal = new TaskCompletionSource();
-            IMessageStreamSubscription? messageSubscription = null;
-            var firstFlag = false;
-            var ifLastChunk = false;
+            // Build proto input
+            var protoInput = BuildStartStreamChatInput(request, chatId);
 
-            // CRITICAL: Subscribe BEFORE calling StartStreamChatAsync to avoid race condition
-            // Messages may arrive immediately after StartStreamChatAsync is called
-            // Subscribe to MassTransit Stream
-            var subscribeStartMs = stopwatch.ElapsedMilliseconds;
-            _logger.LogInformation(
-                "[ChatMiddleware][HandleAuthenticatedChatAsync] Subscribing to StreamId='{StreamId}', ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
-                request.SessionId, chatId, subscribeStartMs);
-            messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
-            {
-                try
-                {
-                    // Unpack unified stream envelope from EventEnvelope
-                    if (!envelope.Payload.Is(GodChatStreamEnvelopeProto.Descriptor))
-                    {
-                        _logger.LogDebug(
-                            "[ChatMiddleware][HandleAuthenticatedChatAsync] Ignored payload: TypeUrl={TypeUrl}, SessionId={SessionId}, ChatId={ChatId}",
-                            envelope.Payload.TypeUrl, request.SessionId, chatId);
-                        return;
-                    }
-
-                    var streamProto = envelope.Payload.Unpack<GodChatStreamEnvelopeProto>();
-                    if (streamProto.ChatId != chatId)
-                    {
-                        return;
-                    }
-
-                    var httpResponse = MapEnvelopeToHttpResponse(streamProto);
-
-                    if (!firstFlag)
-                    {
-                        await context.Response.StartAsync();
-                        firstFlag = true;
-                        _logger.LogInformation(
-                            "[ChatMiddleware][HandleAuthenticatedChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
-                            request.SessionId, stopwatch.ElapsedMilliseconds);
-                    }
-
-                    var responseData = $"data: {JsonConvert.SerializeObject(httpResponse)}\n\n";
-                    await context.Response.WriteAsync(responseData);
-                    await context.Response.Body.FlushAsync();
-
-                    if (httpResponse.IsLastChunk)
-                    {
-                        await context.Response.WriteAsync("event: completed\n");
-                        context.Response.Body.Close();
-                        ifLastChunk = true;
-                        exitSignal.TrySetResult();
-                        if (messageSubscription != null)
-                        {
-                            await messageSubscription.UnsubscribeAsync();
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex,
-                        "[ChatMiddleware][HandleAuthenticatedChatAsync] Error processing MassTransit message: SessionId={SessionId}, ChatId={ChatId}",
-                        request.SessionId, chatId);
-                    exitSignal.TrySetException(ex);
-                }
-            });
-
-            var subscribeEndMs = stopwatch.ElapsedMilliseconds;
-            _logger.LogInformation(
-                "[ChatMiddleware][HandleAuthenticatedChatAsync] Subscribed - SessionId={SessionId}, SubscribeMs={SubscribeMs}ms",
-                request.SessionId, subscribeEndMs - subscribeStartMs);
+            // Setup SSE handler and subscribe
+            var sseHandler = new SseStreamHandler(context, _logger, "HandleAuthenticatedChatAsync", 
+                request.SessionId.ToString(), chatId, stopwatch, context.RequestAborted);
+            sseHandler.SetupSseHeaders();
             
-            // Now that subscription is active, trigger the chat
-            var chatStartMs = stopwatch.ElapsedMilliseconds;
+            var exitSignal = await sseHandler.SubscribeAsync(messageStream);
+            
+            // Trigger chat
             await godChat.StartStreamChatAsync(protoInput);
-            var chatEndMs = stopwatch.ElapsedMilliseconds;
-            _logger.LogInformation(
-                "[ChatMiddleware][HandleAuthenticatedChatAsync] StartStreamChatAsync returned - SessionId={SessionId}, ChatId={ChatId}, RpcMs={RpcMs}ms, TotalElapsedMs={TotalElapsedMs}ms", 
-                request.SessionId, chatId, chatEndMs - chatStartMs, chatEndMs);
-
-            try
-            {
-                await exitSignal.Task.WaitAsync(context.RequestAborted);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("[ChatMiddleware][HandleAuthenticatedChatAsync] catch error: {Error}", ex);
-            }
-            finally
-            {
-                if (messageSubscription != null)
-                {
-                    await messageSubscription.UnsubscribeAsync();
-                }
-            }
-
-            if (!ifLastChunk)
-            {
-                _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] No LastChunk: SessionId={SessionId}, ChatId={ChatId}",
-                    request.SessionId, chatId);
-            }
-
-            _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] complete done SessionId={SessionId}", request.SessionId);
+            
+            // Wait and cleanup
+            await sseHandler.WaitForCompletionAsync();
+            await sseHandler.CleanupAsync();
+            sseHandler.LogCompletion();
         }
         catch (InvalidOperationException e)
         {
-            var statusCode = StatusCodes.Status500InternalServerError;
-            if (e.Data.Contains("Code") && int.TryParse((string?)e.Data["Code"], out var code))
-            {
-                if (code == ExecuteActionStatus.InsufficientCredits)
-                {
-                    statusCode = StatusCodes.Status402PaymentRequired;
-                }
-                else if (code == ExecuteActionStatus.RateLimitExceeded)
-                {
-                    statusCode = StatusCodes.Status429TooManyRequests;
-                }
-            }
-            context.Response.StatusCode = statusCode;
-            await context.Response.WriteAsync(e.Message);
-            await context.Response.Body.FlushAsync();
-            _logger.LogDebug("[ChatMiddleware][HandleAuthenticatedChatAsync] {Error}", e.Message);
+            await HandleBusinessException(context, e);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[ChatMiddleware][HandleAuthenticatedChatAsync] Error in SSE stream: {Error}", ex.Message);
+            _logger.LogError(ex, "[ChatMiddleware][HandleAuthenticatedChatAsync] Error: {Error}", ex.Message);
         }
     }
 
@@ -453,7 +182,6 @@ public class ChatMiddleware
         var clientIp = context.GetClientIpAddress();
         var userHashId = CommonHelper.GetAnonymousUserGAgentId(clientIp).Replace("AnonymousUser_", "");
         var language = context.GetGodGPTLanguage();
-        _logger.LogDebug("[ChatMiddleware][HandleGuestChatAsync] Processing request for user: {UserHashId}, Language={Language}", userHashId, language);
 
         try
         {
@@ -464,220 +192,68 @@ public class ChatMiddleware
             
             if (request == null || string.IsNullOrWhiteSpace(request.Content))
             {
-                _logger.LogWarning("[ChatMiddleware][HandleGuestChatAsync] Invalid request body for user: {UserHashId}", userHashId);
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InvalidRequestBody, language);
-                await context.Response.WriteAsync(localizedMessage);
+                await context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InvalidRequestBody, language));
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(request.Region))
-            {
-                request.Region = isCN ? CNDefaultRegion : DefaultRegion;
-            }
-            else if (request.Region.Equals(ConsoleRegion) && isCN)
-            {
-                request.Region = CNConsoleRegion;
-            }
+            request.Region = ChatMiddlewareHelper.ResolveRegion(request.Region, isCN);
 
-            // Set context using runtime-agnostic IAgentContext API
             var agentContext = _agentContextAccessor.GetOrCreate();
             agentContext.Set(AgentContextKeys.IsCN, isCN);
+            agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
             var stopwatch = Stopwatch.StartNew();
-            _logger.LogDebug("[ChatMiddleware][HandleGuestChatAsync] Start processing guest chat for user: {UserHashId}, ClientIP={ClientIp}, IsCN={IsCN}, Region={Region}",
-                userHashId, clientIp, isCN, request.Region);
 
-            // Get or create anonymous user agent for this IP
+            // Get anonymous user
             var agentId = CommonHelper.GetAnonymousUserGAgentId(clientIp);
             var anonymousUserActor = await _actorFactory.CreateGAgentActorAsync<AnonymousUserGAgent>(agentId);
             var anonymousUserGrain = anonymousUserActor.As<IAnonymousUserGAgent>();
             
-            // Set language context using IAgentContext API
-            agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
-            _logger.LogDebug("[ChatMiddleware][HandleGuestChatAsync] Start processing guest chat for user: {UserHashId}, Language={Language}", userHashId, language);
-
-            // Check if user can still chat
             if (!await anonymousUserGrain.CanChatAsync())
             {
-                _logger.LogWarning("[ChatMiddleware][HandleGuestChatAsync] Chat limit exceeded for user: {UserHashId}", userHashId);
                 context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
-                var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.DailyChatLimitExceeded, language);
-                await context.Response.WriteAsync(localizedMessage);
+                await context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.DailyChatLimitExceeded, language));
                 return;
             }
 
-            // Get current session
             var sessionInfo = await anonymousUserGrain.GetCurrentSessionAsync();
             if (sessionInfo == null)
             {
-                _logger.LogWarning("[ChatMiddleware][HandleGuestChatAsync] No active session for user: {UserHashId}", userHashId);
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.NoActiveGuestSession, language);
-                await context.Response.WriteAsync(localizedMessage);
+                await context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.NoActiveGuestSession, language));
                 return;
             }
 
             var chatId = Guid.NewGuid().ToString();
             var sessionId = sessionInfo.SessionId;
 
-            _logger.LogDebug("[ChatMiddleware][HandleGuestChatAsync] Found session {SessionId} for user: {UserHashId}", sessionId, userHashId);
-
-            // Set up SSE response headers
-            context.Response.ContentType = "text/event-stream";
-            context.Response.Headers.Connection = "keep-alive";
-            context.Response.Headers.CacheControl = "no-cache";
-
-            // MassTransit stream is required (no Orleans Stream fallback)
-            IMessageStream? messageStream = null;
-            if (_messageStreamProvider != null)
-            {
-                messageStream = _messageStreamProvider.GetStream(sessionId, "GodChat");
-                _logger.LogDebug(
-                    "[ChatMiddleware][HandleGuestChatAsync] Using MassTransit Stream for SessionId={SessionId}",
-                    sessionId);
-            }
-
+            var messageStream = GetMessageStream(sessionId);
             if (messageStream == null)
             {
-                _logger.LogError(
-                    "[ChatMiddleware][HandleGuestChatAsync] MassTransit stream provider is not configured. SessionId={SessionId}",
-                    sessionId);
-                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                await context.Response.WriteAsync("Streaming is not available (MassTransit stream provider is not configured).");
-                await context.Response.Body.FlushAsync();
+                await WriteStreamNotAvailableError(context, sessionId);
                 return;
             }
 
-            // Handle streaming response
-            var exitSignal = new TaskCompletionSource();
-            IMessageStreamSubscription? messageSubscription = null;
-            var firstFlag = false;
-            var ifLastChunk = false;
-
-            // CRITICAL: Subscribe BEFORE calling GuestChatAsync to avoid race condition
-            // Subscribe to MassTransit Stream
-            messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
-            {
-                try
-                {
-                    // Unpack unified stream envelope from EventEnvelope
-                    if (!envelope.Payload.Is(GodChatStreamEnvelopeProto.Descriptor))
-                    {
-                        _logger.LogDebug(
-                            "[ChatMiddleware][HandleGuestChatAsync] Ignored payload: TypeUrl={TypeUrl}, SessionId={SessionId}, ChatId={ChatId}",
-                            envelope.Payload.TypeUrl, sessionId, chatId);
-                        return;
-                    }
-
-                    var streamProto = envelope.Payload.Unpack<GodChatStreamEnvelopeProto>();
-                    if (streamProto.ChatId != chatId)
-                    {
-                        return;
-                    }
-
-                    var httpResponse = MapEnvelopeToHttpResponse(streamProto);
-
-                    if (!firstFlag)
-                    {
-                        await context.Response.StartAsync();
-                        firstFlag = true;
-                        _logger.LogInformation(
-                            "[ChatMiddleware][HandleGuestChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
-                            sessionId, stopwatch.ElapsedMilliseconds);
-                    }
-
-                    var responseData = $"data: {JsonConvert.SerializeObject(httpResponse)}\n\n";
-                    await context.Response.WriteAsync(responseData);
-                    await context.Response.Body.FlushAsync();
-
-                    if (httpResponse.IsLastChunk)
-                    {
-                        await context.Response.WriteAsync("event: completed\n");
-                        context.Response.Body.Close();
-                        ifLastChunk = true;
-                        exitSignal.TrySetResult();
-                        if (messageSubscription != null)
-                        {
-                            await messageSubscription.UnsubscribeAsync();
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex,
-                        "[ChatMiddleware][HandleGuestChatAsync] Error processing MassTransit message: SessionId={SessionId}, ChatId={ChatId}",
-                        sessionId, chatId);
-                    exitSignal.TrySetException(ex);
-                }
-            });
-
-            // Now that subscription is active, trigger the chat
+            var sseHandler = new SseStreamHandler(context, _logger, "HandleGuestChatAsync", 
+                sessionId, chatId, stopwatch, context.RequestAborted);
+            sseHandler.SetupSseHeaders();
+            
+            await sseHandler.SubscribeAsync(messageStream);
             await anonymousUserGrain.GuestChatAsync(request.Content, chatId);
-            _logger.LogDebug("[ChatMiddleware][HandleGuestChatAsync] Guest chat executed for user: {UserHashId}, ChatId={ChatId}", userHashId, chatId);
-
-            try
-            {
-                await exitSignal.Task.WaitAsync(context.RequestAborted);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError("[ChatMiddleware][HandleGuestChatAsync] Error waiting for stream completion: {Error}", ex.Message);
-            }
-            finally
-            {
-                if (messageSubscription != null)
-                {
-                    await messageSubscription.UnsubscribeAsync();
-                }
-            }
-
-            if (!ifLastChunk)
-            {
-                _logger.LogDebug("[ChatMiddleware][HandleGuestChatAsync] No LastChunk received for user: {UserHashId}, ChatId={ChatId}", userHashId, chatId);
-            }
-
-            _logger.LogDebug("[ChatMiddleware][HandleGuestChatAsync] Completed guest chat for user: {UserHashId}, Duration={Duration}ms",
-                userHashId, stopwatch.ElapsedMilliseconds);
+            
+            await sseHandler.WaitForCompletionAsync();
+            await sseHandler.CleanupAsync();
+            sseHandler.LogCompletion();
         }
         catch (InvalidOperationException ex)
         {
-            var statusCode = StatusCodes.Status400BadRequest;
-
-            if (ex.Message.Contains("Daily chat limit exceeded"))
-            {
-                statusCode = StatusCodes.Status429TooManyRequests;
-            }
-            else if (ex.Message.Contains("No active guest session"))
-            {
-                statusCode = StatusCodes.Status400BadRequest;
-            }
-            else if (ex.Data.Contains("Code") && int.TryParse(ex.Data["Code"]?.ToString(), out var code))
-            {
-                if (code == ExecuteActionStatus.InsufficientCredits)
-                {
-                    statusCode = StatusCodes.Status402PaymentRequired;
-                }
-                else if (code == ExecuteActionStatus.RateLimitExceeded)
-                {
-                    statusCode = StatusCodes.Status429TooManyRequests;
-                }
-                else if (code >= 10000)
-                {
-                    statusCode = StatusCodes.Status400BadRequest;
-                    _logger.LogWarning("[ChatMiddleware][HandleGuestChatAsync] Business error code {Code} converted to 400 for user: {UserHashId}", code, userHashId);
-                }
-            }
-
-            context.Response.StatusCode = statusCode;
-            await context.Response.WriteAsync(ex.Message);
-            _logger.LogWarning(ex, "[ChatMiddleware][HandleGuestChatAsync] Operation error for user: {UserHashId}, Status={Status}", userHashId, statusCode);
+            await HandleGuestBusinessException(context, ex, userHashId, language);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[ChatMiddleware][HandleGuestChatAsync] Unexpected error for user: {UserHashId}", userHashId);
+            _logger.LogError(ex, "[ChatMiddleware][HandleGuestChatAsync] Error for user: {UserHashId}", userHashId);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InternalServerError, language);
-            await context.Response.WriteAsync(localizedMessage);
+            await context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InternalServerError, language));
         }
     }
 
@@ -685,31 +261,9 @@ public class ChatMiddleware
     {
         var language = context.GetGodGPTLanguage();
         
-        // Check user authentication
-        if (context.User?.Identity == null || !context.User.Identity.IsAuthenticated)
-        {
-            _logger.LogDebug("[ChatMiddleware][HandleVoiceChatAsync] Unauthorized: User is not authenticated");
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.Unauthorized, language);
-            await context.Response.WriteAsync(localizedMessage);
-            await context.Response.Body.FlushAsync();
+        if (!TryGetAuthenticatedUserId(context, language, out var userId))
             return;
-        }
 
-        // Extract user ID from claims
-        var userIdStr = context.User.FindFirst("sub")?.Value ?? 
-                        context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
-        {
-            _logger.LogDebug("[ChatMiddleware][HandleVoiceChatAsync] Unauthorized: Unable to retrieve UserId.");
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.UnableToRetrieveUserId, language);
-            await context.Response.WriteAsync(localizedMessage);
-            await context.Response.Body.FlushAsync();
-            return;
-        }
-
-        // Parse request body
         var body = await new StreamReader(context.Request.Body).ReadToEndAsync();
         var request = JsonConvert.DeserializeObject<VoiceChatRequestDto>(body);
         var clientIp = context.GetClientIpAddress();
@@ -718,256 +272,205 @@ public class ChatMiddleware
 
         if (request == null || string.IsNullOrWhiteSpace(request.Content))
         {
-            _logger.LogWarning("[ChatMiddleware][HandleVoiceChatAsync] Invalid request body for user: {UserId}", userId);
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InvalidRequestBody, language);
-            await context.Response.WriteAsync(localizedMessage);
+            await context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InvalidRequestBody, language));
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(request.Region))
-        {
-            request.Region = isCN ? CNDefaultRegion : DefaultRegion;
-        }
-        else if (request.Region.Equals(ConsoleRegion) && isCN)
-        {
-            request.Region = CNConsoleRegion;
-        }
+        request.Region = ChatMiddlewareHelper.ResolveRegion(request.Region, isCN);
 
-        // Set context using runtime-agnostic IAgentContext API
         var agentContext = _agentContextAccessor.GetOrCreate();
         agentContext.Set(AgentContextKeys.IsCN, isCN);
+        agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
 
         if (request.VoiceLanguage == VoiceLanguageEnum.Unset)
         {
-            _logger.LogWarning("[ChatMiddleware][HandleVoiceChatAsync] unset language UserId={UserId}, Language={Language}", userId, request.VoiceLanguage);
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.UnsetLanguage, language);
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await context.Response.WriteAsync(localizedMessage);
+            await context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.UnsetLanguage, language));
             return;
         }
 
         try
         {
             var stopwatch = Stopwatch.StartNew();
-            agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
-            _logger.LogDebug(
-                "[ChatMiddleware][HandleVoiceChatAsync] HTTP start - SessionId={SessionId}, UserId={UserId}, MessageType={MessageType}, VoiceLanguage={VoiceLanguage}, Language={Language}, ClientIp={ClientIp}, IsCN={IsCN}, Region={Region}",
-                request.SessionId, userId, request.MessageType, request.VoiceLanguage, language, clientIp, isCN, request.Region);
 
-            // Validate session access
             var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
             var manager = managerActor.As<IChatManagerGAgent>();
             if (!await manager.IsUserSessionAsync(request.SessionId))
             {
-                _logger.LogError("[ChatMiddleware][HandleVoiceChatAsync] Session not found or access denied - SessionId={SessionId}, UserId={UserId}",
-                    request.SessionId, userId);
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                var parameters = new Dictionary<string, string> { ["sessionId"] = request.SessionId.ToString() };
-                var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.UnableToLoadConversation, language, parameters);
-                await context.Response.WriteAsync(localizedMessage);
-                await context.Response.Body.FlushAsync();
+                await WriteSessionError(context, request.SessionId, language);
                 return;
             }
 
-            // Check if client is still connected before proceeding
-            if (context.RequestAborted.IsCancellationRequested)
-            {
-                _logger.LogInformation("[ChatMiddleware][HandleVoiceChatAsync] Client disconnected before voice chat start - SessionId={SessionId}", request.SessionId);
-                return;
-            }
+            if (context.RequestAborted.IsCancellationRequested) return;
 
-            // Set SSE response headers
-            context.Response.ContentType = "text/event-stream";
-            context.Response.Headers.Connection = "keep-alive";
-            context.Response.Headers.CacheControl = "no-cache";
-
-            // Use MassTransit Stream if available, otherwise fallback to Orleans Stream
-            IMessageStream? messageStream = null;
-            if (_messageStreamProvider != null)
-            {
-                messageStream = _messageStreamProvider.GetStream(request.SessionId.ToString(), "GodChat");
-                _logger.LogDebug(
-                    "[ChatMiddleware][HandleVoiceChatAsync] Using MassTransit Stream for SessionId={SessionId}",
-                    request.SessionId);
-            }
-
+            var messageStream = GetMessageStream(request.SessionId.ToString());
             if (messageStream == null)
             {
-                _logger.LogError(
-                    "[ChatMiddleware][HandleVoiceChatAsync] MassTransit stream provider is not configured. SessionId={SessionId}",
-                    request.SessionId);
-                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                await context.Response.WriteAsync("Streaming is not available (MassTransit stream provider is not configured).");
-                await context.Response.Body.FlushAsync();
+                await WriteStreamNotAvailableError(context, request.SessionId.ToString());
                 return;
             }
 
             var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(request.SessionId.ToString());
             var godChat = godChatActor.As<IGodChat>();
-            agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
-
-            // Generate unique chat ID
             var chatId = Guid.NewGuid().ToString();
 
-            // Add timeout for voice chat operation
-            var voiceChatTimeout = TimeSpan.FromMinutes(5);
-            var voiceChatCts = new CancellationTokenSource(voiceChatTimeout);
+            // Voice chat timeout
+            var voiceChatCts = new CancellationTokenSource(TimeSpan.FromMinutes(5));
             var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(context.RequestAborted, voiceChatCts.Token);
 
-            // Handle streaming response
-            var exitSignal = new TaskCompletionSource();
-            IMessageStreamSubscription? messageSubscription = null;
-            var firstFlag = false;
-            var ifLastChunk = false;
-
-            // CRITICAL: Subscribe BEFORE calling StreamVoiceChatWithSessionAsync to avoid race condition
-            // Subscribe to MassTransit Stream
-            messageSubscription = await messageStream.SubscribeAsync<EventEnvelope>(async (envelope) =>
-            {
-                try
-                {
-                    // Unpack unified stream envelope from EventEnvelope
-                    if (!envelope.Payload.Is(GodChatStreamEnvelopeProto.Descriptor))
-                    {
-                        _logger.LogDebug(
-                            "[ChatMiddleware][HandleVoiceChatAsync] Ignored payload: TypeUrl={TypeUrl}, SessionId={SessionId}, ChatId={ChatId}",
-                            envelope.Payload.TypeUrl, request.SessionId, chatId);
-                        return;
-                    }
-
-                    var streamProto = envelope.Payload.Unpack<GodChatStreamEnvelopeProto>();
-                    if (streamProto.ChatId != chatId)
-                    {
-                        return;
-                    }
-
-                    var httpResponse = MapEnvelopeToHttpResponse(streamProto);
-
-                    if (!firstFlag)
-                    {
-                        await context.Response.StartAsync();
-                        firstFlag = true;
-                        _logger.LogInformation(
-                            "[ChatMiddleware][HandleVoiceChatAsync] MassTransit Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
-                            request.SessionId, stopwatch.ElapsedMilliseconds);
-                    }
-
-                    var responseData = $"data: {JsonConvert.SerializeObject(httpResponse)}\n\n";
-                    await context.Response.WriteAsync(responseData);
-                    await context.Response.Body.FlushAsync();
-
-                    if (httpResponse.IsLastChunk)
-                    {
-                        await context.Response.WriteAsync("event: completed\n");
-                        context.Response.Body.Close();
-                        ifLastChunk = true;
-                        exitSignal.TrySetResult();
-                        if (messageSubscription != null)
-                        {
-                            await messageSubscription.UnsubscribeAsync();
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    _logger.LogError(ex,
-                        "[ChatMiddleware][HandleVoiceChatAsync] Error processing MassTransit message: SessionId={SessionId}, ChatId={ChatId}",
-                        request.SessionId, chatId);
-                    exitSignal.TrySetException(ex);
-                }
-            });
-
-            // Now that subscription is active, initiate voice chat
             try
             {
+                var sseHandler = new SseStreamHandler(context, _logger, "HandleVoiceChatAsync", 
+                    request.SessionId.ToString(), chatId, stopwatch, combinedCts.Token);
+                sseHandler.SetupSseHeaders();
+                
+                await sseHandler.SubscribeAsync(messageStream);
+                
                 await godChat.StreamVoiceChatWithSessionAsync(request.SessionId, string.Empty, request.Content, "",
                     chatId, null, true, request.Region, request.VoiceLanguage, request.VoiceDurationSeconds);
-                _logger.LogDebug("[ChatMiddleware][HandleVoiceChatAsync] Voice chat initiated - SessionId={SessionId}, ChatId={ChatId}, Duration={Duration}ms",
-                    request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
-            }
-            catch (OperationCanceledException) when (voiceChatCts.Token.IsCancellationRequested)
-            {
-                _logger.LogWarning("[ChatMiddleware][HandleVoiceChatAsync] Voice chat timeout - SessionId={SessionId}, ChatId={ChatId}", request.SessionId, chatId);
-                context.Response.StatusCode = StatusCodes.Status408RequestTimeout;
-                await context.Response.WriteAsync("Voice chat operation timed out");
-                return;
-            }
-
-            try
-            {
-                await exitSignal.Task.WaitAsync(combinedCts.Token);
-            }
-            catch (OperationCanceledException ex)
-            {
-                if (voiceChatCts.Token.IsCancellationRequested)
-                {
-                    _logger.LogWarning("[ChatMiddleware][HandleVoiceChatAsync] Voice chat timeout during streaming - SessionId={SessionId}", request.SessionId);
-                }
-                else if (context.RequestAborted.IsCancellationRequested)
-                {
-                    _logger.LogInformation("[ChatMiddleware][HandleVoiceChatAsync] Client disconnected - SessionId={SessionId}", request.SessionId);
-                }
-                else
-                {
-                    _logger.LogInformation("[ChatMiddleware][HandleVoiceChatAsync] Stream cancelled - SessionId={SessionId}, Reason={Reason}",
-                        request.SessionId, ex.Message);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[ChatMiddleware][HandleVoiceChatAsync] Unexpected error waiting for stream completion - SessionId={SessionId}", request.SessionId);
+                
+                await sseHandler.WaitForCompletionAsync();
+                await sseHandler.CleanupAsync();
+                sseHandler.LogCompletion();
             }
             finally
             {
                 voiceChatCts.Dispose();
                 combinedCts.Dispose();
-                if (messageSubscription != null)
-                {
-                    await messageSubscription.UnsubscribeAsync();
-                }
             }
-
-            if (!ifLastChunk)
-            {
-                _logger.LogDebug("[ChatMiddleware][HandleVoiceChatAsync] No LastChunk received - SessionId={SessionId}, ChatId={ChatId}",
-                    request.SessionId, chatId);
-            }
-
-            _logger.LogDebug("[ChatMiddleware][HandleVoiceChatAsync] Voice chat completed - SessionId={SessionId}, Duration={Duration}ms",
-                request.SessionId, stopwatch.ElapsedMilliseconds);
         }
         catch (InvalidOperationException ex)
         {
-            var statusCode = StatusCodes.Status500InternalServerError;
-            if (ex.Data.Contains("Code") && int.TryParse(ex.Data["Code"]?.ToString(), out var code))
-            {
-                if (code == ExecuteActionStatus.InsufficientCredits)
-                {
-                    statusCode = StatusCodes.Status402PaymentRequired;
-                }
-                else if (code == ExecuteActionStatus.RateLimitExceeded)
-                {
-                    statusCode = StatusCodes.Status429TooManyRequests;
-                }
-                else if (code >= 10000)
-                {
-                    statusCode = StatusCodes.Status400BadRequest;
-                    _logger.LogWarning("[ChatMiddleware][HandleVoiceChatAsync] Business error code {Code} converted to 400 for SessionId={SessionId}", code, request.SessionId);
-                }
-            }
-
-            context.Response.StatusCode = statusCode;
-            await context.Response.WriteAsync(ex.Message);
-            _logger.LogWarning(ex, "[ChatMiddleware][HandleVoiceChatAsync] Operation error - SessionId={SessionId}, Status={Status}", request.SessionId, statusCode);
+            await HandleVoiceBusinessException(context, ex, request.SessionId);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[ChatMiddleware][HandleVoiceChatAsync] Unexpected error - SessionId={SessionId}", request.SessionId);
+            _logger.LogError(ex, "[ChatMiddleware][HandleVoiceChatAsync] Error - SessionId={SessionId}", request.SessionId);
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            var localizedMessage = _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InternalServerError, language);
-            await context.Response.WriteAsync(localizedMessage);
+            await context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InternalServerError, language));
         }
     }
-}
 
+    #region Helper Methods
+
+    private bool TryGetAuthenticatedUserId(HttpContext context, GodGPTChatLanguage language, out Guid userId)
+    {
+        userId = Guid.Empty;
+        
+        if (context.User?.Identity == null || !context.User.Identity.IsAuthenticated)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.Unauthorized, language)).Wait();
+            return false;
+        }
+
+        var userIdStr = context.User.FindFirst("sub")?.Value ?? 
+                        context.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(userIdStr) || !Guid.TryParse(userIdStr, out userId))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.UnableToRetrieveUserId, language)).Wait();
+            return false;
+        }
+
+        return true;
+    }
+
+    private IMessageStream? GetMessageStream(string streamId)
+    {
+        return _messageStreamProvider?.GetStream(streamId, "GodChat");
+    }
+
+    private async Task WriteSessionError(HttpContext context, Guid sessionId, GodGPTChatLanguage language)
+    {
+        context.Response.StatusCode = StatusCodes.Status400BadRequest;
+        var parameters = new Dictionary<string, string> { ["sessionId"] = sessionId.ToString() };
+        await context.Response.WriteAsync(_localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.UnableToLoadConversation, language, parameters));
+    }
+
+    private async Task WriteStreamNotAvailableError(HttpContext context, string sessionId)
+    {
+        _logger.LogError("[ChatMiddleware] MassTransit stream not configured. SessionId={SessionId}", sessionId);
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        await context.Response.WriteAsync("Streaming is not available (MassTransit stream provider is not configured).");
+    }
+
+    private StartStreamChatInputProto BuildStartStreamChatInput(QuantumChatRequestDto request, string chatId)
+    {
+        var protoInput = new StartStreamChatInputProto
+        {
+            SessionId = request.SessionId.ToString(),
+            SysmLlm = string.Empty,
+            Content = request.Content,
+            ChatId = chatId,
+            IsHttpRequest = true,
+            Region = request.Region ?? "",
+        };
+        
+        if (request.Images != null && request.Images.Count > 0)
+            protoInput.Images.AddRange(request.Images);
+        
+        if (request.UserLocalTime.HasValue)
+            protoInput.UserLocalTime = Timestamp.FromDateTime(DateTime.SpecifyKind(request.UserLocalTime.Value, DateTimeKind.Utc));
+        
+        if (!string.IsNullOrEmpty(request.UserTimeZoneId))
+            protoInput.UserTimeZoneId = request.UserTimeZoneId;
+        
+        return protoInput;
+    }
+
+    private async Task HandleBusinessException(HttpContext context, InvalidOperationException e)
+    {
+        var statusCode = StatusCodes.Status500InternalServerError;
+        if (e.Data.Contains("Code") && int.TryParse((string?)e.Data["Code"], out var code))
+        {
+            statusCode = code switch
+            {
+                ExecuteActionStatus.InsufficientCredits => StatusCodes.Status402PaymentRequired,
+                ExecuteActionStatus.RateLimitExceeded => StatusCodes.Status429TooManyRequests,
+                _ => StatusCodes.Status500InternalServerError
+            };
+        }
+        context.Response.StatusCode = statusCode;
+        await context.Response.WriteAsync(e.Message);
+    }
+
+    private async Task HandleGuestBusinessException(HttpContext context, InvalidOperationException ex, string userHashId, GodGPTChatLanguage language)
+    {
+        var statusCode = StatusCodes.Status400BadRequest;
+        if (ex.Message.Contains("Daily chat limit exceeded"))
+            statusCode = StatusCodes.Status429TooManyRequests;
+        else if (ex.Data.Contains("Code") && int.TryParse(ex.Data["Code"]?.ToString(), out var code))
+        {
+            statusCode = code switch
+            {
+                ExecuteActionStatus.InsufficientCredits => StatusCodes.Status402PaymentRequired,
+                ExecuteActionStatus.RateLimitExceeded => StatusCodes.Status429TooManyRequests,
+                >= 10000 => StatusCodes.Status400BadRequest,
+                _ => StatusCodes.Status400BadRequest
+            };
+        }
+        context.Response.StatusCode = statusCode;
+        await context.Response.WriteAsync(ex.Message);
+    }
+
+    private async Task HandleVoiceBusinessException(HttpContext context, InvalidOperationException ex, Guid sessionId)
+    {
+        var statusCode = StatusCodes.Status500InternalServerError;
+        if (ex.Data.Contains("Code") && int.TryParse(ex.Data["Code"]?.ToString(), out var code))
+        {
+            statusCode = code switch
+            {
+                ExecuteActionStatus.InsufficientCredits => StatusCodes.Status402PaymentRequired,
+                ExecuteActionStatus.RateLimitExceeded => StatusCodes.Status429TooManyRequests,
+                >= 10000 => StatusCodes.Status400BadRequest,
+                _ => StatusCodes.Status500InternalServerError
+            };
+        }
+        context.Response.StatusCode = statusCode;
+        await context.Response.WriteAsync(ex.Message);
+    }
+
+    #endregion
+}
