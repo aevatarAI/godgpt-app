@@ -76,6 +76,10 @@ public class AuthServerModule : AbpModule
             );
         });
 
+        var useProductionCert = configuration.GetValue<bool>("OpenIddict:Certificate:UseProductionCertificate");
+        var certPath = configuration["OpenIddict:Certificate:CertificatePath"] ?? "openiddict.pfx";
+        var certPassword = configuration["OpenIddict:Certificate:CertificatePassword"] ?? "";
+
         PreConfigure<OpenIddictBuilder>(builder =>
         {
             builder.AddServer(options =>
@@ -85,14 +89,12 @@ public class AuthServerModule : AbpModule
                     ?? configuration["App:SelfUrl"] 
                     ?? "https://localhost:44320"));
 
-                // Certificate configuration for production
-                var useProductionCert = configuration.GetValue<bool>("OpenIddict:Certificate:UseProductionCertificate");
-                var certPath = configuration["OpenIddict:Certificate:CertificatePath"] ?? "openiddict.pfx";
-                var certPassword = configuration["OpenIddict:Certificate:CertificatePassword"] ?? 
-                                   "00000000-0000-0000-0000-000000000000";
-
                 if (useProductionCert)
                 {
+                    PreConfigure<AbpOpenIddictAspNetCoreOptions>(opt =>
+                    {
+                        opt.AddDevelopmentEncryptionAndSigningCertificate = false;
+                    });
                     if (File.Exists(certPath))
                     {
                         options.AddProductionEncryptionAndSigningCertificate(certPath, certPassword);
@@ -103,22 +105,14 @@ public class AuthServerModule : AbpModule
                     }
                 }
 
-                // Disable access token encryption for easier debugging
                 options.DisableAccessTokenEncryption();
 
-                // Configure access token lifetime (in minutes for easier configuration)
                 if (int.TryParse(configuration["AccessTokenExpirationMinutes"], out int accessTokenMinutes) && accessTokenMinutes > 0)
-                {
                     options.SetAccessTokenLifetime(TimeSpan.FromMinutes(accessTokenMinutes));
-                }
 
-                // Configure refresh token lifetime (in minutes)
                 if (int.TryParse(configuration["RefreshTokenExpirationMinutes"], out int refreshTokenMinutes) && refreshTokenMinutes > 0)
-                {
                     options.SetRefreshTokenLifetime(TimeSpan.FromMinutes(refreshTokenMinutes));
-                }
 
-                // Disable rolling refresh tokens to allow multiple uses
                 options.DisableRollingRefreshTokens();
             });
             
@@ -130,21 +124,13 @@ public class AuthServerModule : AbpModule
             });
         });
 
-        // Register custom grant types for Google/Apple Sign In
         PreConfigure<OpenIddictServerBuilder>(builder =>
         {
-            builder.Configure(openIddictServerOptions =>
+            builder.Configure(opt =>
             {
-                openIddictServerOptions.GrantTypes.Add(GrantTypeConstants.GOOGLE);
-                openIddictServerOptions.GrantTypes.Add(GrantTypeConstants.APPLE);
+                opt.GrantTypes.Add(GrantTypeConstants.GOOGLE);
+                opt.GrantTypes.Add(GrantTypeConstants.APPLE);
             });
-        });
-
-        // Certificate configuration: use production cert or development cert
-        var useProductionCertificate = configuration.GetValue<bool>("OpenIddict:Certificate:UseProductionCertificate");
-        PreConfigure<AbpOpenIddictAspNetCoreOptions>(options =>
-        {
-            options.AddDevelopmentEncryptionAndSigningCertificate = !useProductionCertificate;
         });
     }
 

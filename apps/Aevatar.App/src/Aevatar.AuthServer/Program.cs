@@ -6,6 +6,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using Serilog.Events;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace Aevatar.AuthServer;
 
@@ -19,6 +22,10 @@ public class Program
         {
             Log.Information("Starting Aevatar.AuthServer.");
             var builder = WebApplication.CreateBuilder(args);
+            
+            // Configure OpenTelemetry
+            ConfigureOpenTelemetry(builder);
+            
             builder.Host.AddAppSettingsSecretsJson()
                 .UseAutofac()
                 .UseSerilog();
@@ -51,5 +58,48 @@ public class Program
             .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
             .Enrich.FromLogContext()
             .CreateLogger();
+    }
+
+    /// <summary>
+    /// Configure OpenTelemetry for distributed tracing and metrics
+    /// </summary>
+    private static void ConfigureOpenTelemetry(WebApplicationBuilder builder)
+    {
+        var config = builder.Configuration;
+        var otelEnabled = config.GetValue("OpenTelemetry:Enabled", false);
+        
+        if (!otelEnabled)
+        {
+            Log.Information("📊 OpenTelemetry: Disabled (set OpenTelemetry:Enabled=true to enable)");
+            return;
+        }
+        
+        var serviceName = config.GetValue("OpenTelemetry:ServiceName", "Aevatar.AuthServer");
+        var serviceVersion = config.GetValue("OpenTelemetry:ServiceVersion", "1.0.0");
+        var collectorEndpoint = config.GetValue("OpenTelemetry:CollectorEndpoint", "http://localhost:4317");
+        
+        Log.Information("📊 Configuring OpenTelemetry");
+        Log.Information("   ServiceName: {ServiceName}", serviceName);
+        Log.Information("   ServiceVersion: {ServiceVersion}", serviceVersion);
+        Log.Information("   CollectorEndpoint: {CollectorEndpoint}", collectorEndpoint);
+        
+        builder.Services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource
+                .AddService(serviceName: serviceName, serviceVersion: serviceVersion))
+            .WithTracing(tracing => tracing
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation()
+                .AddOtlpExporter(options =>
+                {
+                    options.Endpoint = new Uri(collectorEndpoint);
+                }))
+            .WithMetrics(metrics => metrics
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation()
+                .AddRuntimeInstrumentation()
+                .AddOtlpExporter(options =>
+                {
+                    options.Endpoint = new Uri(collectorEndpoint);
+                }));
     }
 }

@@ -15,6 +15,9 @@ using Serilog.Events;
 using Orleans.Serialization;
 using MongoDB.Driver;
 using Orleans.Providers.MongoDB.Configuration;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace Aevatar.App.HttpApi.Host;
 
@@ -39,6 +42,9 @@ public class Program
             {
                 ConfigureOrleans(builder, runtimeOptions.Orleans);
             }
+            
+            // Configure OpenTelemetry
+            ConfigureOpenTelemetry(builder);
             
             builder.Host
                 .AddAppSettingsSecretsJson()
@@ -132,5 +138,48 @@ public class Program
             Log.Information("   ClusterId: {ClusterId}", orleansOptions.ClusterId);
             Log.Information("   ServiceId: {ServiceId}", orleansOptions.ServiceId);
         });
+    }
+
+    /// <summary>
+    /// Configure OpenTelemetry for distributed tracing and metrics
+    /// </summary>
+    private static void ConfigureOpenTelemetry(WebApplicationBuilder builder)
+    {
+        var config = builder.Configuration;
+        var otelEnabled = config.GetValue("OpenTelemetry:Enabled", false);
+        
+        if (!otelEnabled)
+        {
+            Log.Information("📊 OpenTelemetry: Disabled (set OpenTelemetry:Enabled=true to enable)");
+            return;
+        }
+        
+        var serviceName = config.GetValue("OpenTelemetry:ServiceName", "Aevatar.App.HttpApi.Host");
+        var serviceVersion = config.GetValue("OpenTelemetry:ServiceVersion", "1.0.0");
+        var collectorEndpoint = config.GetValue("OpenTelemetry:CollectorEndpoint", "http://localhost:4317");
+        
+        Log.Information("📊 Configuring OpenTelemetry");
+        Log.Information("   ServiceName: {ServiceName}", serviceName);
+        Log.Information("   ServiceVersion: {ServiceVersion}", serviceVersion);
+        Log.Information("   CollectorEndpoint: {CollectorEndpoint}", collectorEndpoint);
+        
+        builder.Services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource
+                .AddService(serviceName: serviceName, serviceVersion: serviceVersion))
+            .WithTracing(tracing => tracing
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation()
+                .AddOtlpExporter(options =>
+                {
+                    options.Endpoint = new Uri(collectorEndpoint);
+                }))
+            .WithMetrics(metrics => metrics
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation()
+                .AddRuntimeInstrumentation()
+                .AddOtlpExporter(options =>
+                {
+                    options.Endpoint = new Uri(collectorEndpoint);
+                }));
     }
 }

@@ -27,6 +27,9 @@ using Aevatar.Agents.AI.Abstractions.Configuration;
 using Aevatar.Agents.AI.MEAI.DependencyInjection;
 using Aevatar.Agents.GodGPT.Extensions;
 using Aevatar.Agents.Core.EventSourcing;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
+using OpenTelemetry.Trace;
 
 namespace Aevatar.Silo;
 
@@ -94,6 +97,9 @@ public class Program
             .ConfigureServices((context, services) =>
             {
                 services.AddOrleansHealthChecks();
+                
+                // Configure OpenTelemetry
+                ConfigureOpenTelemetry(context.Configuration, services);
                 
                 // Configure MongoDB BSON serializers (must be first)
                 MongoDBServiceCollectionExtensions.ConfigureBsonSerializers();
@@ -223,6 +229,48 @@ public class Program
                 
                 Log.Information("✅ GodGPT Agent services registered via AddGodGPTServices()");
             });
+    }
+
+    /// <summary>
+    /// Configure OpenTelemetry for distributed tracing and metrics
+    /// </summary>
+    private static void ConfigureOpenTelemetry(IConfiguration config, IServiceCollection services)
+    {
+        var otelEnabled = config.GetValue("OpenTelemetry:Enabled", false);
+        
+        if (!otelEnabled)
+        {
+            Log.Information("📊 OpenTelemetry: Disabled (set OpenTelemetry:Enabled=true to enable)");
+            return;
+        }
+        
+        var serviceName = config.GetValue("OpenTelemetry:ServiceName", "Aevatar.Silo");
+        var serviceVersion = config.GetValue("OpenTelemetry:ServiceVersion", "1.0.0");
+        var collectorEndpoint = config.GetValue("OpenTelemetry:CollectorEndpoint", "http://localhost:4317");
+        
+        Log.Information("📊 Configuring OpenTelemetry");
+        Log.Information("   ServiceName: {ServiceName}", serviceName);
+        Log.Information("   ServiceVersion: {ServiceVersion}", serviceVersion);
+        Log.Information("   CollectorEndpoint: {CollectorEndpoint}", collectorEndpoint);
+        
+        services.AddOpenTelemetry()
+            .ConfigureResource(resource => resource
+                .AddService(serviceName: serviceName, serviceVersion: serviceVersion))
+            .WithTracing(tracing => tracing
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation()
+                .AddOtlpExporter(options =>
+                {
+                    options.Endpoint = new Uri(collectorEndpoint);
+                }))
+            .WithMetrics(metrics => metrics
+                .AddAspNetCoreInstrumentation()
+                .AddHttpClientInstrumentation()
+                .AddRuntimeInstrumentation()
+                .AddOtlpExporter(options =>
+                {
+                    options.Endpoint = new Uri(collectorEndpoint);
+                }));
     }
 }
 
