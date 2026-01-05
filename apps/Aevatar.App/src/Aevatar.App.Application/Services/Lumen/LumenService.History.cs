@@ -152,11 +152,25 @@ public partial class LumenService
     {
         if (history == null) return null;
 
-        // Get the first available language result
-        var firstResult = history.Results.Values.FirstOrDefault();
-        if (firstResult == null) return null;
-
-        return firstResult;
+        // Create a PredictionResultDto from history
+        var result = new PredictionResultDto
+        {
+            PredictionId = history.PredictionId,
+            Type = history.Type,
+            PredictionDate = history.PredictionDate,
+            CreatedAt = history.CreatedAt,
+            Language = history.ReturnedLanguage
+        };
+        
+        // Copy content from history Results (which is map<string, string>)
+        foreach (var kvp in history.Results)
+        {
+            result.Content[kvp.Key] = kvp.Value;
+        }
+        
+        result.AvailableLanguages.AddRange(history.AvailableLanguages);
+        
+        return result;
     }
 
     /// <summary>
@@ -178,26 +192,19 @@ public partial class LumenService
         // Copy available languages
         dto.AvailableLanguages.AddRange(record.AvailableLanguages);
         
-        // Copy multilingual results
+        // Copy multilingual results - LanguageResults.Values is map<string, string>
+        // HistoryPredictionResultDto.Results is also map<string, string>
+        // We concatenate all language results into a single string per language
         foreach (var kvp in record.MultilingualResults)
         {
-            // LanguageResults contains field_values map
-            var predictionResult = new PredictionResultDto
+            // Serialize the field values as a simple JSON-like string
+            var langResults = kvp.Value.Values;
+            if (langResults.Count > 0)
             {
-                PredictionId = record.PredictionId,
-                Type = PredictionType.PredictionDaily
-            };
-            
-            // LanguageResults has FieldValues map
-            if (kvp.Value.FieldValues.Count > 0)
-            {
-                foreach (var field in kvp.Value.FieldValues)
-                {
-                    predictionResult.FieldValues[field.Key] = field.Value;
-                }
+                // Store as serialized content - just use the first field for now
+                // In practice, might want to serialize all fields
+                dto.Results[kvp.Key] = string.Join("; ", langResults.Select(f => $"{f.Key}={f.Value}"));
             }
-            
-            dto.Results[kvp.Key] = predictionResult;
         }
         
         return dto;

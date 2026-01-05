@@ -41,7 +41,7 @@ public class LumenPredictionGAgentTests
 
         // Assert
         agent.Id.ShouldNotBeNullOrEmpty();
-        var state = agent.GetState();
+        var state = agent.GetCustomState();
         state.ShouldNotBeNull();
         state.PredictionId.ShouldBeNullOrEmpty();
         state.UserId.ShouldBeNullOrEmpty();
@@ -228,7 +228,7 @@ public class LumenPredictionGAgentTests
         await agent.ClearCurrentPredictionAsync();
 
         // Assert
-        var state = agent.GetState();
+        var state = agent.GetCustomState();
         state.PredictionId.ShouldBeNullOrEmpty();
         state.Results.Count.ShouldBe(0);
     }
@@ -251,8 +251,8 @@ public class LumenPredictionGAgentTests
         var result = await agent.GetCalculatedValuesAsync(user);
 
         // Assert
-        result.Values.ShouldContainKey("zodiacSign");
-        result.Values["zodiacSign"].ShouldBe("Taurus");
+        result.Values.ShouldContainKey("sun_sign");
+        result.Values["sun_sign"].ShouldBe("Taurus");
     }
 
     [Fact(DisplayName = "GetCalculatedValuesAsync should return Chinese zodiac")]
@@ -269,8 +269,8 @@ public class LumenPredictionGAgentTests
         var result = await agent.GetCalculatedValuesAsync(user);
 
         // Assert
-        result.Values.ShouldContainKey("chineseZodiac");
-        result.Values["chineseZodiac"].ShouldBe("Horse");
+        result.Values.ShouldContainKey("chinese_zodiac");
+        result.Values["chinese_zodiac"].ShouldBe("Horse");
     }
 
     #endregion
@@ -325,7 +325,7 @@ public class LumenPredictionGAgentTests
         await agent.UpdateUserActivityAsync("America/New_York");
 
         // Assert
-        var state = agent.GetState();
+        var state = agent.GetCustomState();
         state.LastActiveDate.ShouldNotBeNull();
     }
 
@@ -345,7 +345,7 @@ public class LumenPredictionGAgentTests
         await agent.GetOrGeneratePredictionAsync(user, PredictionType.PredictionDaily, "en");
 
         // Assert
-        var state = agent.GetState();
+        var state = agent.GetCustomState();
         state.PredictionId.ShouldNotBeNullOrEmpty();
         state.UserId.ShouldBe("user123");
         state.Type.ShouldBe(PredictionType.PredictionDaily);
@@ -366,7 +366,7 @@ public class LumenPredictionGAgentTests
         await agent.ClearCurrentPredictionAsync();
 
         // Assert
-        var state = agent.GetState();
+        var state = agent.GetCustomState();
         state.PredictionId.ShouldBeNullOrEmpty();
         state.Results.Count.ShouldBe(0);
         state.GeneratedLanguages.Count.ShouldBe(0);
@@ -414,7 +414,7 @@ public class LumenPredictionGAgentTests
         var result = await agent.GetCalculatedValuesAsync(user);
 
         // Assert
-        result.Values["zodiacSign"].ShouldBe(expectedZodiac);
+        result.Values["sun_sign"].ShouldBe(expectedZodiac);
     }
 
     [Theory(DisplayName = "Should calculate correct Chinese zodiac")]
@@ -442,7 +442,7 @@ public class LumenPredictionGAgentTests
         var result = await agent.GetCalculatedValuesAsync(user);
 
         // Assert
-        result.Values["chineseZodiac"].ShouldBe(expectedZodiac);
+        result.Values["chinese_zodiac"].ShouldBe(expectedZodiac);
     }
 
     #endregion

@@ -130,6 +130,16 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
             state.Results[kvp.Key] = kvp.Value;
         }
         
+        // Also populate MultilingualResults with the generated language
+        if (!state.MultilingualResults.ContainsKey(evt.Language))
+        {
+            state.MultilingualResults[evt.Language] = new MultilingualResultValue();
+        }
+        foreach (var kvp in evt.Results)
+        {
+            state.MultilingualResults[evt.Language].Values[kvp.Key] = kvp.Value;
+        }
+        
         if (!state.GeneratedLanguages.Contains(evt.Language))
         {
             state.GeneratedLanguages.Add(evt.Language);

@@ -89,20 +89,17 @@ public partial class LumenPredictionGAgent
                     "[LumenPredictionGAgent][GetCalculatedValuesAsync] BirthTime or LatLong not provided, using Sun sign as fallback");
             }
             
-            results.Values["sunSign_name"] = TranslationHelpers.TranslateSunSign(sunSign, userLanguage);
-            results.Values["sunSign_enum"] = ((int)LumenCalculator.ParseZodiacSignEnum(sunSign)).ToString();
-            results.Values["moonSign_name"] = TranslationHelpers.TranslateSunSign(moonSign, userLanguage);
-            results.Values["risingSign_name"] = TranslationHelpers.TranslateSunSign(risingSign, userLanguage);
+            results.Values["sun_sign"] = TranslationHelpers.TranslateSunSign(sunSign, userLanguage);
+            results.Values["moon_sign"] = TranslationHelpers.TranslateSunSign(moonSign, userLanguage);
+            results.Values["rising_sign"] = TranslationHelpers.TranslateSunSign(risingSign, userLanguage);
             
             // ========== CHINESE ASTROLOGY ==========
             var birthYearZodiac = LumenCalculator.GetChineseZodiacWithElement(birthYear);
             var birthYearAnimal = LumenCalculator.CalculateChineseZodiac(birthYear);
             var birthYearElement = LumenCalculator.CalculateChineseElement(birthYear);
             
-            results.Values["chineseZodiac_animal"] = TranslationHelpers.TranslateZodiac(birthYearAnimal, userLanguage);
-            results.Values["chineseZodiac_enum"] = ((int)LumenCalculator.ParseChineseZodiacEnum(birthYearAnimal)).ToString();
-            results.Values["birthYear_zodiac"] = TranslationHelpers.TranslateZodiac(birthYearAnimal, userLanguage);
-            results.Values["birthYear_element"] = TranslationHelpers.TranslateElement(birthYearElement, userLanguage);
+            results.Values["chinese_zodiac"] = TranslationHelpers.TranslateZodiac(birthYearAnimal, userLanguage);
+            results.Values["element"] = TranslationHelpers.TranslateElement(birthYearElement, userLanguage);
             
             // Birth Year Stems
             var birthYearStems = LumenCalculator.CalculateStemsAndBranches(birthYear);
@@ -157,10 +154,9 @@ public partial class LumenPredictionGAgent
             var luckyNumberResult = Aevatar.Agents.Lumen.Services.LuckyNumberService.CalculateLuckyNumber(
                 birthDate, today, userLanguage);
             
-            results.Values["luckyAlignments_luckyNumber_number"] = luckyNumberResult.NumberWord;
-            results.Values["luckyAlignments_luckyNumber_digit"] = luckyNumberResult.Digit.ToString();
-            results.Values["luckyAlignments_luckyNumber_description"] = luckyNumberResult.Description;
-            results.Values["luckyAlignments_luckyNumber_calculation"] = luckyNumberResult.CalculationFormula;
+            results.Values["lucky_number"] = luckyNumberResult.Digit.ToString();
+            results.Values["lucky_number_word"] = luckyNumberResult.NumberWord;
+            results.Values["lucky_number_description"] = luckyNumberResult.Description;
             
             Logger.LogInformation(
                 "[LumenPredictionGAgent][GetCalculatedValuesAsync] Successfully calculated {Count} values for user {UserId}",
