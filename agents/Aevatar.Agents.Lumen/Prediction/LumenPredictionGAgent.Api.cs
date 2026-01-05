@@ -50,13 +50,47 @@ public partial class LumenPredictionGAgent
             
             // ========== WESTERN ASTROLOGY ==========
             var sunSign = LumenCalculator.CalculateZodiacSign(birthDate);
+            string moonSign = sunSign;
+            string risingSign = sunSign;
+            
+            // Calculate Moon and Rising signs using Swiss Ephemeris if birth time and location are available
+            if (birthTime.HasValue && !string.IsNullOrWhiteSpace(userInfo.LatLong))
+            {
+                var latLongResult = WesternAstrologyService.ParseLatLong(userInfo.LatLong);
+                if (latLongResult.HasValue)
+                {
+                    var (latitude, longitude) = latLongResult.Value;
+                    Logger.LogInformation(
+                        "[LumenPredictionGAgent][GetCalculatedValuesAsync] Calculating Moon/Rising for ({Lat}, {Lon})",
+                        latitude, longitude);
+                    
+                    var (calculatedSunSign, calculatedMoonSign, calculatedRisingSign) = 
+                        WesternAstrologyService.CalculateSigns(birthDate, birthTime.Value, latitude, longitude, Logger);
+                    
+                    // Use calculated values (sunSign from Swiss Ephemeris is more accurate)
+                    sunSign = calculatedSunSign;
+                    moonSign = calculatedMoonSign;
+                    risingSign = calculatedRisingSign;
+                    
+                    Logger.LogInformation(
+                        "[LumenPredictionGAgent][GetCalculatedValuesAsync] Swiss Ephemeris Results - Sun: {Sun}, Moon: {Moon}, Rising: {Rising}",
+                        sunSign, moonSign, risingSign);
+                }
+                else
+                {
+                    Logger.LogWarning(
+                        "[LumenPredictionGAgent][GetCalculatedValuesAsync] Invalid LatLong format: {LatLong}",
+                        userInfo.LatLong);
+                }
+            }
+            else
+            {
+                Logger.LogDebug(
+                    "[LumenPredictionGAgent][GetCalculatedValuesAsync] BirthTime or LatLong not provided, using Sun sign as fallback");
+            }
+            
             results.Values["sunSign_name"] = TranslationHelpers.TranslateSunSign(sunSign, userLanguage);
             results.Values["sunSign_enum"] = ((int)LumenCalculator.ParseZodiacSignEnum(sunSign)).ToString();
-            
-            // Moon and Rising signs (simplified - use Sun as fallback since SwissEphNet is not available)
-            var moonSign = sunSign;
-            var risingSign = sunSign;
-            
             results.Values["moonSign_name"] = TranslationHelpers.TranslateSunSign(moonSign, userLanguage);
             results.Values["risingSign_name"] = TranslationHelpers.TranslateSunSign(risingSign, userLanguage);
             
