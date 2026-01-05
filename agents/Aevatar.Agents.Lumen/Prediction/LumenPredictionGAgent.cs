@@ -496,77 +496,14 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
 
     public Task<CalculatedValuesDto> GetCalculatedValuesAsync(LumenUserDto userInfo, string userLanguage = "en")
     {
-        try
-        {
-            var values = new CalculatedValuesDto();
-            
-            // Calculate zodiac sign
-            if (userInfo.BirthDate != null)
-            {
-                var zodiacSign = CalculateZodiacSign(userInfo.BirthDate);
-                values.Values["zodiacSign"] = zodiacSign;
-                
-                // Calculate Chinese zodiac
-                var chineseZodiac = CalculateChineseZodiac(userInfo.BirthDate.Year);
-                values.Values["chineseZodiac"] = chineseZodiac;
-            }
-            
-            return Task.FromResult(values);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "[LumenPredictionGAgent] Error calculating values");
-            return Task.FromResult(new CalculatedValuesDto());
-        }
+        // Delegate to full implementation
+        return GetCalculatedValuesFullAsync(userInfo, userLanguage);
     }
 
     public async Task<TriggerTranslationResult> TriggerTranslationAsync(LumenUserDto userInfo, string targetLanguage)
     {
-        try
-        {
-            Logger.LogDebug("[LumenPredictionGAgent] TriggerTranslationAsync - Language: {Language}", targetLanguage);
-
-            // Check if already translating
-            if (CustomState.TranslationLocks.TryGetValue(targetLanguage, out var lockInfo) && lockInfo.IsTranslating)
-            {
-                return new TriggerTranslationResult
-                {
-                    Success = false,
-                    Message = "Translation already in progress",
-                    AlreadyTranslating = true
-                };
-            }
-
-            // Check if already translated
-            if (CustomState.GeneratedLanguages.Contains(targetLanguage))
-            {
-                return new TriggerTranslationResult
-                {
-                    Success = true,
-                    Message = "Language already available",
-                    AlreadyTranslating = false
-                };
-            }
-
-            // TODO: Implement actual translation logic using LLM
-            // For now, just return success
-            return new TriggerTranslationResult
-            {
-                Success = true,
-                Message = "Translation triggered",
-                AlreadyTranslating = false
-            };
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "[LumenPredictionGAgent] Error triggering translation");
-            return new TriggerTranslationResult
-            {
-                Success = false,
-                Message = "Internal error occurred",
-                AlreadyTranslating = false
-            };
-        }
+        // Delegate to full implementation
+        return await TriggerTranslationFullAsync(userInfo, targetLanguage);
     }
 
     public async Task<UpdateTimeZoneReminderResult> UpdateTimeZoneReminderAsync(string timeZoneId)
