@@ -1,3 +1,4 @@
+using Aevatar.Agents.AI.Abstractions;
 using Aevatar.Agents.Lumen.Protos;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
@@ -7,9 +8,16 @@ namespace Aevatar.Agents.Lumen.Prediction;
 /// <summary>
 /// LumenPredictionGAgent - LLM generation logic
 /// Handles prediction generation orchestration and lock management
+/// Uses AIGAgentBase's LLMProvider for actual LLM calls
 /// </summary>
 public partial class LumenPredictionGAgent
 {
+    // System prompt for prediction generation
+    private const string PredictionSystemPrompt = @"You are a professional astrologer and spiritual guide specializing in personalized horoscope readings. 
+Your predictions combine Eastern and Western astrology, Chinese metaphysics (Bazi, Five Elements), and spiritual wisdom.
+Always provide practical, actionable advice while maintaining an uplifting and supportive tone.
+Format your response as TSV (tab-separated values) with field names and values.";
+
     #region Generation Orchestration
 
     /// <summary>
@@ -37,7 +45,7 @@ public partial class LumenPredictionGAgent
             // Build prompt
             var prompt = BuildPredictionPrompt(userInfo, predictionDate, type, targetLanguage);
             
-            // Call LLM service (placeholder - actual implementation depends on AI service)
+            // Call LLM service
             var llmResponse = await CallLlmAsync(prompt, type, cancellationToken);
             
             if (string.IsNullOrEmpty(llmResponse))
@@ -89,8 +97,8 @@ public partial class LumenPredictionGAgent
         // Create event
         var evt = new PredictionGeneratedEvent
         {
-            PredictionId = State.PredictionId,
-            UserId = State.UserId,
+            PredictionId = CustomState.PredictionId,
+            UserId = CustomState.UserId,
             CreatedAt = Timestamp.FromDateTime(DateTime.UtcNow),
             Language = language,
             Type = type,
@@ -127,7 +135,7 @@ public partial class LumenPredictionGAgent
     private bool IsGenerationLocked(PredictionType type)
     {
         var typeInt = (int)type;
-        if (State.GenerationLocks.TryGetValue(typeInt, out var lockInfo))
+        if (CustomState.GenerationLocks.TryGetValue(typeInt, out var lockInfo))
         {
             // Check if lock is still valid (not expired)
             if (lockInfo.IsGenerating && lockInfo.StartedAt != null)
@@ -173,7 +181,7 @@ public partial class LumenPredictionGAgent
     /// </summary>
     private bool IsTranslationLocked(string language)
     {
-        if (State.TranslationLocks.TryGetValue(language, out var lockInfo))
+        if (CustomState.TranslationLocks.TryGetValue(language, out var lockInfo))
         {
             if (lockInfo.IsTranslating && lockInfo.StartedAt != null)
             {
@@ -218,30 +226,77 @@ public partial class LumenPredictionGAgent
     #region LLM Integration
 
     /// <summary>
-    /// Call LLM service to generate prediction
-    /// This is a placeholder - actual implementation depends on your AI service integration
+    /// Call LLM service to generate prediction using the inherited LLMProvider
     /// </summary>
     private async Task<string> CallLlmAsync(
         string prompt,
         PredictionType type,
         CancellationToken cancellationToken)
     {
-        // TODO: Integrate with actual LLM service (e.g., OpenAI, Azure OpenAI, etc.)
-        // This is a placeholder that returns empty to indicate "not implemented"
+        // Check if LLM provider is initialized
+        if (!_isInitialized)
+        {
+            Logger.LogWarning("[LumenPredictionGAgent] LLM provider not initialized, returning empty response");
+            return string.Empty;
+        }
         
-        // Example integration pattern:
-        // var chatClient = GetChatClient();
-        // var response = await chatClient.CompleteAsync(new ChatMessage[]
-        // {
-        //     new ChatMessage(ChatRole.System, "You are a professional astrologer..."),
-        //     new ChatMessage(ChatRole.User, prompt)
-        // }, cancellationToken: cancellationToken);
-        // return response.Content;
-        
-        Logger.LogWarning("LLM integration not implemented. Returning placeholder response.");
-        
-        await Task.CompletedTask;
-        return string.Empty;
+        try
+        {
+            // Build LLM request using the AI framework
+            var request = new AevatarLLMRequest
+            {
+                SystemPrompt = PredictionSystemPrompt,
+                UserPrompt = prompt,
+                Settings = new AevatarLLMSettings
+                {
+                    Temperature = 0.7f,
+                    MaxTokens = GetMaxTokensForType(type),
+                    ModelId = Config.Model
+                }
+            };
+            
+            Logger.LogDebug("[LumenPredictionGAgent] Calling LLM for prediction type {Type}", type);
+            
+            // Call LLM using the inherited LLMProvider
+            var response = await LLMProvider.GenerateAsync(request, cancellationToken);
+            
+            if (response == null || string.IsNullOrEmpty(response.Content))
+            {
+                Logger.LogWarning("[LumenPredictionGAgent] LLM returned empty response");
+                return string.Empty;
+            }
+            
+            // Log token usage
+            if (response.Usage != null)
+            {
+                Logger.LogInformation(
+                    "[LumenPredictionGAgent] LLM call completed - Prompt: {PromptTokens}, Completion: {CompletionTokens}, Total: {TotalTokens}",
+                    response.Usage.PromptTokens,
+                    response.Usage.CompletionTokens,
+                    response.Usage.TotalTokens);
+            }
+            
+            return response.Content;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LumenPredictionGAgent] Error calling LLM for prediction type {Type}", type);
+            throw;
+        }
+    }
+    
+    /// <summary>
+    /// Get max tokens based on prediction type
+    /// </summary>
+    private static int GetMaxTokensForType(PredictionType type)
+    {
+        return type switch
+        {
+            PredictionType.PredictionDaily => 2000,
+            PredictionType.PredictionYearly => 4000,
+            PredictionType.PredictionLifetime => 6000,
+            _ => 2000
+        };
     }
 
     #endregion
@@ -258,19 +313,19 @@ public partial class LumenPredictionGAgent
         DateOnly predictionDate,
         CancellationToken cancellationToken = default)
     {
-        if (!State.Results.Any())
+        if (!CustomState.Results.Any())
         {
             Logger.LogWarning("No source content to translate");
             return false;
         }
         
         // Get source content
-        var sourceContent = State.Results.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
+        var sourceContent = CustomState.Results.ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
         
         foreach (var targetLang in targetLanguages)
         {
             // Skip if already translated
-            if (State.GeneratedLanguages.Contains(targetLang))
+            if (CustomState.GeneratedLanguages.Contains(targetLang))
             {
                 continue;
             }
@@ -371,7 +426,7 @@ public partial class LumenPredictionGAgent
         evt.TranslatedLanguages.Add(language, multilingualResult);
         
         // Update all generated languages
-        var allLanguages = State.GeneratedLanguages.ToList();
+        var allLanguages = CustomState.GeneratedLanguages.ToList();
         if (!allLanguages.Contains(language))
         {
             allLanguages.Add(language);

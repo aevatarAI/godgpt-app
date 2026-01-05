@@ -16,6 +16,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Aevatar.Agents.Core\Aevatar.Agents.Core.csproj" />
     <ProjectReference Include="..\..\src\Aevatar.Agents.Abstractions\Aevatar.Agents.Abstractions.csproj" />
+    <ProjectReference Include="..\..\src\Aevatar.Agents.AI.Core\Aevatar.Agents.AI.Core.csproj" />
+    <ProjectReference Include="..\..\src\Aevatar.Agents.AI.Abstractions\Aevatar.Agents.AI.Abstractions.csproj" />
   </ItemGroup>
 
   <!-- NuGet 包依赖 -->

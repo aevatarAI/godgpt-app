@@ -1,7 +1,9 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Attributes;
-using Aevatar.Agents.Core;
+using Aevatar.Agents.AI.Abstractions;
+using Aevatar.Agents.AI.Core;
 using Aevatar.Agents.Lumen.Protos;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 
@@ -10,31 +12,74 @@ namespace Aevatar.Agents.Lumen.Prediction;
 /// <summary>
 /// Lumen Prediction GAgent - manages lumen prediction generation
 /// 
-/// New Framework: Inherits from GAgentBase, uses Protobuf State + Event Sourcing
-/// 
-/// Note: This is a simplified migration. The original agent (6935 lines) contains complex
-/// LLM generation logic, reminder handling, and astronomy calculations that would need
-/// additional refactoring to fully migrate.
+/// New Framework: Inherits from AIGAgentBase, uses Protobuf State + Event Sourcing
+/// With built-in LLM capabilities via LLMProvider
 /// </summary>
-public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, ILumenPredictionGAgent
+public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>, ILumenPredictionGAgent
 {
     // Configuration constants
     private const int DefaultMaxRetryCount = 3;
     private const int GenerationTimeoutMinutes = 5;
     
+    // LLM Provider name (configurable)
+    private string _llmProviderName = "default";
+    
     public LumenPredictionGAgent() : base() { }
 
     public override Task<string> GetDescriptionAsync()
     {
-        var dateStr = State.PredictionDate != null 
-            ? $"{State.PredictionDate.Year}-{State.PredictionDate.Month:00}-{State.PredictionDate.Day:00}" 
+        var dateStr = CustomState.PredictionDate != null 
+            ? $"{CustomState.PredictionDate.Year}-{CustomState.PredictionDate.Month:00}-{CustomState.PredictionDate.Day:00}" 
             : "none";
-        return Task.FromResult($"Lumen prediction - Type: {State.Type}, Date: {dateStr}, User: {State.UserId}");
+        return Task.FromResult($"Lumen prediction - Type: {CustomState.Type}, Date: {dateStr}, User: {CustomState.UserId}");
     }
+    
+    #region Initialization
+    
+    protected override async Task OnActivateAsync(CancellationToken ct = default)
+    {
+        await base.OnActivateAsync(ct);
+        
+        // Initialize LLM provider if factory is available
+        try
+        {
+            if (LLMProviderFactory != null)
+            {
+                await InitializeAsync(_llmProviderName, cancellationToken: ct);
+                Logger.LogInformation("[LumenPredictionGAgent] LLM provider initialized: {Provider}", _llmProviderName);
+            }
+            else
+            {
+                Logger.LogWarning("[LumenPredictionGAgent] LLMProviderFactory not available, LLM features will be limited");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "[LumenPredictionGAgent] Failed to initialize LLM provider, will retry on demand");
+        }
+    }
+    
+    /// <summary>
+    /// Configure the LLM provider name
+    /// </summary>
+    public async Task ConfigureLlmProviderAsync(string providerName, CancellationToken ct = default)
+    {
+        _llmProviderName = providerName;
+        
+        if (LLMProviderFactory != null)
+        {
+            await InitializeAsync(providerName, cancellationToken: ct);
+        }
+    }
+    
+    #endregion
 
     #region State Transition (Pure Functional - required for Event Sourcing)
 
-    protected override void TransitionState(LumenPredictionState state, Google.Protobuf.IMessage evt)
+    /// <summary>
+    /// Override from AIGAgentBase to handle custom state transitions
+    /// </summary>
+    protected override void TransitionState(LumenPredictionState state, IMessage evt)
     {
         switch (evt)
         {
@@ -195,57 +240,57 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
     [EventHandler]
     public Task HandlePredictionGenerated(PredictionGeneratedEvent evt)
     {
-        TransitionState(State, evt);
+        TransitionState(CustomState, evt);
         return Task.CompletedTask;
     }
 
     [EventHandler]
     public Task HandlePredictionCleared(PredictionClearedEvent evt)
     {
-        TransitionState(State, evt);
+        TransitionState(CustomState, evt);
         return Task.CompletedTask;
     }
 
     [EventHandler]
     public Task HandleLanguagesTranslated(LanguagesTranslatedEvent evt)
     {
-        TransitionState(State, evt);
+        TransitionState(CustomState, evt);
         return Task.CompletedTask;
     }
 
     [EventHandler]
     public Task HandleGenerationLockSet(GenerationLockSetEvent evt)
     {
-        TransitionState(State, evt);
+        TransitionState(CustomState, evt);
         return Task.CompletedTask;
     }
 
     [EventHandler]
     public Task HandleGenerationLockCleared(GenerationLockClearedEvent evt)
     {
-        TransitionState(State, evt);
+        TransitionState(CustomState, evt);
         return Task.CompletedTask;
     }
 
     [EventHandler]
     public Task HandleTranslationLockSet(TranslationLockSetEvent evt)
     {
-        TransitionState(State, evt);
+        TransitionState(CustomState, evt);
         return Task.CompletedTask;
     }
 
     [EventHandler]
     public Task HandleTranslationLockCleared(TranslationLockClearedEvent evt)
     {
-        TransitionState(State, evt);
+        TransitionState(CustomState, evt);
         return Task.CompletedTask;
     }
 
     [EventHandler]
     public Task HandleDailyReminderUpdated(DailyReminderUpdatedEvent evt)
     {
-        State.IsDailyReminderEnabled = evt.IsEnabled;
-        State.DailyReminderTargetId = evt.TargetId;
+        CustomState.IsDailyReminderEnabled = evt.IsEnabled;
+        CustomState.DailyReminderTargetId = evt.TargetId;
         
         return Task.CompletedTask;
     }
@@ -253,7 +298,7 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
     [EventHandler]
     public Task HandleUserActivityUpdated(UserActivityUpdatedEvent evt)
     {
-        State.LastActiveDate = evt.LastActiveDate;
+        CustomState.LastActiveDate = evt.LastActiveDate;
         
         return Task.CompletedTask;
     }
@@ -275,7 +320,7 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
 
             // Check if currently generating
             var typeKey = (int)type;
-            if (State.GenerationLocks.TryGetValue(typeKey, out var lockInfo) && lockInfo.IsGenerating)
+            if (CustomState.GenerationLocks.TryGetValue(typeKey, out var lockInfo) && lockInfo.IsGenerating)
             {
                 var startedAt = lockInfo.StartedAt?.ToDateTime() ?? DateTime.UtcNow;
                 if ((DateTime.UtcNow - startedAt).TotalMinutes < GenerationTimeoutMinutes)
@@ -319,7 +364,7 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
 
             await ConfirmEventsAsync();
 
-            // Generate prediction (simplified - in real implementation, this would call LLM)
+            // Generate prediction using LLM
             var results = await GeneratePredictionAsync(userInfo, type, userLanguage, requestDate);
             
             if (results == null || results.Count == 0)
@@ -382,7 +427,7 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
     {
         try
         {
-            if (string.IsNullOrEmpty(State.PredictionId))
+            if (string.IsNullOrEmpty(CustomState.PredictionId))
             {
                 return Task.FromResult<PredictionResultDto?>(null);
             }
@@ -400,25 +445,25 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
     {
         try
         {
-            var typeKey = (int)State.Type;
-            var isGenerating = State.GenerationLocks.TryGetValue(typeKey, out var lockInfo) && lockInfo.IsGenerating;
+            var typeKey = (int)CustomState.Type;
+            var isGenerating = CustomState.GenerationLocks.TryGetValue(typeKey, out var lockInfo) && lockInfo.IsGenerating;
 
             var needsRegeneration = false;
-            if (profileUpdatedAt.HasValue && State.ProfileUpdatedAt != null)
+            if (profileUpdatedAt.HasValue && CustomState.ProfileUpdatedAt != null)
             {
-                needsRegeneration = profileUpdatedAt.Value > State.ProfileUpdatedAt.ToDateTime();
+                needsRegeneration = profileUpdatedAt.Value > CustomState.ProfileUpdatedAt.ToDateTime();
             }
 
             return Task.FromResult<PredictionStatusDto?>(new PredictionStatusDto
             {
-                HasPrediction = !string.IsNullOrEmpty(State.PredictionId),
+                HasPrediction = !string.IsNullOrEmpty(CustomState.PredictionId),
                 IsGenerating = isGenerating,
                 NeedsRegeneration = needsRegeneration,
-                PredictionDate = State.PredictionDate,
-                LastGeneratedDate = State.LastGeneratedDate,
-                PromptVersion = State.PromptVersion,
-                AvailableLanguages = { State.GeneratedLanguages },
-                ProfileUpdatedAt = State.ProfileUpdatedAt
+                PredictionDate = CustomState.PredictionDate,
+                LastGeneratedDate = CustomState.LastGeneratedDate,
+                PromptVersion = CustomState.PromptVersion,
+                AvailableLanguages = { CustomState.GeneratedLanguages },
+                ProfileUpdatedAt = CustomState.ProfileUpdatedAt
             });
         }
         catch (Exception ex)
@@ -482,7 +527,7 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
             Logger.LogDebug("[LumenPredictionGAgent] TriggerTranslationAsync - Language: {Language}", targetLanguage);
 
             // Check if already translating
-            if (State.TranslationLocks.TryGetValue(targetLanguage, out var lockInfo) && lockInfo.IsTranslating)
+            if (CustomState.TranslationLocks.TryGetValue(targetLanguage, out var lockInfo) && lockInfo.IsTranslating)
             {
                 return new TriggerTranslationResult
                 {
@@ -493,7 +538,7 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
             }
 
             // Check if already translated
-            if (State.GeneratedLanguages.Contains(targetLanguage))
+            if (CustomState.GeneratedLanguages.Contains(targetLanguage))
             {
                 return new TriggerTranslationResult
                 {
@@ -503,7 +548,7 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
                 };
             }
 
-            // TODO: Implement actual translation logic
+            // TODO: Implement actual translation logic using LLM
             // For now, just return success
             return new TriggerTranslationResult
             {
@@ -580,20 +625,20 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
 
     private bool HasValidPrediction(DateOnly requestDate, PredictionType type, string language)
     {
-        if (string.IsNullOrEmpty(State.PredictionId))
+        if (string.IsNullOrEmpty(CustomState.PredictionId))
             return false;
         
-        if (State.Type != type)
+        if (CustomState.Type != type)
             return false;
         
-        if (State.PredictionDate == null)
+        if (CustomState.PredictionDate == null)
             return false;
         
-        var stateDate = new DateOnly(State.PredictionDate.Year, State.PredictionDate.Month, State.PredictionDate.Day);
+        var stateDate = new DateOnly(CustomState.PredictionDate.Year, CustomState.PredictionDate.Month, CustomState.PredictionDate.Day);
         if (stateDate != requestDate)
             return false;
         
-        if (!State.GeneratedLanguages.Contains(language))
+        if (!CustomState.GeneratedLanguages.Contains(language))
             return false;
         
         return true;
@@ -603,16 +648,16 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
     {
         var result = new PredictionResultDto
         {
-            PredictionId = State.PredictionId,
-            Type = State.Type,
-            PredictionDate = State.PredictionDate,
-            CreatedAt = State.CreatedAt,
+            PredictionId = CustomState.PredictionId,
+            Type = CustomState.Type,
+            PredictionDate = CustomState.PredictionDate,
+            CreatedAt = CustomState.CreatedAt,
             Language = language,
-            AvailableLanguages = { State.GeneratedLanguages }
+            AvailableLanguages = { CustomState.GeneratedLanguages }
         };
 
         // Try to get language-specific results
-        if (State.MultilingualResults.TryGetValue(language, out var langResults))
+        if (CustomState.MultilingualResults.TryGetValue(language, out var langResults))
         {
             foreach (var kvp in langResults.Values)
             {
@@ -622,7 +667,7 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
         else
         {
             // Fall back to base results
-            foreach (var kvp in State.Results)
+            foreach (var kvp in CustomState.Results)
             {
                 result.Content[kvp.Key] = kvp.Value;
             }
@@ -631,14 +676,45 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
         return result;
     }
 
-    private Task<Dictionary<string, string>?> GeneratePredictionAsync(
+    /// <summary>
+    /// Generate prediction using LLM
+    /// </summary>
+    private async Task<Dictionary<string, string>?> GeneratePredictionAsync(
         LumenUserDto userInfo, 
         PredictionType type, 
         string language,
         DateOnly predictionDate)
     {
-        // TODO: Implement actual LLM-based prediction generation
-        // This is a placeholder that returns sample data
+        // Build the prediction prompt
+        var prompt = BuildPredictionPrompt(userInfo, predictionDate, type, language);
+        
+        // Call LLM if provider is initialized
+        if (_isInitialized)
+        {
+            try
+            {
+                var response = await CallLlmAsync(prompt, type, default);
+                if (!string.IsNullOrEmpty(response))
+                {
+                    var parsedResults = ParseTsvResponse(response);
+                    if (parsedResults.Count > 0)
+                    {
+                        // Apply post-processing
+                        parsedResults = MapShortKeysToFullKeys(parsedResults);
+                        parsedResults = ConvertArrayFieldsToJson(parsedResults);
+                        AddQuotesToAffirmation(parsedResults, language);
+                        return parsedResults;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "[LumenPredictionGAgent] LLM generation failed, falling back to placeholder");
+            }
+        }
+        
+        // Fallback: return sample data when LLM is not available
+        Logger.LogWarning("[LumenPredictionGAgent] Using placeholder prediction data");
         var results = new Dictionary<string, string>
         {
             ["career"] = $"Today's career outlook for {userInfo.FullName} is positive.",
@@ -648,7 +724,7 @@ public partial class LumenPredictionGAgent : GAgentBase<LumenPredictionState>, I
             ["overall"] = "A balanced day with opportunities for growth."
         };
 
-        return Task.FromResult<Dictionary<string, string>?>(results);
+        return results;
     }
 
     private static string CalculateZodiacSign(DateValue? birthDate)
