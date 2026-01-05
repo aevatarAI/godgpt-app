@@ -162,6 +162,7 @@ message LumenUserDto {
     optional CalendarTypeEnum calendar_type = 11;
     optional string occupation = 12;
     optional string current_time_zone = 13;
+    optional string lat_long_inferred = 14;  // LLM-inferred coordinates from birth city
 }
 
 message CalculatedValuesDto {
