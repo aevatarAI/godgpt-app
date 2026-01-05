@@ -31,6 +31,7 @@
     <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Core\Aevatar.Agents.Core.csproj" />
     <ProjectReference Include="..\Aevatar.App.Agents\Aevatar.App.Agents.csproj" />
     <ProjectReference Include="..\..\..\..\agents\Aevatar.Agents.GodGPT\Aevatar.Agents.GodGPT.csproj" />
+    <ProjectReference Include="..\..\..\..\agents\Aevatar.Agents.Lumen\Aevatar.Agents.Lumen.csproj" />
     <ProjectReference Include="..\..\..\..\modules\Aevatar.Payment\Aevatar.Payment.csproj" />
   </ItemGroup>
 

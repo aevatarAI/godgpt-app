@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Abstractions\Aevatar.Agents.Abstractions.csproj" />
     <ProjectReference Include="..\..\..\..\agents\Aevatar.Agents.GodGPT\Aevatar.Agents.GodGPT.csproj" />
+    <ProjectReference Include="..\..\..\..\agents\Aevatar.Agents.Lumen\Aevatar.Agents.Lumen.csproj" />
   </ItemGroup>
 
   <!-- Payment Module -->
