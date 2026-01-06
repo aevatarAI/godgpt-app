@@ -1,4 +1,5 @@
 using System;
+using System.Net.Mail;
 using System.Text.Encodings.Web;
 using System.Threading.Tasks;
 using Aevatar.App.Domain.Shared;
@@ -67,7 +68,7 @@ public class AccountEmailer : IAccountEmailer, ITransientDependency
         await CheckSendEmailAsync(email, appName, language);
 
         var subject = GetEmailSubjectByLanguage("Registration Verification Code", language);
-        await _emailSender.SendAsync(email, subject, emailContent);
+        await SendEmailWithAppSenderAsync(email, subject, emailContent, appName);
 
         _logger.LogInformation("[AccountEmailer] Register code sent to {Email} for app {AppName}", email, appName);
     }
@@ -100,7 +101,7 @@ public class AccountEmailer : IAccountEmailer, ITransientDependency
         await CheckSendEmailAsync(email, appName, language);
 
         var subject = GetEmailSubjectByLanguage("Password Reset", language);
-        await _emailSender.SendAsync(email, subject, emailContent);
+        await SendEmailWithAppSenderAsync(email, subject, emailContent, appName);
 
         _logger.LogInformation("[AccountEmailer] Password reset link sent to {Email} for app {AppName}", email, appName);
     }
@@ -141,6 +142,41 @@ public class AccountEmailer : IAccountEmailer, ITransientDependency
             return appOptions.CNResetPasswordUrl;
         }
         return string.Empty;
+    }
+
+    /// <summary>
+    /// Send email with app-specific sender address and display name
+    /// </summary>
+    private async Task SendEmailWithAppSenderAsync(string toEmail, string subject, string body, string appName)
+    {
+        if (_accountOptions.Apps.TryGetValue(appName, out var appOptions) 
+            && !string.IsNullOrEmpty(appOptions.EmailFromAddress))
+        {
+            // Use app-specific sender
+            var fromAddress = new MailAddress(
+                appOptions.EmailFromAddress, 
+                string.IsNullOrEmpty(appOptions.EmailFromName) ? appName : appOptions.EmailFromName
+            );
+
+            var mailMessage = new MailMessage
+            {
+                From = fromAddress,
+                Subject = subject,
+                Body = body,
+                IsBodyHtml = true
+            };
+            mailMessage.To.Add(toEmail);
+
+            await _emailSender.SendAsync(mailMessage);
+            _logger.LogDebug("[AccountEmailer] Email sent with app-specific sender: {FromAddress} ({FromName})", 
+                appOptions.EmailFromAddress, appOptions.EmailFromName);
+        }
+        else
+        {
+            // Use default sender from ABP settings
+            await _emailSender.SendAsync(toEmail, subject, body);
+            _logger.LogDebug("[AccountEmailer] Email sent with default sender for app: {AppName}", appName);
+        }
     }
 
     private static string GetTemplateNameByLanguage(string baseName, GodGPTChatLanguage language)

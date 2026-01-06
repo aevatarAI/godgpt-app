@@ -50,7 +50,12 @@ public class AppAccountOptions
     public string CNResetPasswordUrl { get; set; } = string.Empty;
 
     /// <summary>
-    /// Email sender display name for this app
+    /// Email sender address for this app (e.g., noreply@godgpt.ai)
+    /// </summary>
+    public string EmailFromAddress { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Email sender display name for this app (e.g., GodGPT)
     /// </summary>
     public string EmailFromName { get; set; } = string.Empty;
 }
