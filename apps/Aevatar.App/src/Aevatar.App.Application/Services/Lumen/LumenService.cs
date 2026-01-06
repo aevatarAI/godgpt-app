@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Lumen.Favourite;
@@ -8,10 +9,13 @@ using Aevatar.Agents.Lumen.History;
 using Aevatar.Agents.Lumen.Prediction;
 using Aevatar.Agents.Lumen.Protos;
 using Aevatar.Agents.Lumen.UserProfile;
+using Aevatar.App.Application.Contracts.BlobStorings;
 using Aevatar.App.Lumen;
 using Aevatar.App.Lumen.Dtos;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Volo.Abp.Application.Services;
+using Volo.Abp.BlobStoring;
 using Volo.Abp.DependencyInjection;
 
 namespace Aevatar.App.Services.Lumen;
@@ -23,13 +27,19 @@ public partial class LumenService : ApplicationService, ILumenService, ITransien
 {
     private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<LumenService> _logger;
+    private readonly IBlobContainer _blobContainer;
+    private readonly BlobStoringOptions _blobStoringOptions;
 
     public LumenService(
         IGAgentActorFactory actorFactory,
-        ILogger<LumenService> logger)
+        ILogger<LumenService> logger,
+        IBlobContainer blobContainer,
+        IOptionsSnapshot<BlobStoringOptions> blobStoringOptions)
     {
         _actorFactory = actorFactory;
         _logger = logger;
+        _blobContainer = blobContainer;
+        _blobStoringOptions = blobStoringOptions.Value;
     }
 
     #region Helper Methods

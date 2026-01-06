@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading.Tasks;
 using Aevatar.App.Lumen.Dtos;
 using Aevatar.Agents.Lumen.Protos;
@@ -40,9 +41,19 @@ public interface ILumenService
     Task<GetRemainingUpdatesResult> GetRemainingUpdatesAsync(string userId);
     
     /// <summary>
-    /// Update user icon/avatar
+    /// Update user icon/avatar (URL only - internal use)
     /// </summary>
     Task<UpdateIconResult> UpdateUserIconAsync(string userId, string? iconUrl);
+    
+    /// <summary>
+    /// Upload user icon/avatar with file (handles blob storage and cleanup)
+    /// </summary>
+    /// <param name="userId">User ID</param>
+    /// <param name="fileStream">File stream to upload</param>
+    /// <param name="fileName">Original file name</param>
+    /// <param name="fileSize">File size in bytes</param>
+    /// <returns>Upload result with icon URL</returns>
+    Task<UpdateIconResult> UploadUserIconAsync(string userId, Stream fileStream, string fileName, long fileSize);
     
     #endregion
     

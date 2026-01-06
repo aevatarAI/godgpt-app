@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using Aevatar.Agents.Lumen.Protos;
 using Microsoft.Extensions.Logging;
@@ -123,6 +124,68 @@ public partial class LumenService
             {
                 Success = false,
                 Message = $"Error updating icon: {ex.Message}"
+            };
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<UpdateIconResult> UploadUserIconAsync(string userId, Stream fileStream, string fileName, long fileSize)
+    {
+        try
+        {
+            _logger.LogDebug("[LumenService][UploadUserIconAsync] Start - UserId: {UserId}, FileName: {FileName}", userId, fileName);
+
+            // Validate file size
+            if (fileSize > _blobStoringOptions.MaxSizeBytes)
+            {
+                return new UpdateIconResult
+                {
+                    Success = false,
+                    Message = $"File size exceeds maximum allowed size ({_blobStoringOptions.MaxSizeBytes / 1024 / 1024}MB)"
+                };
+            }
+
+            // Get current icon URL before uploading new one (for deletion)
+            var currentProfileResult = await GetUserProfileAsync(userId, "en");
+            var oldIconUrl = currentProfileResult?.UserProfile?.Icon;
+
+            // Upload to blob storage
+            var fileExtension = Path.GetExtension(fileName);
+            var blobFileName = $"lumen_icon_{userId}_{Guid.NewGuid()}{fileExtension}";
+
+            await _blobContainer.SaveAsync(blobFileName, fileStream, true);
+
+            _logger.LogDebug("[LumenService][UploadUserIconAsync] File uploaded to blob: {FileName}", blobFileName);
+
+            // Update user profile icon via agent
+            var result = await UpdateUserIconAsync(userId, blobFileName);
+
+            // Delete old icon from blob storage if update was successful and old icon exists
+            if (result.Success && !string.IsNullOrWhiteSpace(oldIconUrl))
+            {
+                try
+                {
+                    await _blobContainer.DeleteAsync(oldIconUrl);
+                    _logger.LogInformation("[LumenService][UploadUserIconAsync] Deleted old icon from blob: {OldIcon}", oldIconUrl);
+                }
+                catch (Exception ex)
+                {
+                    // Log but don't fail the request if old icon deletion fails
+                    _logger.LogWarning(ex, "[LumenService][UploadUserIconAsync] Failed to delete old icon: {OldIcon}", oldIconUrl);
+                }
+            }
+
+            _logger.LogInformation("[LumenService][UploadUserIconAsync] Completed - UserId: {UserId}, Success: {Success}", userId, result.Success);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[LumenService][UploadUserIconAsync] Error uploading icon: {UserId}", userId);
+            return new UpdateIconResult
+            {
+                Success = false,
+                Message = "Failed to upload icon"
             };
         }
     }

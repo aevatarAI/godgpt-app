@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.Agents.Lumen.Protos;
+using Aevatar.App.Application.Contracts.BlobStorings;
 using Aevatar.App.Lumen;
 using Aevatar.App.Lumen.Dtos;
 using Microsoft.AspNetCore.Authorization;
@@ -312,6 +313,56 @@ public partial class LumenController : AppController
             {
                 Success = false,
                 Message = "Failed to get language info"
+            };
+        }
+    }
+
+    /// <summary>
+    /// Upload user icon/avatar (with daily limit)
+    /// </summary>
+    /// <param name="input">Image file to upload</param>
+    /// <returns>Upload result with updated icon URL</returns>
+    [HttpPost("user/icon")]
+    public virtual async Task<UpdateIconResult> UploadIconAsync([FromForm] SaveBlobInput input)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var userId = GetCurrentUserId();
+        try
+        {
+            _logger.LogDebug("[LumenController][UploadIconAsync] Start - UserId: {UserId}", userId);
+
+            // Validate file
+            if (input.File == null || input.File.Length == 0)
+            {
+                return new UpdateIconResult
+                {
+                    Success = false,
+                    Message = "No file provided"
+                };
+            }
+
+            // Delegate to service (handles blob upload, validation, and cleanup)
+            var result = await _lumenService.UploadUserIconAsync(
+                userId, 
+                input.File.OpenReadStream(), 
+                input.File.FileName, 
+                input.File.Length);
+
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "[LumenController][UploadIconAsync] Completed - UserId: {UserId}, Success: {Success}, Duration: {Duration}ms",
+                userId, result.Success, stopwatch.ElapsedMilliseconds);
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            _logger.LogError(ex, "[LumenController][UploadIconAsync] Error uploading icon: {UserId}", userId);
+            return new UpdateIconResult
+            {
+                Success = false,
+                Message = "Failed to upload icon"
             };
         }
     }
