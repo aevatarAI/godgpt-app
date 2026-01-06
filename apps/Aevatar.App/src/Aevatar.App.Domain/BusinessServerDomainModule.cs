@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Configuration;
 using Aevatar.App.Localization;
 using Aevatar.App.MultiTenancy;
 using Volo.Abp.Localization;
@@ -68,7 +69,16 @@ public class AppDomainModule : AbpModule
         
 
 #if DEBUG
+        // In DEBUG, default to NullEmailSender to avoid accidental emails.
+        // To enable real SMTP sending locally, set:
+        //   "Emailing": { "EnableRealEmailInDebug": true }
+        // in the host appsettings.json (e.g., AuthServer/appsettings.json).
+        var configuration = context.Services.GetConfiguration();
+        var enableRealEmailInDebug = configuration.GetValue<bool>("Emailing:EnableRealEmailInDebug");
+        if (!enableRealEmailInDebug)
+        {
         context.Services.Replace(ServiceDescriptor.Singleton<IEmailSender, NullEmailSender>());
+        }
 #endif
     }
 }

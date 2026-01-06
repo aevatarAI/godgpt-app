@@ -35,7 +35,11 @@ using Volo.Abp.AspNetCore.Mvc.UI.Bundling;
 using Volo.Abp.Security.Claims;
 using Aevatar.AuthServer.Menus;
 using Aevatar.AuthServer.Grants;
+using Aevatar.AuthServer.Account;
+using Aevatar.AuthServer.Account.Templates;
 using Volo.Abp.AspNetCore.Mvc.Localization;
+using Volo.Abp.TextTemplating;
+using Volo.Abp.Emailing;
 using Aevatar.App;
 using Aevatar.App.Localization;
 using Aevatar.App.MongoDB;
@@ -147,6 +151,7 @@ public class AuthServerModule : AbpModule
         ConfigureSwaggerServices(context.Services);
         ConfigureDataProtection(context, configuration);
         ConfigureGrantHandlers(context, configuration);
+        ConfigureAccountModule(context, configuration);
 
         // Configure distributed cache key prefix
         Configure<AbpDistributedCacheOptions>(options => 
@@ -272,7 +277,10 @@ public class AuthServerModule : AbpModule
     {
         Configure<AbpVirtualFileSystemOptions>(options =>
         {
-            options.FileSets.AddEmbedded<AuthServerModule>();
+            // Explicitly specify base namespace to ensure correct virtual file path mapping
+            // Embedded resource: Aevatar.AuthServer.Account.Templates.RegisterCode.tpl
+            // Virtual path: /Account/Templates/RegisterCode.tpl
+            options.FileSets.AddEmbedded<AuthServerModule>("Aevatar.AuthServer");
         });
     }
 
@@ -294,6 +302,21 @@ public class AuthServerModule : AbpModule
                 options.CustomSchemaIds(type => type.FullName);
             }
         );
+    }
+
+    /// <summary>
+    /// Configure Account module for registration, verification, and password reset
+    /// </summary>
+    private void ConfigureAccountModule(ServiceConfigurationContext context, IConfiguration configuration)
+    {
+        // Configure AccountOptions from appsettings
+        context.Services.Configure<AccountOptions>(configuration.GetSection("Account"));
+
+        // Register email template definitions
+        Configure<AbpTextTemplatingOptions>(options =>
+        {
+            options.DefinitionProviders.Add<AccountEmailTemplateDefinitionProvider>();
+        });
     }
 
     public override void OnApplicationInitialization(ApplicationInitializationContext context)

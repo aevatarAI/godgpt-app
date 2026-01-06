@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk.Web">
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <Import Project="common.props" />
 
@@ -8,6 +8,7 @@
     <AspNetCoreHostingModel>InProcess</AspNetCoreHostingModel>
     <RootNamespace>Aevatar.AuthServer</RootNamespace>
     <AssemblyName>Aevatar.AuthServer</AssemblyName>
+    <UserSecretsId>b1fcec0d-a7fb-4e03-aaae-43f46064c7e6</UserSecretsId>
   </PropertyGroup>
 
   <!-- Project References (Shared Domain and Infrastructure) -->
@@ -63,6 +64,18 @@
     <PackageReference Include="OpenTelemetry.Instrumentation.Http" />
     <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" />
     <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" />
+  </ItemGroup>
+
+  <!-- Email Templates (Embedded for VirtualFileSystem) -->
+  <ItemGroup>
+    <EmbeddedResource Include="Account\Templates\RegisterCode.tpl" />
+    <EmbeddedResource Include="Account\Templates\RegisterCode_es.tpl" />
+    <EmbeddedResource Include="Account\Templates\RegisterCode_zh-cn.tpl" />
+    <EmbeddedResource Include="Account\Templates\RegisterCode_zh-tw.tpl" />
+    <EmbeddedResource Include="Account\Templates\PasswordResetLink.tpl" />
+    <EmbeddedResource Include="Account\Templates\PasswordResetLink_es.tpl" />
+    <EmbeddedResource Include="Account\Templates\PasswordResetLink_zh-cn.tpl" />
+    <EmbeddedResource Include="Account\Templates\PasswordResetLink_zh-tw.tpl" />
   </ItemGroup>
 
 </Project>
