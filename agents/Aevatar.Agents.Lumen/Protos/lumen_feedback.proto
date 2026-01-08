@@ -1,0 +1,78 @@
+syntax = "proto3";
+package lumen;
+
+option csharp_namespace = "Aevatar.Agents.Lumen.Protos";
+
+import "google/protobuf/timestamp.proto";
+import "Protos/lumen_common.proto";
+
+// ============ State ============
+
+message LumenFeedbackState {
+    string feedback_id = 1;
+    string user_id = 2;
+    string prediction_id = 3;  // Stored as string for GUID
+    map<string, FeedbackDetail> method_feedbacks = 4;  // key: prediction_method
+}
+
+// ============ Events ============
+
+message FeedbackSubmittedEvent {
+    string feedback_id = 1;
+    string user_id = 2;
+    string prediction_id = 3;
+    string prediction_method = 4;
+    FeedbackDetail feedback_detail = 5;
+    google.protobuf.Timestamp created_at = 6;
+}
+
+message MethodRatingUpdatedEvent {
+    string feedback_id = 1;
+    string user_id = 2;
+    string prediction_id = 3;
+    string prediction_method = 4;
+    FeedbackDetail feedback_detail = 5;
+    google.protobuf.Timestamp updated_at = 6;
+}
+
+// ============ Request/Response DTOs ============
+
+message SubmitFeedbackRequest {
+    string user_id = 1;
+    string prediction_id = 2;
+    string prediction_method = 3;  // e.g., "opportunity", "bazi", "astrology", "tarot"
+    int32 rating = 4;              // 0 = dislike, 1 = like
+    repeated string feedback_types = 5;
+    optional string comment = 6;
+    optional string email = 7;
+    bool agree_to_contact = 8;
+}
+
+message SubmitFeedbackResult {
+    bool success = 1;
+    string message = 2;
+    string feedback_id = 3;
+}
+
+message UpdateMethodRatingRequest {
+    string user_id = 1;
+    string prediction_id = 2;
+    string prediction_method = 3;
+    int32 rating = 4;  // 0 = dislike, 1 = like
+}
+
+message UpdateMethodRatingResult {
+    bool success = 1;
+    string message = 2;
+    string prediction_method = 3;
+    int32 updated_rating = 4;
+    google.protobuf.Timestamp updated_at = 5;
+}
+
+message FeedbackDto {
+    string feedback_id = 1;
+    string user_id = 2;
+    string prediction_id = 3;
+    map<string, FeedbackDetail> method_feedbacks = 4;
+}
+

@@ -414,5 +414,11 @@
     <PackageVersion Include="Npgsql" Version="8.0.5" />
     <!-- PDF extraction -->
     <PackageVersion Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
+    <!-- Astrology Calculation -->
+    <PackageVersion Include="SwissEphNet" Version="2.8.0.2" />
+    <!-- Hangfire - Distributed Background Job Processing -->
+    <PackageVersion Include="Hangfire.Core" Version="1.8.20" />
+    <PackageVersion Include="Hangfire.AspNetCore" Version="1.8.20" />
+    <PackageVersion Include="Hangfire.Mongo" Version="1.11.2" />
   </ItemGroup>
 </Project>

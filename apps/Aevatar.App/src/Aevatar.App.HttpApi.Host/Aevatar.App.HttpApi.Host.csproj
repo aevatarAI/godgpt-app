@@ -21,6 +21,13 @@
     <None Remove="AGENT_RUNTIME.md" />
   </ItemGroup>
 
+  <!-- Localization JSON files - copy to output -->
+  <ItemGroup>
+    <Content Update="Localization\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="AspNetCore.HealthChecks.UI" />
     <PackageReference Include="AspNetCore.HealthChecks.UI.Client" />
@@ -79,6 +86,13 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="Volo.Abp.Studio.Client.AspNetCore" />
     <PackageReference Include="AutoResponseWrapper" />
+  </ItemGroup>
+  
+  <!-- Hangfire - Background Job Processing -->
+  <ItemGroup>
+    <PackageReference Include="Hangfire.Core" />
+    <PackageReference Include="Hangfire.AspNetCore" />
+    <PackageReference Include="Hangfire.Mongo" />
   </ItemGroup>
 
   <!-- OpenTelemetry -->

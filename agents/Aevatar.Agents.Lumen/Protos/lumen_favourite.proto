@@ -1,0 +1,60 @@
+syntax = "proto3";
+package lumen;
+
+option csharp_namespace = "Aevatar.Agents.Lumen.Protos";
+
+import "google/protobuf/timestamp.proto";
+import "Protos/lumen_common.proto";
+
+// ============ State ============
+
+message LumenFavouriteState {
+    string user_id = 1;
+    map<string, FavouriteDetail> favourites = 2;  // key: prediction_id
+    google.protobuf.Timestamp last_updated_at = 3;
+}
+
+// ============ Events ============
+
+message PredictionFavouritedEvent {
+    string user_id = 1;
+    DateValue date = 2;
+    string prediction_id = 3;
+    FavouriteDetail favourite_detail = 4;
+    google.protobuf.Timestamp favourited_at = 5;
+}
+
+message PredictionUnfavouritedEvent {
+    string user_id = 1;
+    string prediction_id = 2;
+    google.protobuf.Timestamp unfavourited_at = 3;
+}
+
+// ============ Request/Response DTOs ============
+
+message ToggleFavouriteRequest {
+    string user_id = 1;
+    DateValue date = 2;
+    string prediction_id = 3;
+    bool is_favourite = 4;  // true = add, false = remove
+}
+
+message ToggleFavouriteResult {
+    bool success = 1;
+    string message = 2;
+    bool is_favourite = 3;
+    optional google.protobuf.Timestamp updated_at = 4;
+}
+
+message GetFavouritesResult {
+    bool success = 1;
+    string message = 2;
+    repeated FavouriteItemDto favourites = 3;
+}
+
+message FavouriteItemDto {
+    DateValue date = 1;
+    string prediction_id = 2;
+    google.protobuf.Timestamp favourited_at = 3;
+}
+

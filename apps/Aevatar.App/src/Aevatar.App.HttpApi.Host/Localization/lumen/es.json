@@ -1,0 +1,53 @@
+{
+  "zodiac.aries": "Aries",
+  "zodiac.taurus": "Tauro",
+  "zodiac.gemini": "Géminis",
+  "zodiac.cancer": "Cáncer",
+  "zodiac.leo": "Leo",
+  "zodiac.virgo": "Virgo",
+  "zodiac.libra": "Libra",
+  "zodiac.scorpio": "Escorpio",
+  "zodiac.sagittarius": "Sagitario",
+  "zodiac.capricorn": "Capricornio",
+  "zodiac.aquarius": "Acuario",
+  "zodiac.pisces": "Piscis",
+  
+  "chineseZodiac.rat": "Rata",
+  "chineseZodiac.ox": "Buey",
+  "chineseZodiac.tiger": "Tigre",
+  "chineseZodiac.rabbit": "Conejo",
+  "chineseZodiac.dragon": "Dragón",
+  "chineseZodiac.snake": "Serpiente",
+  "chineseZodiac.horse": "Caballo",
+  "chineseZodiac.goat": "Cabra",
+  "chineseZodiac.monkey": "Mono",
+  "chineseZodiac.rooster": "Gallo",
+  "chineseZodiac.dog": "Perro",
+  "chineseZodiac.pig": "Cerdo",
+  
+  "dimension.career": "Carrera",
+  "dimension.love": "Amor",
+  "dimension.wealth": "Riqueza",
+  "dimension.health": "Salud",
+  "dimension.social": "Relaciones Sociales",
+  "dimension.learning": "Aprendizaje",
+  
+  "method.opportunity": "Oportunidad",
+  "method.bazi": "BaZi",
+  "method.astrology": "Astrología Occidental",
+  "method.tarot": "Tarot",
+  "method.lifeTheme1": "Tema de Vida 1",
+  "method.lifeTheme2": "Tema de Vida 2",
+  
+  "prediction.daily": "Predicción Diaria",
+  "prediction.yearly": "Predicción Anual",
+  "prediction.lifetime": "Predicción de Vida",
+  
+  "welcome.default": "¡Bienvenido a Lumen! Tu guía diaria personalizada te espera.",
+  
+  "error.profileNotFound": "Perfil de usuario no encontrado. Por favor, crea tu perfil primero.",
+  "error.predictionNotFound": "No se encontró predicción para esta fecha.",
+  "error.generationFailed": "Error al generar la predicción. Por favor, intenta de nuevo más tarde.",
+  "error.updateLimitExceeded": "Límite de actualización de perfil excedido. Por favor, intenta la próxima semana."
+}
+

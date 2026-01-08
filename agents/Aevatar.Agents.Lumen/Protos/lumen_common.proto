@@ -1,0 +1,322 @@
+syntax = "proto3";
+package lumen;
+
+option csharp_namespace = "Aevatar.Agents.Lumen.Protos";
+
+import "google/protobuf/timestamp.proto";
+
+// ============ 日期/时间类型 ============
+// Protobuf 不原生支持 DateOnly/TimeOnly，需要自定义消息
+
+message DateValue {
+    int32 year = 1;
+    int32 month = 2;
+    int32 day = 3;
+}
+
+message TimeValue {
+    int32 hour = 1;
+    int32 minute = 2;
+    int32 second = 3;
+}
+
+// ============ 性别枚举 ============
+enum GenderEnum {
+    GENDER_UNSPECIFIED = 0;
+    GENDER_MALE = 1;
+    GENDER_FEMALE = 2;
+    GENDER_OTHER = 3;
+}
+
+// ============ MBTI 类型枚举 ============
+enum MbtiTypeEnum {
+    MBTI_UNSPECIFIED = 0;
+    // Analysts
+    MBTI_INTJ = 1;
+    MBTI_INTP = 2;
+    MBTI_ENTJ = 3;
+    MBTI_ENTP = 4;
+    // Diplomats
+    MBTI_INFJ = 5;
+    MBTI_INFP = 6;
+    MBTI_ENFJ = 7;
+    MBTI_ENFP = 8;
+    // Sentinels
+    MBTI_ISTJ = 9;
+    MBTI_ISFJ = 10;
+    MBTI_ESTJ = 11;
+    MBTI_ESFJ = 12;
+    // Explorers
+    MBTI_ISTP = 13;
+    MBTI_ISFP = 14;
+    MBTI_ESTP = 15;
+    MBTI_ESFP = 16;
+}
+
+// ============ 关系状态枚举 ============
+enum RelationshipStatusEnum {
+    RELATIONSHIP_UNSPECIFIED = 0;
+    RELATIONSHIP_SINGLE = 1;
+    RELATIONSHIP_IN_RELATIONSHIP = 2;
+    RELATIONSHIP_MARRIED = 3;
+    RELATIONSHIP_SITUATIONSHIP = 4;
+}
+
+// ============ 日历类型枚举 ============
+enum CalendarTypeEnum {
+    CALENDAR_SOLAR = 0;  // 公历
+    CALENDAR_LUNAR = 1;  // 农历
+}
+
+// ============ 兴趣类别枚举 ============
+enum InterestEnum {
+    INTEREST_CAREER = 0;
+    INTEREST_LOVE = 1;
+    INTEREST_SEX = 2;
+    INTEREST_WEALTH = 3;
+    INTEREST_HEALTH = 4;
+    INTEREST_SOCIAL_RELATIONSHIPS = 5;
+    INTEREST_LEARNING = 6;
+}
+
+// ============ 预测类型枚举 ============
+enum PredictionType {
+    PREDICTION_DAILY = 0;    // 每日预测
+    PREDICTION_YEARLY = 1;   // 年度预测
+    PREDICTION_LIFETIME = 2; // 终身预测
+}
+
+// ============ 西方星座枚举 ============
+enum ZodiacSignEnum {
+    ZODIAC_UNKNOWN = 0;
+    ZODIAC_ARIES = 1;       // 白羊座
+    ZODIAC_TAURUS = 2;      // 金牛座
+    ZODIAC_GEMINI = 3;      // 双子座
+    ZODIAC_CANCER = 4;      // 巨蟹座
+    ZODIAC_LEO = 5;         // 狮子座
+    ZODIAC_VIRGO = 6;       // 处女座
+    ZODIAC_LIBRA = 7;       // 天秤座
+    ZODIAC_SCORPIO = 8;     // 天蝎座
+    ZODIAC_SAGITTARIUS = 9; // 射手座
+    ZODIAC_CAPRICORN = 10;  // 摩羯座
+    ZODIAC_AQUARIUS = 11;   // 水瓶座
+    ZODIAC_PISCES = 12;     // 双鱼座
+}
+
+// ============ 中国生肖枚举 ============
+enum ChineseZodiacEnum {
+    CHINESE_ZODIAC_UNKNOWN = 0;
+    CHINESE_ZODIAC_RAT = 1;     // 鼠
+    CHINESE_ZODIAC_OX = 2;      // 牛
+    CHINESE_ZODIAC_TIGER = 3;   // 虎
+    CHINESE_ZODIAC_RABBIT = 4;  // 兔
+    CHINESE_ZODIAC_DRAGON = 5;  // 龙
+    CHINESE_ZODIAC_SNAKE = 6;   // 蛇
+    CHINESE_ZODIAC_HORSE = 7;   // 马
+    CHINESE_ZODIAC_GOAT = 8;    // 羊
+    CHINESE_ZODIAC_MONKEY = 9;  // 猴
+    CHINESE_ZODIAC_ROOSTER = 10;// 鸡
+    CHINESE_ZODIAC_DOG = 11;    // 狗
+    CHINESE_ZODIAC_PIG = 12;    // 猪
+}
+
+// ============ 塔罗牌枚举 ============
+enum TarotCardEnum {
+    TAROT_UNKNOWN = 0;
+    
+    // Major Arcana (大阿尔卡那)
+    TAROT_THE_FOOL = 1;
+    TAROT_THE_MAGICIAN = 2;
+    TAROT_THE_HIGH_PRIESTESS = 3;
+    TAROT_THE_EMPRESS = 4;
+    TAROT_THE_EMPEROR = 5;
+    TAROT_THE_HIEROPHANT = 6;
+    TAROT_THE_LOVERS = 7;
+    TAROT_THE_CHARIOT = 8;
+    TAROT_STRENGTH = 9;
+    TAROT_THE_HERMIT = 10;
+    TAROT_WHEEL_OF_FORTUNE = 11;
+    TAROT_JUSTICE = 12;
+    TAROT_THE_HANGED_MAN = 13;
+    TAROT_DEATH = 14;
+    TAROT_TEMPERANCE = 15;
+    TAROT_THE_DEVIL = 16;
+    TAROT_THE_TOWER = 17;
+    TAROT_THE_STAR = 18;
+    TAROT_THE_MOON = 19;
+    TAROT_THE_SUN = 20;
+    TAROT_JUDGEMENT = 21;
+    TAROT_THE_WORLD = 22;
+    
+    // Minor Arcana - Wands (权杖)
+    TAROT_ACE_OF_WANDS = 23;
+    TAROT_TWO_OF_WANDS = 24;
+    TAROT_THREE_OF_WANDS = 25;
+    TAROT_FOUR_OF_WANDS = 26;
+    TAROT_FIVE_OF_WANDS = 27;
+    TAROT_SIX_OF_WANDS = 28;
+    TAROT_SEVEN_OF_WANDS = 29;
+    TAROT_EIGHT_OF_WANDS = 30;
+    TAROT_NINE_OF_WANDS = 31;
+    TAROT_TEN_OF_WANDS = 32;
+    TAROT_PAGE_OF_WANDS = 33;
+    TAROT_KNIGHT_OF_WANDS = 34;
+    TAROT_QUEEN_OF_WANDS = 35;
+    TAROT_KING_OF_WANDS = 36;
+    
+    // Minor Arcana - Cups (圣杯)
+    TAROT_ACE_OF_CUPS = 37;
+    TAROT_TWO_OF_CUPS = 38;
+    TAROT_THREE_OF_CUPS = 39;
+    TAROT_FOUR_OF_CUPS = 40;
+    TAROT_FIVE_OF_CUPS = 41;
+    TAROT_SIX_OF_CUPS = 42;
+    TAROT_SEVEN_OF_CUPS = 43;
+    TAROT_EIGHT_OF_CUPS = 44;
+    TAROT_NINE_OF_CUPS = 45;
+    TAROT_TEN_OF_CUPS = 46;
+    TAROT_PAGE_OF_CUPS = 47;
+    TAROT_KNIGHT_OF_CUPS = 48;
+    TAROT_QUEEN_OF_CUPS = 49;
+    TAROT_KING_OF_CUPS = 50;
+    
+    // Minor Arcana - Swords (宝剑)
+    TAROT_ACE_OF_SWORDS = 51;
+    TAROT_TWO_OF_SWORDS = 52;
+    TAROT_THREE_OF_SWORDS = 53;
+    TAROT_FOUR_OF_SWORDS = 54;
+    TAROT_FIVE_OF_SWORDS = 55;
+    TAROT_SIX_OF_SWORDS = 56;
+    TAROT_SEVEN_OF_SWORDS = 57;
+    TAROT_EIGHT_OF_SWORDS = 58;
+    TAROT_NINE_OF_SWORDS = 59;
+    TAROT_TEN_OF_SWORDS = 60;
+    TAROT_PAGE_OF_SWORDS = 61;
+    TAROT_KNIGHT_OF_SWORDS = 62;
+    TAROT_QUEEN_OF_SWORDS = 63;
+    TAROT_KING_OF_SWORDS = 64;
+    
+    // Minor Arcana - Pentacles (金币)
+    TAROT_ACE_OF_PENTACLES = 65;
+    TAROT_TWO_OF_PENTACLES = 66;
+    TAROT_THREE_OF_PENTACLES = 67;
+    TAROT_FOUR_OF_PENTACLES = 68;
+    TAROT_FIVE_OF_PENTACLES = 69;
+    TAROT_SIX_OF_PENTACLES = 70;
+    TAROT_SEVEN_OF_PENTACLES = 71;
+    TAROT_EIGHT_OF_PENTACLES = 72;
+    TAROT_NINE_OF_PENTACLES = 73;
+    TAROT_TEN_OF_PENTACLES = 74;
+    TAROT_PAGE_OF_PENTACLES = 75;
+    TAROT_KNIGHT_OF_PENTACLES = 76;
+    TAROT_QUEEN_OF_PENTACLES = 77;
+    TAROT_KING_OF_PENTACLES = 78;
+}
+
+// ============ 塔罗牌方向枚举 ============
+enum TarotOrientationEnum {
+    ORIENTATION_UNKNOWN = 0;
+    ORIENTATION_UPRIGHT = 1;   // 正位
+    ORIENTATION_REVERSED = 2;  // 逆位
+}
+
+// ============ 水晶/宝石枚举 ============
+enum CrystalStoneEnum {
+    CRYSTAL_UNKNOWN = 0;
+    CRYSTAL_AMETHYST = 1;       // 紫水晶
+    CRYSTAL_ROSE_QUARTZ = 2;    // 粉水晶
+    CRYSTAL_CLEAR_QUARTZ = 3;   // 白水晶
+    CRYSTAL_CITRINE = 4;        // 黄水晶
+    CRYSTAL_BLACK_TOURMALINE = 5;
+    CRYSTAL_SELENITE = 6;
+    CRYSTAL_LABRADORITE = 7;
+    CRYSTAL_MOONSTONE = 8;      // 月光石
+    CRYSTAL_CARNELIAN = 9;      // 红玛瑙
+    CRYSTAL_TIGERS_EYE = 10;    // 虎眼石
+    CRYSTAL_JADE = 11;          // 玉
+    CRYSTAL_TURQUOISE = 12;     // 绿松石
+    CRYSTAL_LAPIS_LAZULI = 13;  // 青金石
+    CRYSTAL_AQUAMARINE = 14;    // 海蓝宝
+    CRYSTAL_EMERALD = 15;       // 祖母绿
+    CRYSTAL_RUBY = 16;          // 红宝石
+    CRYSTAL_SAPPHIRE = 17;      // 蓝宝石
+    CRYSTAL_GARNET = 18;        // 石榴石
+    CRYSTAL_OPAL = 19;          // 蛋白石
+    CRYSTAL_TOPAZ = 20;         // 黄玉
+    CRYSTAL_PERIDOT = 21;       // 橄榄石
+    CRYSTAL_OBSIDIAN = 22;      // 黑曜石
+    CRYSTAL_MALACHITE = 23;     // 孔雀石
+    CRYSTAL_HEMATITE = 24;      // 赤铁矿
+    CRYSTAL_PYRITE = 25;        // 黄铁矿
+    CRYSTAL_FLUORITE = 26;      // 萤石
+    CRYSTAL_AVENTURINE = 27;    // 东陵石
+    CRYSTAL_JASPER = 28;        // 碧玉
+    CRYSTAL_AGATE = 29;         // 玛瑙
+    CRYSTAL_BLOODSTONE = 30;    // 血石
+    CRYSTAL_ONYX = 31;          // 缟玛瑙
+    CRYSTAL_HOWLITE = 32;
+    CRYSTAL_AMAZONITE = 33;     // 天河石
+    CRYSTAL_SMOKY_QUARTZ = 34;  // 茶晶
+}
+
+// ============ 反馈类型枚举 ============
+enum FeedbackTypeEnum {
+    FEEDBACK_ACCURACY = 0;
+    FEEDBACK_CLARITY = 1;
+    FEEDBACK_TONE = 2;
+    FEEDBACK_LENGTH = 3;
+    FEEDBACK_DESIGN = 4;
+    FEEDBACK_BUG = 5;
+}
+
+// ============ 方法统计消息 ============
+message MethodStats {
+    int32 total_ratings = 1;
+    int32 positive_count = 2;
+    int32 negative_count = 3;
+}
+
+// ============ 反馈详情消息 ============
+message FeedbackDetail {
+    string prediction_method = 1;
+    int32 rating = 2;  // 0 = 不喜欢, 1 = 喜欢
+    repeated string feedback_types = 3;
+    optional string comment = 4;
+    optional string email = 5;
+    bool agree_to_contact = 6;
+    google.protobuf.Timestamp created_at = 7;
+    google.protobuf.Timestamp updated_at = 8;
+}
+
+// ============ 收藏详情消息 ============
+message FavouriteDetail {
+    DateValue date = 1;
+    string prediction_id = 2;
+    google.protobuf.Timestamp favourited_at = 3;
+}
+
+// ============ 生成锁信息 ============
+message GenerationLockInfo {
+    bool is_generating = 1;
+    optional google.protobuf.Timestamp started_at = 2;
+    int32 retry_count = 3;
+}
+
+// ============ 翻译锁信息 ============
+message TranslationLockInfo {
+    bool is_translating = 1;
+    optional google.protobuf.Timestamp started_at = 2;
+    string source_language = 3;
+}
+
+// ============ 公共结果消息 ============
+message OperationResult {
+    bool success = 1;
+    string message = 2;
+}
+
+message ClearUserResult {
+    bool success = 1;
+    string message = 2;
+}
+
