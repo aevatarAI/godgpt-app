@@ -114,13 +114,31 @@ public partial class LumenService
             var languageInfo = await profileAgent.GetLanguageInfoAsync();
             var userLanguage = languageInfo.Success ? languageInfo.CurrentLanguage : "en";
 
-            // Trigger generation for each type (fire and forget)
+            // Trigger generation for each type (fire and forget with error logging)
             foreach (var type in types)
             {
                 try
                 {
                     var agent = await GetPredictionAgentAsync(userId, type);
-                    _ = agent.GetOrGeneratePredictionAsync(userDto, type, userLanguage);
+                    var capturedType = type;
+                    var capturedUserId = userId;
+                    
+                    // Fire and forget with proper error handling
+                    _ = Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var result = await agent.GetOrGeneratePredictionAsync(userDto, capturedType, userLanguage);
+                            _logger.LogInformation("[LumenService][TriggerPredictionGenerationAsync] Generation completed for {Type}, UserId: {UserId}, Success: {Success}", 
+                                capturedType, capturedUserId, result.Success);
+                        }
+                        catch (Exception genEx)
+                        {
+                            _logger.LogError(genEx, "[LumenService][TriggerPredictionGenerationAsync] Generation failed for {Type}, UserId: {UserId}", 
+                                capturedType, capturedUserId);
+                        }
+                    });
+                    
                     _logger.LogInformation("[LumenService][TriggerPredictionGenerationAsync] Triggered {Type} for {UserId}", type, userId);
                 }
                 catch (Exception ex)

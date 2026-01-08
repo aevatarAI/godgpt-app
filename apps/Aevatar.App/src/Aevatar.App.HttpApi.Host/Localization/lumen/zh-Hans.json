@@ -1,0 +1,53 @@
+{
+  "zodiac.aries": "白羊座",
+  "zodiac.taurus": "金牛座",
+  "zodiac.gemini": "双子座",
+  "zodiac.cancer": "巨蟹座",
+  "zodiac.leo": "狮子座",
+  "zodiac.virgo": "处女座",
+  "zodiac.libra": "天秤座",
+  "zodiac.scorpio": "天蝎座",
+  "zodiac.sagittarius": "射手座",
+  "zodiac.capricorn": "摩羯座",
+  "zodiac.aquarius": "水瓶座",
+  "zodiac.pisces": "双鱼座",
+  
+  "chineseZodiac.rat": "鼠",
+  "chineseZodiac.ox": "牛",
+  "chineseZodiac.tiger": "虎",
+  "chineseZodiac.rabbit": "兔",
+  "chineseZodiac.dragon": "龙",
+  "chineseZodiac.snake": "蛇",
+  "chineseZodiac.horse": "马",
+  "chineseZodiac.goat": "羊",
+  "chineseZodiac.monkey": "猴",
+  "chineseZodiac.rooster": "鸡",
+  "chineseZodiac.dog": "狗",
+  "chineseZodiac.pig": "猪",
+  
+  "dimension.career": "事业",
+  "dimension.love": "爱情",
+  "dimension.wealth": "财富",
+  "dimension.health": "健康",
+  "dimension.social": "社交关系",
+  "dimension.learning": "学习",
+  
+  "method.opportunity": "机缘",
+  "method.bazi": "八字",
+  "method.astrology": "西方占星",
+  "method.tarot": "塔罗",
+  "method.lifeTheme1": "人生主题1",
+  "method.lifeTheme2": "人生主题2",
+  
+  "prediction.daily": "日运势",
+  "prediction.yearly": "年运势",
+  "prediction.lifetime": "一生运势",
+  
+  "welcome.default": "欢迎来到 Lumen！您的个性化每日指引已就绪。",
+  
+  "error.profileNotFound": "未找到用户资料。请先创建您的个人资料。",
+  "error.predictionNotFound": "未找到该日期的预测。",
+  "error.generationFailed": "预测生成失败。请稍后重试。",
+  "error.updateLimitExceeded": "已超出资料更新限制。请下周再试。"
+}
+

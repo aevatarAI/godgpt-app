@@ -8,11 +8,14 @@ using Aevatar.Agents.Lumen.History;
 using Aevatar.Agents.Lumen.Prediction;
 using Aevatar.Agents.Lumen.Protos;
 using Aevatar.Agents.Lumen.UserProfile;
+using Aevatar.App.Application.Contracts.BlobStorings;
 using Aevatar.App.Services.Lumen;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
+using Volo.Abp.BlobStoring;
 using Xunit;
 
 namespace Aevatar.App.Services.Lumen;
@@ -25,16 +28,23 @@ public class LumenServiceTests
 {
     private readonly IGAgentActorFactory _mockActorFactory;
     private readonly ILogger<LumenService> _mockLogger;
+    private readonly IBlobContainer _mockBlobContainer;
+    private readonly IOptionsSnapshot<BlobStoringOptions> _mockBlobOptions;
     private readonly LumenService _lumenService;
 
     public LumenServiceTests()
     {
         _mockActorFactory = Substitute.For<IGAgentActorFactory>();
         _mockLogger = Substitute.For<ILogger<LumenService>>();
+        _mockBlobContainer = Substitute.For<IBlobContainer>();
+        _mockBlobOptions = Substitute.For<IOptionsSnapshot<BlobStoringOptions>>();
+        _mockBlobOptions.Value.Returns(new BlobStoringOptions());
         
         _lumenService = new LumenService(
             _mockActorFactory,
-            _mockLogger);
+            _mockLogger,
+            _mockBlobContainer,
+            _mockBlobOptions);
     }
 
     #region Helper Methods

@@ -179,53 +179,58 @@ agents/Aevatar.Agents.Lumen/
 
 ## 📋 迁移状态清单
 
-### Phase 1: Protobuf 定义 (优先级: 高)
+### Phase 1: Protobuf 定义 (优先级: 高) ✅ 已完成
 
 | 文件 | 状态 | 复杂度 | 备注 |
 |------|------|--------|------|
-| lumen_common.proto | ⏳ 待开始 | 中 | 枚举(12+), 公共消息 |
-| lumen_user_profile.proto | ⏳ 待开始 | 高 | State + 8 Events + DTOs |
-| lumen_prediction.proto | ⏳ 待开始 | 高 | State + 6 Events + DTOs |
-| lumen_feedback.proto | ⏳ 待开始 | 中 | State + 3 Events + DTOs |
-| lumen_favourite.proto | ⏳ 待开始 | 低 | State + 2 Events + DTOs |
-| lumen_history.proto | ⏳ 待开始 | 中 | State + 3 Events + DTOs |
+| lumen_common.proto | ✅ 完成 | 中 | 枚举(12+), 公共消息 |
+| lumen_stats.proto | ✅ 完成 | 低 | Stats 快照 |
+| lumen_user_profile.proto | ✅ 完成 | 高 | State + 8 Events + DTOs |
+| lumen_prediction.proto | ✅ 完成 | 高 | State + 6 Events + DTOs |
+| lumen_feedback.proto | ✅ 完成 | 中 | State + 3 Events + DTOs |
+| lumen_favourite.proto | ✅ 完成 | 低 | State + 2 Events + DTOs |
+| lumen_history.proto | ✅ 完成 | 中 | State + 3 Events + DTOs |
 
-### Phase 2: Agent 迁移 (按行数从小到大)
+### Phase 2: Agent 迁移 (按行数从小到大) ✅ 已完成
 
 > **迁移策略 (每个Agent必须按此顺序执行):**
 > 1. **Step 1: Partial Class 分析** - 分析代码结构，转换为 partial class
 > 2. **Step 2: 代码风格修改** - 迁移到新框架写法
 > 3. **Step 3: 拆分评估** - 考虑是否需要拆分成多个 Agent
+> 4. **Step 4: 单元测试** - 验证功能正确
 
-| 优先级 | Agent | 行数 | 状态 | 复杂度 | 依赖 |
-|--------|-------|------|------|--------|------|
-| 1 | LumenStatsSnapshotGAgent | 89 | ⏳ 待开始 | 低 | lumen_common.proto |
-| 2 | LumenDailyYearlyHistoryGAgent | 228 | ⏳ 待开始 | 中 | lumen_history.proto |
-| 3 | LumenFavouriteGAgent | 252 | ⏳ 待开始 | 低 | lumen_favourite.proto |
-| 4 | LumenPredictionHistoryGAgent | 298 | ⏳ 待开始 | 中 | lumen_history.proto |
-| 5 | LumenFeedbackGAgent | 375 | ⏳ 待开始 | 中 | lumen_feedback.proto |
-| **6** | **LumenUserProfileGAgent** | **1712** | ⏳ 待开始 | **高** | lumen_user_profile.proto |
-| **7** | **LumenPredictionGAgent** | **6935** | ⏳ 待开始 | **极高** | lumen_prediction.proto, AI集成 |
+| 优先级 | Agent | 行数 | 状态 | 复杂度 | 单元测试 |
+|--------|-------|------|------|--------|----------|
+| 1 | LumenStatsSnapshotGAgent | 89 | ✅ 完成 | 低 | ✅ 有 |
+| 2 | LumenDailyYearlyHistoryGAgent | 228 | ✅ 完成 | 中 | ✅ 有 |
+| 3 | LumenFavouriteGAgent | 252 | ✅ 完成 | 低 | ✅ 有 |
+| 4 | LumenPredictionHistoryGAgent | 298 | ✅ 完成 | 中 | ✅ 有 |
+| 5 | LumenFeedbackGAgent | 375 | ✅ 完成 | 中 | ✅ 有 |
+| **6** | **LumenUserProfileGAgent** | **1712** | ✅ 完成 | **高** | ✅ 有 (3 partial files) |
+| **7** | **LumenPredictionGAgent** | **6935** | ✅ 完成 | **极高** | ✅ 有 (9 partial files) |
 | - | LumenUserGAgent | 716 | ❌ 跳过 | - | DEPRECATED |
 
-### Phase 3: 辅助组件迁移 (优先级: 中)
+### Phase 3: 辅助组件迁移 (优先级: 中) ✅ 已完成
 
-| 组件 | 状态 | 备注 |
+| 组件 | 状态 | 位置 |
 |------|------|------|
-| LumenCalculator | ⏳ 待开始 | 可直接迁移 (纯计算逻辑) |
-| WesternAstrologyCalculator | ⏳ 待开始 | 可直接迁移 |
-| SolarTermCalculator | ⏳ 待开始 | 可直接迁移 |
-| LumenTimezoneHelper | ⏳ 待开始 | 可直接迁移 |
-| LuckyNumberService | ⏳ 待开始 | 可直接迁移 |
-| LumenOptions | ⏳ 待开始 | 配置类保持C# |
+| LumenCalculator | ✅ 完成 | `Calculators/LumenCalculator.cs` |
+| WesternAstrologyService | ✅ 完成 | `Prediction/Services/WesternAstrologyService.cs` |
+| SolarTermCalculator | ✅ 完成 | `Helpers/SolarTermCalculator.cs` |
+| LumenTimezoneHelper | ✅ 完成 | `Helpers/LumenTimezoneHelper.cs` |
+| LuckyNumberService | ✅ 完成 | `Services/LuckyNumberService.cs` |
+| LumenOptions | ✅ 完成 | `Options/LumenOptions.cs` |
+| TranslationDictionaries | ✅ 完成 | `Prediction/Dictionaries/TranslationDictionaries.cs` |
+| TranslationHelpers | ✅ 完成 | `Prediction/Services/TranslationHelpers.cs` |
 
-### Phase 4: 服务层适配 (优先级: 低)
+### Phase 4: 服务层适配 (优先级: 低) ✅ 已完成
 
 | 任务 | 状态 | 备注 |
 |------|------|------|
-| 创建 ILumenService | ⏳ 待开始 | 聚合接口 |
-| 注册 DI | ⏳ 待开始 | - |
-| API Controller 适配 | ⏳ 待开始 | 如有需要 |
+| ILumenService | ✅ 完成 | 聚合接口 |
+| LumenService | ✅ 完成 | 服务实现 (partial class) |
+| LumenController | ✅ 完成 | 3个 partial files |
+| API 测试脚本 | ✅ 完成 | `scripts/test-lumen-flow.sh` |
 
 ---
 
@@ -920,260 +925,45 @@ State 中有多个 `Dictionary<string, T>` 字段：
 
 ---
 
-### Week 1: 基础设施 ✅
+### Week 1: 基础设施 ✅ 完成
 1. ✅ 创建分支 `feature/lumen-migration`
 2. ✅ 创建项目结构 `agents/Aevatar.Agents.Lumen/`
 3. ✅ 定义 `lumen_common.proto`
 4. ✅ 配置 .csproj 文件
 
-### Week 2: 核心 Proto 定义
-1. ⏳ 定义 `lumen_stats.proto` (最简单)
-2. ⏳ 定义 `lumen_history.proto`
-3. ⏳ 定义 `lumen_favourite.proto`
-4. ⏳ 定义 `lumen_feedback.proto`
-5. ⏳ 定义 `lumen_user_profile.proto`
-6. ⏳ 定义 `lumen_prediction.proto`
-7. ⏳ 生成 Proto 代码并验证
+### Week 2: 核心 Proto 定义 ✅ 完成
+1. ✅ 定义 `lumen_stats.proto` (最简单)
+2. ✅ 定义 `lumen_history.proto`
+3. ✅ 定义 `lumen_favourite.proto`
+4. ✅ 定义 `lumen_feedback.proto`
+5. ✅ 定义 `lumen_user_profile.proto`
+6. ✅ 定义 `lumen_prediction.proto`
+7. ✅ 生成 Proto 代码并验证
 
 ---
 
-### Week 3: 小型Agent迁移 (1-3)
+### Week 3-4: Agent 迁移 ✅ 已完成
 
-#### Agent 1: LumenStatsSnapshotGAgent (89行) - 最小
-```
-Step 1: Partial Class 分析
-├── 分析现有代码结构
-├── 识别方法分组 (Event Handlers / Business Logic / Helpers)
-└── 评估是否需要拆分为 partial class
+所有 7 个 Agent 已成功迁移，使用 partial class 模式管理大型文件：
 
-Step 2: 代码风格修改
-├── 移除 GAgentTransitionState()
-├── 添加 [EventHandler] 属性
-├── 修改 RaiseEvent + ConfirmEvents → RaiseEvent + ConfirmEventsAsync
-└── 更新 GetDescriptionAsync()
-
-Step 3: 拆分评估
-├── 89行较小，无需拆分
-└── 记录决策
-
-Step 4: 单元测试 ✅
-├── 创建 Agents/Lumen/LumenStatsSnapshotGAgentTests.cs
-├── 测试所有 RPC 方法
-├── 测试状态转换
-└── dotnet test 通过 → 迁移完成
-```
-
-#### Agent 2: LumenDailyYearlyHistoryGAgent (228行)
-```
-Step 1: Partial Class 分析
-├── 分析日历历史逻辑
-├── 识别是否有可复用的 Daily/Yearly 模式
-└── 考虑是否拆分为 DailyHistory + YearlyHistory
-
-Step 2: 代码风格修改
-└── 标准迁移流程
-
-Step 3: 拆分评估
-├── 评估: Daily和Yearly是否应该分开?
-├── 如果逻辑差异大 → 拆分为2个Agent
-└── 如果逻辑相似 → 保持1个Agent
-
-Step 4: 单元测试 ✅
-├── 创建 Agents/Lumen/LumenDailyYearlyHistoryGAgentTests.cs
-├── 测试 Daily 相关方法
-├── 测试 Yearly 相关方法
-└── dotnet test 通过 → 迁移完成
-```
-
-#### Agent 3: LumenFavouriteGAgent (252行)
-```
-Step 1: Partial Class 分析
-├── 收藏逻辑相对独立
-└── 结构简单，无需partial
-
-Step 2: 代码风格修改
-└── 标准迁移流程
-
-Step 3: 拆分评估
-├── 252行较小，无需拆分
-└── 记录决策
-
-Step 4: 单元测试 ✅
-├── 创建 Agents/Lumen/LumenFavouriteGAgentTests.cs
-├── 测试 ToggleFavourite
-├── 测试 GetFavourites
-└── dotnet test 通过 → 迁移完成
-```
+| Agent | 文件数 | 测试状态 |
+|-------|--------|----------|
+| LumenStatsSnapshotGAgent | 1 | ✅ |
+| LumenDailyYearlyHistoryGAgent | 1 | ✅ |
+| LumenFavouriteGAgent | 1 | ✅ |
+| LumenPredictionHistoryGAgent | 1 | ✅ |
+| LumenFeedbackGAgent | 1 | ✅ |
+| LumenUserProfileGAgent | 3 partial | ✅ |
+| LumenPredictionGAgent | 9 partial | ✅ |
 
 ---
 
-### Week 4: 中型Agent迁移 (4-5)
+### Week 5-6: 服务层 & 集成 ✅ 已完成
 
-#### Agent 4: LumenPredictionHistoryGAgent (298行)
-```
-Step 1: Partial Class 分析
-├── 分析历史记录管理逻辑
-├── 识别查询方法 vs 修改方法
-└── 评估是否需要分离读写操作
-
-Step 2: 代码风格修改
-└── 标准迁移流程
-
-Step 3: 拆分评估
-├── 298行适中，暂不拆分
-└── 如果与 DailyYearlyHistory 有重叠 → 考虑合并
-
-Step 4: 单元测试 ✅
-├── 创建 Agents/Lumen/LumenPredictionHistoryGAgentTests.cs
-├── 测试历史查询方法
-├── 测试历史保存方法
-└── dotnet test 通过 → 迁移完成
-```
-
-#### Agent 5: LumenFeedbackGAgent (375行)
-```
-Step 1: Partial Class 分析
-├── 分析反馈收集逻辑
-├── 识别不同类型反馈的处理
-└── 是否有 RatingFeedback vs TextFeedback 差异?
-
-Step 2: 代码风格修改
-└── 标准迁移流程
-
-Step 3: 拆分评估
-├── 375行适中
-├── 如果有明显分类 → partial class
-└── 否则保持单一文件
-
-Step 4: 单元测试 ✅
-├── 创建 Agents/Lumen/LumenFeedbackGAgentTests.cs
-├── 测试反馈提交方法
-├── 测试反馈查询方法
-└── dotnet test 通过 → 迁移完成
-```
-
----
-
-### Week 5: LumenUserProfileGAgent (1712行) 🔥 重点
-
-```
-Step 1: Partial Class 分析 (重要!)
-├── 代码量大，必须拆分为 partial class
-├── 建议拆分方案:
-│   ├── LumenUserProfileGAgent.cs           # 主类 + 生命周期
-│   ├── LumenUserProfileGAgent.Profile.cs   # 基础资料CRUD
-│   ├── LumenUserProfileGAgent.Icon.cs      # 头像管理
-│   ├── LumenUserProfileGAgent.Language.cs  # 语言切换
-│   └── LumenUserProfileGAgent.Handlers.cs  # EventHandlers
-├── 分析各方法的职责
-└── 识别可提取的辅助逻辑
-
-Step 2: 代码风格修改
-├── 按 partial class 文件逐一迁移
-├── 确保所有 State 操作正确
-└── 处理复杂的 Dictionary 字段
-
-Step 3: 拆分评估
-├── 评估是否需要拆分为多个 Agent:
-│   ├── LumenUserProfileGAgent (核心资料)
-│   ├── LumenUserIconGAgent (头像管理) - 可选
-│   └── LumenUserLanguageGAgent (语言偏好) - 可选
-├── 考虑因素:
-│   ├── 调用频率差异
-│   ├── 状态隔离需求
-│   └── 独立演进需求
-└── 记录决策理由
-
-Step 4: 单元测试 ✅ (1712行需要更多测试)
-├── 创建 Agents/Lumen/LumenUserProfileGAgentTests.cs
-├── 测试 Profile CRUD 方法
-├── 测试 Icon 上传方法
-├── 测试 Language 切换方法
-├── 测试所有 EventHandlers
-├── 测试边界条件 (空数据、无效输入)
-└── dotnet test 通过 → 迁移完成
-```
-
----
-
-### Week 6-7: LumenPredictionGAgent (6935行) 🔥🔥 最复杂
-
-```
-Step 1: Partial Class 分析 (核心!)
-├── 必须强制拆分为 partial class
-├── 建议拆分方案 (按职责):
-│   ├── LumenPredictionGAgent.cs              # 主类 + 生命周期
-│   ├── LumenPredictionGAgent.Daily.cs        # Daily 预测逻辑
-│   ├── LumenPredictionGAgent.Yearly.cs       # Yearly 预测逻辑
-│   ├── LumenPredictionGAgent.Lifetime.cs     # Lifetime 预测逻辑
-│   ├── LumenPredictionGAgent.Translation.cs  # 翻译逻辑
-│   ├── LumenPredictionGAgent.Dictionaries.cs # 翻译字典常量
-│   ├── LumenPredictionGAgent.AI.cs           # AI生成逻辑
-│   ├── LumenPredictionGAgent.Handlers.cs     # EventHandlers
-│   └── LumenPredictionGAgent.Helpers.cs      # 辅助方法
-├── 统计各部分行数，确保每个文件 < 800行
-└── 识别公共依赖和内部状态
-
-Step 2: 代码风格修改
-├── 按 partial class 文件逐一迁移
-├── 特殊处理:
-│   ├── IRemindable 接口 → 外部调度器
-│   ├── AI 服务集成 → 新框架 AIGAgent 模式
-│   └── 复杂字典结构 → Protobuf map 类型
-└── 确保翻译逻辑正确迁移
-
-Step 3: 拆分评估 (重要决策!)
-├── 评估是否需要拆分为多个 Agent:
-│   ├── 方案A: 保持单一 Agent (当前)
-│   │   ├── 优点: 状态共享简单
-│   │   └── 缺点: 单点故障风险
-│   │
-│   ├── 方案B: 按预测类型拆分
-│   │   ├── LumenDailyPredictionGAgent
-│   │   ├── LumenYearlyPredictionGAgent
-│   │   └── LumenLifetimePredictionGAgent
-│   │   ├── 优点: 职责清晰，可独立扩展
-│   │   └── 缺点: 需要协调 Agent 间状态
-│   │
-│   ├── 方案C: 按功能拆分
-│   │   ├── LumenPredictionGAgent (核心预测)
-│   │   ├── LumenTranslationGAgent (翻译)
-│   │   └── LumenPredictionCacheGAgent (缓存)
-│   │   ├── 优点: 翻译可复用
-│   │   └── 缺点: 增加通信开销
-│   │
-│   └── 方案D: 混合方案
-│       ├── 保持核心逻辑在一个Agent
-│       ├── 提取翻译为独立服务 (非Agent)
-│       └── 使用 partial class 管理复杂度
-├── 最终决策需要根据实际代码分析
-└── 记录决策理由和权衡
-
-Step 4: 单元测试 ✅ (6935行需要全面测试)
-├── 创建 Agents/Lumen/LumenPredictionGAgentTests.cs
-├── 如果拆分为多个文件，考虑拆分测试:
-│   ├── LumenPredictionGAgentTests.Daily.cs
-│   ├── LumenPredictionGAgentTests.Yearly.cs
-│   └── LumenPredictionGAgentTests.Lifetime.cs
-├── 测试覆盖:
-│   ├── Daily 预测生成
-│   ├── Yearly 预测生成
-│   ├── Lifetime 预测生成
-│   ├── 翻译功能
-│   ├── 所有 EventHandlers
-│   └── 边界条件和错误处理
-├── Mock AI 服务调用
-└── dotnet test 通过 → 迁移完成
-```
-
----
-
-### Week 8: 辅助组件 & 集成
-1. ⏳ 迁移 Calculators (直接复制)
-2. ⏳ 迁移 Helpers (直接复制)
-3. ⏳ 创建服务层适配
-4. ⏳ 端到端测试
-5. ⏳ 性能对比测试
+1. ✅ LumenService 实现 (partial class)
+2. ✅ LumenController (3 partial files)
+3. ✅ API 测试脚本创建
+4. ✅ 单元测试编写
 
 ---
 
@@ -1224,6 +1014,93 @@ LumenUserProfileGAgent ← LumenPredictionGAgent
 
 ---
 
-*最后更新: 2025-12-31*
-*分支: feature/lumen-migration*
+---
+
+## 🎉 迁移完成总结
+
+### 完成日期
+- 开始: 2025-12-31
+- 完成: 2026-01-08
+
+### 最终项目结构
+
+```
+agents/Aevatar.Agents.Lumen/
+├── Protos/                      # 7 proto 文件
+│   ├── lumen_common.proto
+│   ├── lumen_stats.proto
+│   ├── lumen_user_profile.proto
+│   ├── lumen_prediction.proto
+│   ├── lumen_feedback.proto
+│   ├── lumen_favourite.proto
+│   └── lumen_history.proto
+├── Stats/
+│   └── LumenStatsSnapshotGAgent.cs
+├── UserProfile/                 # 3 partial files
+│   ├── LumenUserProfileGAgent.cs
+│   ├── LumenUserProfileGAgent.Helpers.cs
+│   └── LumenUserProfileGAgent.Language.cs
+├── Prediction/                  # 9 partial files
+│   ├── LumenPredictionGAgent.cs
+│   ├── LumenPredictionGAgent.Api.cs
+│   ├── LumenPredictionGAgent.Generation.cs
+│   ├── LumenPredictionGAgent.LifetimeBatch.cs
+│   ├── LumenPredictionGAgent.Parsing.cs
+│   ├── LumenPredictionGAgent.Prompts.cs
+│   ├── LumenPredictionGAgent.Prompts.Yearly.cs
+│   ├── LumenPredictionGAgent.Translation.cs
+│   └── LumenPredictionGAgent.Utilities.cs
+├── History/
+│   ├── LumenDailyYearlyHistoryGAgent.cs
+│   └── LumenPredictionHistoryGAgent.cs
+├── Feedback/
+│   └── LumenFeedbackGAgent.cs
+├── Favourite/
+│   └── LumenFavouriteGAgent.cs
+├── Calculators/
+│   └── LumenCalculator.cs
+├── Helpers/
+│   ├── LumenTimezoneHelper.cs
+│   ├── SolarTermCalculator.cs
+│   └── SolarTermData.cs
+├── Services/
+│   └── LuckyNumberService.cs
+└── Options/
+    └── LumenOptions.cs
+```
+
+### 测试文件
+
+```
+apps/Aevatar.App/test/Aevatar.App.Application.Tests/
+├── Agents/Lumen/
+│   ├── LumenStatsSnapshotGAgentTests.cs
+│   ├── LumenDailyYearlyHistoryGAgentTests.cs
+│   ├── LumenFavouriteGAgentTests.cs
+│   ├── LumenPredictionHistoryGAgentTests.cs
+│   ├── LumenFeedbackGAgentTests.cs
+│   ├── LumenUserProfileGAgentTests.cs
+│   └── LumenPredictionGAgentTests.cs
+└── Services/Lumen/
+    └── LumenServiceTests.cs
+
+scripts/
+└── test-lumen-flow.sh           # API 端到端测试
+```
+
+### 运行测试命令
+
+```bash
+# 单元测试
+dotnet test apps/Aevatar.App/test/Aevatar.App.Application.Tests/ \
+  --filter "FullyQualifiedName~Lumen"
+
+# API 集成测试 (需要服务运行)
+./scripts/test-lumen-flow.sh
+```
+
+---
+
+*最后更新: 2026-01-08*
+*迁移状态: ✅ 已完成*
 

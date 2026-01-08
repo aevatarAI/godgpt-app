@@ -21,8 +21,8 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
     private const int DefaultMaxRetryCount = 3;
     private const int GenerationTimeoutMinutes = 5;
     
-    // LLM Provider name (configurable)
-    private string _llmProviderName = "default";
+    // LLM Provider name - loaded from config default or can be overridden
+    private string? _llmProviderName;
     
     public LumenPredictionGAgent() : base() { }
 
@@ -45,8 +45,11 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
         {
             if (LLMProviderFactory != null)
             {
-                await InitializeAsync(_llmProviderName, cancellationToken: ct);
-                Logger.LogInformation("[LumenPredictionGAgent] LLM provider initialized: {Provider}", _llmProviderName);
+                // Use configured default provider from LLMProviders.default setting
+                var providerName = _llmProviderName ?? LLMProviderFactory.GetDefaultProviderConfig().Name;
+                await InitializeAsync(providerName, cancellationToken: ct);
+                _llmProviderName = providerName;
+                Logger.LogInformation("[LumenPredictionGAgent] LLM provider initialized: {Provider}", providerName);
             }
             else
             {
@@ -60,7 +63,7 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
     }
     
     /// <summary>
-    /// Configure the LLM provider name
+    /// Configure the LLM provider name (overrides default from config)
     /// </summary>
     public async Task ConfigureLlmProviderAsync(string providerName, CancellationToken ct = default)
     {

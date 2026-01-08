@@ -139,12 +139,12 @@ public partial class LumenController
     /// Trigger prediction generation in background
     /// </summary>
     [HttpPost("trigger-generation")]
-    public virtual async Task<IActionResult> TriggerPredictionGenerationAsync([FromBody] TriggerGenerationRequest request)
+    public virtual async Task<IActionResult> TriggerPredictionGenerationAsync([FromBody] TriggerGenerationRequest? request)
     {
         var userId = GetCurrentUserId();
         try
         {
-            if (request.Types == null || request.Types.Count == 0)
+            if (request?.Types == null || request.Types.Count == 0)
             {
                 return BadRequest(new { Success = false, Message = "At least one prediction type is required" });
             }

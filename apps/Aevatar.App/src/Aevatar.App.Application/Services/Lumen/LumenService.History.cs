@@ -21,19 +21,19 @@ public partial class LumenService
 
             var historyAgent = await GetHistoryAgentAsync(userId);
             var dateValue = new DateValue { Year = date.Year, Month = date.Month, Day = date.Day };
-            var historyPrediction = await historyAgent.GetPredictionByDateAsync(dateValue);
+            var result = await historyAgent.GetPredictionByDateAsync(dateValue);
             
-            if (historyPrediction == null)
+            if (!result.Success || result.Prediction == null)
             {
                 return new GetTodayPredictionResult
                 {
                     Success = false,
-                    Message = $"No prediction found for date {date}"
+                    Message = result.Message ?? $"No prediction found for date {date}"
                 };
             }
 
             // Convert HistoryPredictionResultDto to PredictionResultDto
-            var predictionResult = ConvertHistoryToPredictionResult(historyPrediction);
+            var predictionResult = ConvertHistoryToPredictionResult(result.Prediction);
             
             return new GetTodayPredictionResult
             {
@@ -60,12 +60,13 @@ public partial class LumenService
             _logger.LogDebug("[LumenService][GetPredictionHistoryAsync] Getting history: {UserId}", userId);
 
             var historyAgent = await GetHistoryAgentAsync(userId);
-            var predictions = await historyAgent.GetRecentPredictionsAsync(30); // Last 30 days
+            var result = await historyAgent.GetRecentPredictionsAsync(30); // Last 30 days
             
             return new GetPredictionHistoryResult
             {
-                Success = true,
-                Predictions = predictions
+                Success = result.Success,
+                Message = result.Message,
+                Predictions = result.Predictions.ToList()
             };
         }
         catch (Exception ex)
@@ -89,12 +90,13 @@ public partial class LumenService
                 userId, queryDate.Month, queryDate.Year);
 
             var historyAgent = await GetHistoryAgentAsync(userId);
-            var predictions = await historyAgent.GetMonthlyPredictionsAsync(queryDate.Year, queryDate.Month);
+            var result = await historyAgent.GetMonthlyPredictionsAsync(queryDate.Year, queryDate.Month);
             
             return new GetPredictionHistoryResult
             {
-                Success = true,
-                Predictions = predictions
+                Success = result.Success,
+                Message = result.Message,
+                Predictions = result.Predictions.ToList()
             };
         }
         catch (Exception ex)

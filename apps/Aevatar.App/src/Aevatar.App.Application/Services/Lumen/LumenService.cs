@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.Lumen.Favourite;
 using Aevatar.Agents.Lumen.Feedback;
 using Aevatar.Agents.Lumen.History;

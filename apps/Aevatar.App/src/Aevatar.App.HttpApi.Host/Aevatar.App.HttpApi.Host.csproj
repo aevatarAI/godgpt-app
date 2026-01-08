@@ -21,6 +21,13 @@
     <None Remove="AGENT_RUNTIME.md" />
   </ItemGroup>
 
+  <!-- Localization JSON files - copy to output -->
+  <ItemGroup>
+    <Content Update="Localization\**\*.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="AspNetCore.HealthChecks.UI" />
     <PackageReference Include="AspNetCore.HealthChecks.UI.Client" />
