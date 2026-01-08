@@ -61,6 +61,43 @@ public interface ILumenUserProfileGAgent
     /// Update user's time zone (does NOT count as profile update)
     /// </summary>
     Task<UpdateTimeZoneResult> UpdateTimeZoneAsync(UpdateTimeZoneRequest request);
+    
+    // ============ Activity & Reminder Management ============
+    
+    /// <summary>
+    /// Update user activity timestamp (called when user accesses Lumen features)
+    /// Automatically enables daily reminder if disabled, updates LastActiveDate once per day
+    /// </summary>
+    Task UpdateUserActivityAsync();
+    
+    /// <summary>
+    /// Get user's activity status for reminder management
+    /// </summary>
+    Task<UserActivityStatus> GetActivityStatusAsync();
+    
+    /// <summary>
+    /// Disable daily reminder for this user (called when user is inactive for 3+ days)
+    /// </summary>
+    Task DisableDailyReminderAsync(string reason);
+    
+    /// <summary>
+    /// Record that today's prediction has been generated for this user
+    /// </summary>
+    Task RecordPredictionGeneratedAsync(DateOnly generatedDate);
+}
+
+/// <summary>
+/// User activity status for reminder management
+/// </summary>
+public class UserActivityStatus
+{
+    public string UserId { get; set; } = string.Empty;
+    public DateTime LastActiveDate { get; set; }
+    public bool IsDailyReminderEnabled { get; set; }
+    public DateOnly? LastPredictionGeneratedDate { get; set; }
+    public string CurrentLanguage { get; set; } = "en";
+    public string? TimeZoneId { get; set; }
+    public bool HasValidProfile { get; set; }
 }
 
 

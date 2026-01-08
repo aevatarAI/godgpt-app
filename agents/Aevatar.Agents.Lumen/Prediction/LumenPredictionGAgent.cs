@@ -111,7 +111,7 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
                 state.IsDailyReminderEnabled = reminderEvt.IsEnabled;
                 state.DailyReminderTargetId = reminderEvt.TargetId;
                 break;
-            case UserActivityUpdatedEvent activityEvt:
+            case PredictionActivityUpdatedEvent activityEvt:
                 state.LastActiveDate = activityEvt.LastActiveDate;
                 break;
         }
@@ -309,7 +309,7 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
     }
 
     [EventHandler]
-    public Task HandleUserActivityUpdated(UserActivityUpdatedEvent evt)
+    public Task HandlePredictionActivityUpdated(PredictionActivityUpdatedEvent evt)
     {
         CustomState.LastActiveDate = evt.LastActiveDate;
         
@@ -527,9 +527,10 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
 
             // TODO: Implement reminder update logic
             // For now, just update state
-            RaiseEvent(new UserActivityUpdatedEvent
+            RaiseEvent(new PredictionActivityUpdatedEvent
             {
-                LastActiveDate = Timestamp.FromDateTime(DateTime.UtcNow)
+                LastActiveDate = Timestamp.FromDateTime(DateTime.UtcNow),
+                UserTimeZone = timeZoneId
             });
 
             await ConfirmEventsAsync();
@@ -555,7 +556,7 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
     {
         try
         {
-            RaiseEvent(new UserActivityUpdatedEvent
+            RaiseEvent(new PredictionActivityUpdatedEvent
             {
                 LastActiveDate = Timestamp.FromDateTime(DateTime.UtcNow),
                 UserTimeZone = userTimeZone
@@ -566,6 +567,75 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
         catch (Exception ex)
         {
             Logger.LogError(ex, "[LumenPredictionGAgent] Error updating user activity");
+        }
+    }
+
+    /// <summary>
+    /// Check if prediction has been generated for a specific date
+    /// Used by background reminder job to avoid duplicate generation
+    /// </summary>
+    public Task<bool> HasGeneratedForDateAsync(DateOnly date)
+    {
+        try
+        {
+            if (CustomState.LastGeneratedDate == null)
+                return Task.FromResult(false);
+            
+            var lastGenDate = new DateOnly(
+                CustomState.LastGeneratedDate.Year, 
+                CustomState.LastGeneratedDate.Month, 
+                CustomState.LastGeneratedDate.Day);
+            
+            return Task.FromResult(lastGenDate == date);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LumenPredictionGAgent] Error checking generated date");
+            return Task.FromResult(false);
+        }
+    }
+
+    /// <summary>
+    /// Trigger background prediction generation
+    /// Used by background reminder job for daily auto-generation
+    /// </summary>
+    public async Task TriggerBackgroundGenerationAsync(string language)
+    {
+        try
+        {
+            Logger.LogInformation(
+                "[LumenPredictionGAgent] TriggerBackgroundGenerationAsync - UserId: {UserId}, Language: {Language}",
+                CustomState.UserId, language);
+
+            // Only for Daily predictions
+            if (CustomState.Type != PredictionType.PredictionDaily)
+            {
+                Logger.LogWarning(
+                    "[LumenPredictionGAgent] Background generation only supports Daily type, current: {Type}",
+                    CustomState.Type);
+                return;
+            }
+
+            // Build minimal user info from state
+            var userInfo = new LumenUserDto
+            {
+                UserId = CustomState.UserId
+            };
+
+            // Calculate today's date
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            var dateValue = new DateValue { Year = today.Year, Month = today.Month, Day = today.Day };
+
+            // Generate prediction (will use existing logic)
+            await GetOrGeneratePredictionAsync(
+                userInfo, 
+                PredictionType.PredictionDaily, 
+                language, 
+                dateValue);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "[LumenPredictionGAgent] Error in background generation");
         }
     }
 

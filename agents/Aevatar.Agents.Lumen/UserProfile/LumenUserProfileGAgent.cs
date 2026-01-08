@@ -79,6 +79,13 @@ public partial class LumenUserProfileGAgent : GAgentBase<LumenUserProfileState>,
                 state.CurrentTimeZone = tzEvt.TimeZoneId;
                 state.UpdatedAt = tzEvt.UpdatedAt;
                 break;
+            case UserActivityUpdatedEvent activityEvt:
+                state.LastActiveDate = activityEvt.LastActiveDate;
+                state.IsDailyReminderEnabled = activityEvt.IsDailyReminderEnabled;
+                break;
+            case DailyReminderDisabledEvent disabledEvt:
+                state.IsDailyReminderEnabled = false;
+                break;
         }
     }
 
@@ -607,6 +614,103 @@ public partial class LumenUserProfileGAgent : GAgentBase<LumenUserProfileState>,
                 Message = "Internal error occurred"
             };
         }
+    }
+
+    #endregion
+
+    #region Activity & Reminder Management
+
+    /// <summary>
+    /// Update user activity timestamp (called when user accesses Lumen features)
+    /// Automatically enables daily reminder if disabled, updates LastActiveDate once per day
+    /// </summary>
+    public Task UpdateUserActivityAsync()
+    {
+        var now = DateTime.UtcNow;
+        var today = DateOnly.FromDateTime(now);
+        var lastActiveDay = State.LastActiveDate != null 
+            ? DateOnly.FromDateTime(State.LastActiveDate.ToDateTime()) 
+            : DateOnly.MinValue;
+        
+        var wasInactive = State.LastActiveDate == null || 
+            (now - State.LastActiveDate.ToDateTime()).TotalDays > 3;
+        
+        // Optimization: Only update if it's a different day
+        if (lastActiveDay != today || wasInactive)
+        {
+            // Directly update state (no event sourcing for this agent)
+            State.LastActiveDate = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(now);
+            State.IsDailyReminderEnabled = true;  // Re-enable reminder on activity
+            
+            Logger.LogDebug(
+                "[LumenUserProfile] Updated activity for {UserId}: LastActiveDate={Date}, ReminderEnabled={Enabled}",
+                State.UserId, now, true);
+        }
+        
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Get user's activity status for reminder management
+    /// </summary>
+    public Task<UserActivityStatus> GetActivityStatusAsync()
+    {
+        var status = new UserActivityStatus
+        {
+            UserId = State.UserId,
+            LastActiveDate = State.LastActiveDate?.ToDateTime() ?? DateTime.MinValue,
+            IsDailyReminderEnabled = State.IsDailyReminderEnabled,
+            LastPredictionGeneratedDate = State.LastPredictionGeneratedDate != null
+                ? new DateOnly(
+                    State.LastPredictionGeneratedDate.Year,
+                    State.LastPredictionGeneratedDate.Month,
+                    State.LastPredictionGeneratedDate.Day)
+                : null,
+            CurrentLanguage = State.CurrentLanguage ?? "en",
+            TimeZoneId = State.CurrentTimeZone,
+            HasValidProfile = !string.IsNullOrEmpty(State.UserId) && 
+                              State.BirthDate != null &&
+                              !State.IsDeleted
+        };
+        
+        return Task.FromResult(status);
+    }
+
+    /// <summary>
+    /// Disable daily reminder for this user (called when user is inactive for 3+ days)
+    /// </summary>
+    public Task DisableDailyReminderAsync(string reason)
+    {
+        if (!State.IsDailyReminderEnabled)
+            return Task.CompletedTask;  // Already disabled
+        
+        // Directly update state
+        State.IsDailyReminderEnabled = false;
+        
+        Logger.LogInformation(
+            "[LumenUserProfile] Disabled daily reminder for {UserId}: Reason={Reason}",
+            State.UserId, reason);
+        
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Record that today's prediction has been generated for this user
+    /// </summary>
+    public Task RecordPredictionGeneratedAsync(DateOnly generatedDate)
+    {
+        State.LastPredictionGeneratedDate = new DateValue
+        {
+            Year = generatedDate.Year,
+            Month = generatedDate.Month,
+            Day = generatedDate.Day
+        };
+        
+        Logger.LogDebug(
+            "[LumenUserProfile] Recorded prediction generated for {UserId}: Date={Date}",
+            State.UserId, generatedDate);
+        
+        return Task.CompletedTask;
     }
 
     #endregion

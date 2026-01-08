@@ -42,6 +42,11 @@ message LumenUserProfileState {
     optional string inferred_from_city = 27;
     optional string current_time_zone = 28;  // IANA format, e.g., "America/New_York"
     repeated InterestEnum interests_list = 29;  // V2: Interests as enum list
+    
+    // ============ Reminder & Activity Tracking ============
+    google.protobuf.Timestamp last_active_date = 30;  // Last user activity timestamp (updated once per day)
+    bool is_daily_reminder_enabled = 31;  // Whether daily reminder is enabled (auto-disabled after 3 days inactive)
+    optional DateValue last_prediction_generated_date = 32;  // Last date when prediction was generated (for deduplication)
 }
 
 // ============ Events ============
@@ -104,6 +109,18 @@ message UserProfileLatLongInferredEvent {
     string lat_long_inferred = 2;  // Format: "latitude,longitude"
     string birth_city = 3;
     google.protobuf.Timestamp inferred_at = 4;
+}
+
+message UserActivityUpdatedEvent {
+    string user_id = 1;
+    google.protobuf.Timestamp last_active_date = 2;
+    bool is_daily_reminder_enabled = 3;
+}
+
+message DailyReminderDisabledEvent {
+    string user_id = 1;
+    google.protobuf.Timestamp disabled_at = 2;
+    string reason = 3;  // e.g., "inactive_3_days", "user_request"
 }
 
 // ============ Request/Response DTOs ============

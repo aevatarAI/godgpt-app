@@ -28,6 +28,7 @@ using Volo.Abp.BlobStoring;
 using Volo.Abp.BlobStoring.Aws;
 using Aevatar.App.HttpApi.Host.Handler;
 using Aevatar.Agents.Plugins.MassTransit.DependencyInjection;
+using Aevatar.App.HttpApi.Host.BackgroundJobs;
 using AutoResponseWrapper;
 
 namespace Aevatar.App.HttpApi.Host;
@@ -85,6 +86,9 @@ public class AppHttpApiHostModule : AbpModule
         
         // Configure Health Checks
         context.Services.AddHealthChecks();
+        
+        // Configure Hangfire background job processing
+        context.Services.AddHangfireWithMongo(configuration);
     }
     
     private static void ConfigureAutoResponseWrapper(ServiceConfigurationContext context)
@@ -266,6 +270,10 @@ public class AppHttpApiHostModule : AbpModule
         app.UseHealthChecks("/health");
         app.UseAuditing();
         app.UseAbpSerilogEnrichers();
+        
+        // Configure Hangfire and register recurring jobs
+        app.UseHangfireWithJobs(env);
+        
         app.UseConfiguredEndpoints();
     }
 }

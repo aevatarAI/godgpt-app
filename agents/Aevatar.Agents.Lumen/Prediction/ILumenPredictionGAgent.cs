@@ -56,4 +56,16 @@ public interface ILumenPredictionGAgent
     /// Update user activity timestamp
     /// </summary>
     Task UpdateUserActivityAsync(string? userTimeZone = null);
+    
+    /// <summary>
+    /// Check if prediction has been generated for a specific date
+    /// Used by background reminder job to avoid duplicate generation
+    /// </summary>
+    Task<bool> HasGeneratedForDateAsync(DateOnly date);
+    
+    /// <summary>
+    /// Trigger background prediction generation
+    /// Used by background reminder job for daily auto-generation
+    /// </summary>
+    Task TriggerBackgroundGenerationAsync(string language);
 }

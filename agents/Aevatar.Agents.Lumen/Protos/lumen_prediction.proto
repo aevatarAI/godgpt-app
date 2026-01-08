@@ -112,7 +112,8 @@ message DailyReminderUpdatedEvent {
     google.protobuf.Timestamp updated_at = 3;
 }
 
-message UserActivityUpdatedEvent {
+// Prediction-specific activity event (for Event Sourcing in LumenPredictionGAgent)
+message PredictionActivityUpdatedEvent {
     google.protobuf.Timestamp last_active_date = 1;
     optional string user_time_zone = 2;
 }

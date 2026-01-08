@@ -87,5 +87,12 @@
     <PackageReference Include="Volo.Abp.Studio.Client.AspNetCore" />
     <PackageReference Include="AutoResponseWrapper" />
   </ItemGroup>
+  
+  <!-- Hangfire - Background Job Processing -->
+  <ItemGroup>
+    <PackageReference Include="Hangfire.Core" />
+    <PackageReference Include="Hangfire.AspNetCore" />
+    <PackageReference Include="Hangfire.Mongo" />
+  </ItemGroup>
 
 </Project>
