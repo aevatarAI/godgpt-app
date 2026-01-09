@@ -17,7 +17,8 @@ public partial class ChatGAgentManager
 {
     public async Task<Guid> GenerateChatShareContentAsync(Guid sessionId)
     {
-        Logger.LogDebug($"[ChatGAgentManager][GenerateChatShareContentAsync] - session: {sessionId.ToString()}");
+        var methodStart = System.Diagnostics.Stopwatch.StartNew();
+        Logger.LogInformation("[PERF][ChatGAgentManager] GenerateChatShareContentAsync START - SessionId: {SessionId}", sessionId);
         var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
         if (State.CurrentShareCount >= State.MaxShareCount)
         {
@@ -33,7 +34,9 @@ public partial class ChatGAgentManager
             throw new UserFriendlyException(localizedMessage);
         }
 
+        Logger.LogInformation("[PERF][ChatGAgentManager] GenerateChatShareContentAsync calling GetSessionMessageListAsync - Elapsed: {Elapsed}ms", methodStart.ElapsedMilliseconds);
         var chatMessagesProto = await GetSessionMessageListAsync(sessionId);
+        Logger.LogInformation("[PERF][ChatGAgentManager] GenerateChatShareContentAsync GetSessionMessageListAsync completed - Elapsed: {Elapsed}ms", methodStart.ElapsedMilliseconds);
         if (chatMessagesProto == null || chatMessagesProto.Messages.Count == 0)
         {
             Logger.LogDebug(

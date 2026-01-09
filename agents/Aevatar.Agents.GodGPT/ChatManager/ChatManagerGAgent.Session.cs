@@ -57,7 +57,8 @@ public partial class ChatGAgentManager
     public async Task<Guid> CreateSessionAsync(string systemLLM, string prompt, UserProfileDto? userProfile = null,
         string? guider = null, DateTime? userLocalTime = null)
     {
-        Logger.LogDebug($"[ChatManagerGAgent][CreateSessionAsync] Start - UserId: {Id}");
+        var methodStart = Stopwatch.StartNew();
+        Logger.LogInformation("[PERF][ChatGAgentManager] CreateSessionAsync START - UserId: {UserId}", Id);
 
         var configuration = await GetConfigurationAsync();
         Stopwatch sw = new Stopwatch();
@@ -127,7 +128,9 @@ public partial class ChatGAgentManager
             CreateAt = DateTime.UtcNow.ToProtoTimestamp(),
             Guider = guider ?? "" // Protobuf string cannot be null
         });
+        Logger.LogInformation("[PERF][ChatGAgentManager] CreateSessionAsync ConfirmEventsAsync START");
         await ConfirmEventsAsync();
+        Logger.LogInformation("[PERF][ChatGAgentManager] CreateSessionAsync ConfirmEventsAsync END - Duration: {Duration}ms", methodStart.ElapsedMilliseconds);
 
         var initStopwatch = Stopwatch.StartNew();
         // Extract raw Guid from Agent ID (may be in "AgentType:Guid" format)
@@ -196,19 +199,23 @@ public partial class ChatGAgentManager
 
     public async Task<ChatMessageListProto> GetSessionMessageListAsync(Guid sessionId)
     {
-        Logger.LogDebug($"[ChatGAgentManager][GetSessionMessageListAsync] - session:ID {sessionId.ToString()}");
+        var sw = Stopwatch.StartNew();
+        Logger.LogInformation("[PERF][ChatGAgentManager] GetSessionMessageListAsync START - SessionId: {SessionId}", sessionId);
         var sessionInfo = State.GetSession(sessionId);
-        Logger.LogDebug(
-            $"[ChatGAgentManager][GetSessionMessageListAsync] - session:ID {JsonConvert.SerializeObject(sessionInfo)}");
 
         if (sessionInfo == null)
         {
             throw new InvalidOperationException($"Unable to load conversation {sessionId}");
         }
 
+        Logger.LogInformation("[PERF][ChatGAgentManager] GetSessionMessageListAsync creating GodChatGAgent - Elapsed: {Elapsed}ms", sw.ElapsedMilliseconds);
         var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionInfo.SessionId);
         var godChat = godChatActor.As<IGodChat>();
-        return await godChat.GetChatMessageAsync();
+        Logger.LogInformation("[PERF][ChatGAgentManager] GetSessionMessageListAsync GodChatGAgent created - Elapsed: {Elapsed}ms", sw.ElapsedMilliseconds);
+        
+        var result = await godChat.GetChatMessageAsync();
+        Logger.LogInformation("[PERF][ChatGAgentManager] GetSessionMessageListAsync END - Elapsed: {Elapsed}ms, MessageCount: {Count}", sw.ElapsedMilliseconds, result?.Messages?.Count ?? 0);
+        return result;
     }
 
     public async Task<ChatMessageWithMetaListProto> GetSessionMessageListWithMetaAsync(Guid sessionId)

@@ -73,8 +73,12 @@ public partial class GodChatGAgent
             {
                 Title = title
             });
+            
+            Logger.LogInformation("[PERF][GodChatGAgent] SetSessionTitleAsync calling ChatGAgentManager.RenameChatTitleAsync - SessionId: {SessionId}, ChatManagerGuid: {ChatManagerGuid}", sessionId, State.ChatManagerGuid);
             var chatManagerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(State.ChatManagerGuid);
             var chatManagerGAgent = chatManagerActor.As<IChatManagerGAgent>();
+            Logger.LogInformation("[PERF][GodChatGAgent] SetSessionTitleAsync ChatGAgentManager actor created - Elapsed: {Elapsed}ms", totalStopwatch.ElapsedMilliseconds);
+            
             await chatManagerGAgent.RenameChatTitleAsync(new Aevatar.Agents.GodGPT.Protos.GodChat.RenameChatTitleEvent()
             {
                 SessionId = sessionId.ToString(),
@@ -82,7 +86,7 @@ public partial class GodChatGAgent
             });
             
             totalStopwatch.Stop();
-            Logger.LogDebug($"[GodChatGAgent][SetSessionTitleAsync] TOTAL_Time - Duration: {totalStopwatch.ElapsedMilliseconds}ms, SessionId: {sessionId}");
+            Logger.LogInformation("[PERF][GodChatGAgent] SetSessionTitleAsync COMPLETED - Duration: {Duration}ms, SessionId: {SessionId}", totalStopwatch.ElapsedMilliseconds, sessionId);
         }
         else
         {

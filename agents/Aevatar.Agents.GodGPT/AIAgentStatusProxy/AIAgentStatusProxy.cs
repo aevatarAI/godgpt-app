@@ -241,10 +241,14 @@ public class AIAgentStatusProxy :
         ExecutionPromptSettings? promptSettings = null, 
         AIChatContextDto? context = null)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var requestId = context?.ChatId ?? Guid.NewGuid().ToString();
+        
         var systemPrompt = CustomState.PromptTemplate;
         var selectedHistory = TokenHelper.SelectHistoryMessages(history, prompt, systemPrompt);
-        Logger.LogDebug("[AIAgentStatusProxyNew][ChatWithHistoryAsync] Original: {Original}, Selected: {Selected}", 
-            history?.Count ?? 0, selectedHistory.Count);
+        
+        Logger.LogInformation("[PERF][AIAgentStatusProxy] ChatWithHistory_START - RequestId={RequestId}, PromptLen={PromptLen}, HistoryCount={HistoryCount}, SelectedHistory={SelectedHistory}", 
+            requestId, prompt?.Length ?? 0, history?.Count ?? 0, selectedHistory.Count);
 
         try
         {
@@ -252,7 +256,7 @@ public class AIAgentStatusProxy :
             var request = new ChatRequest
             {
                 Message = prompt,
-                RequestId = context?.ChatId ?? Guid.NewGuid().ToString()
+                RequestId = requestId
             };
 
             if (promptSettings?.Temperature != null && double.TryParse(promptSettings.Temperature, out var temp))
@@ -261,7 +265,12 @@ public class AIAgentStatusProxy :
             }
 
             // Use the AI framework's ChatAsync
+            var chatStartMs = sw.ElapsedMilliseconds;
             var response = await ChatAsync(request);
+            var chatEndMs = sw.ElapsedMilliseconds;
+
+            Logger.LogInformation("[PERF][AIAgentStatusProxy] ChatWithHistory_END - RequestId={RequestId}, ChatAsync_Duration={Duration}ms, ResponseLen={ResponseLen}", 
+                requestId, chatEndMs - chatStartMs, response.Content?.Length ?? 0);
 
             // Convert to proto format
             var result = new ChatWithHistoryResultProto();
@@ -273,11 +282,17 @@ public class AIAgentStatusProxy :
                 ChatRole = (int)Aevatar.GAgents.ChatAgent.Dtos.ChatRole.Assistant
             });
 
+            sw.Stop();
+            Logger.LogInformation("[PERF][AIAgentStatusProxy] ChatWithHistory_COMPLETE - RequestId={RequestId}, Total_Duration={Duration}ms", 
+                requestId, sw.ElapsedMilliseconds);
+
             return result;
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "[AIAgentStatusProxyNew][ChatWithHistoryAsync] Error");
+            sw.Stop();
+            Logger.LogError(ex, "[PERF][AIAgentStatusProxy] ChatWithHistory_ERROR - RequestId={RequestId}, Duration={Duration}ms, Error={Error}", 
+                requestId, sw.ElapsedMilliseconds, ex.Message);
             await HandleChatErrorAsync(context, AIExceptionEnum.Unknown, ex.Message, null);
             return new ChatWithHistoryResultProto(); // Return empty result on error
         }

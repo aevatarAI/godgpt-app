@@ -334,12 +334,16 @@ public partial class GodChatGAgent
         string chatId,
         ExecutionPromptSettings promptSettings = null, bool isHttpRequest = false, string? region = null)
     {
-        Logger.LogDebug($"[GodChatGAgent][ChatWithHistory] {sessionId.ToString()} content:{content} start.");
         var sw = new Stopwatch();
         sw.Start();
+        
+        Logger.LogInformation("[PERF][GodChatGAgent] ChatWithHistory_START - SessionId={SessionId}, ChatId={ChatId}, ContentLen={ContentLen}, Region={Region}",
+            sessionId, chatId, content?.Length ?? 0, region ?? "null");
+        
         var history = State.ChatHistory;
         if (history.IsNullOrEmpty())
         {
+            Logger.LogWarning("[GodChatGAgent][ChatWithHistory] No history found, returning empty - SessionId={SessionId}", sessionId);
             return new ChatMessageListProto();
         }
 
@@ -347,10 +351,16 @@ public partial class GodChatGAgent
         var llm = await configuration.GetSystemLLMAsync();
         var streamingModeEnabled = await configuration.GetStreamingModeEnabledAsync();
 
-        var (aiAgentStatusProxy, _) = await GetInitializedProxyAsync(region, sessionId);
+        var proxyStartMs = sw.ElapsedMilliseconds;
+        var (aiAgentStatusProxy, proxyId) = await GetInitializedProxyAsync(region, sessionId);
+        var proxyEndMs = sw.ElapsedMilliseconds;
+        
+        Logger.LogInformation("[PERF][GodChatGAgent] ChatWithHistory_GetProxy - SessionId={SessionId}, ProxyId={ProxyId}, Duration={Duration}ms",
+            sessionId, proxyId ?? "null", proxyEndMs - proxyStartMs);
+        
         if (aiAgentStatusProxy == null)
         {
-            Logger.LogError($"[GodChatGAgent][ChatWithHistory] No AIGAgent available. {sessionId.ToString()}");
+            Logger.LogError("[GodChatGAgent][ChatWithHistory] No AIGAgent available - SessionId={SessionId}, Region={Region}", sessionId, region);
             return new ChatMessageListProto();
         }
 
@@ -360,10 +370,17 @@ public partial class GodChatGAgent
         var aiChatContextDto = CreateAIChatContext(sessionId, llm, streamingModeEnabled, content, chatId,
             promptSettings, isHttpRequest, region);
         var protoInput = BuildChatWithHistoryInputProto(content, State.ChatHistory.FromProtoList(), settings, aiChatContextDto);
+        
+        var llmStartMs = sw.ElapsedMilliseconds;
+        Logger.LogInformation("[PERF][GodChatGAgent] ChatWithHistory_LLM_START - SessionId={SessionId}, ChatId={ChatId}, HistoryCount={HistoryCount}",
+            sessionId, chatId, State.ChatHistory.Count);
+        
         var response = await aiAgentStatusProxy.ChatWithHistoryProtoAsync(protoInput);
+        
         sw.Stop();
-        Logger.LogDebug(
-            $"[GodChatGAgent][ChatWithHistory] {sessionId.ToString()}, response messages count:{response?.Messages?.Count ?? 0} - step4,time use:{sw.ElapsedMilliseconds}");
+        Logger.LogInformation("[PERF][GodChatGAgent] ChatWithHistory_END - SessionId={SessionId}, ChatId={ChatId}, LLM_Duration={LLMDuration}ms, Total_Duration={TotalDuration}ms, ResponseMsgCount={MsgCount}",
+            sessionId, chatId, sw.ElapsedMilliseconds - llmStartMs, sw.ElapsedMilliseconds, response?.Messages?.Count ?? 0);
+        
         return ConvertToChatMessageListProto(response);
     }
     
