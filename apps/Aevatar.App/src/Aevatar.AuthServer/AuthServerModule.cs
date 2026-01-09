@@ -40,6 +40,7 @@ using Aevatar.AuthServer.Account.Templates;
 using Volo.Abp.AspNetCore.Mvc.Localization;
 using Volo.Abp.TextTemplating;
 using Volo.Abp.Emailing;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Aevatar.App;
 using Aevatar.App.Localization;
 using Aevatar.App.MongoDB;
@@ -141,6 +142,7 @@ public class AuthServerModule : AbpModule
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
         var configuration = context.Services.GetConfiguration();
+        var hostEnvironment = context.Services.GetHostingEnvironment();
 
         ConfigureBundles();
         ConfigureUrls(configuration);
@@ -152,6 +154,7 @@ public class AuthServerModule : AbpModule
         ConfigureDataProtection(context, configuration);
         ConfigureGrantHandlers(context, configuration);
         ConfigureAccountModule(context, configuration);
+        ConfigureRedisCache(context, configuration);
 
         // Configure distributed cache key prefix
         Configure<AbpDistributedCacheOptions>(options => 
@@ -169,6 +172,13 @@ public class AuthServerModule : AbpModule
             options.ProviderPolicies["C"] = "AbpIdentity.Clients.ManagePermissions";
         });
 
+        // Use NullEmailSender in Development environment
+        if (hostEnvironment.IsDevelopment())
+        {
+            context.Services.Replace(
+                ServiceDescriptor.Transient<IEmailSender, NullEmailSender>());
+        }
+
         context.Services.AddHealthChecks();
     }
 
@@ -185,6 +195,21 @@ public class AuthServerModule : AbpModule
                 .AddDataProtection()
                 .PersistKeysToStackExchangeRedis(redis, "GodGPT-DataProtection-Keys")
                 .SetApplicationName("GodGPTAuthServer");
+        }
+    }
+
+    /// <summary>
+    /// Configure Redis as distributed cache
+    /// </summary>
+    private void ConfigureRedisCache(ServiceConfigurationContext context, IConfiguration configuration)
+    {
+        var redisConnection = configuration["Redis:Configuration"];
+        if (!string.IsNullOrWhiteSpace(redisConnection))
+        {
+            context.Services.AddStackExchangeRedisCache(options =>
+            {
+                options.Configuration = redisConnection;
+            });
         }
     }
 

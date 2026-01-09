@@ -69,9 +69,20 @@ public class AccountService : IAccountService, ITransientDependency
     public async Task<IdentityUserDto> RegisterAsync(RegisterDto input, GodGPTChatLanguage language)
     {
         // Verify code
-        var storedCode = await _registerCodeCache.GetAsync(GetRegisterCodeKey(input.AppName, input.EmailAddress));
+        var cacheKey = GetRegisterCodeKey(input.AppName, input.EmailAddress);
+        var storedCode = await _registerCodeCache.GetAsync(cacheKey);
+        
+        _logger.LogInformation(
+            "[AccountService][RegisterAsync] Verifying code for Email={Email}, AppName={AppName}, CacheKey={CacheKey}, StoredCode={StoredCode}, InputCode={InputCode}",
+            input.EmailAddress, input.AppName, cacheKey, 
+            storedCode != null ? "EXISTS" : "NULL", 
+            input.Code);
+        
         if (storedCode != input.Code)
         {
+            _logger.LogWarning(
+                "[AccountService][RegisterAsync] Code mismatch! StoredCode={StoredCode}, InputCode={InputCode}",
+                storedCode ?? "NULL", input.Code);
             var message = GetLocalizedMessage("InvalidVerificationCode", language);
             throw new UserFriendlyException(message);
         }
@@ -133,10 +144,18 @@ public class AccountService : IAccountService, ITransientDependency
 
         // Generate and store code
         var code = GenerateVerificationCode();
-        await _registerCodeCache.SetAsync(
-            GetRegisterCodeKey(input.AppName, input.Email), 
-            code, 
-            _codeCacheOptions);
+        var cacheKey = GetRegisterCodeKey(input.AppName, input.Email);
+        
+        await _registerCodeCache.SetAsync(cacheKey, code, _codeCacheOptions);
+        
+        // DEBUG: Log the actual code (remove in production!)
+        _logger.LogWarning(
+            "[DEBUG] Verification code for {Email}: {Code} (CacheKey={CacheKey})",
+            input.Email, code, cacheKey);
+        
+        _logger.LogInformation(
+            "[AccountService][SendRegisterCodeAsync] Code stored: Email={Email}, AppName={AppName}, CacheKey={CacheKey}, Duration={Duration}min",
+            input.Email, input.AppName, cacheKey, _accountOptions.RegisterCodeDuration);
 
         // Send email
         await _accountEmailer.SendRegisterCodeAsync(input.Email, code, input.AppName, language);
@@ -220,7 +239,9 @@ public class AccountService : IAccountService, ITransientDependency
 
     private static string GetRegisterCodeKey(string appName, string email)
     {
-        return $"RegisterCode_{appName}_{email.ToLower()}";
+        // Normalize both appName and email to lowercase for consistent cache key
+        var normalizedAppName = string.IsNullOrEmpty(appName) ? "default" : appName.ToLower();
+        return $"RegisterCode_{normalizedAppName}_{email.ToLower()}";
     }
 
     private static string GetLocalizedMessage(string key, GodGPTChatLanguage language)
