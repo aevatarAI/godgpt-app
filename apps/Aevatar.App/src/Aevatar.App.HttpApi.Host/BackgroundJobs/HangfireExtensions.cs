@@ -10,6 +10,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
 using Serilog;
+using Hangfire.Server;
 
 namespace Aevatar.App.HttpApi.Host.BackgroundJobs;
 
@@ -54,14 +55,6 @@ public static class HangfireExtensions
                 });
         });
 
-        // Add Hangfire server
-        services.AddHangfireServer(options =>
-        {
-            options.Queues = new[] { "lumen", "default" };
-            options.WorkerCount = Math.Max(1, Environment.ProcessorCount / 2);
-            options.ServerName = $"aevatar-{Environment.MachineName}";
-        });
-
         Log.Information("✅ Hangfire configured with MongoDB storage: {Database}", databaseName);
 
         return services;
@@ -74,6 +67,15 @@ public static class HangfireExtensions
         this IApplicationBuilder app,
         IHostEnvironment env)
     {
+        // Use Hangfire Server to ensure JobStorage is initialized
+        // This must be called before using any Hangfire APIs
+        app.UseHangfireServer(new BackgroundJobServerOptions
+        {
+            Queues = new[] { "lumen", "default" },
+            WorkerCount = Math.Max(1, Environment.ProcessorCount / 2),
+            ServerName = $"aevatar-{Environment.MachineName}"
+        });
+        
         // Dashboard (only in development for security)
         if (env.IsDevelopment())
         {
@@ -85,13 +87,14 @@ public static class HangfireExtensions
             Log.Information("📊 Hangfire Dashboard available at /hangfire");
         }
 
-        // Register recurring jobs
+        // Register recurring jobs using DI-based IRecurringJobManager
         using var scope = app.ApplicationServices.CreateScope();
         var options = scope.ServiceProvider.GetRequiredService<IOptions<LumenReminderOptions>>().Value;
+        var recurringJobManager = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
 
         if (options.IsEnabled && options.EnableDailyAutoGeneration)
         {
-            RecurringJob.AddOrUpdate<LumenDailyReminderJob>(
+            recurringJobManager.AddOrUpdate<LumenDailyReminderJob>(
                 "lumen-daily-reminder",
                 job => job.ExecuteAsync(default),
                 options.CronExpression,
@@ -108,7 +111,7 @@ public static class HangfireExtensions
         else
         {
             // Remove job if disabled
-            RecurringJob.RemoveIfExists("lumen-daily-reminder");
+            recurringJobManager.RemoveIfExists("lumen-daily-reminder");
             Log.Information("⏸️ Lumen Daily Reminder Job is disabled");
         }
 
