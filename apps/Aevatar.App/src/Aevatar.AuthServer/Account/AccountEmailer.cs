@@ -59,13 +59,14 @@ public class AccountEmailer : IAccountEmailer, ITransientDependency
 
     public async Task SendRegisterCodeAsync(string email, string code, string appName, GodGPTChatLanguage language = GodGPTChatLanguage.English)
     {
+        // Check rate limit first to avoid unnecessary template rendering
+        await CheckSendEmailAsync(email, appName, language);
+
         var templateName = GetTemplateNameByLanguage(AccountEmailTemplates.RegisterCode, language);
         var emailContent = await _templateRenderer.RenderAsync(
             templateName,
             new { code }
         );
-
-        await CheckSendEmailAsync(email, appName, language);
 
         var subject = GetEmailSubjectByLanguage("Registration Verification Code", language);
         await SendEmailWithAppSenderAsync(email, subject, emailContent, appName);
@@ -75,8 +76,10 @@ public class AccountEmailer : IAccountEmailer, ITransientDependency
 
     public async Task SendPasswordResetLinkAsync(IdentityUser user, string email, string resetToken, string appName, GodGPTChatLanguage language = GodGPTChatLanguage.English)
     {
+        // Check rate limit first to avoid unnecessary template rendering
+        await CheckSendEmailAsync(email, appName, language);
+
         var url = GetResetPasswordUrl(appName);
-        var context = RequestContext.Get("IsCN");
         var isCN = RequestContext.Get("IsCN") is bool cnValue and true;
 
         if (isCN)
@@ -97,8 +100,6 @@ public class AccountEmailer : IAccountEmailer, ITransientDependency
             templateName,
             new { link }
         );
-
-        await CheckSendEmailAsync(email, appName, language);
 
         var subject = GetEmailSubjectByLanguage("Password Reset", language);
         await SendEmailWithAppSenderAsync(email, subject, emailContent, appName);
