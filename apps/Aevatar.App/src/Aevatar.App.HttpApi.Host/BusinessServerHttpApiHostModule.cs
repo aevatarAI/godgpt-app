@@ -29,6 +29,7 @@ using Volo.Abp.BlobStoring.Aws;
 using Aevatar.App.HttpApi.Host.Handler;
 using Aevatar.Agents.Plugins.MassTransit.DependencyInjection;
 using Aevatar.App.HttpApi.Host.BackgroundJobs;
+using Aevatar.App.Application.Options;
 using AutoResponseWrapper;
 
 namespace Aevatar.App.HttpApi.Host;
@@ -64,6 +65,10 @@ public class AppHttpApiHostModule : AbpModule
         
         // Configure GodGPT Options
         context.Services.Configure<GodGPTOptions>(configuration.GetSection("GodGPT"));
+        
+        // Configure ExternalLocalization Options
+        context.Services.Configure<ExternalLocalizationOptions>(
+            configuration.GetSection(ExternalLocalizationOptions.SectionName));
         
         // Configure ManagerOptions for admin operations
         context.Services.Configure<Aevatar.Common.Options.ManagerOptions>(options =>

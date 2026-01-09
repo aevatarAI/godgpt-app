@@ -1,182 +1,193 @@
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text.Json;
 using Aevatar.App.Application.Contracts.Services;
+using Aevatar.App.Application.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using Newtonsoft.Json.Linq;
 using Volo.Abp.DependencyInjection;
 
 namespace Aevatar.App.Application.Services;
 
 /// <summary>
-/// External localization service that loads texts from JSON files
-/// Directory structure: Localization/{resource}/{culture}.json
-/// Example: Localization/lumen/en.json, Localization/lumen/zh-Hans.json
+/// Service for loading external localization JSON files from disk
+/// Supports both flat (Lumen) and nested (GodGPT) JSON structures
 /// </summary>
 public class ExternalLocalizationService : IExternalLocalizationService, ISingletonDependency
 {
     private readonly ILogger<ExternalLocalizationService> _logger;
-    private readonly string _localizationPath;
-    private readonly ConcurrentDictionary<string, Dictionary<string, string>> _cache;
-    private readonly object _loadLock = new();
+    private readonly string _basePath;
+    
+    // Unified cache (stores as object to support both flat and nested)
+    private readonly Dictionary<string, Dictionary<string, object>> _cache = new();
+    private readonly Dictionary<string, Dictionary<string, DateTime>> _cacheTimestamps = new();
+    private readonly object _cacheLock = new();
 
     public ExternalLocalizationService(
         ILogger<ExternalLocalizationService> logger,
-        IHostEnvironment hostEnvironment)
+        IHostEnvironment hostEnvironment,
+        IOptions<ExternalLocalizationOptions> options)
     {
         _logger = logger;
-        _cache = new ConcurrentDictionary<string, Dictionary<string, string>>();
         
-        // Localization files are in the Content root / Localization
-        _localizationPath = Path.Combine(hostEnvironment.ContentRootPath, "Localization");
+        // Use configured BasePath, or fallback to ContentRootPath/Localization
+        var configuredPath = options.Value.BasePath;
+        if (!string.IsNullOrEmpty(configuredPath) && Directory.Exists(configuredPath))
+        {
+            _basePath = configuredPath;
+        }
+        else
+        {
+            // Fallback to local Localization folder (for development)
+            _basePath = Path.Combine(hostEnvironment.ContentRootPath, "Localization");
+        }
         
-        // Load all resources at startup
-        LoadAllResources();
+        _logger.LogInformation("[ExternalLocalization] Initialized with BasePath: {BasePath}", _basePath);
     }
 
-    /// <inheritdoc />
-    public Dictionary<string, string>? GetTexts(string resource, string culture)
+    public object GetTexts(string resourceName, string cultureName)
     {
-        var cacheKey = GetCacheKey(resource, culture);
-        
-        if (_cache.TryGetValue(cacheKey, out var texts))
+        lock (_cacheLock)
         {
-            return texts;
-        }
-        
-        // Try to load if not in cache
-        var loaded = LoadResource(resource, culture);
-        return loaded;
-    }
-
-    /// <inheritdoc />
-    public string GetText(string resource, string culture, string key)
-    {
-        var texts = GetTexts(resource, culture);
-        
-        if (texts != null && texts.TryGetValue(key, out var value))
-        {
-            return value;
-        }
-        
-        // Fallback to English if not found
-        if (culture != "en")
-        {
-            var enTexts = GetTexts(resource, "en");
-            if (enTexts != null && enTexts.TryGetValue(key, out var enValue))
-            {
-                _logger.LogDebug("Text not found for {Resource}/{Culture}/{Key}, using English fallback", 
-                    resource, culture, key);
-                return enValue;
-            }
-        }
-        
-        _logger.LogWarning("Text not found for {Resource}/{Culture}/{Key}, using key as fallback", 
-            resource, culture, key);
-        return key;
-    }
-
-    /// <inheritdoc />
-    public IEnumerable<string> GetAvailableResources()
-    {
-        if (!Directory.Exists(_localizationPath))
-        {
-            return Enumerable.Empty<string>();
-        }
-        
-        return Directory.GetDirectories(_localizationPath)
-            .Select(Path.GetFileName)
-            .Where(name => !string.IsNullOrEmpty(name))!;
-    }
-
-    /// <inheritdoc />
-    public IEnumerable<string> GetAvailableCultures(string resource)
-    {
-        var resourcePath = Path.Combine(_localizationPath, resource);
-        
-        if (!Directory.Exists(resourcePath))
-        {
-            return Enumerable.Empty<string>();
-        }
-        
-        return Directory.GetFiles(resourcePath, "*.json")
-            .Select(f => Path.GetFileNameWithoutExtension(f))
-            .Where(name => !string.IsNullOrEmpty(name))!;
-    }
-
-    /// <inheritdoc />
-    public void Reload()
-    {
-        lock (_loadLock)
-        {
-            _cache.Clear();
-            LoadAllResources();
-        }
-        
-        _logger.LogInformation("External localization resources reloaded");
-    }
-
-    private void LoadAllResources()
-    {
-        if (!Directory.Exists(_localizationPath))
-        {
-            _logger.LogWarning("Localization directory not found: {Path}", _localizationPath);
-            return;
-        }
-
-        var resources = GetAvailableResources();
-        
-        foreach (var resource in resources)
-        {
-            var cultures = GetAvailableCultures(resource);
+            var filePath = Path.Combine(_basePath, resourceName.ToLower(), $"{cultureName}.json");
             
-            foreach (var culture in cultures)
+            if (!File.Exists(filePath))
             {
-                LoadResource(resource, culture);
+                _logger.LogWarning("[ExternalLocalization] File not found: {FilePath}", filePath);
+                // Return appropriate empty structure based on resource type
+                return IsNestedResource(resourceName) 
+                    ? new Dictionary<string, object>() 
+                    : new Dictionary<string, string>();
             }
+            
+            var currentFileTime = File.GetLastWriteTimeUtc(filePath);
+            
+            // Check cache validity
+            if (_cache.TryGetValue(resourceName, out var resourceCache) &&
+                resourceCache.TryGetValue(cultureName, out var cachedTexts))
+            {
+                if (_cacheTimestamps.TryGetValue(resourceName, out var timestampCache) &&
+                    timestampCache.TryGetValue(cultureName, out var cachedTime))
+                {
+                    if (cachedTime == currentFileTime)
+                    {
+                        return cachedTexts;
+                    }
+                    
+                    _logger.LogInformation("[ExternalLocalization] File modified, reloading {Resource}/{Culture}", 
+                        resourceName, cultureName);
+                }
+            }
+            
+            // Load from file
+            var loadedTexts = LoadTextsFromFile(resourceName, cultureName, filePath);
+            
+            // Update cache
+            if (!_cache.ContainsKey(resourceName))
+            {
+                _cache[resourceName] = new Dictionary<string, object>();
+            }
+            _cache[resourceName][cultureName] = loadedTexts;
+            
+            // Update timestamp
+            if (!_cacheTimestamps.ContainsKey(resourceName))
+            {
+                _cacheTimestamps[resourceName] = new Dictionary<string, DateTime>();
+            }
+            _cacheTimestamps[resourceName][cultureName] = currentFileTime;
+            
+            return loadedTexts;
         }
-        
-        _logger.LogInformation("Loaded {Count} localization resources", _cache.Count);
     }
 
-    private Dictionary<string, string>? LoadResource(string resource, string culture)
+    public Dictionary<string, object> GetAllTexts(string cultureName)
     {
-        var filePath = Path.Combine(_localizationPath, resource, $"{culture}.json");
+        var result = new Dictionary<string, object>();
+        var resourceNames = new[] { "godgpt", "lumen" };
         
-        if (!File.Exists(filePath))
+        foreach (var resourceName in resourceNames)
         {
-            _logger.LogDebug("Localization file not found: {FilePath}", filePath);
-            return null;
-        }
-
-        try
-        {
-            var json = File.ReadAllText(filePath);
-            var texts = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
-            
+            var texts = GetTexts(resourceName, cultureName);
             if (texts != null)
             {
-                var cacheKey = GetCacheKey(resource, culture);
-                _cache[cacheKey] = texts;
-                _logger.LogDebug("Loaded localization resource: {Resource}/{Culture} ({Count} keys)", 
-                    resource, culture, texts.Count);
-                return texts;
+                result[resourceName] = texts;
+            }
+        }
+        
+        return result;
+    }
+
+    /// <summary>
+    /// Determine if a resource uses nested structure
+    /// - GodGPT: nested structure
+    /// - Lumen: flat structure
+    /// </summary>
+    private bool IsNestedResource(string resourceName)
+    {
+        return resourceName.Equals("godgpt", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private object LoadTextsFromFile(string resourceName, string cultureName, string filePath)
+    {
+        try
+        {
+            _logger.LogInformation("[ExternalLocalization] Loading: {Resource}/{Culture} from {FilePath}", 
+                resourceName, cultureName, filePath);
+            
+            var jsonContent = File.ReadAllText(filePath);
+            using var doc = JsonDocument.Parse(jsonContent);
+            
+            // Check for "texts" property (ABP format: { "culture": "en", "texts": {...} })
+            JsonElement textsElement;
+            if (doc.RootElement.TryGetProperty("texts", out textsElement))
+            {
+                // Use the "texts" content
+            }
+            else
+            {
+                // Use root content directly
+                textsElement = doc.RootElement;
+            }
+            
+            var rawJson = textsElement.GetRawText();
+            
+            // Determine structure based on resource type
+            if (IsNestedResource(resourceName))
+            {
+                // GodGPT: nested structure
+                // Use Newtonsoft.Json JObject to avoid circular reference issues
+                var nestedTexts = JObject.Parse(rawJson);
+                
+                _logger.LogInformation("[ExternalLocalization] Loaded {Resource}/{Culture} (nested structure)", 
+                    resourceName, cultureName);
+                
+                return nestedTexts ?? new JObject();
+            }
+            else
+            {
+                // Lumen: flat structure
+                var flatTexts = JsonSerializer.Deserialize<Dictionary<string, string>>(
+                    rawJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                
+                _logger.LogInformation("[ExternalLocalization] Loaded {Resource}/{Culture} (flat structure)", 
+                    resourceName, cultureName);
+                
+                return flatTexts ?? new Dictionary<string, string>();
             }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to load localization file: {FilePath}", filePath);
+            _logger.LogError(ex, "[ExternalLocalization] Error loading {Resource}/{Culture}", 
+                resourceName, cultureName);
+            
+            // Return appropriate empty structure
+            return IsNestedResource(resourceName) 
+                ? new JObject() 
+                : new Dictionary<string, string>();
         }
-
-        return null;
-    }
-
-    private static string GetCacheKey(string resource, string culture)
-    {
-        return $"{resource}:{culture}";
     }
 }
-

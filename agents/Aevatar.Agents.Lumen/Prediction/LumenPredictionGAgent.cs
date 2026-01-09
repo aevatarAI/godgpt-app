@@ -2,10 +2,12 @@ using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Attributes;
 using Aevatar.Agents.AI.Abstractions;
 using Aevatar.Agents.AI.Core;
+using Aevatar.Agents.Lumen.Options;
 using Aevatar.Agents.Lumen.Protos;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Aevatar.Agents.Lumen.Prediction;
 
@@ -17,9 +19,21 @@ namespace Aevatar.Agents.Lumen.Prediction;
 /// </summary>
 public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>, ILumenPredictionGAgent
 {
-    // Configuration constants
-    private const int DefaultMaxRetryCount = 3;
-    private const int GenerationTimeoutMinutes = 5;
+    // Configuration constants as fallback (use Options when available)
+    [Obsolete("Use PredictionOptions.MaxRetryCount instead. This constant is kept as fallback only.")]
+    private const int FallbackMaxRetryCount = 3;
+    [Obsolete("Use PredictionOptions.GenerationTimeoutMinutes instead. This constant is kept as fallback only.")]
+    private const int FallbackGenerationTimeoutMinutes = 5;
+    [Obsolete("Use PredictionOptions.PromptVersion instead. This constant is kept as fallback only.")]
+    private const int FallbackPromptVersion = 28;
+    
+    // Dependency injection via properties for Orleans compatibility
+    public IOptionsMonitor<LumenPredictionOptions>? PredictionOptions { get; set; }
+    
+    // Helper properties for accessing configuration values with fallback
+    private int MaxRetryCount => PredictionOptions?.CurrentValue?.MaxRetryCount ?? FallbackMaxRetryCount;
+    private int GenerationTimeoutMinutes => PredictionOptions?.CurrentValue?.GenerationTimeoutMinutes ?? FallbackGenerationTimeoutMinutes;
+    private int CurrentPromptVersion => PredictionOptions?.CurrentValue?.PromptVersion ?? FallbackPromptVersion;
     
     // LLM Provider name - loaded from config default or can be overridden
     private string? _llmProviderName;
@@ -403,7 +417,7 @@ public partial class LumenPredictionGAgent : AIGAgentBase<LumenPredictionState>,
                 Type = type,
                 Results = { results },
                 Language = userLanguage,
-                PromptVersion = 1
+                PromptVersion = CurrentPromptVersion
             });
 
             // Clear generation lock

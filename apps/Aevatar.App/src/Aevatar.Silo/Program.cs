@@ -26,6 +26,7 @@ using Aevatar.Agents.Plugins.CQRS.Elasticsearch;  // Use Core's CQRS implementat
 using Aevatar.Agents.AI.Abstractions.Configuration;
 using Aevatar.Agents.AI.MEAI.DependencyInjection;
 using Aevatar.Agents.GodGPT.Extensions;
+using Aevatar.Agents.Lumen.Extensions;
 using Aevatar.Agents.Core.EventSourcing;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -224,10 +225,13 @@ public class Program
                 // Register GodGPT Agent services and configuration (modularized)
                 services.AddGodGPTServices(context.Configuration);
                 
+                // Register Lumen Agent services and configuration
+                services.AddLumenServices(context.Configuration);
+                
                 // Configure ManagerOptions for admin operations (framework-level, not GodGPT-specific)
                 services.Configure<Aevatar.Common.Options.ManagerOptions>(context.Configuration.GetSection("ManagerIds"));
                 
-                Log.Information("✅ GodGPT Agent services registered via AddGodGPTServices()");
+                Log.Information("✅ GodGPT & Lumen Agent services registered");
             });
     }
 

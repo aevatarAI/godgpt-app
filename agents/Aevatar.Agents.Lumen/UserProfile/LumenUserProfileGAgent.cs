@@ -1,9 +1,11 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Attributes;
 using Aevatar.Agents.Core;
+using Aevatar.Agents.Lumen.Options;
 using Aevatar.Agents.Lumen.Protos;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Aevatar.Agents.Lumen.UserProfile;
 
@@ -12,10 +14,21 @@ namespace Aevatar.Agents.Lumen.UserProfile;
 /// </summary>
 public partial class LumenUserProfileGAgent : GAgentBase<LumenUserProfileState>, ILumenUserProfileGAgent
 {
-    // Configuration constants (can be moved to options later)
-    private const int MaxProfileUpdatesPerWeek = 100;
-    private const int MaxIconUploadsPerDay = 1;
-    private const int MaxLanguageSwitchesPerDay = 1;
+    // Configuration constants as fallback (use Options when available)
+    [Obsolete("Use ProfileOptions.MaxProfileUpdatesPerWeek instead. This constant is kept as fallback only.")]
+    private const int DefaultMaxProfileUpdatesPerWeek = 100;
+    [Obsolete("Use ProfileOptions.MaxIconUploadsPerDay instead. This constant is kept as fallback only.")]
+    private const int DefaultMaxIconUploadsPerDay = 1;
+    [Obsolete("Use ProfileOptions.MaxLanguageSwitchesPerDay instead. This constant is kept as fallback only.")]
+    private const int DefaultMaxLanguageSwitchesPerDay = 1;
+    
+    // Dependency injection via properties for Orleans compatibility
+    public IOptionsMonitor<LumenUserProfileOptions>? ProfileOptions { get; set; }
+    
+    // Helper properties for accessing configuration values with fallback
+    private int MaxProfileUpdatesPerWeek => ProfileOptions?.CurrentValue?.MaxProfileUpdatesPerWeek ?? DefaultMaxProfileUpdatesPerWeek;
+    private int MaxIconUploadsPerDay => ProfileOptions?.CurrentValue?.MaxIconUploadsPerDay ?? DefaultMaxIconUploadsPerDay;
+    private int MaxLanguageSwitchesPerDay => ProfileOptions?.CurrentValue?.MaxLanguageSwitchesPerDay ?? DefaultMaxLanguageSwitchesPerDay;
     
     /// <summary>
     /// Valid lumen prediction actions

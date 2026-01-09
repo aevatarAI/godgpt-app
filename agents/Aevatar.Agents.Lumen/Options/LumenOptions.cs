@@ -13,13 +13,6 @@ public class LumenPredictionOptions
     public int PromptVersion { get; set; } = 28;
     
     /// <summary>
-    /// Reminder target ID for daily prediction auto-generation
-    /// Change this GUID to invalidate all existing reminders (e.g., when switching from UTC to user timezone)
-    /// Default: 00000000-0000-0000-0000-000000000001
-    /// </summary>
-    public Guid ReminderTargetId { get; set; } = new Guid("00000000-0000-0000-0000-000000000001");
-    
-    /// <summary>
     /// Maximum retry count for prediction generation failures
     /// Default: 3
     /// </summary>
@@ -31,13 +24,6 @@ public class LumenPredictionOptions
     /// Default: 5 minutes
     /// </summary>
     public int GenerationTimeoutMinutes { get; set; } = 5;
-    
-    /// <summary>
-    /// Enable daily prediction auto-generation via scheduled reminders
-    /// When disabled, daily predictions will only be generated on-demand
-    /// Default: false (disabled)
-    /// </summary>
-    public bool EnableDailyAutoGeneration { get; set; } = false;
 }
 
 /// <summary>

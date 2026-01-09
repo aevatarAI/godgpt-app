@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using Aevatar.App.Application.Contracts.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
@@ -39,63 +38,6 @@ public partial class LumenController
     }
 
     #endregion
-
-    #region Localization
-
-    /// <summary>
-    /// Get Lumen localization texts for all supported cultures
-    /// Returns flat structure: Dictionary&lt;string, string&gt;
-    /// </summary>
-    [AllowAnonymous]
-    [HttpGet("localization")]
-    public IActionResult GetAllLocalizations([FromServices] IExternalLocalizationService externalLocalizationService)
-    {
-        var cultures = new[] { "en", "zh-Hans", "zh-Hant", "es" };
-        var result = new Dictionary<string, Dictionary<string, string>>();
-        
-        foreach (var culture in cultures)
-        {
-            var texts = externalLocalizationService.GetTexts("lumen", culture);
-            if (texts != null && texts.Count > 0)
-            {
-                result[culture] = texts;
-            }
-        }
-        
-        return Ok(new
-        {
-            resource = "lumen",
-            cultures = result
-        });
-    }
-
-    /// <summary>
-    /// Get Lumen localization texts for a specific culture
-    /// Returns flat structure: Dictionary&lt;string, string&gt;
-    /// </summary>
-    /// <param name="cultureName">Culture code (e.g., "en", "zh-Hans", "zh-Hant", "es")</param>
-    /// <param name="externalLocalizationService">Localization service (injected)</param>
-    [AllowAnonymous]
-    [HttpGet("localization/{cultureName}")]
-    public IActionResult GetLocalization(
-        string cultureName,
-        [FromServices] IExternalLocalizationService externalLocalizationService)
-    {
-        var texts = externalLocalizationService.GetTexts("lumen", cultureName);
-        
-        if (texts == null || texts.Count == 0)
-        {
-            return NotFound(new { message = $"Localization not found for lumen/{cultureName}" });
-        }
-        
-        return Ok(new
-        {
-            culture = cultureName,
-            texts = texts
-        });
-    }
-
-    #endregion
 }
 
 /// <summary>
@@ -108,4 +50,3 @@ public class LumenFeatureFlagsOptions
     /// </summary>
     public Dictionary<string, string> Flags { get; set; } = new();
 }
-
