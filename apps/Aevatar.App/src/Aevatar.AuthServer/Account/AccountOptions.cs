@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 
 namespace Aevatar.AuthServer.Account;
@@ -29,9 +30,9 @@ public class AccountOptions
     public string DefaultResetPasswordUrl { get; set; } = string.Empty;
 
     /// <summary>
-    /// App-specific configurations
+    /// App-specific configurations (case-insensitive key matching)
     /// </summary>
-    public Dictionary<string, AppAccountOptions> Apps { get; set; } = new();
+    public Dictionary<string, AppAccountOptions> Apps { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 /// <summary>
