@@ -74,19 +74,31 @@ public partial class GodChatGAgent
                 Title = title
             });
             
-            Logger.LogInformation("[PERF][GodChatGAgent] SetSessionTitleAsync calling ChatGAgentManager.RenameChatTitleAsync - SessionId: {SessionId}, ChatManagerGuid: {ChatManagerGuid}", sessionId, State.ChatManagerGuid);
-            var chatManagerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(State.ChatManagerGuid);
-            var chatManagerGAgent = chatManagerActor.As<IChatManagerGAgent>();
-            Logger.LogInformation("[PERF][GodChatGAgent] SetSessionTitleAsync ChatGAgentManager actor created - Elapsed: {Elapsed}ms", totalStopwatch.ElapsedMilliseconds);
+            // Fire-and-forget to avoid deadlock with ChatGAgentManager
+            // ChatGAgentManager may call back to GodChatGAgent.GetChatMessageAsync during Share operations
+            Logger.LogInformation("[PERF][GodChatGAgent] SetSessionTitleAsync scheduling ChatGAgentManager.RenameChatTitleAsync (fire-and-forget) - SessionId: {SessionId}, ChatManagerGuid: {ChatManagerGuid}", sessionId, State.ChatManagerGuid);
             
-            await chatManagerGAgent.RenameChatTitleAsync(new Aevatar.Agents.GodGPT.Protos.GodChat.RenameChatTitleEvent()
+            _ = Task.Run(async () =>
             {
-                SessionId = sessionId.ToString(),
-                Title = title
+                try
+                {
+                    var chatManagerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(State.ChatManagerGuid);
+                    var chatManagerGAgent = chatManagerActor.As<IChatManagerGAgent>();
+                    await chatManagerGAgent.RenameChatTitleAsync(new Aevatar.Agents.GodGPT.Protos.GodChat.RenameChatTitleEvent()
+                    {
+                        SessionId = sessionId.ToString(),
+                        Title = title
+                    });
+                    Logger.LogInformation("[PERF][GodChatGAgent] SetSessionTitleAsync background task COMPLETED - SessionId: {SessionId}", sessionId);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "[GodChatGAgent] SetSessionTitleAsync background task failed - SessionId: {SessionId}", sessionId);
+                }
             });
             
             totalStopwatch.Stop();
-            Logger.LogInformation("[PERF][GodChatGAgent] SetSessionTitleAsync COMPLETED - Duration: {Duration}ms, SessionId: {SessionId}", totalStopwatch.ElapsedMilliseconds, sessionId);
+            Logger.LogInformation("[PERF][GodChatGAgent] SetSessionTitleAsync scheduled (not waiting) - Duration: {Duration}ms, SessionId: {SessionId}", totalStopwatch.ElapsedMilliseconds, sessionId);
         }
         else
         {
