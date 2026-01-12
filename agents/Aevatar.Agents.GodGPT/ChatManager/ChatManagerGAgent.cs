@@ -73,6 +73,8 @@ public partial class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatMana
     
     protected override async Task OnActivateAsync(CancellationToken cancellationToken = default)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        
         // Diagnostic logging: State BEFORE replay
         var versionBefore = GetCurrentVersion();
         var sessionCountBefore = State?.SessionInfoList?.Count ?? 0;
@@ -81,15 +83,17 @@ public partial class ChatGAgentManager : Aevatar.Agents.Core.GAgentBase<ChatMana
             "[ChatGAgentManager][OnActivateAsync] BEFORE base.OnActivateAsync - AgentId: {AgentId}, Version: {Version}, SessionCount: {Count}, Sessions: [{Sessions}]",
             Id, versionBefore, sessionCountBefore, string.Join(", ", sessionIds));
         
+        var baseStartMs = sw.ElapsedMilliseconds;
         await base.OnActivateAsync(cancellationToken);
+        var baseEndMs = sw.ElapsedMilliseconds;
         
         // Diagnostic logging: State AFTER replay
         var versionAfter = GetCurrentVersion();
         var sessionCountAfter = State?.SessionInfoList?.Count ?? 0;
         var sessionIdsAfter = State?.SessionInfoList?.Take(5).Select(s => $"{s.SessionId}:shares={s.ShareIds.Count}").ToList() ?? new List<string>();
         Logger.LogInformation(
-            "[ChatGAgentManager][OnActivateAsync] AFTER base.OnActivateAsync - AgentId: {AgentId}, Version: {Version}, SessionCount: {Count}, Sessions: [{Sessions}]",
-            Id, versionAfter, sessionCountAfter, string.Join(", ", sessionIdsAfter));
+            "[ChatGAgentManager][OnActivateAsync] AFTER base.OnActivateAsync - AgentId: {AgentId}, Version: {Version}, SessionCount: {Count}, Sessions: [{Sessions}], StateRecoveryMs: {StateRecoveryMs}",
+            Id, versionAfter, sessionCountAfter, string.Join(", ", sessionIdsAfter), baseEndMs - baseStartMs);
         
         // Check and initialize first access status if needed
         var firstAccess = await CheckAndInitializeFirstAccessStatus();
