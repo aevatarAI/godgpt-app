@@ -40,23 +40,28 @@ public class StripeProvider : IPaymentProvider
         }
 
         var products = _options.Products
-            .Where(p => p.PlanType != BillingCycle.Daily) // Skip daily plans
-            .Select(p => new ProductDto
+            .Where(p => p.PlanType != 1) // Skip daily plans (PlanType 1 = Day)
+            .Select(p => 
             {
-                ProductId = p.PriceId,
-                Name = p.Name,
-                Description = p.Description,
-                Price = p.Amount,
-                Currency = p.Currency,
-                PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
-                BillingCycle = p.PlanType,
-                IsActive = true,
-                Metadata = new Dictionary<string, string>
+                var billingCycle = p.GetBillingCycle();
+                return new ProductDto
                 {
-                    ["isUltimate"] = p.IsUltimate.ToString(),
-                    ["mode"] = p.Mode,
-                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, p.PlanType)
-                }
+                    ProductId = p.PriceId,
+                    Name = p.Name,
+                    Description = p.Description,
+                    Price = p.Amount,
+                    Currency = p.Currency,
+                    PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
+                    BillingCycle = billingCycle,
+                    IsActive = true,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["isUltimate"] = p.IsUltimate.ToString(),
+                        ["mode"] = p.Mode,
+                        ["originalPlanType"] = p.PlanType.ToString(),
+                        ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, billingCycle)
+                    }
+                };
             })
             .ToList();
 
@@ -617,7 +622,27 @@ public class StripeProductConfig
     public string Description { get; set; } = string.Empty;
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
-    public BillingCycle PlanType { get; set; }
+    
+    /// <summary>
+    /// Original plan type value from config (1=Day, 2=Month, 3=Year, 4=Week).
+    /// This matches the legacy GodGPT PlanType enum values.
+    /// </summary>
+    public int PlanType { get; set; }
+    
     public string Mode { get; set; } = "subscription";
     public bool IsUltimate { get; set; }
+    
+    /// <summary>
+    /// Maps the legacy PlanType value to BillingCycle for internal calculations.
+    /// Legacy PlanType: 1=Day, 2=Month, 3=Year, 4=Week
+    /// BillingCycle: 1=Daily, 2=Weekly, 3=Monthly, 4=Quarterly, 5=Yearly
+    /// </summary>
+    public BillingCycle GetBillingCycle() => PlanType switch
+    {
+        1 => BillingCycle.Daily,    // Day -> Daily
+        2 => BillingCycle.Monthly,  // Month -> Monthly
+        3 => BillingCycle.Yearly,   // Year -> Yearly
+        4 => BillingCycle.Weekly,   // Week -> Weekly
+        _ => BillingCycle.Monthly   // Default to Monthly
+    };
 }

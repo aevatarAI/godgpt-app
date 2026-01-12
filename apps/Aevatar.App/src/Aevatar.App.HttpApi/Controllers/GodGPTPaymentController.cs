@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using GrainPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
 using BillingCycle = Aevatar.Payment.Abstractions.BillingCycle;
+using QuotaPlanType = Aevatar.Agents.GodGPT.Protos.UserQuota.QuotaPlanType;
 
 namespace Aevatar.Controllers;
 
@@ -60,11 +61,13 @@ public class GodGPTPaymentController : AevatarController
         var result = products.Select(p => new StripeProductDto
         {
             PriceId = p.ProductId,
-            PlanType = MapBillingCycleToPlanType(p.BillingCycle).ToQuotaPlanType(),
+            // Use original PlanType from config metadata (matches legacy API)
+            PlanType = GetOriginalPlanType(p),
             Mode = "subscription",
             Amount = p.Price,
             Currency = p.Currency,
-            DailyAvgPrice = CalculateDailyAvgPrice(p.Price, p.BillingCycle),
+            // Use dailyAvgPrice from metadata (pure number format like "0.85")
+            DailyAvgPrice = GetDailyAvgPrice(p),
             IsUltimate = p.PlanType == PlanType.Premium,
             Credits = 0
         }).ToList();
@@ -87,10 +90,12 @@ public class GodGPTPaymentController : AevatarController
             ProductId = p.ProductId,
             Name = p.Name,
             Description = p.Description,
-            PlanType = (int)MapBillingCycleToPlanType(p.BillingCycle),
+            // Use original PlanType from config metadata (matches legacy API)
+            PlanType = (int)GetOriginalPlanType(p),
             Amount = p.Price,
             Currency = p.Currency,
-            DailyAvgPrice = CalculateDailyAvgPrice(p.Price, p.BillingCycle)
+            // Use dailyAvgPrice from metadata (pure number format)
+            DailyAvgPrice = GetDailyAvgPrice(p)
         }).ToList();
         
         _logger.LogDebug("[GodGPTPaymentController][GetAppleProductsAsync] userId: {UserId}, duration: {Duration}ms",
@@ -356,6 +361,33 @@ public class GodGPTPaymentController : AevatarController
     #region Helper Methods
 
     /// <summary>
+    /// Gets original PlanType from product metadata (matches legacy API: 1=Day, 2=Month, 3=Year, 4=Week)
+    /// </summary>
+    private static QuotaPlanType GetOriginalPlanType(ProductDto product)
+    {
+        if (product.Metadata.TryGetValue("originalPlanType", out var planTypeStr) 
+            && int.TryParse(planTypeStr, out var planType))
+        {
+            return (QuotaPlanType)planType;
+        }
+        // Fallback: map from BillingCycle
+        return MapBillingCycleToPlanType(product.BillingCycle).ToQuotaPlanType();
+    }
+
+    /// <summary>
+    /// Gets dailyAvgPrice from product metadata (pure number format like "0.85")
+    /// </summary>
+    private static string GetDailyAvgPrice(ProductDto product)
+    {
+        if (product.Metadata.TryGetValue("dailyAvgPrice", out var dailyAvgPrice))
+        {
+            return dailyAvgPrice;
+        }
+        // Fallback: calculate from price and BillingCycle
+        return CalculateDailyAvgPriceLegacy(product.Price, product.BillingCycle);
+    }
+
+    /// <summary>
     /// Maps BillingCycle (new design) to old PlanType (Day/Month/Year/Week)
     /// </summary>
     private static GrainPlanType MapBillingCycleToPlanType(BillingCycle billingCycle)
@@ -365,14 +397,17 @@ public class GodGPTPaymentController : AevatarController
             BillingCycle.Daily => GrainPlanType.Day,
             BillingCycle.Weekly => GrainPlanType.Week,
             BillingCycle.Monthly => GrainPlanType.Month,
-            BillingCycle.Quarterly => GrainPlanType.Month, // Closest approximation
+            BillingCycle.Quarterly => GrainPlanType.Month,
             BillingCycle.Yearly => GrainPlanType.Year,
-            BillingCycle.Lifetime => GrainPlanType.Year, // Treat lifetime as yearly
+            BillingCycle.Lifetime => GrainPlanType.Year,
             _ => GrainPlanType.None
         };
     }
 
-    private static string CalculateDailyAvgPrice(decimal price, BillingCycle billingCycle)
+    /// <summary>
+    /// Legacy dailyAvgPrice calculation (pure number format)
+    /// </summary>
+    private static string CalculateDailyAvgPriceLegacy(decimal price, BillingCycle billingCycle)
     {
         var days = billingCycle switch
         {
@@ -381,11 +416,10 @@ public class GodGPTPaymentController : AevatarController
             BillingCycle.Monthly => 30,
             BillingCycle.Quarterly => 90,
             BillingCycle.Yearly => 365,
-            BillingCycle.Lifetime => 3650, // ~10 years
+            BillingCycle.Lifetime => 3650,
             _ => 30
         };
-        var dailyPrice = price / days;
-        return $"${dailyPrice:F2}/day";
+        return Math.Round(price / days, 2).ToString("F2");
     }
 
     #endregion
