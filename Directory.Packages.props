@@ -421,5 +421,7 @@
     <PackageVersion Include="Hangfire.Core" Version="1.8.20" />
     <PackageVersion Include="Hangfire.AspNetCore" Version="1.8.20" />
     <PackageVersion Include="Hangfire.Mongo" Version="1.11.2" />
+    <!-- CLI Tools -->
+    <PackageVersion Include="Spectre.Console" Version="0.49.1" />
   </ItemGroup>
 </Project>
