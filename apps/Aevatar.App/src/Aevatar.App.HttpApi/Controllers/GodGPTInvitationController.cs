@@ -1,5 +1,6 @@
 using Aevatar.App.Application.Services;
 using Aevatar.App.HttpApi.Controllers;
+using Aevatar.App.Application.Contracts.Services;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -39,13 +40,18 @@ namespace Aevatar.Controllers;
 [Authorize]
 public class GodGPTInvitationController : AevatarController
 {
-    private readonly ILogger<GodGPTPaymentController> _logger;
+    private readonly ILogger<GodGPTInvitationController> _logger;
     private readonly IInvitationService _invitationService;
+    private readonly ITwitterService _twitterService;
 
-    public GodGPTInvitationController(ILogger<GodGPTPaymentController> logger, IInvitationService invitationService)
+    public GodGPTInvitationController(
+        ILogger<GodGPTInvitationController> logger, 
+        IInvitationService invitationService,
+        ITwitterService twitterService)
     {
         _logger = logger;
         _invitationService = invitationService;
+        _twitterService = twitterService;
     }
     
     [HttpPost("generate-trial-code")]
@@ -103,5 +109,63 @@ public class GodGPTInvitationController : AevatarController
         return response;
     }
     
-    // NOTE: Twitter endpoints removed - feature deprecated
+    // ==========================================
+    // Twitter OAuth2 Endpoints
+    // ==========================================
+    
+    /// <summary>
+    /// Get Twitter OAuth2 PKCE authentication parameters
+    /// </summary>
+    [HttpGet("twitter/params")]
+    public async Task<TwitterAuthParamsDto> GetTwitterAuthParamsAsync()
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var currentUserId = (Guid)CurrentUser.Id!;
+        var response = await _twitterService.GetAuthParamsAsync(currentUserId);
+        _logger.LogDebug("[GodGPTInvitationController][GetTwitterAuthParamsAsync] userId: {UserId}, duration: {Duration}ms",
+            currentUserId, stopwatch.ElapsedMilliseconds);
+        return response;
+    }
+    
+    /// <summary>
+    /// Verify Twitter OAuth2 authorization code and bind account
+    /// </summary>
+    [HttpPost("twitter/verify")]
+    public async Task<TwitterAuthResultDto> TwitterAuthVerifyAsync(TwitterAuthVerifyInput input)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var currentUserId = (Guid)CurrentUser.Id!;
+        var response = await _twitterService.VerifyAuthCodeAsync(currentUserId, input);
+        _logger.LogDebug("[GodGPTInvitationController][TwitterAuthVerifyAsync] userId: {UserId}, duration: {Duration}ms",
+            currentUserId, stopwatch.ElapsedMilliseconds);
+        return response;
+    }
+    
+    /// <summary>
+    /// Get current Twitter account bind status
+    /// </summary>
+    [HttpGet("twitter/bind-status")]
+    public async Task<TwitterBindStatusDto> GetTwitterBindStatusAsync()
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var currentUserId = (Guid)CurrentUser.Id!;
+        var response = await _twitterService.GetBindStatusAsync(currentUserId);
+        _logger.LogDebug("[GodGPTInvitationController][GetTwitterBindStatusAsync] userId: {UserId}, duration: {Duration}ms",
+            currentUserId, stopwatch.ElapsedMilliseconds);
+        return response;
+    }
+    
+    /// <summary>
+    /// Unbind Twitter account from user
+    /// </summary>
+    [HttpPost("twitter/unbind")]
+    public async Task<TwitterOperationResultDto> UnbindTwitterAsync()
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var currentUserId = (Guid)CurrentUser.Id!;
+        var response = await _twitterService.UnbindTwitterAsync(currentUserId);
+        _logger.LogDebug("[GodGPTInvitationController][UnbindTwitterAsync] userId: {UserId}, duration: {Duration}ms",
+            currentUserId, stopwatch.ElapsedMilliseconds);
+        return response;
+    }
 }
