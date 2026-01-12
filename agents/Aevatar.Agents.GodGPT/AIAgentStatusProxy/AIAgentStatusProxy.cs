@@ -411,13 +411,43 @@ public class AIAgentStatusProxy :
             await foreach (var token in ChatStreamAsync(request))
             {
                 serialNumber++;
-                fullResponse.Append(token);
-                aggregationBuffer.Append(token);
-                aggregatedTokenCount++;
+                fullResponse.Append(token);  // 原始响应（用于最终存储）
+                
+                // ========================================
+                // CRITICAL FIX: Filter 只处理新 token，不是累积内容！
+                // StreamingSuggestionsFilter 是状态机，每个字符只能处理一次
+                // ========================================
+                string filteredToken = token;
+                bool tokenBlocked = false;
+                
+                if (suggestionsFilter != null)
+                {
+                    var filterResult = suggestionsFilter.ProcessChunk(token);  // ✓ 只传新 token
+                    if (filterResult.WasBlocked && string.IsNullOrEmpty(filterResult.FilteredContent))
+                    {
+                        tokenBlocked = true;
+                        Logger.LogDebug("[AIAgentStatusProxy] Token blocked by SUGGESTIONS filter - ChatId={ChatId}", context?.ChatId ?? "null");
+                    }
+                    else
+                    {
+                        filteredToken = filterResult.FilteredContent ?? "";
+                    }
+                }
+                
+                // 把 filtered 内容（而非原始 token）添加到聚合缓冲
+                if (!tokenBlocked && !string.IsNullOrEmpty(filteredToken))
+                {
+                    aggregationBuffer.Append(filteredToken);
+                    aggregatedTokenCount++;
+                }
+                else if (tokenBlocked)
+                {
+                    // Token 被阻止，跳过本次循环
+                    continue;
+                }
                 
                 // CRITICAL: Send first token immediately for best TTFT (Time To First Token)
-                // Users should see response start immediately, subsequent tokens can be aggregated
-                if (!firstTokenReceived)
+                if (!firstTokenReceived && aggregationBuffer.Length > 0)
                 {
                     firstTokenReceived = true;
                     Logger.LogInformation("[PERF][AIAgentStatusProxy] TTFT - First token received after {ElapsedMs}ms, ChatId={ChatId}",
@@ -425,35 +455,16 @@ public class AIAgentStatusProxy :
                     
                     var firstTokenContent = aggregationBuffer.ToString();
                     
-                    // Apply SUGGESTIONS filtering for HTTP text chat
-                    if (suggestionsFilter != null)
+                    // Send first token immediately
+                    var firstContent = new AIStreamChatContent
                     {
-                        var filterResult = suggestionsFilter.ProcessChunk(firstTokenContent);
-                        if (filterResult.WasBlocked && string.IsNullOrEmpty(filterResult.FilteredContent))
-                        {
-                            // Entire first token is blocked, don't send
-                            aggregationBuffer.Clear();
-                            aggregatedTokenCount = 0;
-                            lastSendTime = DateTime.UtcNow;
-                            continue;
-                        }
-                        // Use filtered content (may be partial if [SUGGESTIONS] was found)
-                        firstTokenContent = filterResult.FilteredContent ?? "";
-                    }
-                    
-                    // Send first token immediately (if there's content after filtering)
-                    if (!string.IsNullOrEmpty(firstTokenContent))
-                    {
-                        var firstContent = new AIStreamChatContent
-                        {
-                            Content = firstTokenContent,
-                            IsComplete = false,
-                            SerialNumber = serialNumber,
-                            IsLastChunk = false
-                        };
-                        await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, firstContent, streamId, isHttpRequest, isVoiceChat, voiceLanguage);
-                        messagesSent++;
-                    }
+                        Content = firstTokenContent,
+                        IsComplete = false,
+                        SerialNumber = serialNumber,
+                        IsLastChunk = false
+                    };
+                    await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, firstContent, streamId, isHttpRequest, isVoiceChat, voiceLanguage);
+                    messagesSent++;
                     
                     Logger.LogInformation("[PERF][AIAgentStatusProxy] First token sent immediately - SerialNumber={SerialNumber}, ChatId={ChatId}",
                         serialNumber, context?.ChatId ?? "null");
@@ -462,32 +473,7 @@ public class AIAgentStatusProxy :
                     aggregationBuffer.Clear();
                     aggregatedTokenCount = 0;
                     lastSendTime = DateTime.UtcNow;
-                    continue; // Skip the aggregation check for first token
-                }
-                
-                // Apply SUGGESTIONS filtering for HTTP text chat
-                string? filteredContent = null;
-                if (suggestionsFilter != null)
-                {
-                    var currentContent = aggregationBuffer.ToString();
-                    var filterResult = suggestionsFilter.ProcessChunk(currentContent);
-                    
-                    if (filterResult.WasBlocked && string.IsNullOrEmpty(filterResult.FilteredContent))
-                    {
-                        // Entire content blocked (in SUGGESTIONS block) - don't send
-                        aggregationBuffer.Clear();
-                        aggregatedTokenCount = 0;
-                        Logger.LogDebug("[AIAgentStatusProxy] SUGGESTIONS content blocked - ChatId={ChatId}", context?.ChatId ?? "null");
-                        continue;
-                    }
-                    
-                    // Use filtered content (may be partial if [SUGGESTIONS] was found mid-chunk)
-                    filteredContent = filterResult.FilteredContent;
-                    if (filteredContent != currentContent)
-                    {
-                        Logger.LogDebug("[AIAgentStatusProxy] SUGGESTIONS filtered - Original={OrigLen}, Filtered={FiltLen}, ChatId={ChatId}", 
-                            currentContent.Length, filteredContent?.Length ?? 0, context?.ChatId ?? "null");
-                    }
+                    continue;
                 }
                 
                 // Check if we should send aggregated message
@@ -495,11 +481,9 @@ public class AIAgentStatusProxy :
                 var shouldSend = aggregatedTokenCount >= MaxAggregatedTokens || 
                                  timeSinceLastSend >= AggregationIntervalMs;
                 
-                // Use filtered content if available, otherwise original buffer
-                var contentToSend = filteredContent ?? aggregationBuffer.ToString();
-                
-                if (shouldSend && !string.IsNullOrEmpty(contentToSend))
+                if (shouldSend && aggregationBuffer.Length > 0)
                 {
+                    var contentToSend = aggregationBuffer.ToString();
                     var streamContent = new AIStreamChatContent
                     {
                         Content = contentToSend,
@@ -524,44 +508,25 @@ public class AIAgentStatusProxy :
                 }
             }
             
-            // Send any remaining buffered content (that's not blocked by filter)
+            // Send any remaining buffered content
             if (aggregationBuffer.Length > 0)
             {
                 var remainingContentStr = aggregationBuffer.ToString();
-                
-                // Apply filter if active
-                if (suggestionsFilter != null)
+                var remainingContent = new AIStreamChatContent
                 {
-                    var filterResult = suggestionsFilter.ProcessChunk(remainingContentStr);
-                    if (!filterResult.WasBlocked && !string.IsNullOrEmpty(filterResult.FilteredContent))
-                    {
-                        var remainingContent = new AIStreamChatContent
-                        {
-                            Content = filterResult.FilteredContent,
-                            IsComplete = false,
-                            SerialNumber = serialNumber,
-                            IsLastChunk = false
-                        };
-                        await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, remainingContent, streamId, isHttpRequest, isVoiceChat, voiceLanguage);
-                        messagesSent++;
-                    }
-                }
-                else
-                {
-                    var remainingContent = new AIStreamChatContent
-                    {
-                        Content = remainingContentStr,
-                        IsComplete = false,
-                        SerialNumber = serialNumber,
-                        IsLastChunk = false
-                    };
-                    await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, remainingContent, streamId, isHttpRequest, isVoiceChat, voiceLanguage);
-                    messagesSent++;
-                }
+                    Content = remainingContentStr,
+                    IsComplete = false,
+                    SerialNumber = serialNumber,
+                    IsLastChunk = false
+                };
+                await SendStreamCallbackAsync(context, AIExceptionEnum.None, null, remainingContent, streamId, isHttpRequest, isVoiceChat, voiceLanguage);
+                messagesSent++;
             }
             
             // Extract final filtered content if we were accumulating SUGGESTIONS
             List<string>? extractedSuggestions = null;
+            string? cleanedAggregationResponse = null;
+            
             if (suggestionsFilter != null && suggestionsFilter.IsAccumulating)
             {
                 var finalFilterResult = suggestionsFilter.ExtractFinalContent();
@@ -583,10 +548,20 @@ public class AIAgentStatusProxy :
                     Logger.LogDebug("[AIAgentStatusProxy] Sent clean content after SUGGESTIONS extraction - Length={Length}, Suggestions={Count}, ChatId={ChatId}",
                         finalFilterResult.FilteredContent.Length, extractedSuggestions?.Count ?? 0, context?.ChatId ?? "null");
                 }
+                
+                // CRITICAL: Clean aggregation message to remove SUGGESTIONS block
+                // This ensures GodChatGAgent receives clean content and doesn't need to clean again
+                var fullResponseStr = fullResponse.ToString();
+                var parseResult = SuggestionParser.ParseResponseWithSuggestions(fullResponseStr);
+                cleanedAggregationResponse = parseResult.MainContent;
+                
+                Logger.LogDebug("[AIAgentStatusProxy] Cleaned aggregation message - Original={OrigLen}, Cleaned={CleanLen}, Suggestions={Count}, ChatId={ChatId}",
+                    fullResponseStr.Length, cleanedAggregationResponse?.Length ?? 0, extractedSuggestions?.Count ?? 0, context?.ChatId ?? "null");
             }
 
             // Send final chunk with aggregation message for state persistence
-            var aggregatedResponse = fullResponse.ToString();
+            // Use cleaned content if suggestions were filtered, otherwise use full response
+            var aggregatedResponse = cleanedAggregationResponse ?? fullResponse.ToString();
             var finalContent = new AIStreamChatContent
             {
                 Content = aggregatedResponse,
@@ -595,7 +570,7 @@ public class AIAgentStatusProxy :
                 SerialNumber = serialNumber + 1,
                 // CRITICAL: Set these fields to trigger AI message persistence in GodChatGAgent.Callbacks
                 IsAggregationMsg = true,
-                AggregationMsg = aggregatedResponse,
+                AggregationMsg = aggregatedResponse, // Already cleaned if suggestions were filtered
                 // Pass extracted suggestions for client
                 ExtractedSuggestions = extractedSuggestions
             };
@@ -816,6 +791,43 @@ public class AIAgentStatusProxy :
             }
             else if (content?.IsLastChunk == true)
             {
+                // CRITICAL FIX: If we have extracted suggestions, send TextChunk with suggestedItems first,
+                // then send ControlProto(AllCompleted)
+                if (content.ExtractedSuggestions?.Any() == true)
+                {
+                    // Send final text chunk with suggestedItems
+                    var textEnvelope = new GodChatStreamEnvelopeProto
+                    {
+                        StreamId = streamId,
+                        ChatId = context?.ChatId ?? "",
+                        RequestId = context?.RequestId.ToString() ?? "",
+                        Seq = seq,
+                        Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
+                        Text = new TextChunkProto
+                        {
+                            Content = "",
+                            IsLast = true,
+                            SentenceIndex = 0
+                        }
+                    };
+                    textEnvelope.Text.SuggestedItems.AddRange(content.ExtractedSuggestions);
+                    
+                    var textEventEnvelope = new EventEnvelope
+                    {
+                        Id = Guid.NewGuid().ToString(),
+                        Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
+                        Version = 0,
+                        Payload = Any.Pack(textEnvelope)
+                    };
+                    await stream.ProduceAsync(textEventEnvelope, CancellationToken.None);
+                    Logger.LogInformation("[AIAgentStatusProxy] Sent suggestedItems - Count={Count}, StreamId={StreamId}",
+                        content.ExtractedSuggestions.Count, streamId);
+                    
+                    // Update seq for control message
+                    seq++;
+                    streamEnvelope.Seq = seq;
+                }
+                
                 streamEnvelope.Control = new ControlProto
                 {
                     Type = isVoiceChat

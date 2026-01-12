@@ -42,6 +42,9 @@ message TextChunkProto {
   // Optional: sentence index hint for downstream TTS alignment (0-based).
   // When omitted, consumers can treat as "unknown".
   int32 sentence_index = 3;
+
+  // AI-generated conversation suggestions (present only in last chunk for text chat).
+  repeated string suggested_items = 4;
 }
 
 // Streaming audio chunk produced asynchronously by voice synthesis.

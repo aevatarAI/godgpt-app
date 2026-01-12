@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using Aevatar.Agents.GodGPT.Protos.GodChatStream;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
@@ -56,9 +57,14 @@ public static class ChatMiddlewareHelper
         {
             case GodChatStreamEnvelopeProto.PayloadOneofCase.Text:
                 http.Response = envelope.Text?.Content ?? string.Empty;
-                http.IsLastChunk = false;
+                http.IsLastChunk = envelope.Text?.IsLast ?? false;
                 http.AudioData = null;
                 http.AudioMetadata = null;
+                // Map suggested items from proto to HTTP response
+                if (envelope.Text?.SuggestedItems != null && envelope.Text.SuggestedItems.Count > 0)
+                {
+                    http.SuggestedItems = envelope.Text.SuggestedItems.ToList();
+                }
                 return http;
 
             case GodChatStreamEnvelopeProto.PayloadOneofCase.Audio:

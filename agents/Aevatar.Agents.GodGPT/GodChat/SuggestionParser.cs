@@ -55,6 +55,62 @@ public static class SuggestionParser
     }
     
     /// <summary>
+    /// Clean any remaining SUGGESTIONS markers from content.
+    /// This is a safety net to ensure no SUGGESTIONS-related content leaks through.
+    /// Removes:
+    /// - [SUGGESTIONS] markers (case-insensitive)
+    /// - [/SUGGESTIONS] markers (case-insensitive)
+    /// - Partial markers like "[SUGGESTIONS", "SUGGESTIONS]", etc.
+    /// - Any content after [SUGGESTIONS] marker
+    /// </summary>
+    public static string CleanRemainingSuggestionsMarkers(string content)
+    {
+        if (string.IsNullOrEmpty(content))
+        {
+            return content;
+        }
+        
+        // Find the start of [SUGGESTIONS] marker (case-insensitive)
+        var suggestionsIndex = content.IndexOf("[SUGGESTIONS]", StringComparison.OrdinalIgnoreCase);
+        if (suggestionsIndex >= 0)
+        {
+            // Remove everything from [SUGGESTIONS] to the end
+            var cleaned = content.Substring(0, suggestionsIndex).TrimEnd();
+            
+            // Also check for partial markers that might have leaked through
+            // Remove any trailing partial markers
+            cleaned = System.Text.RegularExpressions.Regex.Replace(
+                cleaned, 
+                @"\[SUGGESTIONS?[^\]]*$", 
+                "", 
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            cleaned = System.Text.RegularExpressions.Regex.Replace(
+                cleaned, 
+                @"\[/SUGGESTIONS?[^\]]*$", 
+                "", 
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            
+            return cleaned.TrimEnd();
+        }
+        
+        // Check for partial markers at the end
+        var cleaned2 = System.Text.RegularExpressions.Regex.Replace(
+            content, 
+            @"\[SUGGESTIONS?[^\]]*$", 
+            "", 
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        
+        cleaned2 = System.Text.RegularExpressions.Regex.Replace(
+            cleaned2, 
+            @"\[/SUGGESTIONS?[^\]]*$", 
+            "", 
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        
+        return cleaned2.TrimEnd();
+    }
+    
+    /// <summary>
     /// Checks if the text contains a partial suggestions marker using prefix matching
     /// </summary>
     public static bool IsPartialSuggestionsMarker(ReadOnlySpan<char> content)
