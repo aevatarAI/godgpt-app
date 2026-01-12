@@ -111,6 +111,7 @@ public class GodGPTAccountController : AevatarController
     /// <summary>
     /// Get basic user information (ProfileController endpoint).
     /// Returns uid, email, name, avatar for legacy API compatibility.
+    /// Handles Apple Private Relay and third-party login (Apple/Google) users.
     /// </summary>
     [HttpGet("profile/user-info")]
     public async Task<BasicUserInfoDto> GetUserInfoAsync()
@@ -120,13 +121,51 @@ public class GodGPTAccountController : AevatarController
         _logger.LogDebug("[GodGPTAccountController][GetUserInfoAsync] UserId: {UserId}", userId);
         
         var user = await _userManager.FindByIdAsync(userId.ToString());
+        if (user == null)
+        {
+            _logger.LogWarning("[GodGPTAccountController][GetUserInfoAsync] User not found: {UserId}", userId);
+            return new BasicUserInfoDto { Uid = userId };
+        }
+        
+        // Try to get Apple provided name from ExtraProperties
+        string? fullName = null;
+        if (user.ExtraProperties.TryGetValue("AppleFullName", out var appleFullName))
+        {
+            fullName = appleFullName?.ToString();
+        }
+        if (string.IsNullOrWhiteSpace(fullName))
+        {
+            var firstName = user.ExtraProperties.TryGetValue("AppleFirstName", out var fn) ? fn?.ToString() : "";
+            var lastName = user.ExtraProperties.TryGetValue("AppleLastName", out var ln) ? ln?.ToString() : "";
+            fullName = $"{firstName} {lastName}".Trim();
+            if (string.IsNullOrWhiteSpace(fullName)) fullName = null;
+        }
+        
+        // Check for Apple Private Relay (privacy protection)
+        if (IsApplePrivateRelay(user))
+        {
+            _logger.LogDebug("[GodGPTAccountController][GetUserInfoAsync] Apple Private Relay user: {UserId}", userId);
+            return new BasicUserInfoDto
+            {
+                Uid = userId,
+                Email = null, // Privacy protection - no email for private relay
+                Avatar = null,
+                Name = string.IsNullOrWhiteSpace(fullName) ? "Profile" : fullName
+            };
+        }
+        
+        // Extract real email based on login type
+        var email = ExtractRealEmail(user.UserName, user.Email);
+        
+        // Extract display name
+        var displayName = ExtractDisplayName(user.UserName, email, fullName);
         
         var result = new BasicUserInfoDto
         {
             Uid = userId,
-            Email = user?.Email,
-            Name = user?.UserName,
-            Avatar = null // Avatar not stored in Identity, kept for API compatibility
+            Email = email,
+            Avatar = null,
+            Name = displayName
         };
         
         _logger.LogDebug("[GodGPTAccountController][GetUserInfoAsync] UserId: {UserId}, duration: {Duration}ms",
@@ -134,6 +173,76 @@ public class GodGPTAccountController : AevatarController
         
         return result;
     }
+    
+    #region User Info Helpers
+    
+    /// <summary>
+    /// Check if the user is using Apple's private relay
+    /// </summary>
+    private static bool IsApplePrivateRelay(IdentityUser user)
+    {
+        if (user.UserName?.EndsWith("@apple.privaterelay.com@apple", StringComparison.OrdinalIgnoreCase) == true)
+            return true;
+        if (user.Email?.Contains("@apple.privaterelay.com", StringComparison.OrdinalIgnoreCase) == true)
+            return true;
+        if (user.ExtraProperties.ContainsKey("AppleFirstName") || 
+            user.ExtraProperties.ContainsKey("AppleLastName") ||
+            user.ExtraProperties.ContainsKey("AppleFullName"))
+            return true;
+        return false;
+    }
+    
+    /// <summary>
+    /// Extract real email address based on login type (handles @apple/@google suffix)
+    /// </summary>
+    private static string? ExtractRealEmail(string? userName, string? systemEmail)
+    {
+        if (string.IsNullOrEmpty(userName)) return systemEmail;
+        
+        // Check if it's third-party login (Apple/Google)
+        if (userName.EndsWith("@apple", StringComparison.OrdinalIgnoreCase))
+            return userName[..^"@apple".Length];
+        if (userName.EndsWith("@google", StringComparison.OrdinalIgnoreCase))
+            return userName[..^"@google".Length];
+        
+        return systemEmail;
+    }
+    
+    /// <summary>
+    /// Extract display name based on available information
+    /// </summary>
+    private static string ExtractDisplayName(string? userName, string? email, string? fullName)
+    {
+        // Priority 1: Use fullName if available
+        if (!string.IsNullOrWhiteSpace(fullName))
+            return fullName;
+        
+        // Priority 2: For third-party login, extract from email
+        if (userName?.EndsWith("@apple", StringComparison.OrdinalIgnoreCase) == true ||
+            userName?.EndsWith("@google", StringComparison.OrdinalIgnoreCase) == true)
+        {
+            return GetDisplayNameFromEmail(email);
+        }
+        
+        // Priority 3: For regular login with custom username (not GUID), use username
+        if (!string.IsNullOrEmpty(userName) && !Guid.TryParse(userName, out _))
+            return userName;
+        
+        // Priority 4: Extract from email as fallback
+        return GetDisplayNameFromEmail(email);
+    }
+    
+    /// <summary>
+    /// Extract display name from email address (part before @)
+    /// </summary>
+    private static string GetDisplayNameFromEmail(string? email)
+    {
+        if (string.IsNullOrWhiteSpace(email) || !email.Contains('@'))
+            return email ?? "User";
+        return email[..email.IndexOf('@')];
+    }
+    
+    #endregion
 
     /// <summary>
     /// Get current user ID (QueryController endpoint)
