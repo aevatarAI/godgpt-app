@@ -1,12 +1,12 @@
+using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.GodGPT.Protos.Twitter;
 
 namespace Aevatar.Application.Grains.Twitter;
 
 /// <summary>
 /// Twitter Auth Agent Interface - OAuth2 authentication agent
-/// Note: Does NOT inherit IGAgent - RPC proxy pattern requires plain interface
 /// </summary>
-public interface ITwitterAuthGAgent
+public interface ITwitterAuthGAgent : IGAgent
 {
     /// <summary>
     /// Generate PKCE code verifier and challenge (plain method)

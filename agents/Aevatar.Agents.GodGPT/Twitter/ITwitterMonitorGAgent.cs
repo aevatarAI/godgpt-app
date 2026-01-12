@@ -1,3 +1,4 @@
+using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Twitter;
 
 namespace Aevatar.Application.Grains.Twitter;
@@ -9,9 +10,8 @@ namespace Aevatar.Application.Grains.Twitter;
 /// Note: This is NOT an Orleans Grain interface. Agent runs inside OrleansGAgentGrain.
 /// Use IGAgentActorManager to manage Agent lifecycle.
 /// All RPC-exposed methods use Protobuf types for cross-runtime compatibility.
-/// Note: Does NOT inherit IGAgent - RPC proxy pattern requires plain interface
 /// </summary>
-public interface ITwitterMonitorGAgent
+public interface ITwitterMonitorGAgent : IGAgent
 {
     #region Monitoring Control
 

@@ -1,12 +1,12 @@
+using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.GodGPT.Protos.Twitter;
 
 namespace Aevatar.Application.Grains.Twitter;
 
 /// <summary>
 /// Twitter Identity Binding Agent Interface - Maps Twitter ID to system user ID
-/// Note: Does NOT inherit IGAgent - RPC proxy pattern requires plain interface
 /// </summary>
-public interface ITwitterIdentityBindingGAgent
+public interface ITwitterIdentityBindingGAgent : IGAgent
 {
     /// <summary>
     /// Create or update binding between Twitter ID and system user ID
