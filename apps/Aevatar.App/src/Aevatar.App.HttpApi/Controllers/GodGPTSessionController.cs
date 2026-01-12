@@ -201,13 +201,14 @@ public class GodGPTSessionController : AevatarController
         try
         {
             var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(currentUserId.ToString());
+            var createActorMs = stopwatch.ElapsedMilliseconds;
+            
             var manager = managerActor.As<IChatManagerGAgent>();
             var language = HttpContext.GetGodGPTLanguage();
-            _logger.LogDebug(
-                $"[GodGPTSessionController][GetSessionMessageListAsync] sessionId: {sessionId}, language:{language}");
             var agentContext = _agentContextAccessor.GetOrCreate();
             agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
             var protoResult = await manager.GetSessionMessageListWithMetaAsync(sessionId);
+            var grainCallMs = stopwatch.ElapsedMilliseconds - createActorMs;
             
             // Convert Proto to DTO for HTTP response
             chatMessages = protoResult.Entries.Select(e => new ChatMessageWithMetaDto
@@ -221,21 +222,24 @@ public class GodGPTSessionController : AevatarController
                 VoiceDurationSeconds = e.Meta?.VoiceDurationSeconds ?? 0.0,
                 ImageKeys = e.Message.ImageKeys?.ToList() ?? new List<string>()
             }).ToList();
+            
+            _logger.LogInformation(
+                "[GodGPTSessionController][GetSessionMessageListAsync] sessionId={SessionId}, CreateActorMs={CreateActorMs}, GrainCallMs={GrainCallMs}, TotalMs={TotalMs}, MsgCount={MsgCount}",
+                sessionId, createActorMs, grainCallMs, stopwatch.ElapsedMilliseconds, chatMessages.Count);
         }
         catch (InvalidOperationException ex)
         {
-            _logger.LogError($"[GodGPTSessionController][GetSessionMessageListAsync] exception sessionId: {sessionId}, , duration: {stopwatch.ElapsedMilliseconds}ms, error:{ex.Message}");
-            // Convert InvalidOperationException to UserFriendlyException for proper HTTP error handling
+            _logger.LogError("[GodGPTSessionController][GetSessionMessageListAsync] exception sessionId={SessionId}, duration={DurationMs}ms, error={Error}",
+                sessionId, stopwatch.ElapsedMilliseconds, ex.Message);
             throw new UserFriendlyException(ex.Message);
         }
         catch (Exception ex)
         {
-            _logger.LogError($"[GodGPTSessionController][GetSessionMessageListAsync] exception sessionId: {sessionId}, , duration: {stopwatch.ElapsedMilliseconds}ms, error:{ex.Message}");
-            throw ex;
+            _logger.LogError("[GodGPTSessionController][GetSessionMessageListAsync] exception sessionId={SessionId}, duration={DurationMs}ms, error={Error}",
+                sessionId, stopwatch.ElapsedMilliseconds, ex.Message);
+            throw;
         }
 
-        _logger.LogDebug(
-            $"[GodGPTSessionController][GetSessionMessageListAsync] sessionId: {sessionId}, messageCount: {chatMessages.Count}, duration: {stopwatch.ElapsedMilliseconds}ms ");
         return chatMessages;
     }
 
