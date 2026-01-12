@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.Agents.Core.Context;
@@ -13,6 +14,8 @@ namespace Aevatar.Agents.Runtime.Orleans;
 /// 
 /// Creates lightweight actor proxies that forward to Grains.
 /// Agent instances are created and executed in the Grain (Silo) side.
+/// 
+/// Actor proxies are cached to avoid repeated RPC calls to InitializeAgentAsync.
 /// </summary>
 public class OrleansGAgentActorFactory : IGAgentActorFactory
 {
@@ -23,6 +26,12 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
     private readonly StreamingOptions _streamingOptions;
     private readonly IMessageStreamProvider? _messageStreamProvider;
     private readonly IOptions<MessageStreamProviderOptions>? _providerOptions;
+    
+    /// <summary>
+    /// Cache for actor proxies. Key = "AgentTypeShortName:RawId"
+    /// This avoids repeated InitializeAgentAsync RPC calls for the same agent.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, IGAgentActor> _actorCache = new();
 
     public OrleansGAgentActorFactory(
         IServiceProvider serviceProvider,
@@ -57,7 +66,8 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
     }
 
     /// <summary>
-    /// Create agent actor by type
+    /// Create or get cached agent actor by type.
+    /// Actor proxies are cached to avoid repeated InitializeAgentAsync RPC calls.
     /// </summary>
     public async Task<IGAgentActor> CreateGAgentActorAsync(
         Type agentType, 
@@ -70,6 +80,17 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
         var actorId = AgentId.Normalize(agentType, inputId);
         var rawId = AgentId.ExtractRawId(actorId);
         var agentTypeName = agentType.AssemblyQualifiedName ?? agentType.FullName ?? agentType.Name;
+        
+        // Build cache key: "AgentTypeShortName:RawId"
+        var agentTypeShortName = AgentId.GetAgentTypeShortName(agentTypeName);
+        var cacheKey = $"{agentTypeShortName}:{rawId}";
+        
+        // Check cache first - fast path without RPC
+        if (_actorCache.TryGetValue(cacheKey, out var cachedActor))
+        {
+            _logger.LogDebug("✅ Cache hit for Actor {CacheKey}", cacheKey);
+            return cachedActor;
+        }
 
         _logger.LogInformation(
             "Creating Orleans Actor proxy for Agent - Type: {AgentType}, inputId={InputId}, actorId={ActorId}",
@@ -90,8 +111,11 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
 
         // Activate - This will initialize Agent in the Grain (Silo side)
         await actor.ActivateAsync(ct);
+        
+        // Cache the actor proxy
+        _actorCache.TryAdd(cacheKey, actor);
 
-        _logger.LogInformation("✅ Created Orleans Actor proxy {ActorId}, Agent running in Silo", actor.Id);
+        _logger.LogInformation("✅ Created and cached Orleans Actor proxy {ActorId}, Agent running in Silo", actor.Id);
 
         return actor;
     }
