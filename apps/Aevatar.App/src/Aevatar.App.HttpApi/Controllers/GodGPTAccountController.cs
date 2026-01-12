@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Volo.Abp;
+using Volo.Abp.Identity;
 using Aevatar.GodGPT.Dtos;
 
 namespace Aevatar.Controllers;
@@ -28,13 +29,16 @@ namespace Aevatar.Controllers;
 public class GodGPTAccountController : AevatarController
 {
     private readonly IGodGPTUserService _userService;
+    private readonly IdentityUserManager _userManager;
     private readonly ILogger<GodGPTAccountController> _logger;
 
     public GodGPTAccountController(
         IGodGPTUserService userService,
+        IdentityUserManager userManager,
         ILogger<GodGPTAccountController> logger)
     {
         _userService = userService;
+        _userManager = userManager;
         _logger = logger;
     }
 
@@ -105,21 +109,30 @@ public class GodGPTAccountController : AevatarController
     }
 
     /// <summary>
-    /// Get user profile information (ProfileController endpoint)
+    /// Get basic user information (ProfileController endpoint).
+    /// Returns uid, email, name, avatar for legacy API compatibility.
     /// </summary>
     [HttpGet("profile/user-info")]
-    public async Task<UserProfileDto> GetUserInfoAsync()
+    public async Task<BasicUserInfoDto> GetUserInfoAsync()
     {
         var stopwatch = Stopwatch.StartNew();
         var userId = (Guid)CurrentUser.Id!;
         _logger.LogDebug("[GodGPTAccountController][GetUserInfoAsync] UserId: {UserId}", userId);
         
-        var userProfile = await _userService.GetUserProfileAsync(userId);
+        var user = await _userManager.FindByIdAsync(userId.ToString());
+        
+        var result = new BasicUserInfoDto
+        {
+            Uid = userId,
+            Email = user?.Email,
+            Name = user?.UserName,
+            Avatar = null // Avatar not stored in Identity, kept for API compatibility
+        };
         
         _logger.LogDebug("[GodGPTAccountController][GetUserInfoAsync] UserId: {UserId}, duration: {Duration}ms",
             userId, stopwatch.ElapsedMilliseconds);
         
-        return userProfile;
+        return result;
     }
 
     /// <summary>
@@ -130,4 +143,30 @@ public class GodGPTAccountController : AevatarController
     {
         return Task.FromResult((Guid)CurrentUser.Id!);
     }
+}
+
+/// <summary>
+/// Basic user information DTO for legacy API compatibility.
+/// </summary>
+public class BasicUserInfoDto
+{
+    /// <summary>
+    /// User ID
+    /// </summary>
+    public Guid Uid { get; set; }
+    
+    /// <summary>
+    /// User email address
+    /// </summary>
+    public string? Email { get; set; }
+    
+    /// <summary>
+    /// User display name
+    /// </summary>
+    public string? Name { get; set; }
+    
+    /// <summary>
+    /// User avatar URL (reserved for future use)
+    /// </summary>
+    public string? Avatar { get; set; }
 }
