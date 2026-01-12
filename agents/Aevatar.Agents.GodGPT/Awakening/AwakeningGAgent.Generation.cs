@@ -37,11 +37,12 @@ public partial class AwakeningGAgent
             {
                 using var cts = new CancellationTokenSource(timeout);
                 
-                // Get current user ID
-                var userId = Guid.Parse(Id);
+                // Get current user ID - use ExtractRawId to handle AgentType/Guid format
+                var rawId = AgentId.ExtractRawId(Id);
+                var userId = Guid.Parse(rawId);
                 
                 // Get IGodChat instance for current user using new framework
-                var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(AgentId.ExtractRawId(Id));
+                var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(rawId);
                 var godChat = godChatActor.As<IGodChat>();
                 var chatId = Guid.NewGuid().ToString();
                 

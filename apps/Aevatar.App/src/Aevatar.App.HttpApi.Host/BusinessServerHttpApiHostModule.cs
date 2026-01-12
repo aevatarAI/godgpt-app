@@ -30,6 +30,7 @@ using Aevatar.App.HttpApi.Host.Handler;
 using Aevatar.Agents.Plugins.MassTransit.DependencyInjection;
 using Aevatar.App.HttpApi.Host.BackgroundJobs;
 using Aevatar.App.Application.Options;
+using Aevatar.Controllers;
 using AutoResponseWrapper;
 
 namespace Aevatar.App.HttpApi.Host;
@@ -94,6 +95,36 @@ public class AppHttpApiHostModule : AbpModule
         
         // Configure Hangfire background job processing
         context.Services.AddHangfireWithMongo(configuration);
+        
+        // Configure AuthServer Proxy for backward compatibility with /api/account routes
+        ConfigureAuthServerProxy(context, configuration);
+    }
+    
+    /// <summary>
+    /// Configure HttpClient for proxying requests to AuthServer.
+    /// This enables backward compatibility for old /api/account routes.
+    /// </summary>
+    private void ConfigureAuthServerProxy(ServiceConfigurationContext context, IConfiguration configuration)
+    {
+        // Configure AuthServerProxyOptions from appsettings
+        context.Services.Configure<AuthServerProxyOptions>(options =>
+        {
+            // Use AuthServer:Authority URL, removing trailing slash
+            var authority = configuration["AuthServer:Authority"]?.TrimEnd('/') ?? "http://localhost:8001";
+            options.BaseUrl = authority;
+        });
+        
+        // Register named HttpClient for AuthServer communication
+        context.Services.AddHttpClient("AuthServer", client =>
+        {
+            var authority = configuration["AuthServer:Authority"]?.TrimEnd('/') ?? "http://localhost:8001";
+            client.BaseAddress = new Uri(authority);
+            client.Timeout = TimeSpan.FromSeconds(30);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            // Allow self-signed certificates in development
+            ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+        });
     }
     
     private static void ConfigureAutoResponseWrapper(ServiceConfigurationContext context)

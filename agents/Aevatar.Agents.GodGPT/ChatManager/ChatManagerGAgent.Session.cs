@@ -330,7 +330,7 @@ public partial class ChatGAgentManager
 
         RaiseEvent(new ClearAllEvent());
         await ConfirmEventsAsync();
-        return Guid.Parse(Id);
+        return Guid.Parse(AgentId.ExtractRawId(Id));
     }
 }
 
