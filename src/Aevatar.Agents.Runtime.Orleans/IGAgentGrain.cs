@@ -21,9 +21,12 @@ public interface IGAgentGrain : IGrainWithStringKey
     /// <summary>
     /// 初始化 Agent 实例（在 Silo 内创建）
     /// Agent ID 从 Grain 的 PrimaryKey 获取（Grain ID = Agent ID）
+    /// [AlwaysInterleave] allows this to execute even when Grain is processing other requests.
+    /// The method has early return if already initialized, so it's safe to interleave.
     /// </summary>
     /// <param name="agentTypeName">Agent 类型的程序集限定名</param>
     /// <returns>是否成功初始化</returns>
+    [AlwaysInterleave]
     Task<bool> InitializeAgentAsync(string agentTypeName);
 
     /// <summary>
