@@ -1,0 +1,173 @@
+syntax = "proto3";
+
+package Aevatar.Agents.Twitter;
+
+option csharp_namespace = "Aevatar.Agents.Twitter";
+
+import "google/protobuf/timestamp.proto";
+
+// ========== Agent State ==========
+
+// Twitter Monitor Agent State
+message TwitterMonitorState {
+    bool is_running = 1;
+    google.protobuf.Timestamp last_fetch_time = 2;
+    int64 last_fetch_time_utc = 3;
+    TweetMonitorConfig config = 4;
+    map<string, TweetRecord> stored_tweets = 5;
+    repeated TweetFetchHistory fetch_history = 6;
+    string last_error = 7;
+    int64 reminder_target_id = 8;
+    google.protobuf.Timestamp next_scheduled_fetch = 9;
+    int64 next_scheduled_fetch_utc = 10;
+}
+
+// ========== Events ==========
+
+// Monitoring started event
+message TwitterMonitoringStartedEvent {
+    string agent_id = 1;
+    google.protobuf.Timestamp started_at = 2;
+    int32 fetch_interval_minutes = 3;
+    string search_query = 4;
+}
+
+// Monitoring stopped event
+message TwitterMonitoringStoppedEvent {
+    string agent_id = 1;
+    google.protobuf.Timestamp stopped_at = 2;
+}
+
+// Tweets fetched event
+message TweetsFetchedEvent {
+    string agent_id = 1;
+    google.protobuf.Timestamp fetched_at = 2;
+    int32 total_fetched = 3;
+    int32 new_tweets = 4;
+    int32 duplicates_skipped = 5;
+    int32 filtered_out = 6;
+    repeated string new_tweet_ids = 7;
+}
+
+// Monitor config updated event
+message MonitorConfigUpdatedEvent {
+    string agent_id = 1;
+    TweetMonitorConfig config = 2;
+    google.protobuf.Timestamp updated_at = 3;
+}
+
+// Expired tweets cleaned event
+message ExpiredTweetsCleanedEvent {
+    string agent_id = 1;
+    int32 cleaned_count = 2;
+    google.protobuf.Timestamp cleaned_at = 3;
+}
+
+// ========== Config and DTOs ==========
+
+// Tweet monitor configuration
+message TweetMonitorConfig {
+    int32 fetch_interval_minutes = 1;
+    int32 max_tweets_per_fetch = 2;
+    int32 data_retention_days = 3;
+    string search_query = 4;
+    bool filter_original_only = 5;
+    bool enable_auto_cleanup = 6;
+    int32 config_version = 7;
+}
+
+// Tweet record stored in state
+message TweetRecord {
+    string tweet_id = 1;
+    string author_id = 2;
+    string author_handle = 3;
+    string author_name = 4;
+    google.protobuf.Timestamp created_at = 5;
+    int64 created_at_utc = 6;
+    string text = 7;
+    TweetTypeProto type = 8;
+    int32 view_count = 9;
+    int32 follower_count = 10;
+    bool has_valid_share_link = 11;
+    string share_link_url = 12;
+    bool is_processed = 13;
+    google.protobuf.Timestamp fetched_at = 14;
+}
+
+// Tweet type enumeration
+enum TweetTypeProto {
+    TWEET_TYPE_ORIGINAL = 0;
+    TWEET_TYPE_REPLY = 1;
+    TWEET_TYPE_RETWEET = 2;
+    TWEET_TYPE_QUOTE = 3;
+    TWEET_TYPE_UNKNOWN = 99;
+}
+
+// Tweet fetch history record
+message TweetFetchHistory {
+    google.protobuf.Timestamp fetch_time = 1;
+    int64 fetch_time_utc = 2;
+    int32 tweets_fetched = 3;
+    int32 new_tweets = 4;
+    bool is_success = 5;
+    string error_message = 6;
+    int64 duration_ms = 7;
+}
+
+// Tweet fetch result
+message TweetFetchResult {
+    google.protobuf.Timestamp fetch_start_time = 1;
+    int64 fetch_start_time_utc = 2;
+    google.protobuf.Timestamp fetch_end_time = 3;
+    int64 fetch_end_time_utc = 4;
+    int32 total_fetched = 5;
+    int32 new_tweets = 6;
+    int32 duplicate_skipped = 7;
+    int32 filtered_out = 8;
+    repeated string new_tweet_ids = 9;
+    string error_message = 10;
+    google.protobuf.Timestamp last_successful_fetch_time = 11;
+    int64 last_successful_fetch_time_utc = 12;
+}
+
+// Monitor status DTO
+message TweetMonitorStatus {
+    bool is_running = 1;
+    google.protobuf.Timestamp last_fetch_time = 2;
+    int64 last_fetch_time_utc = 3;
+    int32 total_tweets_stored = 4;
+    int32 tweets_fetched_today = 5;
+    string last_error = 6;
+    TweetMonitorConfig config = 7;
+    google.protobuf.Timestamp next_scheduled_fetch = 8;
+    int64 next_scheduled_fetch_utc = 9;
+}
+
+// Time range for queries
+message TimeRange {
+    google.protobuf.Timestamp start_time = 1;
+    google.protobuf.Timestamp end_time = 2;
+    int64 start_time_utc_second = 3;
+    int64 end_time_utc_second = 4;
+}
+
+// Tweet statistics
+message TweetStatistics {
+    int32 total_tweets = 1;
+    int32 original_tweets = 2;
+    int32 tweets_with_share_links = 3;
+    int32 unprocessed_tweets = 4;
+    google.protobuf.Timestamp statistics_generated_at = 5;
+    TimeRange query_range = 6;
+    map<string, int32> tweets_by_hour = 7;
+    map<string, int32> top_authors = 8;
+}
+
+// Search tweets request
+message SearchTweetsRequestProto {
+    string query = 1;
+    int32 max_results = 2;
+    google.protobuf.Timestamp start_time = 3;
+    google.protobuf.Timestamp end_time = 4;
+    string next_token = 5;
+}

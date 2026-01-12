@@ -1,0 +1,217 @@
+syntax = "proto3";
+
+package Aevatar.Agents.Twitter;
+
+option csharp_namespace = "Aevatar.Agents.Twitter";
+
+import "google/protobuf/timestamp.proto";
+import "Protos/twitter_monitor.proto";
+
+// ========== Agent State ==========
+
+// Twitter Reward Agent State
+message TwitterRewardState {
+    bool is_running = 1;
+    google.protobuf.Timestamp last_calculation_time = 2;
+    int64 last_calculation_time_utc = 3;
+    RewardConfig config = 4;
+    repeated RewardCalculationHistory calculation_history = 5;
+    map<string, UserRewardRecordList> user_rewards = 6;  // Key: Date string (yyyy-MM-dd)
+    string last_error = 7;
+    int64 reminder_target_id = 8;
+    google.protobuf.Timestamp next_scheduled_calculation = 9;
+    int64 next_scheduled_calculation_utc = 10;
+    int32 total_users_rewarded = 11;
+    int32 total_credits_distributed = 12;
+}
+
+// Wrapper for repeated user reward records (needed for map value)
+message UserRewardRecordList {
+    repeated UserRewardRecord records = 1;
+}
+
+// ========== Events ==========
+
+// Reward calculation started event
+message RewardCalculationStartedEvent {
+    string agent_id = 1;
+    google.protobuf.Timestamp started_at = 2;
+    google.protobuf.Timestamp target_date = 3;
+}
+
+// Reward calculation stopped event
+message RewardCalculationStoppedEvent {
+    string agent_id = 1;
+    google.protobuf.Timestamp stopped_at = 2;
+}
+
+// Reward calculation completed event
+message RewardCalculationCompletedEvent {
+    string agent_id = 1;
+    google.protobuf.Timestamp completed_at = 2;
+    google.protobuf.Timestamp target_date = 3;
+    int32 users_rewarded = 4;
+    int32 total_credits_distributed = 5;
+    int32 tweets_processed = 6;
+    bool is_success = 7;
+    string error_message = 8;
+}
+
+// User reward sent event
+message UserRewardSentEvent {
+    string agent_id = 1;
+    string user_id = 2;
+    string user_handle = 3;
+    string tweet_id = 4;
+    int32 credits = 5;
+    google.protobuf.Timestamp sent_at = 6;
+    string transaction_id = 7;
+}
+
+// Reward config updated event
+message RewardConfigUpdatedEvent {
+    string agent_id = 1;
+    RewardConfig config = 2;
+    google.protobuf.Timestamp updated_at = 3;
+}
+
+// ========== Config and DTOs ==========
+
+// Reward configuration
+message RewardConfig {
+    int32 time_range_start_hours = 1;
+    int32 time_range_end_hours = 2;
+    double share_link_multiplier = 3;
+    int32 max_daily_credits_per_user = 4;
+    bool enable_reward_calculation = 5;
+    int32 config_version = 6;
+    int32 min_views_for_reward = 7;
+    repeated RewardTier reward_tiers = 8;
+    repeated string excluded_user_ids = 9;
+}
+
+// Reward tier definition
+message RewardTier {
+    int32 min_views = 1;
+    int32 min_followers = 2;
+    int32 reward_credits = 3;
+    string tier_name = 4;
+}
+
+// Reward calculation history record
+message RewardCalculationHistory {
+    google.protobuf.Timestamp calculation_date = 1;
+    int64 calculation_date_utc = 2;
+    bool is_success = 3;
+    int32 users_rewarded = 4;
+    int32 total_credits_distributed = 5;
+    int64 processing_duration_ms = 6;
+    string error_message = 7;
+    google.protobuf.Timestamp processed_time_range_start = 8;
+    google.protobuf.Timestamp processed_time_range_end = 9;
+}
+
+// User reward record
+message UserRewardRecord {
+    string user_id = 1;
+    string user_handle = 2;
+    string tweet_id = 3;
+    google.protobuf.Timestamp reward_date = 4;
+    int64 reward_date_utc = 5;
+    double share_link_multiplier = 6;
+    int32 final_credits = 7;
+    bool has_valid_share_link = 8;
+    bool is_reward_sent = 9;
+    google.protobuf.Timestamp reward_sent_time = 10;
+    string reward_transaction_id = 11;
+    
+    // Separated credit fields
+    int32 regular_credits = 12;
+    int32 bonus_credits = 13;
+    int32 tweet_count = 14;
+    int32 bonus_credits_before_multiplier = 15;
+}
+
+// Reward calculation status
+message RewardCalculationStatus {
+    bool is_running = 1;
+    google.protobuf.Timestamp last_calculation_time = 2;
+    int64 last_calculation_time_utc = 3;
+    google.protobuf.Timestamp next_scheduled_calculation = 4;
+    int64 next_scheduled_calculation_utc = 5;
+    string last_error = 6;
+    RewardConfig config = 7;
+    int32 total_users_rewarded = 8;
+    int32 total_credits_distributed = 9;
+}
+
+// Reward calculation result
+message RewardCalculationResult {
+    google.protobuf.Timestamp calculation_date = 1;
+    int64 calculation_date_utc = 2;
+    google.protobuf.Timestamp processing_start_time = 3;
+    google.protobuf.Timestamp processing_end_time = 4;
+    int64 processing_duration_ms = 5;
+    TimeRange processed_time_range = 6;
+    int32 total_tweets_processed = 7;
+    int32 eligible_tweets = 8;
+    int32 users_rewarded = 9;
+    int32 total_credits_distributed = 10;
+    repeated UserRewardRecord user_rewards = 11;
+    bool is_success = 12;
+    string error_message = 13;
+}
+
+// Daily reward statistics
+message DailyRewardStatistics {
+    google.protobuf.Timestamp statistics_date = 1;
+    int64 statistics_date_utc = 2;
+    int32 total_users_rewarded = 3;
+    int32 total_credits_distributed = 4;
+    int32 total_tweets_eligible = 5;
+    int32 tweets_with_share_links = 6;
+    double average_credits_per_user = 7;
+    int32 share_link_bonus_total = 8;
+    map<string, int32> rewards_by_tier = 9;
+    map<string, int32> users_rewarded_map = 10;
+}
+
+// Time control status
+message TimeControlStatus {
+    google.protobuf.Timestamp current_utc_time = 1;
+    int64 current_utc_timestamp = 2;
+    google.protobuf.Timestamp last_reward_calculation_time = 3;
+    int64 last_reward_calculation_timestamp = 4;
+    google.protobuf.Timestamp next_reward_calculation_time = 5;
+    int64 next_reward_calculation_timestamp = 6;
+    int64 time_until_next_calculation_ms = 7;
+    bool is_reward_calculation_day = 8;
+    string timezone_info = 9;
+}
+
+// User info DTO for reward calculation
+message UserInfo {
+    string user_id = 1;
+    string username = 2;
+    string name = 3;
+    int32 followers_count = 4;
+    int32 following_count = 5;
+    int32 tweet_count = 6;
+}
+
+// Tweet process result for reward calculation
+message TweetProcessResultProto {
+    string tweet_id = 1;
+    string author_id = 2;
+    string author_handle = 3;
+    string author_name = 4;
+    google.protobuf.Timestamp created_at = 5;
+    TweetTypeProto type = 6;
+    int32 view_count = 7;
+    int32 follower_count = 8;
+    bool has_valid_share_link = 9;
+    string share_link_url = 10;
+    bool is_processed = 11;
+    int32 reward_credits = 12;
+    double share_link_multiplier = 13;
+}

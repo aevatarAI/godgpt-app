@@ -1,0 +1,118 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.protos.twitter;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.Twitter";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// Twitter Auth Agent State
+// =============================================================================
+
+// Twitter Auth State - OAuth2 authentication state
+message TwitterAuthState {
+    string user_id = 1;
+    string twitter_user_id = 2;
+    string username = 3;
+    bool is_bound = 4;
+    string access_token = 5;
+    string refresh_token = 6;
+    google.protobuf.Timestamp token_expires_at = 7;
+    string code_verifier = 8;
+    string code_challenge = 9;
+    string state = 10;
+    string profile_image_url = 11;
+}
+
+// =============================================================================
+// Twitter Identity Binding Agent State
+// =============================================================================
+
+// Twitter Identity Binding State - Maps Twitter ID to system user ID
+message TwitterIdentityBindingState {
+    string twitter_user_id = 1;
+    string user_id = 2;  // System user ID as string (from Guid)
+    string twitter_username = 3;
+    string profile_image_url = 4;
+    google.protobuf.Timestamp created_at = 5;
+    google.protobuf.Timestamp updated_at = 6;
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+// Set Code Verifier Event - Stores PKCE code verifier
+message SetCodeVerifierEvent {
+    string code_verifier = 1;
+}
+
+// Twitter Account Bound Event - Twitter account bound to user
+message TwitterAccountBoundEvent {
+    string user_id = 1;
+    string twitter_id = 2;
+    string username = 3;
+    string access_token = 4;
+    string refresh_token = 5;
+    google.protobuf.Timestamp token_expires_at = 6;
+    string profile_image_url = 7;
+}
+
+// Twitter Identity Binding Created Event
+message TwitterIdentityBindingCreatedEvent {
+    string twitter_user_id = 1;
+    string user_id = 2;
+    string twitter_username = 3;
+    string profile_image_url = 4;
+    google.protobuf.Timestamp created_at = 5;
+}
+
+// Twitter Identity Binding Updated Event
+message TwitterIdentityBindingUpdatedEvent {
+    string twitter_user_id = 1;
+    string user_id = 2;
+    string twitter_username = 3;
+    string profile_image_url = 4;
+    google.protobuf.Timestamp updated_at = 5;
+}
+
+// =============================================================================
+// DTOs (for RPC responses)
+// =============================================================================
+
+// Twitter Auth Result DTO
+message TwitterAuthResultProto {
+    bool success = 1;
+    string error = 2;
+    string twitter_id = 3;
+    string username = 4;
+    bool bind_status = 5;
+    string profile_image_url = 6;
+    string redirect_uri = 7;
+}
+
+// Twitter Bind Status DTO
+message TwitterBindStatusProto {
+    bool is_bound = 1;
+    string twitter_id = 2;
+    string username = 3;
+    string profile_image_url = 4;
+}
+
+// Twitter Auth Params DTO
+message TwitterAuthParamsProto {
+    string client_id = 1;
+    string grant_type = 2;
+    string code_challenge = 3;
+    string code_challenge_method = 4;
+    string state = 5;
+    string scope = 6;
+    string response_type = 7;
+}
+
+// PKCE Result DTO
+message PkceResultProto {
+    string code_verifier = 1;
+    string code_challenge = 2;
+}

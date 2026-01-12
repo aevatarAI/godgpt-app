@@ -69,117 +69,79 @@ public class LumenServiceTests
 
     private void SetupMockUserProfileAgent(string userId, LumenUserProfileDto? profile = null)
     {
-        var actor = Substitute.For<IGAgentActor, ILumenUserProfileGAgent>();
-        var agent = (ILumenUserProfileGAgent)actor;
-        
+        var mockActor = Substitute.For<IGAgentActor>();
         profile ??= CreateTestProfile(userId);
         
-        agent.GetUserProfileAsync(userId, Arg.Any<string>())
-            .Returns(Task.FromResult(new GetUserProfileResult
-            {
-                Success = true,
-                UserProfile = profile
-            }));
+        TestHelpers.SetupRpcMock<ILumenUserProfileGAgent>(mockActor, "GetUserProfileAsync", 
+            new GetUserProfileResult { Success = true, UserProfile = profile });
         
-        agent.GetLanguageInfoAsync()
-            .Returns(Task.FromResult(new GetLanguageInfoResult
-            {
-                Success = true,
-                CurrentLanguage = "en",
-                RemainingChanges = 3
-            }));
+        TestHelpers.SetupRpcMock<ILumenUserProfileGAgent>(mockActor, "GetLanguageInfoAsync",
+            new GetLanguageInfoResult { Success = true, CurrentLanguage = "en", RemainingChanges = 3 });
         
         _mockActorFactory.CreateGAgentActorAsync<LumenUserProfileGAgent>(Arg.Any<string>())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
     }
 
     private void SetupMockPredictionAgent(string userId, PredictionType type = PredictionType.PredictionDaily)
     {
-        var actor = Substitute.For<IGAgentActor, ILumenPredictionGAgent>();
-        var agent = (ILumenPredictionGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
-        agent.GetPredictionAsync(Arg.Any<string>())
-            .Returns(Task.FromResult<PredictionResultDto?>(new PredictionResultDto
-            {
-                PredictionId = Guid.NewGuid().ToString(),
-                Type = type
-            }));
+        TestHelpers.SetupRpcMock<ILumenPredictionGAgent>(mockActor, "GetPredictionAsync",
+            new PredictionResultDto { PredictionId = Guid.NewGuid().ToString(), Type = type });
         
-        agent.GetPredictionStatusAsync(Arg.Any<DateTime?>(), Arg.Any<string?>())
-            .Returns(Task.FromResult<PredictionStatusDto?>(new PredictionStatusDto
-            {
-                HasPrediction = true,
-                IsGenerating = false
-            }));
+        TestHelpers.SetupRpcMock<ILumenPredictionGAgent>(mockActor, "GetPredictionStatusAsync",
+            new PredictionStatusDto { HasPrediction = true, IsGenerating = false });
         
-        agent.GetCalculatedValuesAsync(Arg.Any<LumenUserDto>(), Arg.Any<string>())
-            .Returns(Task.FromResult(new CalculatedValuesDto()));
+        TestHelpers.SetupRpcMock<ILumenPredictionGAgent>(mockActor, "GetCalculatedValuesAsync",
+            new CalculatedValuesDto());
         
         _mockActorFactory.CreateGAgentActorAsync<LumenPredictionGAgent>(Arg.Any<string>())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
     }
 
     private void SetupMockHistoryAgent(string userId)
     {
-        var actor = Substitute.For<IGAgentActor, ILumenPredictionHistoryGAgent>();
-        var agent = (ILumenPredictionHistoryGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
-        agent.GetRecentPredictionsAsync(Arg.Any<int>())
-            .Returns(Task.FromResult(new List<HistoryPredictionResultDto>()));
+        TestHelpers.SetupRpcMock<ILumenPredictionHistoryGAgent>(mockActor, "GetRecentPredictionsAsync",
+            new GetRecentPredictionsResult { Success = true });
         
-        agent.GetPredictionByDateAsync(Arg.Any<DateValue>())
-            .Returns(Task.FromResult<HistoryPredictionResultDto?>(null));
+        TestHelpers.SetupRpcMock<ILumenPredictionHistoryGAgent>(mockActor, "GetPredictionByDateAsync",
+            new GetPredictionByDateResult { Success = true });
         
-        agent.GetMonthlyPredictionsAsync(Arg.Any<int>(), Arg.Any<int>())
-            .Returns(Task.FromResult(new List<HistoryPredictionResultDto>()));
+        TestHelpers.SetupRpcMock<ILumenPredictionHistoryGAgent>(mockActor, "GetMonthlyPredictionsAsync",
+            new GetMonthlyPredictionsResult { Success = true });
         
         _mockActorFactory.CreateGAgentActorAsync<LumenPredictionHistoryGAgent>(Arg.Any<string>())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
     }
 
     private void SetupMockFeedbackAgent(string predictionId)
     {
-        var actor = Substitute.For<IGAgentActor, ILumenFeedbackGAgent>();
-        var agent = (ILumenFeedbackGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
-        agent.SubmitOrUpdateFeedbackAsync(Arg.Any<SubmitFeedbackRequest>())
-            .Returns(Task.FromResult(new SubmitFeedbackResult
-            {
-                Success = true,
-                FeedbackId = Guid.NewGuid().ToString()
-            }));
+        TestHelpers.SetupRpcMock<ILumenFeedbackGAgent>(mockActor, "SubmitOrUpdateFeedbackAsync",
+            new SubmitFeedbackResult { Success = true, FeedbackId = Guid.NewGuid().ToString() });
         
-        agent.UpdateMethodRatingAsync(Arg.Any<UpdateMethodRatingRequest>())
-            .Returns(Task.FromResult(new UpdateMethodRatingResult
-            {
-                Success = true,
-                UpdatedRating = 1
-            }));
+        TestHelpers.SetupRpcMock<ILumenFeedbackGAgent>(mockActor, "UpdateMethodRatingAsync",
+            new UpdateMethodRatingResult { Success = true, UpdatedRating = 1 });
         
         _mockActorFactory.CreateGAgentActorAsync<LumenFeedbackGAgent>(Arg.Any<string>())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
     }
 
     private void SetupMockFavouriteAgent(string userId)
     {
-        var actor = Substitute.For<IGAgentActor, ILumenFavouriteGAgent>();
-        var agent = (ILumenFavouriteGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
-        agent.ToggleFavouriteAsync(Arg.Any<ToggleFavouriteRequest>())
-            .Returns(Task.FromResult(new ToggleFavouriteResult
-            {
-                Success = true,
-                IsFavourite = true
-            }));
+        TestHelpers.SetupRpcMock<ILumenFavouriteGAgent>(mockActor, "ToggleFavouriteAsync",
+            new ToggleFavouriteResult { Success = true, IsFavourite = true });
         
-        agent.GetFavouritesAsync()
-            .Returns(Task.FromResult(new GetFavouritesResult
-            {
-                Success = true
-            }));
+        TestHelpers.SetupRpcMock<ILumenFavouriteGAgent>(mockActor, "GetFavouritesAsync",
+            new GetFavouritesResult { Success = true });
         
         _mockActorFactory.CreateGAgentActorAsync<LumenFavouriteGAgent>(Arg.Any<string>())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
     }
 
     #endregion
@@ -223,8 +185,7 @@ public class LumenServiceTests
     {
         // Arrange
         var userId = "user123";
-        var actor = Substitute.For<IGAgentActor, ILumenUserProfileGAgent>();
-        var agent = (ILumenUserProfileGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
         var request = new UpdateUserProfileRequest
         {
@@ -234,15 +195,11 @@ public class LumenServiceTests
             BirthDate = new DateValue { Year = 1990, Month = 5, Day = 15 }
         };
         
-        agent.UpdateUserProfileAsync(Arg.Any<UpdateUserProfileRequest>())
-            .Returns(Task.FromResult(new UpdateUserProfileResult
-            {
-                Success = true,
-                Message = "Profile updated"
-            }));
+        TestHelpers.SetupRpcMock<ILumenUserProfileGAgent>(mockActor, "UpdateUserProfileAsync",
+            new UpdateUserProfileResult { Success = true, Message = "Profile updated" });
         
         _mockActorFactory.CreateGAgentActorAsync<LumenUserProfileGAgent>(Arg.Any<string>())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
 
         // Act
         var result = await _lumenService.UpdateUserProfileAsync(request, "en");
@@ -256,18 +213,13 @@ public class LumenServiceTests
     {
         // Arrange
         var userId = "user123";
-        var actor = Substitute.For<IGAgentActor, ILumenUserProfileGAgent>();
-        var agent = (ILumenUserProfileGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
-        agent.SetLanguageAsync("zh")
-            .Returns(Task.FromResult(new SetLanguageResult
-            {
-                Success = true,
-                CurrentLanguage = "zh"
-            }));
+        TestHelpers.SetupRpcMock<ILumenUserProfileGAgent>(mockActor, "SetLanguageAsync",
+            new SetLanguageResult { Success = true, CurrentLanguage = "zh" });
         
         _mockActorFactory.CreateGAgentActorAsync<LumenUserProfileGAgent>(Arg.Any<string>())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
 
         // Act
         var result = await _lumenService.SetLanguageAsync(userId, "zh");
@@ -302,8 +254,6 @@ public class LumenServiceTests
         // Arrange
         var userId = "user123";
         SetupMockPredictionAgent(userId, PredictionType.PredictionDaily);
-        SetupMockPredictionAgent(userId, PredictionType.PredictionYearly);
-        SetupMockPredictionAgent(userId, PredictionType.PredictionLifetime);
 
         // Act
         var result = await _lumenService.GetPredictionStatusAsync(userId);
@@ -332,18 +282,13 @@ public class LumenServiceTests
     {
         // Arrange
         var userId = "user123";
-        var actor = Substitute.For<IGAgentActor, ILumenUserProfileGAgent>();
-        var agent = (ILumenUserProfileGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
-        agent.GetUserProfileAsync(userId, Arg.Any<string>())
-            .Returns(Task.FromResult(new GetUserProfileResult
-            {
-                Success = false,
-                Message = "Profile not found"
-            }));
+        TestHelpers.SetupRpcMock<ILumenUserProfileGAgent>(mockActor, "GetUserProfileAsync",
+            new GetUserProfileResult { Success = false, Message = "Profile not found" });
         
         _mockActorFactory.CreateGAgentActorAsync<LumenUserProfileGAgent>(Arg.Any<string>())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
 
         // Act
         var result = await _lumenService.GetCalculatedValuesAsync(userId, "en");
@@ -383,6 +328,7 @@ public class LumenServiceTests
         var result = await _lumenService.GetPredictionByDateAsync(userId, DateOnly.FromDateTime(DateTime.Today));
 
         // Assert
+        // When prediction is null, success is false
         result.Success.ShouldBeFalse();
     }
 
@@ -493,4 +439,3 @@ public class LumenServiceTests
 
     #endregion
 }
-

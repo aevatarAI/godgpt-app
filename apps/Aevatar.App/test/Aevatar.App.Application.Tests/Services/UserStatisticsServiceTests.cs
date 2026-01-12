@@ -44,11 +44,10 @@ public class UserStatisticsServiceTests
             DeviceId = "device-123"
         };
 
-        var actor = Substitute.For<IGAgentActor, IUserStatisticsGAgent>();
-        var agent = (IUserStatisticsGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
         _mockActorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(Arg.Any<string>())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
         
         var protoResponse = new AppRatingRecordProto
         {
@@ -59,8 +58,7 @@ public class UserStatisticsServiceTests
             RatingCount = 1
         };
         
-        agent.RecordAppRatingAsync(Arg.Any<RecordAppRatingRequestProto>())
-            .Returns(protoResponse);
+        TestHelpers.SetupRpcMock<IUserStatisticsGAgent>(mockActor, "RecordAppRatingAsync", protoResponse);
 
         // Act
         var result = await _userStatisticsService.RecordAppRatingAsync(userId, input);
@@ -82,14 +80,12 @@ public class UserStatisticsServiceTests
             DeviceId = "device-123"
         };
 
-        var actor = Substitute.For<IGAgentActor, IUserStatisticsGAgent>();
-        var agent = (IUserStatisticsGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
         _mockActorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(Arg.Any<string>())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
         
-        agent.CanUserRateAppAsync(Arg.Any<string>())
-            .Returns(true);
+        TestHelpers.SetupRpcMock(mockActor, "CanUserRateAppAsync", true);
 
         // Act
         var result = await _userStatisticsService.CanUserRateAppAsync(userId, input);
@@ -104,11 +100,10 @@ public class UserStatisticsServiceTests
         // Arrange
         var userId = Guid.NewGuid();
 
-        var actor = Substitute.For<IGAgentActor, IUserStatisticsGAgent>();
-        var agent = (IUserStatisticsGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
         _mockActorFactory.CreateGAgentActorAsync<UserStatisticsGAgent>(userId.ToString())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
         
         var protoResponse = new UserStatisticsProto
         {
@@ -123,8 +118,7 @@ public class UserStatisticsServiceTests
             RatingCount = 1
         });
         
-        agent.GetUserStatisticsAsync()
-            .Returns(protoResponse);
+        TestHelpers.SetupRpcMock<IUserStatisticsGAgent>(mockActor, "GetUserStatisticsAsync", protoResponse);
 
         // Act
         var result = await _userStatisticsService.GetUserStatisticsAsync(userId);
@@ -136,4 +130,3 @@ public class UserStatisticsServiceTests
         result.AppRatings.Count.ShouldBe(1);
     }
 }
-

@@ -47,11 +47,10 @@ public class UserFeedbackServiceTests
         };
         request.Reasons.Add(Aevatar.Application.Grains.Common.Constants.FeedbackReasonEnum.TooExpensive);
 
-        var actor = Substitute.For<IGAgentActor, IUserFeedbackGAgent>();
-        var agent = (IUserFeedbackGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
         _mockActorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId.ToString())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
         
         var protoResponse = new SubmitFeedbackResultProto
         {
@@ -59,8 +58,7 @@ public class UserFeedbackServiceTests
             Message = "Feedback submitted successfully"
         };
         
-        agent.SubmitFeedbackAsync(Arg.Any<SubmitFeedbackRequestProto>())
-            .Returns(protoResponse);
+        TestHelpers.SetupRpcMock<IUserFeedbackGAgent>(mockActor, "SubmitFeedbackAsync", protoResponse);
 
         // Act
         var result = await _userFeedbackService.SubmitFeedbackAsync(userId, request);
@@ -77,11 +75,10 @@ public class UserFeedbackServiceTests
         // Arrange
         var userId = Guid.NewGuid();
 
-        var actor = Substitute.For<IGAgentActor, IUserFeedbackGAgent>();
-        var agent = (IUserFeedbackGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
         _mockActorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId.ToString())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
         
         var protoResponse = new CheckEligibilityResultProto
         {
@@ -89,8 +86,7 @@ public class UserFeedbackServiceTests
             Message = string.Empty
         };
         
-        agent.CheckFeedbackEligibilityAsync()
-            .Returns(protoResponse);
+        TestHelpers.SetupRpcMock<IUserFeedbackGAgent>(mockActor, "CheckFeedbackEligibilityAsync", protoResponse);
 
         // Act
         var result = await _userFeedbackService.CheckFeedbackEligibilityAsync(userId);
@@ -111,11 +107,10 @@ public class UserFeedbackServiceTests
             PageIndex = 0
         };
 
-        var actor = Substitute.For<IGAgentActor, IUserFeedbackGAgent>();
-        var agent = (IUserFeedbackGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
         _mockActorFactory.CreateGAgentActorAsync<UserFeedbackGAgent>(userId.ToString())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
         
         var protoResponse = new GetFeedbackHistoryResultProto
         {
@@ -130,8 +125,7 @@ public class UserFeedbackServiceTests
             SubmittedAt = Timestamp.FromDateTime(DateTime.UtcNow)
         });
         
-        agent.GetFeedbackHistoryAsync(Arg.Any<GetFeedbackHistoryRequestProto>())
-            .Returns(protoResponse);
+        TestHelpers.SetupRpcMock<IUserFeedbackGAgent>(mockActor, "GetFeedbackHistoryAsync", protoResponse);
 
         // Act
         var result = await _userFeedbackService.GetFeedbackHistoryAsync(userId, request);
@@ -143,4 +137,3 @@ public class UserFeedbackServiceTests
         result.Feedbacks.Count.ShouldBe(1);
     }
 }
-

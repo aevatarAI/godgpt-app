@@ -68,11 +68,10 @@ public class UserInfoServiceTests
             }
         };
 
-        var actor = Substitute.For<IGAgentActor, IUserInfoCollectionGAgent>();
-        var agent = (IUserInfoCollectionGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
         _mockActorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId.ToString())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
         
         var protoResponse = new UserInfoCollectionResponseProto
         {
@@ -80,8 +79,7 @@ public class UserInfoServiceTests
             Message = "User info updated successfully"
         };
         
-        agent.UpdateUserInfoCollectionAsync(Arg.Any<UpdateUserInfoCollectionRequestProto>())
-            .Returns(protoResponse);
+        TestHelpers.SetupRpcMock<IUserInfoCollectionGAgent>(mockActor, "UpdateUserInfoCollectionAsync", protoResponse);
 
         // Act
         var result = await _userInfoService.UpdateUserInfoCollectionAsync(userId, updateDto);
@@ -98,11 +96,10 @@ public class UserInfoServiceTests
         // Arrange
         var userId = Guid.NewGuid();
 
-        var actor = Substitute.For<IGAgentActor, IUserInfoCollectionGAgent>();
-        var agent = (IUserInfoCollectionGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
         _mockActorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId.ToString())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
         
         var protoResponse = new UserInfoCollectionProto
         {
@@ -119,8 +116,7 @@ public class UserInfoServiceTests
             LastName = "Doe"
         };
         
-        agent.GetUserInfoCollectionAsync()
-            .Returns(protoResponse);
+        TestHelpers.SetupRpcMock<IUserInfoCollectionGAgent>(mockActor, "GetUserInfoCollectionAsync", protoResponse);
 
         // Act
         var result = await _userInfoService.GetUserInfoCollectionAsync(userId);
@@ -139,11 +135,10 @@ public class UserInfoServiceTests
         // Arrange
         var userId = Guid.NewGuid();
 
-        var actor = Substitute.For<IGAgentActor, IUserInfoCollectionGAgent>();
-        var agent = (IUserInfoCollectionGAgent)actor;
+        var mockActor = Substitute.For<IGAgentActor>();
         
         _mockActorFactory.CreateGAgentActorAsync<UserInfoCollectionGAgent>(userId.ToString())
-            .Returns(Task.FromResult((IGAgentActor)actor));
+            .Returns(Task.FromResult(mockActor));
         
         var protoResponse = new UserInfoDisplayProto
         {
@@ -157,8 +152,7 @@ public class UserInfoServiceTests
             City = "New York"
         };
         
-        agent.GetUserInfoDisplayAsync()
-            .Returns(protoResponse);
+        TestHelpers.SetupRpcMock<IUserInfoCollectionGAgent>(mockActor, "GetUserInfoDisplayAsync", protoResponse);
 
         // Act
         var result = await _userInfoService.GetUserInfoDisplayAsync(userId);
@@ -170,4 +164,3 @@ public class UserInfoServiceTests
         result.Gender.ShouldBe(1);
     }
 }
-
