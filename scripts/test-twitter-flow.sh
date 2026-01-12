@@ -63,10 +63,25 @@ test_get_auth_params() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.authorizationUrl' > /dev/null 2>&1; then
+    # Check for ABP-wrapped response (.data) or direct response
+    if echo "$response" | jq -e '.data.authorizationUrl' > /dev/null 2>&1; then
         log_info "Twitter auth params retrieved successfully ✓"
         
-        # Save to global state for later tests
+        # Save to global state for later tests (ABP format)
+        TWITTER_AUTH_URL=$(echo "$response" | jq -r '.data.authorizationUrl // empty')
+        TWITTER_CODE_VERIFIER=$(echo "$response" | jq -r '.data.codeVerifier // empty')
+        TWITTER_STATE=$(echo "$response" | jq -r '.data.state // empty')
+        
+        if [ -n "$TWITTER_AUTH_URL" ]; then
+            log_info "→ Saved auth params for subsequent tests"
+            log_info "  Authorization URL: ${TWITTER_AUTH_URL:0:60}..."
+            log_info "  State: ${TWITTER_STATE:0:20}..."
+        fi
+        return 0
+    elif echo "$response" | jq -e '.authorizationUrl' > /dev/null 2>&1; then
+        log_info "Twitter auth params retrieved successfully ✓"
+        
+        # Save to global state for later tests (direct format)
         TWITTER_AUTH_URL=$(echo "$response" | jq -r '.authorizationUrl // empty')
         TWITTER_CODE_VERIFIER=$(echo "$response" | jq -r '.codeVerifier // empty')
         TWITTER_STATE=$(echo "$response" | jq -r '.state // empty')
@@ -92,7 +107,19 @@ test_get_bind_status() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.isBound != null or .IsBound != null' > /dev/null 2>&1; then
+    # Check for ABP-wrapped response (.data) or direct response
+    if echo "$response" | jq -e '.data.isBound != null' > /dev/null 2>&1; then
+        TWITTER_IS_BOUND=$(echo "$response" | jq -r '.data.isBound // false')
+        log_info "Twitter bind status retrieved successfully ✓"
+        log_info "→ User is currently bound: $TWITTER_IS_BOUND"
+        
+        # Show bound account info if available (ABP format)
+        local username=$(echo "$response" | jq -r '.data.twitterUsername // empty')
+        if [ -n "$username" ] && [ "$username" != "null" ]; then
+            log_info "  Twitter Username: @$username"
+        fi
+        return 0
+    elif echo "$response" | jq -e '.isBound != null or .IsBound != null' > /dev/null 2>&1; then
         TWITTER_IS_BOUND=$(echo "$response" | jq -r '.isBound // .IsBound // false')
         log_info "Twitter bind status retrieved successfully ✓"
         log_info "→ User is currently bound: $TWITTER_IS_BOUND"

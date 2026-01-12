@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.Twitter;
 using Aevatar.Application.Grains.Twitter;
 using Aevatar.App.Application.Contracts.Services;
@@ -46,9 +47,10 @@ public class TwitterService : ApplicationService, ITwitterService
         _logger.LogDebug("[TwitterService][GetAuthParamsAsync] userId: {UserId}", userId);
         
         var actor = await _actorFactory.CreateGAgentActorAsync<TwitterAuthGAgent>(userId.ToString());
-        var agent = actor.As<ITwitterAuthGAgent>();
         
-        var result = await agent.GetAuthParamsAsync();
+        // Use direct RPC invocation instead of As<T>() proxy
+        var result = await actor.InvokeAsync<Aevatar.Agents.GodGPT.Protos.Twitter.TwitterAuthParamsProto>(
+            nameof(ITwitterAuthGAgent.GetAuthParamsAsync));
         
         // Build authorization URL from params
         var authUrl = BuildAuthorizationUrl(result);
@@ -83,9 +85,10 @@ public class TwitterService : ApplicationService, ITwitterService
         _logger.LogDebug("[TwitterService][VerifyAuthCodeAsync] userId: {UserId}", userId);
         
         var actor = await _actorFactory.CreateGAgentActorAsync<TwitterAuthGAgent>(userId.ToString());
-        var agent = actor.As<ITwitterAuthGAgent>();
         
-        var result = await agent.VerifyAuthCodeAsync(input.Platform, input.Code, input.RedirectUri);
+        // Use direct RPC invocation
+        var result = await actor.InvokeAsync<Aevatar.Agents.GodGPT.Protos.Twitter.TwitterAuthResultProto>(
+            nameof(ITwitterAuthGAgent.VerifyAuthCodeAsync), input.Platform, input.Code, input.RedirectUri);
         
         return new TwitterAuthResultDto
         {
@@ -101,9 +104,10 @@ public class TwitterService : ApplicationService, ITwitterService
         _logger.LogDebug("[TwitterService][GetBindStatusAsync] userId: {UserId}", userId);
         
         var actor = await _actorFactory.CreateGAgentActorAsync<TwitterAuthGAgent>(userId.ToString());
-        var agent = actor.As<ITwitterAuthGAgent>();
         
-        var result = await agent.GetBindStatusAsync();
+        // Use direct RPC invocation
+        var result = await actor.InvokeAsync<Aevatar.Agents.GodGPT.Protos.Twitter.TwitterBindStatusProto>(
+            nameof(ITwitterAuthGAgent.GetBindStatusAsync));
         
         return new TwitterBindStatusDto
         {
@@ -138,9 +142,7 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterMonitorGAgent>(MonitorAgentId);
-            var agent = actor.As<ITwitterMonitorGAgent>();
-            
-            var result = await agent.FetchTweetsManuallyAsync();
+            var result = await actor.InvokeAsync<TweetFetchResult>(nameof(ITwitterMonitorGAgent.FetchTweetsManuallyAsync));
             
             // TweetFetchResult doesn't have IsSuccess, check if error is empty
             var success = string.IsNullOrEmpty(result.ErrorMessage);
@@ -165,7 +167,6 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterMonitorGAgent>(MonitorAgentId);
-            var agent = actor.As<ITwitterMonitorGAgent>();
             
             var timeRange = new TimeRange
             {
@@ -173,7 +174,7 @@ public class TwitterService : ApplicationService, ITwitterService
                 EndTimeUtcSecond = endTimeUtcSecond
             };
             
-            var result = await agent.RefetchTweetsByTimeRangeAsync(timeRange);
+            var result = await actor.InvokeAsync<bool>(nameof(ITwitterMonitorGAgent.RefetchTweetsByTimeRangeAsync), timeRange);
             
             return new TwitterOperationResultDto
             {
@@ -195,9 +196,7 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterMonitorGAgent>(MonitorAgentId);
-            var agent = actor.As<ITwitterMonitorGAgent>();
-            
-            var result = await agent.StartMonitoringAsync();
+            var result = await actor.InvokeAsync<bool>(nameof(ITwitterMonitorGAgent.StartMonitoringAsync));
             
             return new TwitterOperationResultDto 
             { 
@@ -219,9 +218,7 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterMonitorGAgent>(MonitorAgentId);
-            var agent = actor.As<ITwitterMonitorGAgent>();
-            
-            var result = await agent.StopMonitoringAsync();
+            var result = await actor.InvokeAsync<bool>(nameof(ITwitterMonitorGAgent.StopMonitoringAsync));
             
             return new TwitterOperationResultDto 
             { 
@@ -243,9 +240,7 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterMonitorGAgent>(MonitorAgentId);
-            var agent = actor.As<ITwitterMonitorGAgent>();
-            
-            var status = await agent.GetMonitoringStatusAsync();
+            var status = await actor.InvokeAsync<TweetMonitorStatus>(nameof(ITwitterMonitorGAgent.GetMonitoringStatusAsync));
             
             return new TwitterMonitorStatusDto
             {
@@ -273,10 +268,9 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterRewardGAgent>(RewardAgentId);
-            var agent = actor.As<ITwitterRewardGAgent>();
             
             var targetDate = DateTimeOffset.FromUnixTimeSeconds(targetDateUtcSeconds).UtcDateTime;
-            var result = await agent.TriggerRewardCalculationAsync(targetDate);
+            var result = await actor.InvokeAsync<bool>(nameof(ITwitterRewardGAgent.TriggerRewardCalculationAsync), targetDate);
             
             return new TwitterOperationResultDto
             {
@@ -298,9 +292,7 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterRewardGAgent>(RewardAgentId);
-            var agent = actor.As<ITwitterRewardGAgent>();
-            
-            var result = await agent.ClearRewardByDayUtcSecondAsync(targetDateUtcSeconds);
+            var result = await actor.InvokeAsync<bool>(nameof(ITwitterRewardGAgent.ClearRewardByDayUtcSecondAsync), targetDateUtcSeconds);
             
             return new TwitterOperationResultDto 
             { 
@@ -322,9 +314,7 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterRewardGAgent>(RewardAgentId);
-            var agent = actor.As<ITwitterRewardGAgent>();
-            
-            var result = await agent.StartRewardCalculationAsync();
+            var result = await actor.InvokeAsync<bool>(nameof(ITwitterRewardGAgent.StartRewardCalculationAsync));
             
             return new TwitterOperationResultDto 
             { 
@@ -346,9 +336,7 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterRewardGAgent>(RewardAgentId);
-            var agent = actor.As<ITwitterRewardGAgent>();
-            
-            var result = await agent.StopRewardCalculationAsync();
+            var result = await actor.InvokeAsync<bool>(nameof(ITwitterRewardGAgent.StopRewardCalculationAsync));
             
             return new TwitterOperationResultDto 
             { 
@@ -370,9 +358,7 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterRewardGAgent>(RewardAgentId);
-            var agent = actor.As<ITwitterRewardGAgent>();
-            
-            var status = await agent.GetRewardCalculationStatusAsync();
+            var status = await actor.InvokeAsync<RewardCalculationStatus>(nameof(ITwitterRewardGAgent.GetRewardCalculationStatusAsync));
             
             return new TwitterRewardStatusDto
             {
@@ -398,16 +384,15 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterRewardGAgent>(RewardAgentId);
-            var agent = actor.As<ITwitterRewardGAgent>();
-            
-            var result = await agent.GetUserRewardsByUserIdAsync(userId);
+            var result = await actor.InvokeAsync<Google.Protobuf.Collections.MapField<string, UserRewardRecordList>>(
+                nameof(ITwitterRewardGAgent.GetUserRewardsByUserIdAsync), userId);
             
             // Convert to DTO format
             var dict = new Dictionary<string, List<ManagerUserRewardRecordDto>>();
             foreach (var kvp in result)
             {
                 var records = new List<ManagerUserRewardRecordDto>();
-                foreach (var record in kvp.Value)
+                foreach (var record in kvp.Value.Records)
                 {
                     records.Add(new ManagerUserRewardRecordDto
                     {
@@ -441,9 +426,8 @@ public class TwitterService : ApplicationService, ITwitterService
         try
         {
             var actor = await _actorFactory.CreateGAgentActorAsync<TwitterRewardGAgent>(RewardAgentId);
-            var agent = actor.As<ITwitterRewardGAgent>();
-            
-            var result = await agent.GetRewardCalculationHistoryAsync(30);
+            var result = await actor.InvokeAsync<Google.Protobuf.Collections.RepeatedField<RewardCalculationHistory>>(
+                nameof(ITwitterRewardGAgent.GetRewardCalculationHistoryAsync), 30);
             
             var list = new List<ManagerRewardCalculationHistoryDto>();
             foreach (var record in result)
