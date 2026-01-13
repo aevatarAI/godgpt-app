@@ -31,6 +31,7 @@ using Aevatar.Agents.Core.EventSourcing;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using Volo.Abp.BlobStoring;
 
 namespace Aevatar.Silo;
 
@@ -144,6 +145,13 @@ public class Program
                 services.Configure<LLMProvidersConfig>(context.Configuration.GetSection("LLMProviders"));
                 services.AddMEAI();
                 Log.Information("🤖 LLM Providers configured from appsettings.json");
+                
+                // Configure AWS S3 BlobContainer for image downloads
+                // Uses shared implementation from Aevatar.App.Application
+                services.Configure<App.Application.Services.AwsS3Options>(context.Configuration.GetSection("AwsS3"));
+                services.AddSingleton<App.Application.Services.AwsS3BlobContainer>();
+                services.AddSingleton<IBlobContainer>(sp => sp.GetRequiredService<App.Application.Services.AwsS3BlobContainer>());
+                Log.Information("🗂️ AWS S3 BlobContainer configured for image downloads");
 
                 // MassTransit Stream Plugin - ONLY if MessageStream.Provider is "MassTransit"
                 var messageStreamProvider = context.Configuration.GetSection("MessageStream").GetValue("Provider", "Orleans");

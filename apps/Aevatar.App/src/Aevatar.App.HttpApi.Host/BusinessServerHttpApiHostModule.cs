@@ -134,20 +134,13 @@ public class AppHttpApiHostModule : AbpModule
     
     private void ConfigureBlobStorage(ServiceConfigurationContext context, IConfiguration configuration)
     {
-        Configure<AbpBlobStoringOptions>(options =>
-        {
-            options.Containers.ConfigureDefault(container =>
-            {
-                var configSection = configuration.GetSection("AwsS3");
-                container.UseAws(o =>
-                {
-                    o.AccessKeyId = configSection.GetValue<string>("AccessKeyId", "None");
-                    o.SecretAccessKey = configSection.GetValue<string>("SecretAccessKey", "None");
-                    o.Region = configSection.GetValue<string>("Region", "None");
-                    o.ContainerName = configSection.GetValue<string>("ContainerName", "None");
-                });
-            });
-        });
+        // Use custom AwsS3BlobContainer instead of ABP's AWS provider
+        // This ensures consistent key format (no prefix) across HttpApi and Silo
+        context.Services.Configure<App.Application.Services.AwsS3Options>(
+            configuration.GetSection("AwsS3"));
+        context.Services.AddSingleton<App.Application.Services.AwsS3BlobContainer>();
+        context.Services.AddSingleton<IBlobContainer>(sp => 
+            sp.GetRequiredService<App.Application.Services.AwsS3BlobContainer>());
     }
 
     private void ConfigureAgentRuntime(ServiceConfigurationContext context, IConfiguration configuration)

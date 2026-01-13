@@ -27,6 +27,7 @@ using Orleans.Concurrency;
 using Orleans;
 using Aevatar.Agents.Runtime.Orleans;
 using System.Diagnostics;
+using Volo.Abp.BlobStoring;
 using ChatMessage = Aevatar.GAgents.AI.Abstractions.ChatMessage;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.ProxyAgent;
@@ -387,6 +388,20 @@ public class AIAgentStatusProxy :
             if (promptSettings?.Temperature != null && double.TryParse(promptSettings.Temperature, out var temp))
             {
                 request.Temperature = (float)temp;
+            }
+            
+            // Add image keys for multimodal requests
+            Logger.LogWarning("[AIAgentStatusProxy][IMAGE_DEBUG] imageKeys parameter: {ImageKeys}", 
+                imageKeys != null ? string.Join(",", imageKeys) : "NULL");
+            if (imageKeys != null && imageKeys.Count > 0)
+            {
+                request.ImageKeys.AddRange(imageKeys);
+                Logger.LogWarning("[AIAgentStatusProxy][IMAGE_DEBUG] Added {Count} image keys to ChatRequest: {Keys}", 
+                    imageKeys.Count, string.Join(",", imageKeys));
+            }
+            else
+            {
+                Logger.LogWarning("[AIAgentStatusProxy][IMAGE_DEBUG] No image keys to add");
             }
 
             var fullResponse = new System.Text.StringBuilder();
@@ -1116,6 +1131,100 @@ public class AIAgentStatusProxy :
                 state.PromptTemplate = promptEvt.PromptTemplate;
                 break;
         }
+    }
+
+    #endregion
+    
+    #region Multimodal Image Support
+
+    /// <summary>
+    /// Resolve image keys to actual image data from blob storage
+    /// Overrides base implementation to provide actual blob storage integration
+    /// </summary>
+    protected override async Task<IList<AevatarImageData>?> ResolveImageKeysAsync(
+        IEnumerable<string> imageKeys,
+        CancellationToken cancellationToken = default)
+    {
+        Logger.LogWarning("[AIAgentStatusProxy][IMAGE_DEBUG] ResolveImageKeysAsync CALLED with keys: {Keys}",
+            string.Join(",", imageKeys));
+        
+        if (ServiceProvider == null)
+        {
+            Logger.LogWarning("[AIAgentStatusProxy][IMAGE_DEBUG] ServiceProvider is NULL!");
+            return null;
+        }
+        Logger.LogWarning("[AIAgentStatusProxy][IMAGE_DEBUG] ServiceProvider OK, getting IBlobContainer...");
+
+        var blobContainer = ServiceProvider.GetService<IBlobContainer>();
+        if (blobContainer == null)
+        {
+            Logger.LogWarning("[AIAgentStatusProxy][IMAGE_DEBUG] IBlobContainer is NULL in ServiceProvider!");
+            return null;
+        }
+        Logger.LogWarning("[AIAgentStatusProxy][IMAGE_DEBUG] IBlobContainer OK, starting download...");
+
+        var imageDataList = new List<AevatarImageData>();
+        var keyList = imageKeys.ToList();
+        
+        Logger.LogInformation("[AIAgentStatusProxy] Resolving {Count} image keys from blob storage", keyList.Count);
+        
+        // Download all images concurrently
+        var downloadTasks = keyList.Select(async key =>
+        {
+            try
+            {
+                var bytes = await blobContainer.GetAllBytesAsync(key, cancellationToken);
+                var mediaType = GetMediaTypeFromKey(key);
+                
+                Logger.LogDebug("[AIAgentStatusProxy] Downloaded image: Key={Key}, Size={Size} bytes, MediaType={MediaType}",
+                    key, bytes.Length, mediaType);
+                
+                return new AevatarImageData
+                {
+                    Key = key,
+                    Data = new ReadOnlyMemory<byte>(bytes),
+                    MediaType = mediaType
+                };
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "[AIAgentStatusProxy] Failed to download image: Key={Key}", key);
+                return null;
+            }
+        });
+
+        var results = await Task.WhenAll(downloadTasks);
+        
+        foreach (var result in results)
+        {
+            if (result != null)
+            {
+                imageDataList.Add(result);
+            }
+        }
+
+        Logger.LogInformation("[AIAgentStatusProxy] Successfully resolved {Count}/{Total} images",
+            imageDataList.Count, keyList.Count);
+        
+        return imageDataList.Count > 0 ? imageDataList : null;
+    }
+
+    /// <summary>
+    /// Get MIME type from file key/extension
+    /// </summary>
+    private static string GetMediaTypeFromKey(string key)
+    {
+        var extension = Path.GetExtension(key)?.ToLowerInvariant();
+        return extension switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".gif" => "image/gif",
+            ".webp" => "image/webp",
+            ".bmp" => "image/bmp",
+            ".svg" => "image/svg+xml",
+            _ => "image/jpeg" // Default to JPEG
+        };
     }
 
     #endregion
