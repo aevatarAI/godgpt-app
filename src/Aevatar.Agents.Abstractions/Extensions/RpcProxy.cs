@@ -166,14 +166,17 @@ internal class RpcProxy<TInterface> : DispatchProxy where TInterface : class
         foreach (var arg in args ?? [])
             request.Args.Add(ProtobufPacker.Pack(arg));
 
-        // Check if method has [ReadOnly] attribute (Orleans.Concurrency.ReadOnlyAttribute)
-        var isReadOnly = targetMethod.GetCustomAttributes(true)
-            .Any(attr => attr.GetType().Name == "ReadOnlyAttribute");
+        // Check if method is marked as safe for concurrent execution:
+        // - [ConcurrentSafe] - our framework attribute (recommended)
+        // - [ReadOnly] - Orleans attribute (for compatibility with existing code)
+        var isConcurrentSafe = targetMethod.GetCustomAttributes(true)
+            .Any(attr => attr.GetType().Name == "ConcurrentSafeAttribute" 
+                      || attr.GetType().Name == "ReadOnlyAttribute");
 
         var returnType = targetMethod.ReturnType;
 
         if (returnType == typeof(Task))
-            return InvokeVoidAsync(request, isReadOnly);
+            return InvokeVoidAsync(request, isConcurrentSafe);
 
         if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
         {
@@ -183,17 +186,17 @@ internal class RpcProxy<TInterface> : DispatchProxy where TInterface : class
                 .First(m => m.Name == nameof(InvokeAsync) && m.IsGenericMethod);
             return invokeMethod
                 .MakeGenericMethod(resultType)
-                .Invoke(this, [request, isReadOnly]);
+                .Invoke(this, [request, isConcurrentSafe]);
         }
 
         throw new NotSupportedException(
             $"Return type '{returnType.Name}' not supported. Use Task or Task<T>.");
     }
 
-    private async Task InvokeVoidAsync(RpcRequest request, bool isReadOnly)
+    private async Task InvokeVoidAsync(RpcRequest request, bool isConcurrentSafe)
     {
         var requestBytes = request.ToByteArray();
-        var responseBytes = isReadOnly 
+        var responseBytes = isConcurrentSafe 
             ? await _actor.InvokeReadOnlyRpcAsync(requestBytes)
             : await _actor.InvokeRpcAsync(requestBytes);
         var response = RpcResponse.Parser.ParseFrom(responseBytes);
@@ -203,10 +206,10 @@ internal class RpcProxy<TInterface> : DispatchProxy where TInterface : class
                 $"RPC call '{request.MethodName}' failed: {response.Error?.Message ?? "Unknown error"}");
     }
 
-    private async Task<TResult> InvokeAsync<TResult>(RpcRequest request, bool isReadOnly)
+    private async Task<TResult> InvokeAsync<TResult>(RpcRequest request, bool isConcurrentSafe)
     {
         var requestBytes = request.ToByteArray();
-        var responseBytes = isReadOnly 
+        var responseBytes = isConcurrentSafe 
             ? await _actor.InvokeReadOnlyRpcAsync(requestBytes)
             : await _actor.InvokeRpcAsync(requestBytes);
         var response = RpcResponse.Parser.ParseFrom(responseBytes);
