@@ -1059,8 +1059,21 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
 
     /// <summary>
     /// Protobuf RPC method invocation - delegates to shared RpcInvoker
+    /// For write operations (no concurrent execution)
     /// </summary>
     public Task<byte[]> InvokeRpcAsync(byte[] requestBytes)
+    {
+        if (_agent == null)
+            throw new InvalidOperationException("Agent not initialized");
+
+        return RpcInvoker.InvokeAsync(_agent, requestBytes, _logger);
+    }
+
+    /// <summary>
+    /// Protobuf RPC method invocation for read-only operations
+    /// [AlwaysInterleave] on interface allows concurrent execution
+    /// </summary>
+    public Task<byte[]> InvokeReadOnlyRpcAsync(byte[] requestBytes)
     {
         if (_agent == null)
             throw new InvalidOperationException("Agent not initialized");

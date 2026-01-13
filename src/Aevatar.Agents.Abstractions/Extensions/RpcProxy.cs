@@ -166,10 +166,14 @@ internal class RpcProxy<TInterface> : DispatchProxy where TInterface : class
         foreach (var arg in args ?? [])
             request.Args.Add(ProtobufPacker.Pack(arg));
 
+        // Check if method has [ReadOnly] attribute (Orleans.Concurrency.ReadOnlyAttribute)
+        var isReadOnly = targetMethod.GetCustomAttributes(true)
+            .Any(attr => attr.GetType().Name == "ReadOnlyAttribute");
+
         var returnType = targetMethod.ReturnType;
 
         if (returnType == typeof(Task))
-            return InvokeVoidAsync(request);
+            return InvokeVoidAsync(request, isReadOnly);
 
         if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
         {
@@ -179,16 +183,19 @@ internal class RpcProxy<TInterface> : DispatchProxy where TInterface : class
                 .First(m => m.Name == nameof(InvokeAsync) && m.IsGenericMethod);
             return invokeMethod
                 .MakeGenericMethod(resultType)
-                .Invoke(this, [request]);
+                .Invoke(this, [request, isReadOnly]);
         }
 
         throw new NotSupportedException(
             $"Return type '{returnType.Name}' not supported. Use Task or Task<T>.");
     }
 
-    private async Task InvokeVoidAsync(RpcRequest request)
+    private async Task InvokeVoidAsync(RpcRequest request, bool isReadOnly)
     {
-        var responseBytes = await _actor.InvokeRpcAsync(request.ToByteArray());
+        var requestBytes = request.ToByteArray();
+        var responseBytes = isReadOnly 
+            ? await _actor.InvokeReadOnlyRpcAsync(requestBytes)
+            : await _actor.InvokeRpcAsync(requestBytes);
         var response = RpcResponse.Parser.ParseFrom(responseBytes);
 
         if (!response.Success)
@@ -196,9 +203,12 @@ internal class RpcProxy<TInterface> : DispatchProxy where TInterface : class
                 $"RPC call '{request.MethodName}' failed: {response.Error?.Message ?? "Unknown error"}");
     }
 
-    private async Task<TResult> InvokeAsync<TResult>(RpcRequest request)
+    private async Task<TResult> InvokeAsync<TResult>(RpcRequest request, bool isReadOnly)
     {
-        var responseBytes = await _actor.InvokeRpcAsync(request.ToByteArray());
+        var requestBytes = request.ToByteArray();
+        var responseBytes = isReadOnly 
+            ? await _actor.InvokeReadOnlyRpcAsync(requestBytes)
+            : await _actor.InvokeRpcAsync(requestBytes);
         var response = RpcResponse.Parser.ParseFrom(responseBytes);
 
         if (!response.Success)

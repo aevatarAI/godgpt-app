@@ -108,13 +108,20 @@ public interface IGAgentGrain : IGrainWithStringKey
     Task DeactivateAsync();
 
     /// <summary>
-    /// Protobuf RPC method invocation
-    /// [AlwaysInterleave] allows RPC calls to execute concurrently, preventing blocking when Grain is busy.
-    /// This is critical for read operations (like GetChatMessageAsync) to not block on long-running AI operations.
-    /// Note: Business logic should handle its own thread-safety if needed.
+    /// Protobuf RPC method invocation (for write operations)
+    /// No [AlwaysInterleave] - ensures serial execution for state-modifying operations
+    /// </summary>
+    /// <param name="requestBytes">RpcRequest serialized bytes</param>
+    /// <returns>RpcResponse serialized bytes</returns>
+    Task<byte[]> InvokeRpcAsync(byte[] requestBytes);
+    
+    /// <summary>
+    /// Protobuf RPC method invocation (for read-only operations)
+    /// [AlwaysInterleave] allows concurrent execution - safe for read-only operations
+    /// Use this for methods marked with [ReadOnly] attribute
     /// </summary>
     /// <param name="requestBytes">RpcRequest serialized bytes</param>
     /// <returns>RpcResponse serialized bytes</returns>
     [AlwaysInterleave]
-    Task<byte[]> InvokeRpcAsync(byte[] requestBytes);
+    Task<byte[]> InvokeReadOnlyRpcAsync(byte[] requestBytes);
 }

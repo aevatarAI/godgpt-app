@@ -512,4 +512,14 @@ public abstract class GAgentActorBase : IGAgentActor, IActorHierarchyOperations
     {
         return RpcInvoker.InvokeAsync(Agent, requestBytes, Logger);
     }
+    
+    /// <summary>
+    /// Invoke read-only RPC method.
+    /// For Local runtime, this is the same as InvokeRpcAsync (no concurrent control).
+    /// </summary>
+    public virtual Task<byte[]> InvokeReadOnlyRpcAsync(byte[] requestBytes)
+    {
+        // Local runtime: no difference between read/write RPC
+        return InvokeRpcAsync(requestBytes);
+    }
 }
