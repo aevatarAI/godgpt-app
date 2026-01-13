@@ -141,6 +141,84 @@ public static class SuggestionParser
 }
 
 /// <summary>
+/// Fixed "I don't understand" suggestions for different languages
+/// </summary>
+public static class FixedSuggestions
+{
+    public const string English = "I don't understand";
+    public const string SimplifiedChinese = "我不理解";
+    public const string TraditionalChinese = "我不明白";
+    public const string Spanish = "No entiendo";
+    
+    /// <summary>
+    /// Ensure the suggestions list contains exactly 4 items, with the 4th being the fixed "I don't understand" option.
+    /// If the 4th item already matches the fixed suggestion (in any language), keep it.
+    /// If fewer than 4 items, add the fixed suggestion.
+    /// </summary>
+    public static List<string> EnsureFixedSuggestion(List<string>? suggestions, string? userLanguage = null)
+    {
+        var result = suggestions?.ToList() ?? new List<string>();
+        
+        // Determine the fixed suggestion based on user language
+        var fixedSuggestion = GetFixedSuggestionForLanguage(userLanguage);
+        
+        // Check if any of the existing items is a fixed suggestion (any language)
+        bool hasFixedSuggestion = result.Any(s => IsFixedSuggestion(s));
+        
+        if (result.Count < 4)
+        {
+            // Add the fixed suggestion if we have fewer than 4 items
+            if (!hasFixedSuggestion)
+            {
+                result.Add(fixedSuggestion);
+            }
+        }
+        else if (result.Count == 4 && !hasFixedSuggestion)
+        {
+            // Replace the 4th item with fixed suggestion if it's not already a fixed suggestion
+            result[3] = fixedSuggestion;
+        }
+        
+        // Ensure we have exactly 4 items (truncate if more)
+        if (result.Count > 4)
+        {
+            // Keep first 3 plus the fixed suggestion
+            var first3 = result.Take(3).ToList();
+            first3.Add(hasFixedSuggestion ? result.First(s => IsFixedSuggestion(s)) : fixedSuggestion);
+            return first3;
+        }
+        
+        return result;
+    }
+    
+    private static string GetFixedSuggestionForLanguage(string? language)
+    {
+        if (string.IsNullOrEmpty(language))
+            return English;
+            
+        return language.ToLowerInvariant() switch
+        {
+            "zh" or "zh-cn" or "chinese" or "simplified chinese" => SimplifiedChinese,
+            "zh-tw" or "zh-hk" or "traditional chinese" => TraditionalChinese,
+            "es" or "spanish" => Spanish,
+            _ => English
+        };
+    }
+    
+    private static bool IsFixedSuggestion(string suggestion)
+    {
+        if (string.IsNullOrEmpty(suggestion))
+            return false;
+            
+        var normalized = suggestion.Trim().ToLowerInvariant();
+        return normalized == English.ToLowerInvariant() ||
+               normalized == SimplifiedChinese ||
+               normalized == TraditionalChinese ||
+               normalized == Spanish.ToLowerInvariant();
+    }
+}
+
+/// <summary>
 /// Result of parsing a response for suggestions
 /// </summary>
 public class SuggestionParseResult

@@ -498,7 +498,8 @@ public partial class GodChatGAgent
                 var storedSuggestions = Context?.Get(GodGPTContextKeys.ConversationSuggestions);
                 if (storedSuggestions?.Any() == true)
                 {
-                    partialMessage.SuggestedItems = storedSuggestions;
+                    // Ensure fixed "I don't understand" suggestion is present (always 4 items)
+                    partialMessage.SuggestedItems = FixedSuggestions.EnsureFixedSuggestion(storedSuggestions);
                     Logger.LogDebug(
                         $"[GodChatGAgent][ChatMessageCallbackAsync] Added {storedSuggestions.Count} suggestions to last chunk");
 
@@ -748,7 +749,9 @@ public partial class GodChatGAgent
                 IsLast = true,
                 SentenceIndex = 0
             };
-            streamEnvelope.Text.SuggestedItems.AddRange(chatMessage.SuggestedItems);
+            // Ensure fixed "I don't understand" suggestion is present (always 4 items)
+            var ensuredSuggestions = FixedSuggestions.EnsureFixedSuggestion(chatMessage.SuggestedItems);
+            streamEnvelope.Text.SuggestedItems.AddRange(ensuredSuggestions);
             
             var textEnvelope = new EventEnvelope
             {
