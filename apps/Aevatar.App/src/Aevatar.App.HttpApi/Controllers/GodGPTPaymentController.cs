@@ -120,18 +120,26 @@ public class GodGPTPaymentController : AevatarController
                 new SubscriptionRequest
                 {
                     ProductId = input.PriceId,
-                    CancelUrl = input.CancelUrl
+                    CancelUrl = input.CancelUrl,
+                    Mode = input.Mode,
+                    UiMode = input.UiMode
                 });
 
-            _logger.LogDebug("[GodGPTPaymentController][CreateCheckoutSessionAsync] userId: {UserId}, duration: {Duration}ms",
-                currentUserId, stopwatch.ElapsedMilliseconds);
+            _logger.LogDebug("[GodGPTPaymentController][CreateCheckoutSessionAsync] userId: {UserId}, uiMode: {UiMode}, duration: {Duration}ms",
+                currentUserId, input.UiMode, stopwatch.ElapsedMilliseconds);
 
-            return Ok(new
+            // Return format compatible with legacy API
+            // EMBEDDED mode: return clientSecret (string)
+            // HOSTED mode: return session URL (string)
+            if (string.Equals(input.UiMode, "embedded", StringComparison.OrdinalIgnoreCase))
             {
-                sessionId = result.SubscriptionId,
-                sessionUrl = result.SessionUrl,
-                clientSecret = result.AdditionalData.GetValueOrDefault("clientSecret")
-            });
+                var clientSecret = result.AdditionalData.GetValueOrDefault("clientSecret")?.ToString() ?? string.Empty;
+                return Ok(clientSecret);
+            }
+            else
+            {
+                return Ok(result.SessionUrl ?? string.Empty);
+            }
         }
         catch (Exception e)
         {
