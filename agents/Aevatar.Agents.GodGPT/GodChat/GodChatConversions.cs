@@ -79,14 +79,15 @@ public static class GodChatConversions
     
     /// <summary>
     /// Convert ChatRole enum to role string for Protobuf serialization
+    /// Note: Enum values are User=0, Assistant=1, System=2, Tool=3 for API compatibility
     /// </summary>
     private static string GetRoleStringFromEnum(ChatRole chatRole)
     {
         return chatRole switch
         {
-            ChatRole.System => "system",
             ChatRole.User => "user",
             ChatRole.Assistant => "assistant",
+            ChatRole.System => "system",
             ChatRole.Tool => "tool",
             _ => "user"
         };
