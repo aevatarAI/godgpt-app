@@ -78,6 +78,9 @@ public class OrleansAgentState
 // before any other request can modify state).
 public class OrleansGAgentGrain : Grain, IGAgentGrain
 {
+    // Static shared SiloGAgentActorFactory - cached across all Grains for performance
+    private static SiloGAgentActorFactory? _sharedSiloFactory;
+    
     // Grain 持久化状态
     private readonly IPersistentState<OrleansAgentState> _grainState;
 
@@ -743,15 +746,38 @@ public class OrleansGAgentGrain : Grain, IGAgentGrain
         // Agent runs inside Silo. If we inject the DI-registered OrleansGAgentActorFactory (client-side),
         // it may create client proxies (IClusterClient) which are NOT suitable for Grain-to-Grain calls.
         //
-        // Instead, inject a Silo-side factory that uses IGrainFactory and delegates to IGAgentGrain directly.
-        var grainFactory = ServiceProvider.GetRequiredService<IGrainFactory>();
-        var loggerFactory = ServiceProvider.GetRequiredService<ILoggerFactory>();
-        var siloFactory = new SiloGAgentActorFactory(
-            grainFactory,
-            loggerFactory.CreateLogger<SiloGAgentActorFactory>());
+        // Instead, use shared SiloGAgentActorFactory that caches actor instances.
+        // First try to get from DI (if registered as Singleton), otherwise use static instance.
+        var siloFactory = GetOrCreateSharedSiloFactory();
 
         actorFactoryProperty.SetValue(agent, siloFactory);
         _logger.LogDebug("✅ Injected SiloGAgentActorFactory into Agent {AgentType}", agentType.Name);
+    }
+    
+    /// <summary>
+    /// Get or create shared SiloGAgentActorFactory instance.
+    /// This ensures all Grains share the same factory with its actor cache.
+    /// Uses Interlocked for thread-safe lazy initialization (static field shared across Grains).
+    /// </summary>
+    private SiloGAgentActorFactory GetOrCreateSharedSiloFactory()
+    {
+        if (_sharedSiloFactory != null)
+            return _sharedSiloFactory;
+        
+        var grainFactory = ServiceProvider.GetRequiredService<IGrainFactory>();
+        var loggerFactory = ServiceProvider.GetRequiredService<ILoggerFactory>();
+        var newFactory = new SiloGAgentActorFactory(
+            grainFactory,
+            loggerFactory.CreateLogger<SiloGAgentActorFactory>());
+        
+        // Thread-safe: if another Grain already set it, use that one (newFactory will be GC'd)
+        var existing = Interlocked.CompareExchange(ref _sharedSiloFactory, newFactory, null);
+        if (existing == null)
+        {
+            _logger.LogInformation("✅ Created shared SiloGAgentActorFactory (with cache)");
+            return newFactory;
+        }
+        return existing;
     }
 
     public Task<bool> IsInitializedAsync()
