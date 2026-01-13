@@ -810,7 +810,9 @@ public class AIAgentStatusProxy :
                             SentenceIndex = 0
                         }
                     };
-                    textEnvelope.Text.SuggestedItems.AddRange(content.ExtractedSuggestions);
+                    // Ensure fixed "I don't understand" suggestion is present (always 4 items)
+                    var ensuredSuggestions = FixedSuggestions.EnsureFixedSuggestion(content.ExtractedSuggestions);
+                    textEnvelope.Text.SuggestedItems.AddRange(ensuredSuggestions);
                     
                     var textEventEnvelope = new EventEnvelope
                     {
@@ -821,7 +823,7 @@ public class AIAgentStatusProxy :
                     };
                     await stream.ProduceAsync(textEventEnvelope, CancellationToken.None);
                     Logger.LogInformation("[AIAgentStatusProxy] Sent suggestedItems - Count={Count}, StreamId={StreamId}",
-                        content.ExtractedSuggestions.Count, streamId);
+                        ensuredSuggestions.Count, streamId);
                     
                     // Update seq for control message
                     seq++;
