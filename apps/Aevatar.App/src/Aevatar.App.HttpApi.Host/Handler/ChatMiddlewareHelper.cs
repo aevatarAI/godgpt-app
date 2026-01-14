@@ -60,6 +60,12 @@ public static class ChatMiddlewareHelper
                 http.IsLastChunk = envelope.Text?.IsLast ?? false;
                 http.AudioData = null;
                 http.AudioMetadata = null;
+                // Read VoiceContentType from proto: 0=VoiceToText, 1=VoiceResponse
+                // This is critical for voice chat to distinguish STT result from AI response
+                if (envelope.Text != null && Enum.IsDefined(typeof(VoiceContentType), envelope.Text.VoiceContentType))
+                {
+                    http.VoiceContentType = (VoiceContentType)envelope.Text.VoiceContentType;
+                }
                 // Map suggested items from proto to HTTP response
                 if (envelope.Text?.SuggestedItems != null && envelope.Text.SuggestedItems.Count > 0)
                 {

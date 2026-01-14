@@ -822,7 +822,9 @@ public class AIAgentStatusProxy :
                         {
                             Content = "",
                             IsLast = true,
-                            SentenceIndex = 0
+                            SentenceIndex = 0,
+                            // AI response: always VoiceResponse (1)
+                            VoiceContentType = (int)VoiceContentType.VoiceResponse
                         }
                     };
                     // Ensure fixed "I don't understand" suggestion is present (always 4 items)
@@ -845,12 +847,13 @@ public class AIAgentStatusProxy :
                     streamEnvelope.Seq = seq;
                 }
                 
+                // Unified completion signal: Always send AllCompleted
+                // Voice synthesis (VoiceSynthesisGAgent) sends AudioChunks independently
+                // This ensures SSE closes reliably without distributed coordination
                 streamEnvelope.Control = new ControlProto
                 {
-                    Type = isVoiceChat
-                        ? ControlProto.Types.ControlType.TextCompleted
-                        : ControlProto.Types.ControlType.AllCompleted,
-                    Scope = isVoiceChat ? "text" : "all",
+                    Type = ControlProto.Types.ControlType.AllCompleted,
+                    Scope = "all",
                     Message = "",
                     ErrorCode = 0
                 };
@@ -861,7 +864,9 @@ public class AIAgentStatusProxy :
                 {
                     Content = content?.Content ?? "",
                     IsLast = false,
-                    SentenceIndex = 0
+                    SentenceIndex = 0,
+                    // AI response: always VoiceResponse (1)
+                    VoiceContentType = (int)VoiceContentType.VoiceResponse
                 };
             }
 

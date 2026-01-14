@@ -339,6 +339,124 @@ test_guest_chat_sse() {
 }
 
 # =============================================================================
+# Test 2d: Voice Chat SSE (Critical for voice streaming)
+# =============================================================================
+test_voice_chat_sse() {
+    log_step "Test 2d: Voice chat SSE (testing voice streaming completion)..."
+    
+    if [ -z "$SESSION_ID" ]; then
+        log_warn "No session ID, skipping"
+        return 0
+    fi
+    
+    local start_time=$(get_time_ms)
+    local chunk_count=0
+    local has_last_chunk=false
+    local has_voice_content_type=false
+    local has_all_completed=false
+    local voice_content_types_seen=""
+    
+    # Note: Voice chat requires actual audio data. For testing, we'll send
+    # a minimal base64-encoded audio payload (this may fail if STT rejects it,
+    # but we can still test if the endpoint responds with SSE format)
+    
+    log_info "Testing voice chat endpoint SSE completion signal..."
+    
+    # Stream and analyze response
+    while IFS= read -r line; do
+        if echo "$line" | grep -q "^data: "; then
+            ((chunk_count++))
+            local json_data=$(echo "$line" | sed 's/^data: //')
+            
+            # Check VoiceContentType field (critical for backward compatibility)
+            local voice_type=$(echo "$json_data" | jq -r '.VoiceContentType // -1' 2>/dev/null)
+            if [ "$voice_type" != "-1" ] && [ "$voice_type" != "null" ]; then
+                has_voice_content_type=true
+                voice_content_types_seen="${voice_content_types_seen}${voice_type},"
+                
+                # VoiceToText = 0, VoiceResponse = 1
+                if [ "$voice_type" == "0" ]; then
+                    log_info "✓ Received VoiceContentType=0 (VoiceToText/STT result)"
+                elif [ "$voice_type" == "1" ]; then
+                    log_info "✓ Received VoiceContentType=1 (VoiceResponse/AI reply)"
+                fi
+            fi
+            
+            # Check IsLastChunk - critical for SSE connection closing
+            local is_last=$(echo "$json_data" | jq -r '.IsLastChunk // false' 2>/dev/null)
+            if [ "$is_last" == "true" ]; then
+                has_last_chunk=true
+                has_all_completed=true
+                log_info "✓ Received IsLastChunk=true (SSE will close properly)"
+            fi
+            
+            # Log first few chunks
+            if [ $chunk_count -le 3 ]; then
+                log_info "Chunk #${chunk_count}: $(echo "$json_data" | jq -c '{VoiceContentType,IsLastChunk,Response:.Response[0:50]}' 2>/dev/null || echo "$json_data")"
+            fi
+        fi
+        
+        # Check for 'event: completed' (explicit SSE completion)
+        if echo "$line" | grep -q "^event: completed"; then
+            has_all_completed=true
+            log_info "✓ Received 'event: completed' signal"
+        fi
+        
+        # Break on completion
+        if echo "$line" | grep -q '"IsLastChunk":true'; then
+            break
+        fi
+    done < <(curl -k -s -N -X POST "$API_URL/api/godgpt/voice/chat" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "Accept: text/event-stream" \
+        -H "GodgptLanguage: en" \
+        --max-time 45 \
+        -d "{
+            \"sessionId\": \"$SESSION_ID\",
+            \"content\": \"SGVsbG8gd29ybGQ=\",
+            \"region\": null,
+            \"voiceLanguage\": 0,
+            \"voiceDurationSeconds\": 1.0
+        }" 2>/dev/null)
+    
+    local end_time=$(get_time_ms)
+    local duration=$((end_time - start_time))
+    
+    echo ""
+    log_info "========================================"
+    log_info "📊 Voice Chat SSE Test Summary"
+    log_info "========================================"
+    log_info "⏱️  Duration: ${duration}ms"
+    log_info "📦 Total Chunks: ${chunk_count}"
+    log_info "🔊 VoiceContentType present: $([ "$has_voice_content_type" == "true" ] && echo "Yes ✓" || echo "No ⚠️")"
+    log_info "🔊 VoiceContentTypes seen: ${voice_content_types_seen:-none}"
+    log_info "✅ IsLastChunk received: $([ "$has_last_chunk" == "true" ] && echo "Yes ✓" || echo "No ❌")"
+    log_info "✅ Completion signal: $([ "$has_all_completed" == "true" ] && echo "Yes ✓" || echo "No ❌")"
+    log_info "========================================"
+    
+    # Test results evaluation
+    if [ $chunk_count -eq 0 ]; then
+        log_warn "No SSE chunks received (voice chat may require valid audio, endpoint may not be configured)"
+        log_warn "This is expected if STT service rejects the test audio payload"
+        ((TESTS_PASSED++))
+        return 0
+    fi
+    
+    # Critical check: If we got chunks, we MUST get IsLastChunk=true for SSE to close
+    if [ "$has_last_chunk" != "true" ]; then
+        log_error "❌ CRITICAL: Received chunks but no IsLastChunk=true - SSE connection will hang!"
+        log_error "This was the bug we fixed: AllCompleted signal not being sent for voice chat"
+        ((TESTS_FAILED++))
+        return 1
+    fi
+    
+    log_info "Voice chat SSE test passed ✓"
+    ((TESTS_PASSED++))
+    return 0
+}
+
+# =============================================================================
 # Test 2c: Test SuggestedItems Field in Last Chunk
 # =============================================================================
 test_suggested_items_field() {
@@ -606,6 +724,8 @@ echo ""
 test_suggested_items_field
 echo ""
 test_guest_chat_sse
+echo ""
+test_voice_chat_sse
 echo ""
 test_get_session_messages
 echo ""

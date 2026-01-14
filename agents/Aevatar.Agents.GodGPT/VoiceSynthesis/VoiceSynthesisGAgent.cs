@@ -85,8 +85,9 @@ public class VoiceSynthesisGAgent : GAgentBase<VoiceSynthesisStateProto>, IVoice
                 emittedAny = true;
             }
 
-            // Even if no audio was produced (e.g., empty), we still need to close the stream.
-            await PublishControlAsync(job, ControlProto.Types.ControlType.AllCompleted, scope: "all", message: string.Empty, errorCode: 0);
+            // NOTE: AllCompleted is now sent by AIAgentStatusProxy (unified completion signal)
+            // VoiceSynthesisGAgent only sends AudioChunks - audio is a "best effort" enhancement
+            // This avoids distributed coordination issues and ensures SSE closes reliably
 
             // Cleanup state to avoid unbounded growth
             State.Streams.Remove(job.StreamId);

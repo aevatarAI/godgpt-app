@@ -747,7 +747,9 @@ public partial class GodChatGAgent
             {
                 Content = chatMessage.Response ?? "",
                 IsLast = true,
-                SentenceIndex = 0
+                SentenceIndex = 0,
+                // VoiceResponse (1) is default for AI responses
+                VoiceContentType = (int)VoiceContentType.VoiceResponse
             };
             // Ensure fixed "I don't understand" suggestion is present (always 4 items)
             var ensuredSuggestions = FixedSuggestions.EnsureFixedSuggestion(chatMessage.SuggestedItems);
@@ -822,7 +824,10 @@ public partial class GodChatGAgent
             {
                 Content = chatMessage.Response ?? "",
                 IsLast = false,
-                SentenceIndex = 0
+                SentenceIndex = 0,
+                // Preserve VoiceContentType for backward compatibility
+                // VoiceToText (0) indicates STT result, VoiceResponse (1) is default
+                VoiceContentType = (int)chatMessage.VoiceContentType
             };
         }
         var envelope = new EventEnvelope

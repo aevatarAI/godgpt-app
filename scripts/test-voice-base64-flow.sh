@@ -229,6 +229,7 @@ run_sse_summary() {
   # Keep stderr clean; we only need the body.
   "${SSE_CMD[@]}" -o "$tmp_sse" || true
 
+  # Parse and VALIDATE the SSE response
   python3 - <<PY
 import re,sys
 path = r"$tmp_sse"
@@ -236,22 +237,26 @@ try:
     data = open(path, "r", encoding="utf-8", errors="ignore").read().splitlines()
 except Exception as e:
     print(f"[summary] failed_to_read_sse_file: {e}")
-    sys.exit(0)
+    sys.exit(1)  # FAIL: couldn't read SSE
 
 re_chatid=re.compile(r'"ChatId":"([^"]+)"')
 re_session=re.compile(r'"SessionId":"([^"]+)"')
 re_serial=re.compile(r'"SerialNumber":([0-9]+)')
 re_audio=re.compile(r'"AudioData":"([^"]*)"')
+re_voice_type=re.compile(r'"VoiceContentType":([0-9]+)')
 
 completed = any(line.startswith("event: completed") for line in data)
 
 first_text = None
 first_audio = None
 last_chunk = None
+has_data_lines = False
+voice_content_types_seen = set()
 
 for line in data:
     if not line.startswith("data: "):
         continue
+    has_data_lines = True
     payload=line[len("data: "):].strip()
     if not payload:
         continue
@@ -263,6 +268,10 @@ for line in data:
         first_audio = (payload, b64_len)
     if '"IsLastChunk":true' in payload:
         last_chunk = payload
+    # Track VoiceContentType values (critical for backward compatibility)
+    vt_match = re_voice_type.search(payload)
+    if vt_match:
+        voice_content_types_seen.add(int(vt_match.group(1)))
 
 def extract(pat, s, default=""):
     m=pat.search(s or "")
@@ -275,6 +284,8 @@ def fmt(kind, payload):
     return f"[summary] {kind}: serial={serial} chat_id={chat_id} session_id={session_id}"
 
 print(f"[summary] completed={str(completed).lower()}")
+print(f"[summary] has_data_lines={str(has_data_lines).lower()}")
+print(f"[summary] voice_content_types_seen={list(voice_content_types_seen)}")
 if first_text:
     print(fmt("first_text", first_text))
 if first_audio:
@@ -282,10 +293,31 @@ if first_audio:
     print(fmt("first_audio", payload) + f" base64_len={b64_len}")
 if last_chunk:
     print(fmt("last_chunk", last_chunk))
-PY
 
-  # In summary mode, treat curl write errors as non-fatal because we still can parse what we captured.
-  return 0
+# ========== VALIDATION (Critical for detecting streaming bugs) ==========
+exit_code = 0
+
+# Check 1: If we got data lines but no completion signal, SSE will hang!
+if has_data_lines and not last_chunk and not completed:
+    print("[FAIL] Received data but no IsLastChunk=true and no 'event: completed' - SSE connection will hang!")
+    exit_code = 1
+
+# Check 2: For voice chat, VoiceContentType should be present
+# VoiceToText=0 (STT result), VoiceResponse=1 (AI reply)
+if has_data_lines and first_text and len(voice_content_types_seen) == 0:
+    print("[WARN] VoiceContentType field not seen in any response (backward compatibility issue)")
+    # Don't fail on this, just warn
+
+# Check 3: If last_chunk present, we should also have completed event
+if last_chunk and not completed:
+    print("[WARN] Got IsLastChunk=true but no 'event: completed' signal")
+
+if exit_code == 0:
+    print("[PASS] Voice chat SSE validation passed")
+sys.exit(exit_code)
+PY
+  local py_exit=$?
+  return $py_exit
 }
 
 case "$OUTPUT_MODE" in
