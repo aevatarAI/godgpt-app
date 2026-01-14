@@ -94,6 +94,20 @@ public class AppHttpApiHostModule : AbpModule
         
         // Configure Hangfire background job processing
         context.Services.AddHangfireWithMongo(configuration);
+        
+        // Configure State Migration Job
+        ConfigureStateMigration(context, configuration);
+    }
+    
+    private void ConfigureStateMigration(ServiceConfigurationContext context, IConfiguration configuration)
+    {
+        // Configure options
+        context.Services.Configure<StateMigrationOptions>(
+            configuration.GetSection(StateMigrationOptions.SectionName));
+        
+        // Register StateMigrationJob (IMongoClient should already be registered by AppMongoDbModule)
+        context.Services.AddHttpClient();
+        context.Services.AddScoped<StateMigrationJob>();
     }
     
     private static void ConfigureAutoResponseWrapper(ServiceConfigurationContext context)
@@ -137,6 +151,8 @@ public class AppHttpApiHostModule : AbpModule
         Configure<AbpAspNetCoreMvcOptions>(options =>
         {
             options.ConventionalControllers.Create(typeof(AppApplicationModule).Assembly);
+            // Also register controllers from HttpApi.Host assembly
+            options.ConventionalControllers.Create(typeof(AppHttpApiHostModule).Assembly);
         });
     }
 
