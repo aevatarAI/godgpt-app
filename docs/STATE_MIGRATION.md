@@ -475,12 +475,30 @@ curl "http://localhost:8082/api/admin/migration/test/read/UserStatisticsGAgent:2
 ### 当前实现状态
 
 ✅ **已完成**：
-- UserStatisticsGAgent 迁移（1:1 映射）
+- 11 个 Agent 类型的 Converter 实现（1:1 映射）
+  - UserStatisticsGAgent
+  - AnonymousUserGAgent
+  - InvitationGAgent
+  - UserQuotaGAgent
+  - ChatManagerGAgent
+  - GodChatGAgent
+  - AwakeningGAgent
+  - ConfigurationGAgent
+  - DailyContentGAgent
+  - FreeTrialCodeFactoryGAgent
+  - AIAgentStatusProxy
 - 统一集合命名和文档结构
 - 测试 API 和验证流程
 
+❌ **不需要迁移的 Agent**：
+以下 5 个 Agent 类型**不需要迁移**，会在迁移过程中自动跳过：
+1. **DailyPushCoordinatorGAgent** - 旧系统的 Coordinator Agent，新系统中已重构为不同的架构
+2. **GoogleAuthGAgent** - 旧系统的 Google 认证 Agent，新系统中已废弃或改为其他实现方式
+3. **AevatarProjectorIndex** - Orleans 基础设施 Grain，不属于业务 Agent
+4. **AevatarPubSubRendezvousGrain** - Orleans 基础设施 Grain，用于 PubSub 消息传递
+5. **AevatarServerDirectoryState** - Orleans 基础设施 Grain，用于服务器目录管理
+
 ⏳ **待实现**：
-- 其他 Agent 类型的 Converter
 - Agent 拆分场景的处理逻辑
 - 拆分 Agent 的映射关系维护
 
