@@ -223,7 +223,9 @@ var id = this.Id;
 ### 低优先级
 
 - [ ] 清理 GodGPTService.cs（已无Controller依赖）
-- [ ] 清理 GodGPTController.cs（已注释）
+- [ ] 清理 GodGPTController.cs（已注释，所有方法已迁移到专用Controller）
+  - ✅ `GetTodayAwakeningAsync` 已迁移至 `GodGPTContentController`
+  - ✅ 其他方法已拆分到对应的专用Controller
 
 ## 🔧 最近修复
 
