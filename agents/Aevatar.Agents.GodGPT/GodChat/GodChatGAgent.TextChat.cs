@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.Agents.GodGPT.Protos.UserQuota;
+using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
+using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.Application.Grains.Agents.ChatManager.Dtos;
 using Aevatar.Application.Grains.GodChat.Dtos;
 using Aevatar.GAgents.AI.Options;
@@ -384,10 +386,18 @@ public partial class GodChatGAgent
         return ConvertToChatMessageListProto(response);
     }
     
-    public async Task<ChatMessageListProto> ChatWithoutHistoryAsync(Guid sessionId, string systemLLM, string content, string chatId,
-        ExecutionPromptSettings promptSettings = null, bool isHttpRequest = false, string? region = null)
+    public async Task<string> GodChatAsync(string llm, string message,
+        ExecutionPromptSettings? promptSettings = null)
     {
-        Logger.LogDebug($"[GodChatGAgent][ChatWithUserId] {sessionId.ToString()} content:{content} start.");
+        throw new Exception("The method has expired");
+    }
+    
+    /// <summary>
+    /// Chat without history using Protobuf input (for RPC calls with custom settings)
+    /// </summary>
+    public async Task<ChatMessageListProto> ChatWithoutHistoryProtoAsync(ChatWithHistoryInputProto input, bool isHttpRequest = false, string? region = null)
+    {
+        Logger.LogDebug($"[GodChatGAgent][ChatWithoutHistoryProtoAsync] session {Id.ToString()} start.");
         var sw = new Stopwatch();
         sw.Start();
 
@@ -395,28 +405,34 @@ public partial class GodChatGAgent
         var llm = await configuration.GetSystemLLMAsync();
         var streamingModeEnabled = await configuration.GetStreamingModeEnabledAsync();
         
-        var (aiAgentStatusProxy2, _) = await GetInitializedProxyAsync(region, sessionId);
+        // Extract sessionId from context or use Id (extract Guid from Id if needed)
+        Guid sessionId;
+        if (input.Context != null && !string.IsNullOrEmpty(input.Context.SessionId))
+        {
+            sessionId = Guid.TryParse(input.Context.SessionId, out var parsedSessionId) ? parsedSessionId : Guid.Parse(AgentId.ExtractRawId(Id));
+        }
+        else if (input.Context != null && !string.IsNullOrEmpty(input.Context.RequestId))
+        {
+            sessionId = Guid.TryParse(input.Context.RequestId, out var parsedRequestId) ? parsedRequestId : Guid.Parse(AgentId.ExtractRawId(Id));
+        }
+        else
+        {
+            sessionId = Guid.Parse(AgentId.ExtractRawId(Id));
+        }
+        
+        var proxyResult = await GetInitializedProxyAsync(region, sessionId);
+        var aiAgentStatusProxy2 = proxyResult.Proxy;
         if (aiAgentStatusProxy2 == null)
         {
-            Logger.LogError($"[GodChatGAgent][ChatWithoutHistory] No AIGAgent available. {sessionId.ToString()}");
+            Logger.LogError($"[GodChatGAgent][ChatWithoutHistoryProtoAsync] No AIGAgent available. {sessionId.ToString()}");
             return new ChatMessageListProto();
         }
 
-        var settings = promptSettings ?? new ExecutionPromptSettings();
-        settings.Temperature = "1.0";
-        
-        var aiChatContextDto = CreateAIChatContext(sessionId, llm, streamingModeEnabled, content, chatId, promptSettings, isHttpRequest, region);
-        var protoInput = BuildChatWithHistoryInputProto(content, State.ChatHistory.FromProtoList(), settings, aiChatContextDto);
-        var response = await aiAgentStatusProxy2.ChatWithHistoryProtoAsync(protoInput);
+        // Use the Protobuf input directly (already contains ExecutionPromptSettingsProto)
+        var response = await aiAgentStatusProxy2.ChatWithHistoryProtoAsync(input);
         sw.Stop();
-        Logger.LogDebug($"[GodChatGAgent][ChatWithoutHistory] {sessionId.ToString()}, response messages count:{response?.Messages?.Count ?? 0} - step4,time use:{sw.ElapsedMilliseconds}");
+        Logger.LogDebug($"[GodChatGAgent][ChatWithoutHistoryProtoAsync] {sessionId.ToString()}, response messages count:{response?.Messages?.Count ?? 0} - step4,time use:{sw.ElapsedMilliseconds}");
         return ConvertToChatMessageListProto(response);
-    }
-
-    public async Task<string> GodChatAsync(string llm, string message,
-        ExecutionPromptSettings? promptSettings = null)
-    {
-        throw new Exception("The method has expired");
     }
 }
 
