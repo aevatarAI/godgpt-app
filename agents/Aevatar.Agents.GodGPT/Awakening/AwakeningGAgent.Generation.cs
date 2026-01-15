@@ -7,6 +7,9 @@ using GodGPT.GAgents.Awakening.Helpers;
 using GodGPT.GAgents.SpeechChat;
 using Microsoft.Extensions.Logging;
 using Aevatar.Agents.Abstractions.Extensions;
+using Aevatar.Agents.GodGPT.AIAgentStatusProxy.Protos;
+using Aevatar.GAgents.AIGAgent.Dtos;
+using Google.Protobuf.WellKnownTypes;
 
 // Protobuf types aliases
 using AwakeningStatusProto = Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStatusProto;
@@ -41,18 +44,34 @@ public partial class AwakeningGAgent
                 var rawId = AgentId.ExtractRawId(Id);
                 var userId = Guid.Parse(rawId);
                 
-                // Get IGodChat instance for current user using new framework
+                // Get IGodChat instance
                 var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(rawId);
                 var godChat = godChatActor.As<IGodChat>();
                 var chatId = Guid.NewGuid().ToString();
                 
-                var settings = new ExecutionPromptSettings
+                // Build Protobuf input with custom Temperature from configuration
+                var protoInput = new ChatWithHistoryInputProto 
+                { 
+                    Prompt = prompt 
+                };
+                
+                // Set prompt settings using Protobuf type with custom Temperature
+                protoInput.PromptSettings = new ExecutionPromptSettingsProto
                 {
                     Temperature = _options.CurrentValue.Temperature.ToString()
                 };
                 
-                // Call IGodChat.ChatWithoutHistory with our prompt
-                var response = await godChat.ChatWithoutHistoryAsync(userId, string.Empty, prompt, chatId, settings, true, region);
+                // Create context for the request
+                protoInput.Context = new AIChatContextProto
+                {
+                    RequestId = userId.ToString(),
+                    SessionId = userId.ToString(),
+                    UserId = userId.ToString(),
+                    ChatId = chatId
+                };
+                
+                // Call Protobuf method directly to preserve Temperature configuration
+                var response = await godChat.ChatWithoutHistoryProtoAsync(protoInput, true, region);
                 
                 string responseContent;
                 if (response == null || response.Messages.Count == 0)
