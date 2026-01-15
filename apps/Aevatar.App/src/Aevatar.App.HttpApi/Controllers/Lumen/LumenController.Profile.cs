@@ -2,7 +2,7 @@ using System;
 using System.Linq;
 using Aevatar.Agents.Lumen.Protos;
 using Aevatar.App.Lumen.Dtos;
-using Google.Protobuf.WellKnownTypes;
+using Aevatar.App.HttpApi.Controllers;
 
 namespace Aevatar.App.Controllers.Lumen;
 
@@ -20,9 +20,9 @@ public partial class LumenController
             BirthCity = profile.BirthCity,
             LatLong = profile.LatLong,
             CalendarType = profile.HasCalendarType ? profile.CalendarType : null,
-            CreatedAt = ToUnixTimeSeconds(profile.CreatedAt),
+            CreatedAt = DateTimeFormatHelper.ToIso8601String(profile.CreatedAt),
             CurrentResidence = NormalizeOptionalString(profile.CurrentResidence),
-            UpdatedAt = ToUnixTimeSeconds(profile.UpdatedAt),
+            UpdatedAt = DateTimeFormatHelper.ToIso8601String(profile.UpdatedAt),
             WelcomeNote = profile.WelcomeNote.ToDictionary(item => item.Key, item => item.Value),
             ZodiacSign = profile.ZodiacSign,
             ZodiacSignEnum = profile.ZodiacSignEnum,
@@ -40,12 +40,6 @@ public partial class LumenController
             LatLongInferred = NormalizeOptionalString(profile.LatLongInferred),
             InferredFromCity = NormalizeOptionalString(profile.InferredFromCity)
         };
-    }
-
-    private static long ToUnixTimeSeconds(Timestamp timestamp)
-    {
-        var utcDateTime = timestamp.ToDateTime();
-        return new DateTimeOffset(utcDateTime).ToUnixTimeSeconds();
     }
 
     private static string? NormalizeOptionalString(string value)

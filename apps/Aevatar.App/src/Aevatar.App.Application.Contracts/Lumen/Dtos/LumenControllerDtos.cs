@@ -106,9 +106,9 @@ public class LumenUserProfileApiDto
     public string BirthCity { get; set; } = string.Empty;
     public string LatLong { get; set; } = string.Empty;
     public CalendarTypeEnum? CalendarType { get; set; }
-    public long CreatedAt { get; set; }
+    public string CreatedAt { get; set; } = string.Empty;
     public string? CurrentResidence { get; set; }
-    public long UpdatedAt { get; set; }
+    public string UpdatedAt { get; set; } = string.Empty;
     public Dictionary<string, string> WelcomeNote { get; set; } = new();
     public string ZodiacSign { get; set; } = string.Empty;
     public ZodiacSignEnum ZodiacSignEnum { get; set; }

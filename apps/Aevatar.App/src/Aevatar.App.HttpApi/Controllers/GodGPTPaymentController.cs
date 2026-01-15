@@ -193,7 +193,7 @@ public class GodGPTPaymentController : AevatarController
             Amount = h.Amount,
             Currency = h.Currency,
             Status = h.Status.ToString(),
-            CreatedAt = h.CreatedAt
+            CreatedAt = DateTimeFormatHelper.ToIso8601String(h.CreatedAt)
         }).ToList();
         
         _logger.LogDebug("[GodGPTPaymentController][GetPaymentHistoryAsync] userId: {UserId}, duration: {Duration}ms",
@@ -280,7 +280,7 @@ public class GodGPTPaymentController : AevatarController
             Success = result.Success,
             Error = result.ErrorMessage,
             SubscriptionId = result.SubscriptionId,
-            ExpiresAt = result.ExpiresAt
+            ExpiresAt = DateTimeFormatHelper.ToIso8601String(result.ExpiresAt)
         };
     }
 
@@ -447,7 +447,7 @@ public class PaymentSummaryDto
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
     public string Status { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; }
+    public string CreatedAt { get; set; } = string.Empty;
 }
 
 public class AppStoreSubscriptionResponseDto
@@ -455,7 +455,7 @@ public class AppStoreSubscriptionResponseDto
     public bool Success { get; set; }
     public string? Error { get; set; }
     public string? SubscriptionId { get; set; }
-    public DateTime? ExpiresAt { get; set; }
+    public string? ExpiresAt { get; set; }
 }
 
 public class GetPaymentHistoryInput
