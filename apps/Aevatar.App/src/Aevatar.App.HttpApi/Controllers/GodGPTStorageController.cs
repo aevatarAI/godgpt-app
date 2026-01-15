@@ -60,6 +60,8 @@ public class GodGPTStorageController : AevatarController
     /// Upload a file (image)
     /// </summary>
     [HttpPost("godgpt/blob")]
+    [RequestSizeLimit(long.MaxValue)]
+    [RequestFormLimits(MultipartBodyLengthLimit = long.MaxValue)]
     public async Task<string> SaveAsync([FromForm] SaveBlobInput input)
     {
         var language = HttpContext.GetGodGPTLanguage();
