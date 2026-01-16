@@ -90,19 +90,25 @@ public class InvitationService : IInvitationService
 
     public async Task<RedeemInviteCodeResponse> RedeemInviteCodeAsync(Guid userId, RedeemInviteCodeRequest input)
     {
-        _logger.LogInformation("[InvitationService] Redeeming invite code for user {UserId}", userId);
+        _logger.LogInformation("[InvitationService] Redeeming invite code for user {UserId}, code {Code}", 
+            userId, input.InviteCode);
 
         var protoCodeType = InvitationCodeHelper.GetCodeType(input.InviteCode);
         var codeType = protoCodeType.HasValue 
             ? (CsInvitationCodeType)(int)protoCodeType.Value 
             : CsInvitationCodeType.FriendInvitation;
         
+        _logger.LogInformation("[InvitationService] Invite code type resolved. UserId: {UserId}, Code: {Code}, CodeType: {CodeType}",
+            userId, input.InviteCode, codeType);
+
         if (codeType == CsInvitationCodeType.FriendInvitation)
         {
             // Use UserInvitationGAgent for friend invitation redemption
             var userInvitationActor = await _actorFactory.CreateGAgentActorAsync<UserInvitationGAgent>(userId.ToString());
             var userInvitationGAgent = userInvitationActor.As<IUserInvitationGAgent>();
             var result = await userInvitationGAgent.RedeemInviteCodeAsync(input.InviteCode);
+            _logger.LogInformation("[InvitationService] Friend invite redemption result. UserId: {UserId}, Code: {Code}, Success: {Result}",
+                userId, input.InviteCode, result);
             
             return new RedeemInviteCodeResponse
             {
