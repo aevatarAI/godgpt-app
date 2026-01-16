@@ -5,12 +5,10 @@ using Aevatar.Agents.GodGPT.Protos.InviteCode;
 using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Common;
 using Aevatar.Application.Grains.Common.Constants;
-using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 // Using QuotaPlanType from user_quota.proto as the unified plan type
 
@@ -35,10 +33,6 @@ public interface IFreeTrialCodeFactoryGAgent : Aevatar.Agents.Abstractions.IGAge
 
 public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>, IFreeTrialCodeFactoryGAgent
 {
-    // Dependency injection via properties for Orleans compatibility
-    public IOptionsMonitor<StripeOptions>? StripeOptions { get; set; }
-    public IOptionsMonitor<CreditsOptions>? CreditsOptions { get; set; }
-
     private const int MaxQuantity = 10000;
 
     // Parameterless constructor required for Orleans activation
@@ -53,19 +47,6 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
 
     public async Task<GenerateCodesResultProto> GenerateCodesAsync(GenerateCodesRequestProto request)
     {
-        if (!IsUserAuthorizedToGenerateCode(request.OperatorUserId))
-        {
-            Logger.LogWarning(
-                "[FreeTrialCodeFactoryGAgent][GenerateCodesAsync] Unauthorized attempt to generate codes by user {OperatorUserId}",
-                request.OperatorUserId);
-            return new GenerateCodesResultProto
-            {
-                Success = false,
-                Message = "Unauthorized attempt to generate code",
-                ErrorCode = (int)FreeTrialCodeError.InternalError
-            };
-        }
-        
         await InitializeFactoryAsync(request);
 
         if (!State.HasBatchId)
@@ -181,19 +162,15 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
             return false;
         }
 
-        var stripeProduct = await GetStripeProductConfigAsync(request.ProductId);
-
-        var batchConfig = new BatchConfig
+        if (request.BatchConfig == null)
         {
-            TrialDays = request.TrialDays,
-            ProductId = stripeProduct.PriceId,
-            PlanType = (FactoryPlanType)stripeProduct.PlanType,
-            IsUltimate = stripeProduct.IsUltimate,
-            Platform = request.Platform,
-            StartTime = request.StartTime,
-            EndTime = request.EndTime,
-            Description = request.Description ?? string.Empty
-        };
+            Logger.LogError(
+                "[FreeTrialCodeFactoryGAgent][InitializeFactoryAsync] BatchConfig is required. OperatorUserId: {OperatorUserId}",
+                request.OperatorUserId);
+            return false;
+        }
+
+        var batchConfig = request.BatchConfig;
 
         RaiseEvent(new InitializeFactoryEvent
         {
@@ -374,40 +351,6 @@ public class FreeTrialCodeFactoryGAgent : GAgentBase<FreeTrialCodeFactoryState>,
         }
 
         return Task.FromResult(codes);
-    }
-
-    private bool IsUserAuthorizedToGenerateCode(string operatorUserId)
-    {
-        if (CreditsOptions == null)
-        {
-            Logger.LogError("[FreeTrialCodeFactoryGAgent] CreditsOptions is not injected");
-            return false;
-        }
-        var authorizedUsers = CreditsOptions.CurrentValue.OperatorUserId;
-        return authorizedUsers.Contains(operatorUserId);
-    }
-
-    private Task<StripeProduct> GetStripeProductConfigAsync(string priceId)
-    {
-        if (StripeOptions == null)
-        {
-            Logger.LogError("[FreeTrialCodeFactoryGAgent] StripeOptions is not injected");
-            throw new InvalidOperationException("StripeOptions is not injected");
-        }
-        var productConfig = StripeOptions.CurrentValue.Products.FirstOrDefault(p => p.PriceId == priceId);
-        if (productConfig == null)
-        {
-            Logger.LogError(
-                "[FreeTrialCodeFactoryGAgent][GetStripeProductConfigAsync] Invalid priceId: {PriceId}. Product not found in configuration.",
-                priceId);
-            throw new ArgumentException($"Invalid priceId: {priceId}. Product not found in configuration.");
-        }
-
-        Logger.LogDebug(
-            "[FreeTrialCodeFactoryGAgent][GetStripeProductConfigAsync] Found product with priceId: {PriceId}, planType: {PlanType}, amount: {Amount} {Currency}",
-            productConfig.PriceId, productConfig.PlanType, productConfig.Amount, productConfig.Currency);
-
-        return Task.FromResult(productConfig);
     }
 
     private FreeTrialCodeBatchConfig? ConvertBatchConfigToDto(BatchConfig? config)

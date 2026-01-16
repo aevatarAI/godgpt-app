@@ -1,18 +1,27 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.App.Application.Services;
 using Aevatar.Application.Grains.Common;
 using Aevatar.Application.Grains.Common.Constants;
+using Aevatar.Application.Grains.Common.Options;
+using Aevatar.Application.Grains.FreeTrialCode;
+using Aevatar.Agents.GodGPT.Protos.FreeTrialCode;
 using Aevatar.GodGPT.Dtos;
 using Aevatar.Payment.Abstractions;
+using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Shouldly;
 using Xunit;
 using NewPaymentPlatform = Aevatar.Payment.Abstractions.PaymentPlatform;
+using PaymentStripeOptions = Aevatar.Payment.Providers.StripeOptions;
+using PaymentStripeProductConfig = Aevatar.Payment.Providers.StripeProductConfig;
 
 namespace Aevatar.App.Services;
 
@@ -29,6 +38,8 @@ public class InvitationServiceTests
     private readonly IGAgentActorFactory _mockActorFactory;
     private readonly ILogger<InvitationService> _mockLogger;
     private readonly IPaymentService _mockPaymentService;
+    private readonly IOptionsMonitor<CreditsOptions> _mockCreditsOptions;
+    private readonly IOptionsMonitor<PaymentStripeOptions> _mockStripeOptions;
     private readonly InvitationService _invitationService;
     
     // Generate a valid FreeTrialCode format (11-12 uppercase chars/digits)
@@ -44,11 +55,68 @@ public class InvitationServiceTests
         _mockActorFactory = Substitute.For<IGAgentActorFactory>();
         _mockLogger = Substitute.For<ILogger<InvitationService>>();
         _mockPaymentService = Substitute.For<IPaymentService>();
+        _mockCreditsOptions = new TestOptionsMonitor<CreditsOptions>(new CreditsOptions
+        {
+            OperatorUserId = new List<string> { "test-operator-1" }
+        });
+        _mockStripeOptions = new TestOptionsMonitor<PaymentStripeOptions>(new PaymentStripeOptions
+        {
+            Products = new List<PaymentStripeProductConfig>
+            {
+                new Aevatar.Payment.Providers.StripeProductConfig
+                {
+                    PriceId = "price_test_monthly",
+                    PlanType = 2,
+                    Amount = 9.99m,
+                    Currency = "USD",
+                    IsUltimate = false
+                }
+            }
+        });
         
         _invitationService = new InvitationService(
             _mockActorFactory,
             _mockLogger,
-            _mockPaymentService);
+            _mockPaymentService,
+            _mockCreditsOptions,
+            _mockStripeOptions);
+    }
+
+    private class TestOptionsMonitor<T> : IOptionsMonitor<T> where T : class
+    {
+        private readonly T _value;
+        public TestOptionsMonitor(T value) => _value = value;
+        public T CurrentValue => _value;
+        public T Get(string? name) => _value;
+        public IDisposable? OnChange(Action<T, string?> listener) => null;
+    }
+
+    private static BatchInfoProto CreateBatchInfoProto()
+    {
+        return new BatchInfoProto
+        {
+            BatchId = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            Config = new BatchConfig
+            {
+                TrialDays = 7,
+                ProductId = "price_test_monthly",
+                PlanType = FactoryPlanType.Month,
+                IsUltimate = false,
+                Platform = FactoryPaymentPlatform.Stripe,
+                StartTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc)),
+                EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow.AddDays(7), DateTimeKind.Utc)),
+                Description = "Test batch"
+            }
+        };
+    }
+
+    private void SetupFreeTrialFactoryAgent(IFreeTrialCodeFactoryGAgent agent)
+    {
+        var actor = Substitute.For<IGAgentActor>();
+        actor.GetAgent().Returns(agent);
+        _mockActorFactory
+            .CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns(actor);
     }
 
     #region GetInvitationCodeTypeAsync Tests
@@ -147,10 +215,22 @@ public class InvitationServiceTests
             IsWeb = true
         };
 
+        var factoryAgent = Substitute.For<IFreeTrialCodeFactoryGAgent>();
+        factoryAgent
+            .ValidateCodeAvailableAsync(Arg.Any<ValidateCodeRequestProto>())
+            .Returns(true);
+        factoryAgent
+            .GetBatchInfoAsync()
+            .Returns(CreateBatchInfoProto());
+        factoryAgent
+            .MarkCodeAsUsedAsync(Arg.Any<MarkCodeUsedRequestProto>())
+            .Returns(true);
+        SetupFreeTrialFactoryAgent(factoryAgent);
+
         _mockPaymentService.CreateSubscriptionAsync(
             Arg.Is<Guid>(id => id == userId),
             Arg.Is<NewPaymentPlatform>(p => p == NewPaymentPlatform.Stripe),
-            Arg.Is<SubscriptionRequest>(r => r.CouponCode == trialCode),
+            Arg.Is<SubscriptionRequest>(r => r.ProductId == "price_test_monthly" && r.TrialDays == 7),
             Arg.Any<CancellationToken>())
             .Returns(new SubscriptionResult
             {
@@ -167,6 +247,9 @@ public class InvitationServiceTests
         result.IsValid.ShouldBeTrue();
         result.CodeType.ShouldBe(InvitationCodeType.FreeTrialReward);
         result.URL.ShouldBe(expectedUrl);
+
+        await factoryAgent.Received(1)
+            .MarkCodeAsUsedAsync(Arg.Any<MarkCodeUsedRequestProto>());
     }
 
     [Fact(DisplayName = "RedeemInviteCodeAsync should return failure when Stripe fails")]
@@ -180,6 +263,15 @@ public class InvitationServiceTests
             InviteCode = trialCode,
             IsWeb = true
         };
+
+        var factoryAgent = Substitute.For<IFreeTrialCodeFactoryGAgent>();
+        factoryAgent
+            .ValidateCodeAvailableAsync(Arg.Any<ValidateCodeRequestProto>())
+            .Returns(true);
+        factoryAgent
+            .GetBatchInfoAsync()
+            .Returns(CreateBatchInfoProto());
+        SetupFreeTrialFactoryAgent(factoryAgent);
 
         _mockPaymentService.CreateSubscriptionAsync(
             Arg.Any<Guid>(),
@@ -200,6 +292,9 @@ public class InvitationServiceTests
         result.ShouldNotBeNull();
         result.IsValid.ShouldBeFalse();
         result.URL.ShouldBeNull();
+
+        await factoryAgent.DidNotReceive()
+            .MarkCodeAsUsedAsync(Arg.Any<MarkCodeUsedRequestProto>());
     }
 
     [Fact(DisplayName = "RedeemInviteCodeAsync should handle Stripe exceptions gracefully")]
@@ -213,6 +308,15 @@ public class InvitationServiceTests
             InviteCode = trialCode,
             IsWeb = true
         };
+
+        var factoryAgent = Substitute.For<IFreeTrialCodeFactoryGAgent>();
+        factoryAgent
+            .ValidateCodeAvailableAsync(Arg.Any<ValidateCodeRequestProto>())
+            .Returns(true);
+        factoryAgent
+            .GetBatchInfoAsync()
+            .Returns(CreateBatchInfoProto());
+        SetupFreeTrialFactoryAgent(factoryAgent);
 
         _mockPaymentService.CreateSubscriptionAsync(
             Arg.Any<Guid>(),
@@ -228,6 +332,9 @@ public class InvitationServiceTests
         result.ShouldNotBeNull();
         result.IsValid.ShouldBeFalse();
         result.CodeType.ShouldBe(InvitationCodeType.FreeTrialReward);
+
+        await factoryAgent.DidNotReceive()
+            .MarkCodeAsUsedAsync(Arg.Any<MarkCodeUsedRequestProto>());
     }
 
     [Fact(DisplayName = "RedeemInviteCodeAsync should fail when SessionUrl is empty")]
@@ -241,6 +348,15 @@ public class InvitationServiceTests
             InviteCode = trialCode,
             IsWeb = true
         };
+
+        var factoryAgent = Substitute.For<IFreeTrialCodeFactoryGAgent>();
+        factoryAgent
+            .ValidateCodeAvailableAsync(Arg.Any<ValidateCodeRequestProto>())
+            .Returns(true);
+        factoryAgent
+            .GetBatchInfoAsync()
+            .Returns(CreateBatchInfoProto());
+        SetupFreeTrialFactoryAgent(factoryAgent);
 
         _mockPaymentService.CreateSubscriptionAsync(
             Arg.Any<Guid>(),
@@ -260,6 +376,9 @@ public class InvitationServiceTests
         result.ShouldNotBeNull();
         result.IsValid.ShouldBeFalse();
         result.URL.ShouldBeNull();
+
+        await factoryAgent.DidNotReceive()
+            .MarkCodeAsUsedAsync(Arg.Any<MarkCodeUsedRequestProto>());
     }
 
     #endregion
