@@ -114,17 +114,60 @@ public class InvitationService : IInvitationService
             
             try
             {
-                // Use PaymentService to create checkout session with trial code
-                // Stripe will validate the coupon code - if invalid, it will throw exception or return Success=false
+                var batchId = InvitationCodeHelper.ParseBatchTimestampFromCode(input.InviteCode);
+                var agentId = CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId);
+                var actor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(agentId.ToString());
+                var factoryAgent = actor.As<IFreeTrialCodeFactoryGAgent>();
+                var isAvailable = await factoryAgent.ValidateCodeAvailableAsync(new ValidateCodeRequestProto
+                {
+                    Code = input.InviteCode
+                });
+                if (!isAvailable)
+                {
+                    _logger.LogWarning("[InvitationService] FreeTrialCode not available. UserId: {UserId}, Code: {Code}", 
+                        userId, input.InviteCode);
+                    return new RedeemInviteCodeResponse
+                    {
+                        IsValid = false,
+                        CodeType = codeType,
+                        URL = null
+                    };
+                }
+                
+                var batchInfo = await factoryAgent.GetBatchInfoAsync();
+                if (batchInfo.Config == null)
+                {
+                    _logger.LogWarning("[InvitationService] FreeTrialCode batch config missing. UserId: {UserId}, Code: {Code}", 
+                        userId, input.InviteCode);
+                    return new RedeemInviteCodeResponse
+                    {
+                        IsValid = false,
+                        CodeType = codeType,
+                        URL = null
+                    };
+                }
+                
+                if (!TryMapPaymentPlatform(batchInfo.Config.Platform, out var paymentPlatform))
+                {
+                    _logger.LogWarning("[InvitationService] Unsupported payment platform for FreeTrialCode. UserId: {UserId}, Code: {Code}, Platform: {Platform}", 
+                        userId, input.InviteCode, batchInfo.Config.Platform);
+                    return new RedeemInviteCodeResponse
+                    {
+                        IsValid = false,
+                        CodeType = codeType,
+                        URL = null
+                    };
+                }
+                
                 var result = await _paymentService.CreateSubscriptionAsync(
                     userId,
-                    NewPaymentPlatform.Stripe,
+                    paymentPlatform,
                     new SubscriptionRequest
                     {
-                        CouponCode = input.InviteCode // TrialCode maps to CouponCode
+                        ProductId = batchInfo.Config.ProductId,
+                        TrialDays = batchInfo.Config.TrialDays
                     });
                 
-                // Check if Stripe successfully created the checkout session
                 if (!result.Success || string.IsNullOrEmpty(result.SessionUrl))
                 {
                     _logger.LogWarning("[InvitationService] Failed to create checkout session for user {UserId}, code {Code}. Error: {Error}", 
@@ -135,6 +178,17 @@ public class InvitationService : IInvitationService
                         CodeType = codeType,
                         URL = null
                     };
+                }
+                
+                var marked = await factoryAgent.MarkCodeAsUsedAsync(new MarkCodeUsedRequestProto
+                {
+                    Code = input.InviteCode,
+                    UserId = userId.ToString()
+                });
+                if (!marked)
+                {
+                    _logger.LogWarning("[InvitationService] FreeTrialCode marked used failed. UserId: {UserId}, Code: {Code}", 
+                        userId, input.InviteCode);
                 }
                 
                 return new RedeemInviteCodeResponse
@@ -163,6 +217,25 @@ public class InvitationService : IInvitationService
             {
                 IsValid = false
             };
+        }
+    }
+
+    private static bool TryMapPaymentPlatform(FactoryPaymentPlatform platform, out NewPaymentPlatform mappedPlatform)
+    {
+        switch (platform)
+        {
+            case FactoryPaymentPlatform.Stripe:
+                mappedPlatform = NewPaymentPlatform.Stripe;
+                return true;
+            case FactoryPaymentPlatform.AppStore:
+                mappedPlatform = NewPaymentPlatform.AppStore;
+                return true;
+            case FactoryPaymentPlatform.GooglePlay:
+                mappedPlatform = NewPaymentPlatform.GooglePlay;
+                return true;
+            default:
+                mappedPlatform = NewPaymentPlatform.Stripe;
+                return false;
         }
     }
 
