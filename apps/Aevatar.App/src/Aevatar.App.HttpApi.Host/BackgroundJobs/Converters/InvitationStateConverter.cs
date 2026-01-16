@@ -13,7 +13,7 @@ namespace Aevatar.App.HttpApi.Host.BackgroundJobs.Converters;
 /// </summary>
 public class InvitationStateConverter : IStateConverter
 {
-    public IMessage? Convert(Dictionary<string, object>? oldState)
+    public IMessage? Convert(Dictionary<string, object?>? oldState)
     {
         if (oldState == null)
             return new InvitationState();

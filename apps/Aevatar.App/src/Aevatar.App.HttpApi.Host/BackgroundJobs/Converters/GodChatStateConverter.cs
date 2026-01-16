@@ -12,7 +12,7 @@ namespace Aevatar.App.HttpApi.Host.BackgroundJobs.Converters;
 /// </summary>
 public class GodChatStateConverter : IStateConverter
 {
-    public IMessage? Convert(Dictionary<string, object>? oldState)
+    public IMessage? Convert(Dictionary<string, object?>? oldState)
     {
         if (oldState == null)
             return new GodChatStateProto();

@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.googleauth;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.GoogleAuth";
+
+import "google/protobuf/timestamp.proto";
+
+// =============================================================================
+// GoogleAuth State
+// =============================================================================
+
+message GoogleAuthStateProto {
+  string user_id = 1;
+  string google_id = 2;
+  string email = 3;
+  string display_name = 4;
+  string access_token = 5;
+  string refresh_token = 6;
+  google.protobuf.Timestamp token_expires_at = 7;
+  google.protobuf.Timestamp last_login_at = 8;
+}

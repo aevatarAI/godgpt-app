@@ -12,7 +12,7 @@ namespace Aevatar.App.HttpApi.Host.BackgroundJobs.Converters;
 /// </summary>
 public class UserQuotaStateConverter : IStateConverter
 {
-    public IMessage? Convert(Dictionary<string, object>? oldState)
+    public IMessage? Convert(Dictionary<string, object?>? oldState)
     {
         if (oldState == null)
             return new UserQuotaState();
@@ -292,12 +292,12 @@ public class UserQuotaStateConverter : IStateConverter
         return null;
     }
 
-    private Dictionary<string, object>? ConvertToDictionary(object? obj)
+    private Dictionary<string, object?>? ConvertToDictionary(object? obj)
     {
         if (obj == null) return null;
-        if (obj is Dictionary<string, object> dict) return dict;
+        if (obj is Dictionary<string, object?> dict) return dict;
         if (obj is JsonElement je && je.ValueKind == JsonValueKind.Object)
-            return JsonSerializer.Deserialize<Dictionary<string, object>>(je.GetRawText());
+            return JsonSerializer.Deserialize<Dictionary<string, object?>>(je.GetRawText());
         return null;
     }
 

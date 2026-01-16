@@ -316,8 +316,19 @@ public class StateMigrationJob
                     continue;
                 }
 
+                // Handle agent type name mapping (e.g., UserBillingGAgent -> PaymentIndexGAgent)
+                var targetAgentTypeName = MapAgentTypeName(collection.TypeName);
+                
+                // Update agent ID if type name changed
+                if (targetAgentTypeName != collection.TypeName && newAgentId.Contains(':'))
+                {
+                    var parts = newAgentId.Split(':', 2);
+                    if (parts.Length == 2)
+                        newAgentId = $"{targetAgentTypeName}:{parts[1]}";
+                }
+
                 // Write to new database
-                var success = await WriteStateAsync(newAgentId, newState, collection.TypeName, cancellationToken);
+                var success = await WriteStateAsync(newAgentId, newState, targetAgentTypeName, cancellationToken);
                 
                 if (success)
                 {
@@ -365,7 +376,9 @@ public class StateMigrationJob
             var doc = JsonDocument.Parse(json);
 
             if (doc.RootElement.TryGetProperty("data", out var dataElement) &&
-                dataElement.TryGetProperty("records", out var recordsElement))
+                dataElement.ValueKind == JsonValueKind.Object &&
+                dataElement.TryGetProperty("records", out var recordsElement) &&
+                recordsElement.ValueKind == JsonValueKind.Array)
             {
                 var records = JsonSerializer.Deserialize<List<ExportedRecord>>(
                     recordsElement.GetRawText(),
@@ -399,21 +412,33 @@ public class StateMigrationJob
         // Extract short type name for matching
         var shortName = ExtractShortTypeName(typeName);
         
-            return shortName switch
-            {
-                "UserStatisticsGAgent" => new UserStatisticsStateConverter(),
-                "AnonymousUserGAgent" => new AnonymousUserStateConverter(),
-                "InvitationGAgent" => new InvitationStateConverter(),
-                "UserQuotaGAgent" => new UserQuotaStateConverter(),
-                "ChatManagerGAgent" => new ChatManagerStateConverter(),
-                "GodChatGAgent" => new GodChatStateConverter(),
-                "AwakeningGAgent" => new AwakeningStateConverter(),
-                "ConfigurationGAgent" => new ConfigurationStateConverter(),
-                "DailyContentGAgent" => new DailyContentStateConverter(),
-                "FreeTrialCodeFactoryGAgent" => new FreeTrialCodeFactoryStateConverter(),
-                "AIAgentStatusProxy" => new AIAgentStatusProxyStateConverter(),
-                _ => null
-            };
+        if (shortName == "ChatGAgentManager")
+            shortName = "ChatManagerGAgent";
+
+        return shortName switch
+        {
+            "UserStatisticsGAgent" => new UserStatisticsStateConverter(),
+            "AnonymousUserGAgent" => new AnonymousUserStateConverter(),
+            "InvitationGAgent" => new InvitationStateConverter(),
+            "UserQuotaGAgent" => new UserQuotaStateConverter(),
+            "ChatManagerGAgent" => new ChatManagerStateConverter(),
+            "GodChatGAgent" => new GodChatStateConverter(),
+            "AwakeningGAgent" => new AwakeningStateConverter(),
+            "ConfigurationGAgent" => new ConfigurationStateConverter(),
+            "DailyContentGAgent" => new DailyContentStateConverter(),
+            "FreeTrialCodeFactoryGAgent" => new FreeTrialCodeFactoryStateConverter(),
+            "InviteCodeGAgent" => new InviteCodeStateConverter(),
+            "UserFeedbackGAgent" => new UserFeedbackStateConverter(),
+            "UserInfoCollectionGAgent" => new UserInfoCollectionStateConverter(),
+            "LumenUserProfileGAgent" => new LumenUserProfileStateConverter(),
+            "LumenPredictionGAgent" => new LumenPredictionStateConverter(),
+            "LumenDailyYearlyHistoryGAgent" => new LumenDailyYearlyHistoryStateConverter(),
+            "LumenFeedbackGAgent" => new LumenFeedbackStateConverter(),
+            "UserBillingGAgent" => new UserBillingStateConverter(),
+            "GoogleAuthGAgent" => new GoogleAuthStateConverter(),
+            "AIAgentStatusProxy" => new AIAgentStatusProxyStateConverter(),
+            _ => null
+        };
     }
 
     /// <summary>
@@ -445,6 +470,21 @@ public class StateMigrationJob
     {
         var lastDot = fullTypeName.LastIndexOf('.');
         return lastDot >= 0 ? fullTypeName[(lastDot + 1)..] : fullTypeName;
+    }
+
+    /// <summary>
+    /// Map old agent type name to new agent type name (for refactored agents)
+    /// </summary>
+    private string MapAgentTypeName(string oldTypeName)
+    {
+        var shortName = ExtractShortTypeName(oldTypeName);
+        
+        // Handle special cases where agent was refactored
+        return shortName switch
+        {
+            "UserBillingGAgent" => "PaymentIndexGAgent",
+            _ => shortName
+        };
     }
 
     /// <summary>
@@ -498,7 +538,7 @@ public class StateMigrationJob
 /// </summary>
 public interface IStateConverter
 {
-    IMessage? Convert(Dictionary<string, object>? oldState);
+    IMessage? Convert(Dictionary<string, object?>? oldState);
 }
 
 /// <summary>
@@ -793,5 +833,5 @@ public class ExportedRecord
 {
     public string Id { get; set; } = string.Empty;
     public string? ETag { get; set; }
-    public Dictionary<string, object>? State { get; set; }
+    public Dictionary<string, object?>? State { get; set; }
 }

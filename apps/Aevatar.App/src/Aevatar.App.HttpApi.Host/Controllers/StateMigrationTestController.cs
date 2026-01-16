@@ -9,7 +9,10 @@ using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.App.HttpApi.Host.BackgroundJobs;
 using Aevatar.App.HttpApi.Host.BackgroundJobs.Converters;
 using Aevatar.Agents.GodGPT.Protos.UserStatistics;
+using Aevatar.Agents.GodGPT.Protos.GoogleAuth;
 using Aevatar.Application.Grains.UserStatistics;
+using Aevatar.Payment.Agents;
+using Aevatar.Payment.Agents.Protos;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.AspNetCore.Authorization;
@@ -311,6 +314,155 @@ public class StateMigrationTestController : AbpControllerBase
                 });
             }
 
+            // Test 3: PaymentIndexGAgent (migrated from UserBillingGAgent)
+            try
+            {
+                // Try to find a migrated PaymentIndexGAgent from MongoDB
+                var databaseName = _configuration.GetSection("Storage")
+                    .GetValue<string>("DatabaseName") 
+                    ?? _configuration.GetConnectionString("Orleans")?.Split('/').LastOrDefault()?.Split('?').FirstOrDefault()
+                    ?? "AevatarBusiness";
+                var database = _mongoClient.GetDatabase(databaseName);
+                var paymentIndexCollection = database.GetCollection<BsonDocument>("agent_states_PaymentIndexStateProto");
+                var paymentIndexDoc = await paymentIndexCollection.Find(FilterDefinition<BsonDocument>.Empty).FirstOrDefaultAsync();
+                
+                if (paymentIndexDoc == null)
+                {
+                    // Try alternative collection name (if old migration used UserBillingGAgent)
+                    var userBillingCollection = database.GetCollection<BsonDocument>("agent_states_UserBillingStateProto");
+                    paymentIndexDoc = await userBillingCollection.Find(FilterDefinition<BsonDocument>.Empty).FirstOrDefaultAsync();
+                }
+                
+                if (paymentIndexDoc == null)
+                {
+                    results.Add(new LoadTestResult
+                    {
+                        TestName = "Find PaymentIndexGAgent in MongoDB",
+                        AgentId = "N/A",
+                        Success = false,
+                        Error = "No PaymentIndexGAgent records found in MongoDB. Collection may be empty or use different name."
+                    });
+                }
+                else if (paymentIndexDoc != null && paymentIndexDoc.Contains("AgentId"))
+                {
+                    var paymentAgentId = paymentIndexDoc["AgentId"].AsString;
+                    
+                    try
+                    {
+                        var paymentActor = await _actorFactory.CreateGAgentActorAsync<Aevatar.Payment.Agents.PaymentIndexGAgent>(paymentAgentId);
+                        var paymentAgent = paymentActor.As<Aevatar.Payment.Agents.IPaymentIndexGAgent>();
+                        
+                        // Test RPC methods
+                        var activeSubscriptions = await paymentAgent.GetActiveSubscriptionsAsync();
+                        var totalPaymentCount = await paymentAgent.GetTotalPaymentCountAsync();
+                        var stripeCustomerId = await paymentAgent.GetPlatformCustomerIdAsync(PaymentPlatform.Stripe);
+                        
+                        results.Add(new LoadTestResult
+                        {
+                            TestName = "Load PaymentIndexGAgent (migrated from UserBillingGAgent)",
+                            AgentId = paymentAgentId,
+                            Success = true,
+                            StateData = new
+                            {
+                                ActiveSubscriptionsCount = activeSubscriptions.Subscriptions.Count,
+                                TotalPaymentCount = totalPaymentCount,
+                                StripeCustomerId = stripeCustomerId,
+                                ActiveSubscriptions = activeSubscriptions.Subscriptions.Select(s => new
+                                {
+                                    PaymentId = s.PaymentId,
+                                    BusinessType = s.BusinessType,
+                                    BusinessId = s.BusinessId,
+                                    Platform = s.Platform,
+                                    ProductName = s.ProductName,
+                                    Amount = s.Amount,
+                                    Currency = s.Currency,
+                                    PeriodEnd = s.PeriodEnd?.ToDateTime().ToString("O")
+                                }).ToList()
+                            }
+                        });
+                    }
+                    catch (Exception ex)
+                    {
+                        results.Add(new LoadTestResult
+                        {
+                            TestName = "Load PaymentIndexGAgent",
+                            AgentId = paymentAgentId ?? "unknown",
+                            Success = false,
+                            Error = ex.Message
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                results.Add(new LoadTestResult
+                {
+                    TestName = "Find PaymentIndexGAgent in MongoDB",
+                    AgentId = "N/A",
+                    Success = false,
+                    Error = ex.Message
+                });
+            }
+
+            // Test 4: GoogleAuthGAgent
+            try
+            {
+                var databaseName = _configuration.GetSection("Storage")
+                    .GetValue<string>("DatabaseName") 
+                    ?? _configuration.GetConnectionString("Orleans")?.Split('/').LastOrDefault()?.Split('?').FirstOrDefault()
+                    ?? "AevatarBusiness";
+                var database = _mongoClient.GetDatabase(databaseName);
+                var googleAuthCollection = database.GetCollection<BsonDocument>("agent_states_GoogleAuthStateProto");
+                var googleAuthDoc = await googleAuthCollection.Find(FilterDefinition<BsonDocument>.Empty).FirstOrDefaultAsync();
+                
+                if (googleAuthDoc == null)
+                {
+                    results.Add(new LoadTestResult
+                    {
+                        TestName = "Find GoogleAuthGAgent in MongoDB",
+                        AgentId = "N/A",
+                        Success = false,
+                        Error = "No GoogleAuthGAgent records found in MongoDB. Collection may be empty or use different name."
+                    });
+                }
+                else if (googleAuthDoc != null && googleAuthDoc.Contains("AgentId"))
+                {
+                    var googleAuthAgentId = googleAuthDoc["AgentId"].AsString;
+                    
+                    // Read state directly from MongoDB (GoogleAuthGAgent may not have RPC interface)
+                    var stateData = googleAuthDoc["StateData"].AsBsonBinaryData.Bytes;
+                    var state = Aevatar.Agents.GodGPT.Protos.GoogleAuth.GoogleAuthStateProto.Parser.ParseFrom(stateData);
+                    
+                    results.Add(new LoadTestResult
+                    {
+                        TestName = "Load GoogleAuthGAgent state from MongoDB",
+                        AgentId = googleAuthAgentId,
+                        Success = true,
+                        StateData = new
+                        {
+                            UserId = state.UserId,
+                            GoogleId = state.GoogleId,
+                            Email = state.Email,
+                            DisplayName = state.DisplayName,
+                            HasAccessToken = !string.IsNullOrEmpty(state.AccessToken),
+                            HasRefreshToken = !string.IsNullOrEmpty(state.RefreshToken),
+                            TokenExpiresAt = state.TokenExpiresAt?.ToDateTime().ToString("O"),
+                            LastLoginAt = state.LastLoginAt?.ToDateTime().ToString("O")
+                        }
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                results.Add(new LoadTestResult
+                {
+                    TestName = "Load GoogleAuthGAgent",
+                    AgentId = "N/A",
+                    Success = false,
+                    Error = ex.Message
+                });
+            }
+
             return Ok(new
             {
                 Summary = new
@@ -416,6 +568,15 @@ public class StateMigrationTestController : AbpControllerBase
                 "ConfigurationGAgent" => new ConfigurationStateConverter(),
                 "DailyContentGAgent" => new DailyContentStateConverter(),
                 "FreeTrialCodeFactoryGAgent" => new FreeTrialCodeFactoryStateConverter(),
+                "InviteCodeGAgent" => new InviteCodeStateConverter(),
+                "UserFeedbackGAgent" => new UserFeedbackStateConverter(),
+                "UserInfoCollectionGAgent" => new UserInfoCollectionStateConverter(),
+                "LumenUserProfileGAgent" => new LumenUserProfileStateConverter(),
+                "LumenPredictionGAgent" => new LumenPredictionStateConverter(),
+                "LumenDailyYearlyHistoryGAgent" => new LumenDailyYearlyHistoryStateConverter(),
+                "LumenFeedbackGAgent" => new LumenFeedbackStateConverter(),
+                "UserBillingGAgent" => new UserBillingStateConverter(),
+                "GoogleAuthGAgent" => new GoogleAuthStateConverter(),
                 "AIAgentStatusProxy" => new AIAgentStatusProxyStateConverter(),
                 _ => (IStateConverter?)null
             };
