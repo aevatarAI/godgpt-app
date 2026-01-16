@@ -209,6 +209,10 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
     {
         switch (evt)
         {
+            case SetRegisteredAtUtcEvent setRegisteredAtUtcEvent:
+                state.RegisteredAtUtc = setRegisteredAtUtcEvent.RegisteredAtUtc;
+                break;
+
             case SetInviterEvent setInviterEvent:
                 state.InviterId = setInviterEvent.InviterId;
                 break;
