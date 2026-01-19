@@ -391,12 +391,17 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         var isVoiceMessage = actionTypeEnum == ActionType.VoiceConversation;
         var actionType = actionTypeEnum.ToString().ToLowerInvariant();
 
-        if (await IsSubscribedAsync(true))
+        var isUltimate = await IsSubscribedAsync(true);
+        if (isUltimate)
         {
+            Logger.LogInformation("[UserQuotaGAgent][ExecuteStandardActionAsync] UserId={UserId} is Ultimate subscriber, skipping credits deduction", Id);
             return new ExecuteActionResultProto { Success = true };
         }
 
         var isSubscribed = await IsSubscribedAsync(false);
+        var creditsPerConversation = CreditsOptions?.CurrentValue.CreditsPerConversation ?? -1;
+        Logger.LogInformation("[UserQuotaGAgent][ExecuteStandardActionAsync] UserId={UserId}, IsSubscribed={IsSubscribed}, CreditsPerConversation={CreditsPerConversation}, CurrentCredits={CurrentCredits}",
+            Id, isSubscribed, creditsPerConversation, State.Credits);
         var maxTokens = isSubscribed
             ? (isVoiceMessage ? (RateLimiterOptions?.CurrentValue.VoiceSubscribedUserMaxRequests ?? 0) : (RateLimiterOptions?.CurrentValue.SubscribedUserMaxRequests ?? 0))
             : (isVoiceMessage ? (RateLimiterOptions?.CurrentValue.VoiceUserMaxRequests ?? 0) : (RateLimiterOptions?.CurrentValue.UserMaxRequests ?? 0));
@@ -475,7 +480,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         {
             try
             {
-                var newCredits = State.Credits - (CreditsOptions?.CurrentValue.CreditsPerConversation ?? 0);
+                var deductAmount = CreditsOptions?.CurrentValue.CreditsPerConversation ?? 0;
+                var newCredits = State.Credits - deductAmount;
+                Logger.LogInformation("[UserQuotaGAgent][ExecuteStandardActionAsync] Deducting credits: UserId={UserId}, Before={Before}, Deduct={Deduct}, After={After}",
+                    Id, State.Credits, deductAmount, newCredits);
                 RaiseEvent(new UpdateCreditsEvent { NewCredits = newCredits });
 
                 if (newCredits == 0)
@@ -487,6 +495,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             {
                 Logger.LogWarning($"[UserQuotaGAgent][ExecuteStandardActionAsync] ReportCreditsExhaustedAsync error msg:{e.Message}");
             }
+        }
+        else
+        {
+            Logger.LogInformation("[UserQuotaGAgent][ExecuteStandardActionAsync] UserId={UserId} is subscribed, skipping credits deduction", Id);
         }
 
         var updatedRateLimitInfo = State.RateLimits[actionType];
