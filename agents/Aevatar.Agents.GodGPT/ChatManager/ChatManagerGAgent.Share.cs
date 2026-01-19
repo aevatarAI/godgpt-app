@@ -34,17 +34,46 @@ public partial class ChatGAgentManager
             throw new UserFriendlyException(localizedMessage);
         }
 
-        // Step 1: Get session messages
+        // Step 1: Verify session exists before getting messages
+        var sessionInfo = State.GetSession(sessionId);
+        if (sessionInfo == null)
+        {
+            Logger.LogWarning(
+                "[ChatGAgentManager][GenerateChatShareContentAsync] Session NOT FOUND - SessionId: {SessionId}, UserId: {UserId}, AvailableSessions: {Count}",
+                sessionId, Id, State.SessionInfoList.Count);
+            var localizedMessage =
+                _localizationService.GetLocalizedException(ExceptionMessageKeys.InvalidSession, language);
+            throw new UserFriendlyException(localizedMessage);
+        }
+
+        // Step 2: Get session messages
         var step1Start = methodStart.ElapsedMilliseconds;
-        var chatMessagesProto = await GetSessionMessageListAsync(sessionId);
+        ChatMessageListProto chatMessagesProto;
+        try
+        {
+            chatMessagesProto = await GetSessionMessageListAsync(sessionId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex,
+                "[ChatGAgentManager][GenerateChatShareContentAsync] Failed to get messages - SessionId: {SessionId}, UserId: {UserId}",
+                sessionId, Id);
+            var localizedMessage =
+                _localizationService.GetLocalizedException(ExceptionMessageKeys.InvalidSession, language);
+            throw new UserFriendlyException(localizedMessage);
+        }
+        
         var step1End = methodStart.ElapsedMilliseconds;
+        var messageCount = chatMessagesProto?.Messages.Count ?? 0;
         Logger.LogInformation("[PERF][Share] Step1_GetMessages: {Ms}ms, MessageCount: {Count}", 
-            step1End - step1Start, chatMessagesProto?.Messages.Count ?? 0);
+            step1End - step1Start, messageCount);
         
         if (chatMessagesProto == null || chatMessagesProto.Messages.Count == 0)
         {
-            Logger.LogDebug(
-                $"[ChatGAgentManager][GenerateChatShareContentAsync] - session: {sessionId.ToString()}, chatMessages is null");
+            Logger.LogWarning(
+                "[ChatGAgentManager][GenerateChatShareContentAsync] Session has NO MESSAGES - SessionId: {SessionId}, UserId: {UserId}, " +
+                "SessionExists: {Exists}, SessionTitle: {Title}, MessageCount: {Count}",
+                sessionId, Id, sessionInfo != null, sessionInfo?.Title ?? "(null)", messageCount);
             var localizedMessage =
                 _localizationService.GetLocalizedException(ExceptionMessageKeys.InvalidSession, language);
             throw new UserFriendlyException(localizedMessage);
@@ -52,7 +81,7 @@ public partial class ChatGAgentManager
 
         var shareId = Guid.NewGuid();
         
-        // Step 2: Create ShareLinkGAgent Actor
+        // Step 3: Create ShareLinkGAgent Actor
         var step2Start = methodStart.ElapsedMilliseconds;
         var shareLinkActor = await _actorFactory.CreateGAgentActorAsync<ShareLinkGAgent>(shareId.ToString());
         var step2End = methodStart.ElapsedMilliseconds;
@@ -69,7 +98,7 @@ public partial class ChatGAgentManager
         };
         shareLinkProto.Messages.AddRange(chatMessagesProto.Messages);
         
-        // Step 3: Save share content via RPC
+        // Step 4: Save share content via RPC
         var step3Start = methodStart.ElapsedMilliseconds;
         await shareLink.SaveShareContentAsync(shareLinkProto);
         var step3End = methodStart.ElapsedMilliseconds;
@@ -86,7 +115,7 @@ public partial class ChatGAgentManager
             ShareId = shareId.ToString()
         });
 
-        // Step 4: Confirm events (EventSourcing persistence)
+        // Step 5: Confirm events (EventSourcing persistence)
         var step4Start = methodStart.ElapsedMilliseconds;
         await ConfirmEventsAsync();
         var step4End = methodStart.ElapsedMilliseconds;

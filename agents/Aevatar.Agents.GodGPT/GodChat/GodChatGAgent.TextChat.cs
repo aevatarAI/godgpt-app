@@ -354,7 +354,7 @@ public partial class GodChatGAgent
         var streamingModeEnabled = await configuration.GetStreamingModeEnabledAsync();
 
         var proxyStartMs = sw.ElapsedMilliseconds;
-        var (aiAgentStatusProxy, proxyId) = await GetInitializedProxyAsync(region, sessionId);
+        var (aiAgentStatusProxy, proxyId) = await GetProxyByRegionAsync(region);
         var proxyEndMs = sw.ElapsedMilliseconds;
         
         Logger.LogInformation("[PERF][GodChatGAgent] ChatWithHistory_GetProxy - SessionId={SessionId}, ProxyId={ProxyId}, Duration={Duration}ms",
@@ -420,7 +420,7 @@ public partial class GodChatGAgent
             sessionId = Guid.Parse(AgentId.ExtractRawId(Id));
         }
         
-        var proxyResult = await GetInitializedProxyAsync(region, sessionId);
+        var proxyResult = await GetProxyByRegionAsync(region);
         var aiAgentStatusProxy2 = proxyResult.Proxy;
         if (aiAgentStatusProxy2 == null)
         {

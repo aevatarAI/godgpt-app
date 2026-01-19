@@ -66,6 +66,7 @@ public partial class GodChatGAgent
         var existingProxy = State.RegionProxies?.FirstOrDefault(r => r.Region == region);
         var proxyIds = existingProxy?.ProxyIds?.ToList();
         
+        // Lazy initialization: create proxies if not exist
         if (proxyIds == null || !proxyIds.Any())
         {
             Logger.LogDebug(
@@ -76,7 +77,7 @@ public partial class GodChatGAgent
             initStopwatch.Stop();
             Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] InitializeRegionProxiesAsync - Duration: {initStopwatch.ElapsedMilliseconds}ms, SessionId: {Id}, Region: {region}");
             
-            var eventStopwatch = Stopwatch.StartNew();
+            // Save proxy IDs to state
             RaiseEvent(new UpdateRegionProxiesEvent
             {
                 RegionProxies = 
@@ -89,17 +90,15 @@ public partial class GodChatGAgent
                 }
             });
             await ConfirmEventsAsync();
-            eventStopwatch.Stop();
-            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] UpdateRegionProxiesEvent - Duration: {eventStopwatch.ElapsedMilliseconds}ms, SessionId: {Id}");
         }
 
+        // Find first available proxy
         foreach (var proxyId in proxyIds)
         {
-            // Use new framework ActorFactory to get proxy
             var proxyActor = await _actorFactory.CreateGAgentActorAsync<AIAgentStatusProxy>(proxyId);
             var proxy = proxyActor.As<IAIAgentStatusProxy>();
             
-            // Always ensure ParentId is set (in case proxy was restored from old state without ParentId)
+            // Ensure ParentId is set (for proxies restored from old state)
             await proxy.ConfigAsync(new AIAgentStatusProxyConfigProto
             {
                 RequestRecoveryDelay = Duration.FromTimeSpan(RequestRecoveryDelay),
@@ -109,10 +108,10 @@ public partial class GodChatGAgent
             if (await proxy.IsAvailableAsync())
             {
                 totalStopwatch.Stop();
-                Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] TOTAL_Time - Duration: {totalStopwatch.ElapsedMilliseconds}ms, SessionId: {Id}");
+                Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] Found available proxy - Duration: {totalStopwatch.ElapsedMilliseconds}ms, ProxyId: {proxyId}, SessionId: {Id}");
                 return (proxy, proxyId);
             }
-            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] ProxyCheck_Failed -, ProxyId: {proxyId}, SessionId: {Id}");
+            Logger.LogDebug($"[GodChatGAgent][GetProxyByRegionAsync] Proxy not available - ProxyId: {proxyId}, SessionId: {Id}");
         }
 
         Logger.LogDebug(
@@ -196,15 +195,17 @@ public partial class GodChatGAgent
         totalProxyStopwatch.Stop();
         
         // ✅ 批量记录事件（性能优化：从 N 次 ConfirmEvents 变为 1 次）
+        // NOTE: 由于 Proxy 创建和配置是同步完成的（await ConfigAsync/SetPromptTemplateAsync），
+        // 所以直接设置状态为 Initialized（而非 Initializing）
         foreach (var proxyId in proxyIds)
         {
             RaiseEvent(new UpdateProxyInitStatusEvent
             {
                 ProxyId = proxyId,
-                Status = ProxyInitStatus.Initializing.ToProto()
+                Status = ProxyInitStatus.Initialized.ToProto()  // ✅ 直接设置为 Initialized
             });
             Logger.LogDebug(
-                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, UpdateProxyInitStatusEvent status Initializing proxyId {proxyId}");
+                $"[GodChatGAgent][InitializeRegionProxiesAsync] session {Id.ToString()}, UpdateProxyInitStatusEvent status Initialized proxyId {proxyId}");
         }
         await ConfirmEventsAsync(); // 一次性确认所有事件
         
@@ -217,58 +218,6 @@ public partial class GodChatGAgent
     {
         var regionToLLMsMap = _llmRegionOptions.CurrentValue.RegionToLLMsMap;
         return regionToLLMsMap.TryGetValue(region, out var llms) ? llms : new List<string>();
-    }
-
-    /// <summary>
-    /// Ensures that the specified proxy is initialized before proceeding with operations.
-    /// This method implements retry logic with exponential backoff to wait for proxy initialization.
-    /// </summary>
-    private async Task EnsureProxyInitializedAsync(string proxyId, Guid sessionId)
-    {
-        const int maxRetries = 10;
-        const int retryDelayMs = 200;
-        var retryCount = 0;
-        ProxyInitStatus proxyInitStatus = ProxyInitStatus.NotInitialized;
-        
-        while (retryCount < maxRetries)
-        {
-            var statusEntry = State.ProxyInitStatuses?.FirstOrDefault(s => s.ProxyId == proxyId);
-            if (State.ProxyInitStatuses.IsNullOrEmpty() || statusEntry == null)
-            {
-                Logger.LogDebug($"[GodChatGAgent][EnsureProxyInitializedAsync] Historical data detected based on FirstChatTime, skipping proxy initialization check - ProxyId: {proxyId}, SessionId: {sessionId}");
-                break;
-            }
-            proxyInitStatus = statusEntry.Status.FromProto();
-
-            if (proxyInitStatus != ProxyInitStatus.Initialized)
-            {
-                retryCount++;
-                Logger.LogDebug($"[GodChatGAgent][EnsureProxyInitializedAsync] Proxy not initialized - ProxyId: {proxyId}, Status: {proxyInitStatus}, Retry: {retryCount}/{maxRetries}, SessionId: {sessionId}");
-                
-                if (retryCount >= maxRetries)
-                {
-                    throw new Exception($"proxy:{proxyId} Not initialized after {maxRetries} retries, status:{proxyInitStatus}");
-                }
-                
-                await Task.Delay(retryDelayMs);
-                continue;
-            }
-            
-            // Proxy is initialized, break out of retry loop
-            Logger.LogDebug($"[GodChatGAgent][EnsureProxyInitializedAsync] Proxy initialization check successful - ProxyId: {proxyId}, Status: {proxyInitStatus}, Retries: {retryCount}, SessionId: {sessionId}");
-            break;
-        }
-    }
-
-    /// <summary>
-    /// Gets an initialized AI agent status proxy for the specified region.
-    /// Returns (proxy, proxyId) tuple.
-    /// </summary>
-    private async Task<(IAIAgentStatusProxy? Proxy, string? ProxyId)> GetInitializedProxyAsync(string? region, Guid sessionId)
-    {
-        return await GetProxyByRegionAsync(region);
-        // Note: Proxy initialization is handled by the new framework automatically
-        // The proxy is ready to use after CreateGAgentActorAsync
     }
     
     #endregion
