@@ -119,36 +119,31 @@ public class MassTransitMessageStreamProvider : IMessageStreamProvider
     /// </summary>
     internal MassTransitMessageStream? GetStreamInternal(string streamId)
     {
-        var logger = _serviceProvider.GetService<ILogger<MassTransitMessageStreamProvider>>();
+        // CRITICAL FIX: Try lookup with stripped quotes if direct lookup fails
+        // This handles cases where StreamId from Kafka has quotes but registered stream doesn't
         var found = _streams.TryGetValue(streamId, out var stream);
+        
+        if (!found && !string.IsNullOrEmpty(streamId))
+        {
+            // Try stripping quotes and lookup again
+            var stripped = streamId.Trim('"', '\'', '\u201C', '\u201D', ' ', '\t');
+            if (stripped.Length != streamId.Length)
+            {
+                found = _streams.TryGetValue(stripped, out stream);
+                if (found)
+                {
+                    var logger = _serviceProvider.GetService<ILogger<MassTransitMessageStreamProvider>>();
+                    logger?.LogDebug("[MassTransitMessageStreamProvider] Stream found after quote stripping: '{Original}' -> '{Stripped}'",
+                        streamId, stripped);
+                }
+            }
+        }
         
         if (!found)
         {
-            // Detailed comparison: check if any registered stream matches after normalization
-            var lookupLength = streamId?.Length ?? 0;
-            var matchingStreams = _streams.Keys
-                .Where(k => k.Length == lookupLength || k.Replace("\"", "").Length == lookupLength)
-                .Take(5)
-                .ToList();
-            
-            logger?.LogWarning("[MassTransitMessageStreamProvider] Stream NOT FOUND - LookupStreamId='{StreamId}', LookupLength={Length}, TotalRegistered={Total}",
-                streamId, lookupLength, _streams.Count);
-            
-            if (matchingStreams.Any())
-            {
-                logger?.LogWarning("[MassTransitMessageStreamProvider] Similar registered streams (by length): {Similar}",
-                    string.Join(", ", matchingStreams.Select(s => $"'{s}' (len={s.Length})")));
-            }
-            else
-            {
-                logger?.LogWarning("[MassTransitMessageStreamProvider] Registered streams (first 10): {Ids}",
-                    string.Join(", ", _streams.Keys.Take(10).Select(s => $"'{s}' (len={s.Length})")));
-            }
-        }
-        else
-        {
-            logger?.LogDebug("[MassTransitMessageStreamProvider] Stream FOUND - StreamId={StreamId}, HandlerCount={HandlerCount}",
-                streamId, stream?.GetHandlerCount() ?? 0);
+            var logger = _serviceProvider.GetService<ILogger<MassTransitMessageStreamProvider>>();
+            logger?.LogWarning("[MassTransitMessageStreamProvider] Stream NOT FOUND - StreamId='{StreamId}', TotalRegistered={Total}, RegisteredStreams=[{Streams}]",
+                streamId, _streams.Count, string.Join(", ", _streams.Keys.Take(10)));
         }
         
         return stream;

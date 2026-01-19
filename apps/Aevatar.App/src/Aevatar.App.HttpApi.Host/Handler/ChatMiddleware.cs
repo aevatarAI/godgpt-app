@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Aevatar.Anonymous;
@@ -154,8 +155,11 @@ public class ChatMiddleware
                 ? $"{correlationId}_{request.SessionId:N}_{chatId}"
                 : $"{request.SessionId:N}_{chatId}";
             
-            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] Getting message stream - SessionId={SessionId}, SessionIdString='{SessionIdString}', Length={Length}, CorrelationId={CorrelationId}",
-                traceId, request.SessionId, sessionIdStr, sessionIdStr.Length, correlationId);
+            // DIAGNOSTIC: Log raw bytes to detect if SessionIdString contains quotes
+            var sessionIdBytes = System.Text.Encoding.UTF8.GetBytes(sessionIdStr);
+            var sessionIdHex = string.Join(" ", sessionIdBytes.Take(40).Select(b => b.ToString("X2")));
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] Getting message stream - SessionId={SessionId}, SessionIdString='{SessionIdString}', Length={Length}, CorrelationId={CorrelationId}, FirstBytes={Hex}",
+                traceId, request.SessionId, sessionIdStr, sessionIdStr.Length, correlationId, sessionIdHex);
             
             var messageStream = GetMessageStream(sessionIdStr);
             if (messageStream == null)

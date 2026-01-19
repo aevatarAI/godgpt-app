@@ -110,70 +110,33 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
+            // Log reflection failure for debugging
+            _logger.LogDebug(ex, "[StreamMessageDispatcher] Failed to extract TraceId from envelope - TypeUrl={TypeUrl}, StreamId={StreamId}", 
+                envelope.Payload.TypeUrl, streamId);
             // Ignore - TraceId is optional for non-GodChat messages or if reflection fails
         }
         
         var traceIdPrefix = traceId != null ? $"[TraceId={traceId}]" : "";
         
-        // DIAGNOSTIC: Check if StreamId contains unexpected quotes from JSON serialization
+        // CRITICAL FIX: Strip quotes from StreamId if present (MassTransit JSON serialization may add quotes)
+        // This ensures StreamId matches the registered stream key
         var originalStreamId = streamId;
-        var streamIdLength = streamId?.Length ?? 0;
-        
-        // Log first and last character ASCII codes for precise diagnosis
-        var firstCharCode = streamIdLength > 0 ? (int)streamId[0] : -1;
-        var lastCharCode = streamIdLength > 1 ? (int)streamId[streamIdLength - 1] : -1;
-        _logger.LogDebug("[StreamMessageDispatcher]{TraceId} StreamId analysis - Length={Length}, FirstChar='{First}' (0x{FirstHex:X2}), LastChar='{Last}' (0x{LastHex:X2})",
-            traceIdPrefix, streamIdLength, 
-            streamIdLength > 0 ? streamId[0] : '?', firstCharCode, 
-            streamIdLength > 1 ? streamId[streamIdLength - 1] : '?', lastCharCode);
-        
-        var hasLeadingQuote = streamIdLength > 0 && (streamId[0] == '"' || streamId[0] == '\'' || streamId[0] == '\u201C' || streamId[0] == '\u201D');
-        var hasTrailingQuote = streamIdLength > 1 && (streamId[streamIdLength - 1] == '"' || streamId[streamIdLength - 1] == '\'' || streamId[streamIdLength - 1] == '\u201C' || streamId[streamIdLength - 1] == '\u201D');
-        
-        if (hasLeadingQuote && hasTrailingQuote && streamIdLength > 2)
+        if (!string.IsNullOrEmpty(streamId))
         {
-            // Strip JSON-encoded quotes (including Unicode quotes)
-            streamId = streamId[1..^1];
-            _logger.LogWarning("[StreamMessageDispatcher]{TraceId} StreamId had quotes, stripped: Original='{Original}' (len={OrigLen}) -> Stripped='{Stripped}' (len={StrippedLen})",
-                traceIdPrefix, originalStreamId, originalStreamId?.Length ?? 0, streamId, streamId?.Length ?? 0);
-        }
-        else if (streamId?.Contains('"') == true || streamId?.Contains('\'') == true || 
-                 streamId?.Contains('\u201C') == true || streamId?.Contains('\u201D') == true)
-        {
-            // StreamId contains quotes but not at start/end - log for investigation
-            _logger.LogWarning("[StreamMessageDispatcher] StreamId contains quotes but not at boundaries: StreamId='{StreamId}', Length={Length}, FirstChar='{First}' (0x{FirstHex:X2}), LastChar='{Last}' (0x{LastHex:X2})",
-                streamId, streamIdLength, 
-                streamIdLength > 0 ? streamId[0] : '?', firstCharCode,
-                streamIdLength > 1 ? streamId[streamIdLength - 1] : '?', lastCharCode);
-        }
-        
-        // CRITICAL: Always try to strip quotes if StreamId length suggests it might have quotes
-        // GUID format is exactly 36 characters. If we have 36 but it looks quoted, try stripping anyway
-        if (streamIdLength == 36 && (hasLeadingQuote || hasTrailingQuote))
-        {
-            // This is suspicious - GUID should be 36 chars, but if it has quotes it should be 38
-            // Try aggressive quote stripping anyway
+            // Try stripping quotes (both standard and Unicode quotes)
             var stripped = streamId.Trim('"', '\'', '\u201C', '\u201D', ' ', '\t');
-            if (stripped.Length < streamIdLength)
+            if (stripped.Length != streamId.Length)
             {
-                _logger.LogWarning("[StreamMessageDispatcher] Aggressive quote stripping: '{Original}' (len={OrigLen}) -> '{Stripped}' (len={StrippedLen})",
-                    streamId, streamIdLength, stripped, stripped.Length);
                 streamId = stripped;
+                _logger.LogDebug("[StreamMessageDispatcher]{TraceId} Stripped quotes from StreamId: '{Original}' -> '{Stripped}'",
+                    traceIdPrefix, originalStreamId, streamId);
             }
         }
         
-        _logger.LogInformation("[StreamMessageDispatcher]{TraceId} Consuming message - StreamId='{StreamId}', StreamIdLength={Length}, OriginalLength={OriginalLength}, DispatchHandler={DispatchHandler}",
-            traceIdPrefix, streamId, streamId?.Length ?? 0, originalStreamId?.Length ?? 0, _dispatchHandler);
-        
-        // Log raw bytes to detect hidden characters or encoding issues
-        if (!string.IsNullOrEmpty(streamId))
-        {
-            var bytes = System.Text.Encoding.UTF8.GetBytes(streamId);
-            var hex = string.Join(" ", bytes.Take(50).Select(b => b.ToString("X2")));
-            _logger.LogDebug("[StreamMessageDispatcher]{TraceId} StreamId raw bytes (first 50): {Hex}", traceIdPrefix, hex);
-        }
+        _logger.LogInformation("[StreamMessageDispatcher]{TraceId} Consuming message - StreamId='{StreamId}', DispatchHandler={DispatchHandler}",
+            traceIdPrefix, streamId, _dispatchHandler);
         
         // ============================================================
         // Dispatch based on configured handler type
@@ -181,10 +144,14 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
         if (_dispatchHandler == DispatchHandler.LocalHandler)
         {
             // LocalHandler: Dispatch to local memory stream subscribers (HttpApi Client)
+            // In broadcast mode, each instance receives all messages but only processes
+            // those with local subscribers. This is how Orleans Stream works for Clients.
             var dispatched = await TryDispatchToLocalStreamAsync(streamId, data, envelope);
             if (!dispatched)
             {
-                _logger.LogDebug("LocalHandler: No local subscribers for StreamId {StreamId}", streamId);
+                // No local subscriber - this is expected in broadcast mode
+                // Other instances may have the subscriber
+                _logger.LogDebug("LocalHandler: No local subscribers for StreamId {StreamId}, skipping", streamId);
             }
             return;
         }
