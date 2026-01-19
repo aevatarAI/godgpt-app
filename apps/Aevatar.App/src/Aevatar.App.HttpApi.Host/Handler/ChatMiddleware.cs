@@ -130,9 +130,10 @@ public class ChatMiddleware
             
             // Try to get CorrelationId from HttpContext (set by UseCorrelationId middleware)
             // Fallback to HttpContext.TraceIdentifier if CorrelationId is not available
-            var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault() 
-                               ?? context.TraceIdentifier 
-                               ?? Guid.NewGuid().ToString();
+            var correlationIdHeader = context.Request.Headers["X-Correlation-ID"].ToString();
+            var correlationId = !string.IsNullOrEmpty(correlationIdHeader) 
+                               ? correlationIdHeader 
+                               : context.TraceIdentifier;
 
             // Validate session
             var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
