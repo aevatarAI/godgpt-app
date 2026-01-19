@@ -157,10 +157,19 @@ public class ChatMiddleware
                 request.SessionId.ToString(), chatId, stopwatch, context.RequestAborted);
             sseHandler.SetupSseHeaders();
             
+            _logger.LogInformation("[ChatMiddleware] STEP1 - Subscribing to stream: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
+                request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
+            
             var exitSignal = await sseHandler.SubscribeAsync(messageStream);
             
-            // Trigger chat
+            _logger.LogInformation("[ChatMiddleware] STEP2 - Subscription done, calling StartStreamChatAsync: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
+                request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
+            
+            // Trigger chat - this should return quickly (fire-and-forget for HTTP requests)
             await godChat.StartStreamChatAsync(protoInput);
+            
+            _logger.LogInformation("[ChatMiddleware] STEP3 - StartStreamChatAsync returned, waiting for stream: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
+                request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
             
             // Wait and cleanup
             await sseHandler.WaitForCompletionAsync();
