@@ -1,12 +1,12 @@
 using System.Linq;
 using Aevatar.Agents.Abstractions;
-using Aevatar.Agents.GodGPT.Protos.GodChatStream;
 using MassTransit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Google.Protobuf;
 
 namespace Aevatar.Agents.Plugins.MassTransit;
 
@@ -70,24 +70,49 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
         }
         
         // Extract TraceId from envelope for ES correlation: SessionId_ChatId
+        // Use TypeUrl string matching to avoid direct dependency on GodGPT assembly
         string? traceId = null;
         try
         {
-            // Try to extract ChatId from GodChatStreamEnvelopeProto
-            if (envelope.Payload.Is(GodChatStreamEnvelopeProto.Descriptor))
+            // Check if this is a GodChatStreamEnvelopeProto by TypeUrl
+            var typeUrl = envelope.Payload.TypeUrl;
+            if (typeUrl.Contains("GodChatStreamEnvelopeProto") || typeUrl.Contains("godchat.stream.GodChatStreamEnvelopeProto"))
             {
-                var streamProto = envelope.Payload.Unpack<GodChatStreamEnvelopeProto>();
-                if (!string.IsNullOrEmpty(streamProto.StreamId) && !string.IsNullOrEmpty(streamProto.ChatId))
+                // Use reflection to unpack without direct dependency
+                // TypeUrl format: type.googleapis.com/aevatar.agents.godgpt.godchat.stream.GodChatStreamEnvelopeProto
+                var messageType = Type.GetType("Aevatar.Agents.GodGPT.Protos.GodChatStream.GodChatStreamEnvelopeProto, Aevatar.Agents.GodGPT");
+                if (messageType != null)
                 {
-                    // Format: SessionId_ChatId (SessionId without dashes for shorter format)
-                    var sessionIdGuid = Guid.TryParse(streamProto.StreamId.Replace("\"", ""), out var parsed) ? parsed : Guid.Empty;
-                    traceId = sessionIdGuid != Guid.Empty ? $"{sessionIdGuid:N}_{streamProto.ChatId}" : null;
+                    var parserProperty = messageType.GetProperty("Parser", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                    if (parserProperty != null)
+                    {
+                        var parser = parserProperty.GetValue(null);
+                        var unpackMethod = envelope.Payload.GetType().GetMethod("Unpack", new[] { messageType });
+                        if (unpackMethod != null && parser != null)
+                        {
+                            var streamProto = unpackMethod.Invoke(envelope.Payload, new[] { parser });
+                            if (streamProto != null)
+                            {
+                                var streamIdProp = messageType.GetProperty("StreamId");
+                                var chatIdProp = messageType.GetProperty("ChatId");
+                                var streamIdValue = streamIdProp?.GetValue(streamProto) as string;
+                                var chatIdValue = chatIdProp?.GetValue(streamProto) as string;
+                                
+                                if (!string.IsNullOrEmpty(streamIdValue) && !string.IsNullOrEmpty(chatIdValue))
+                                {
+                                    // Format: SessionId_ChatId (SessionId without dashes for shorter format)
+                                    var sessionIdGuid = Guid.TryParse(streamIdValue.Replace("\"", ""), out var parsed) ? parsed : Guid.Empty;
+                                    traceId = sessionIdGuid != Guid.Empty ? $"{sessionIdGuid:N}_{chatIdValue}" : null;
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
         catch
         {
-            // Ignore - TraceId is optional for non-GodChat messages
+            // Ignore - TraceId is optional for non-GodChat messages or if reflection fails
         }
         
         var traceIdPrefix = traceId != null ? $"[TraceId={traceId}]" : "";

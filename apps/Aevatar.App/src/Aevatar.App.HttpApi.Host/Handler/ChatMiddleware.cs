@@ -127,6 +127,12 @@ public class ChatMiddleware
         try
         {
             var stopwatch = Stopwatch.StartNew();
+            
+            // Try to get CorrelationId from HttpContext (set by UseCorrelationId middleware)
+            // Fallback to HttpContext.TraceIdentifier if CorrelationId is not available
+            var correlationId = context.Request.Headers["X-Correlation-ID"].FirstOrDefault() 
+                               ?? context.TraceIdentifier 
+                               ?? Guid.NewGuid().ToString();
 
             // Validate session
             var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
@@ -140,10 +146,15 @@ public class ChatMiddleware
             // Get message stream
             var sessionIdStr = request.SessionId.ToString();
             var chatId = Guid.NewGuid().ToString();
-            var traceId = $"{request.SessionId:N}_{chatId}";
             
-            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] Getting message stream - SessionId={SessionId}, SessionIdString='{SessionIdString}', Length={Length}",
-                traceId, request.SessionId, sessionIdStr, sessionIdStr.Length);
+            // Generate TraceId: CorrelationId_SessionId_ChatId (for ES query correlation)
+            // Use CorrelationId from middleware if available, otherwise use SessionId_ChatId
+            var traceId = !string.IsNullOrEmpty(correlationId) && correlationId != context.TraceIdentifier
+                ? $"{correlationId}_{request.SessionId:N}_{chatId}"
+                : $"{request.SessionId:N}_{chatId}";
+            
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] Getting message stream - SessionId={SessionId}, SessionIdString='{SessionIdString}', Length={Length}, CorrelationId={CorrelationId}",
+                traceId, request.SessionId, sessionIdStr, sessionIdStr.Length, correlationId);
             
             var messageStream = GetMessageStream(sessionIdStr);
             if (messageStream == null)
