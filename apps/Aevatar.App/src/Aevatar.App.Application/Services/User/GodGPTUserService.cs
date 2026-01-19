@@ -63,11 +63,14 @@ public class GodGPTUserService : ApplicationService, IGodGPTUserService
         
         return new UserProfileDto
         {
+            Id = currentUserId,
             Gender = profileProto.Gender,
             BirthDate = profileProto.BirthDate?.ToDateTime() ?? DateTime.MinValue,
             BirthPlace = profileProto.BirthPlace,
             FullName = profileProto.FullName,
             Credits = creditsDto,
+            Subscription = profileProto.Subscription ?? new SubscriptionInfoProto(),
+            UltimateSubscription = profileProto.UltimateSubscription ?? new SubscriptionInfoProto(),
             InviterId = string.IsNullOrEmpty(profileProto.InviterId) ? null : Guid.Parse(profileProto.InviterId),
             VoiceLanguage = (VoiceLanguageEnum)profileProto.VoiceLanguage
         };
@@ -120,11 +123,14 @@ public class GodGPTUserService : ApplicationService, IGodGPTUserService
         
         return new UserProfileDto
         {
+            Id = currentUserId,
             Gender = profileProto.Gender,
             BirthDate = profileProto.BirthDate?.ToDateTime() ?? DateTime.MinValue,
             BirthPlace = profileProto.BirthPlace,
             FullName = profileProto.FullName,
             Credits = creditsDto,
+            Subscription = profileProto.Subscription ?? new SubscriptionInfoProto(),
+            UltimateSubscription = profileProto.UltimateSubscription ?? new SubscriptionInfoProto(),
             InviterId = string.IsNullOrEmpty(profileProto.InviterId) ? null : Guid.Parse(profileProto.InviterId),
             VoiceLanguage = (VoiceLanguageEnum)profileProto.VoiceLanguage
         };
