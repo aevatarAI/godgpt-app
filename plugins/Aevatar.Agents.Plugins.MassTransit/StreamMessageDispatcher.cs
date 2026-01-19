@@ -59,21 +59,48 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
         // DIAGNOSTIC: Check if StreamId contains unexpected quotes from JSON serialization
         var originalStreamId = streamId;
         var streamIdLength = streamId?.Length ?? 0;
-        var hasLeadingQuote = streamIdLength > 0 && (streamId[0] == '"' || streamId[0] == '\'');
-        var hasTrailingQuote = streamIdLength > 1 && (streamId[streamIdLength - 1] == '"' || streamId[streamIdLength - 1] == '\'');
+        
+        // Log first and last character ASCII codes for precise diagnosis
+        var firstCharCode = streamIdLength > 0 ? (int)streamId[0] : -1;
+        var lastCharCode = streamIdLength > 1 ? (int)streamId[streamIdLength - 1] : -1;
+        _logger.LogDebug("[StreamMessageDispatcher] StreamId analysis - Length={Length}, FirstChar='{First}' (0x{FirstHex:X2}), LastChar='{Last}' (0x{LastHex:X2})",
+            streamIdLength, 
+            streamIdLength > 0 ? streamId[0] : '?', firstCharCode, 
+            streamIdLength > 1 ? streamId[streamIdLength - 1] : '?', lastCharCode);
+        
+        var hasLeadingQuote = streamIdLength > 0 && (streamId[0] == '"' || streamId[0] == '\'' || streamId[0] == '\u201C' || streamId[0] == '\u201D');
+        var hasTrailingQuote = streamIdLength > 1 && (streamId[streamIdLength - 1] == '"' || streamId[streamIdLength - 1] == '\'' || streamId[streamIdLength - 1] == '\u201C' || streamId[streamIdLength - 1] == '\u201D');
         
         if (hasLeadingQuote && hasTrailingQuote && streamIdLength > 2)
         {
-            // Strip JSON-encoded quotes
+            // Strip JSON-encoded quotes (including Unicode quotes)
             streamId = streamId[1..^1];
-            _logger.LogWarning("[StreamMessageDispatcher] StreamId had quotes, stripped: Original='{Original}' -> Stripped='{Stripped}', Length={Length}",
-                originalStreamId, streamId, streamId.Length);
+            _logger.LogWarning("[StreamMessageDispatcher] StreamId had quotes, stripped: Original='{Original}' (len={OrigLen}) -> Stripped='{Stripped}' (len={StrippedLen})",
+                originalStreamId, originalStreamId?.Length ?? 0, streamId, streamId?.Length ?? 0);
         }
-        else if (streamId?.Contains('"') == true || streamId?.Contains('\'') == true)
+        else if (streamId?.Contains('"') == true || streamId?.Contains('\'') == true || 
+                 streamId?.Contains('\u201C') == true || streamId?.Contains('\u201D') == true)
         {
             // StreamId contains quotes but not at start/end - log for investigation
-            _logger.LogWarning("[StreamMessageDispatcher] StreamId contains quotes in middle: StreamId='{StreamId}', Length={Length}, FirstChar={First}, LastChar={Last}",
-                streamId, streamIdLength, streamIdLength > 0 ? streamId[0] : '?', streamIdLength > 1 ? streamId[streamIdLength - 1] : '?');
+            _logger.LogWarning("[StreamMessageDispatcher] StreamId contains quotes but not at boundaries: StreamId='{StreamId}', Length={Length}, FirstChar='{First}' (0x{FirstHex:X2}), LastChar='{Last}' (0x{LastHex:X2})",
+                streamId, streamIdLength, 
+                streamIdLength > 0 ? streamId[0] : '?', firstCharCode,
+                streamIdLength > 1 ? streamId[streamIdLength - 1] : '?', lastCharCode);
+        }
+        
+        // CRITICAL: Always try to strip quotes if StreamId length suggests it might have quotes
+        // GUID format is exactly 36 characters. If we have 36 but it looks quoted, try stripping anyway
+        if (streamIdLength == 36 && (hasLeadingQuote || hasTrailingQuote))
+        {
+            // This is suspicious - GUID should be 36 chars, but if it has quotes it should be 38
+            // Try aggressive quote stripping anyway
+            var stripped = streamId.Trim('"', '\'', '\u201C', '\u201D', ' ', '\t');
+            if (stripped.Length < streamIdLength)
+            {
+                _logger.LogWarning("[StreamMessageDispatcher] Aggressive quote stripping: '{Original}' (len={OrigLen}) -> '{Stripped}' (len={StrippedLen})",
+                    streamId, streamIdLength, stripped, stripped.Length);
+                streamId = stripped;
+            }
         }
         
         _logger.LogInformation("[StreamMessageDispatcher] Consuming message - StreamId='{StreamId}', StreamIdLength={Length}, OriginalLength={OriginalLength}, DispatchHandler={DispatchHandler}",
