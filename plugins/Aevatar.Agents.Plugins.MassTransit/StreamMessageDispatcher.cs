@@ -55,6 +55,15 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
             return;
         }
         
+        // DIAGNOSTIC: Check if StreamId contains unexpected quotes from JSON serialization
+        var originalStreamId = streamId;
+        if (streamId.StartsWith("\"") && streamId.EndsWith("\"") && streamId.Length > 2)
+        {
+            // Strip JSON-encoded quotes
+            streamId = streamId[1..^1];
+            _logger.LogWarning("StreamId had JSON quotes, stripped: {Original} -> {Stripped}", originalStreamId, streamId);
+        }
+        
         _logger.LogInformation("Received message for StreamId {StreamId}, DispatchHandler: {DispatchHandler}", streamId, _dispatchHandler);
         
         // Parse the envelope first
