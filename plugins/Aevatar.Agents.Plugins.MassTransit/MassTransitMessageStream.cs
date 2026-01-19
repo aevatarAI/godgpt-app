@@ -124,6 +124,9 @@ public class MassTransitMessageStream : IMessageStream
         };
 
         _handlers.TryAdd(subscriptionId, wrapperHandler);
+        
+        _logger.LogInformation("[MassTransitMessageStream] Handler REGISTERED - StreamId={StreamId}, SubscriptionId={SubscriptionId}, HandlerType={HandlerType}, TotalHandlers={Total}",
+            StreamId, subscriptionId, typeof(T).Name, _handlers.Count);
 
         return Task.FromResult<IMessageStreamSubscription>(
             new MassTransitMessageStreamSubscription(
@@ -131,6 +134,8 @@ public class MassTransitMessageStream : IMessageStream
                 StreamId, 
                 () => {
                     _handlers.TryRemove(subscriptionId, out _);
+                    _logger.LogDebug("[MassTransitMessageStream] Handler UNREGISTERED - StreamId={StreamId}, SubscriptionId={SubscriptionId}, RemainingHandlers={Remaining}",
+                        StreamId, subscriptionId, _handlers.Count);
                     return Task.CompletedTask;
                 }));
     }

@@ -57,14 +57,26 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
         
         // DIAGNOSTIC: Check if StreamId contains unexpected quotes from JSON serialization
         var originalStreamId = streamId;
-        if (streamId.StartsWith("\"") && streamId.EndsWith("\"") && streamId.Length > 2)
+        var streamIdLength = streamId?.Length ?? 0;
+        var hasLeadingQuote = streamIdLength > 0 && (streamId[0] == '"' || streamId[0] == '\'');
+        var hasTrailingQuote = streamIdLength > 1 && (streamId[streamIdLength - 1] == '"' || streamId[streamIdLength - 1] == '\'');
+        
+        if (hasLeadingQuote && hasTrailingQuote && streamIdLength > 2)
         {
             // Strip JSON-encoded quotes
             streamId = streamId[1..^1];
-            _logger.LogWarning("StreamId had JSON quotes, stripped: {Original} -> {Stripped}", originalStreamId, streamId);
+            _logger.LogWarning("[StreamMessageDispatcher] StreamId had quotes, stripped: Original='{Original}' -> Stripped='{Stripped}', Length={Length}",
+                originalStreamId, streamId, streamId.Length);
+        }
+        else if (streamId?.Contains('"') == true || streamId?.Contains('\'') == true)
+        {
+            // StreamId contains quotes but not at start/end - log for investigation
+            _logger.LogWarning("[StreamMessageDispatcher] StreamId contains quotes in middle: StreamId='{StreamId}', Length={Length}, FirstChar={First}, LastChar={Last}",
+                streamId, streamIdLength, streamIdLength > 0 ? streamId[0] : '?', streamIdLength > 1 ? streamId[streamIdLength - 1] : '?');
         }
         
-        _logger.LogInformation("Received message for StreamId {StreamId}, DispatchHandler: {DispatchHandler}", streamId, _dispatchHandler);
+        _logger.LogInformation("[StreamMessageDispatcher] Consuming message - StreamId='{StreamId}', OriginalLength={OriginalLength}, DispatchHandler={DispatchHandler}",
+            streamId, originalStreamId?.Length ?? 0, _dispatchHandler);
         
         // Parse the envelope first
         EventEnvelope envelope;

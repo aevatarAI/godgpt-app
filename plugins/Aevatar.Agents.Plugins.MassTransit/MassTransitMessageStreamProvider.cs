@@ -84,8 +84,23 @@ public class MassTransitMessageStreamProvider : IMessageStreamProvider
         // A stream instance is tied to an AgentId. 
         // If we create it with a category, that category determines where it publishes TO.
         
-        return _streams.GetOrAdd(agentId, id => 
-            new MassTransitMessageStream(id, category, _bus, _serviceProvider, _options));
+        var logger = _serviceProvider.GetService<ILogger<MassTransitMessageStreamProvider>>();
+        var isNew = !_streams.ContainsKey(agentId);
+        
+        var stream = _streams.GetOrAdd(agentId, id => 
+        {
+            logger?.LogInformation("[MassTransitMessageStreamProvider] Creating NEW stream - StreamId={StreamId}, Category={Category}, TotalStreams={Total}",
+                id, category ?? "null", _streams.Count + 1);
+            return new MassTransitMessageStream(id, category, _bus, _serviceProvider, _options);
+        });
+        
+        if (!isNew)
+        {
+            logger?.LogDebug("[MassTransitMessageStreamProvider] Using EXISTING stream - StreamId={StreamId}, Category={Category}, TotalStreams={Total}",
+                agentId, category ?? "null", _streams.Count);
+        }
+        
+        return stream;
     }
 
     /// <summary>
@@ -94,7 +109,20 @@ public class MassTransitMessageStreamProvider : IMessageStreamProvider
     /// </summary>
     internal MassTransitMessageStream? GetStreamInternal(string streamId)
     {
-        _streams.TryGetValue(streamId, out var stream);
+        var logger = _serviceProvider.GetService<ILogger<MassTransitMessageStreamProvider>>();
+        var found = _streams.TryGetValue(streamId, out var stream);
+        
+        if (!found)
+        {
+            logger?.LogWarning("[MassTransitMessageStreamProvider] Stream NOT FOUND - StreamId={StreamId}, TotalRegistered={Total}, RegisteredIds=[{Ids}]",
+                streamId, _streams.Count, string.Join(", ", _streams.Keys.Take(10)));
+        }
+        else
+        {
+            logger?.LogDebug("[MassTransitMessageStreamProvider] Stream FOUND - StreamId={StreamId}, HandlerCount={HandlerCount}",
+                streamId, stream?.GetHandlerCount() ?? 0);
+        }
+        
         return stream;
     }
 

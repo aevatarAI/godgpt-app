@@ -138,12 +138,19 @@ public class ChatMiddleware
             }
 
             // Get message stream
-            var messageStream = GetMessageStream(request.SessionId.ToString());
+            var sessionIdStr = request.SessionId.ToString();
+            _logger.LogInformation("[ChatMiddleware] Getting message stream - SessionId={SessionId}, SessionIdString='{SessionIdString}', Length={Length}",
+                request.SessionId, sessionIdStr, sessionIdStr.Length);
+            
+            var messageStream = GetMessageStream(sessionIdStr);
             if (messageStream == null)
             {
-                await WriteStreamNotAvailableError(context, request.SessionId.ToString());
+                await WriteStreamNotAvailableError(context, sessionIdStr);
                 return;
             }
+            
+            _logger.LogInformation("[ChatMiddleware] Message stream obtained - SessionId={SessionId}, StreamId={StreamId}",
+                request.SessionId, messageStream.StreamId);
 
             var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(request.SessionId.ToString());
             var godChat = godChatActor.As<IGodChat>();
