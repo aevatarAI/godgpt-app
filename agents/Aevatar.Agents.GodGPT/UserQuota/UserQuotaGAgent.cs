@@ -512,6 +512,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         };
         RaiseEvent(new UpdateRateLimitEvent { ActionType = actionType, RateLimitInfo = newRateLimitInfo });
 
+        // CRITICAL: Persist credits deduction and rate limit update events
+        await ConfirmEventsAsync();
+        
         return new ExecuteActionResultProto { Success = true };
     }
 
