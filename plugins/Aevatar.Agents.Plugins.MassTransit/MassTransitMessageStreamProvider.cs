@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using Aevatar.Agents.Abstractions;
 using MassTransit;
 using MassTransit.KafkaIntegration;
@@ -89,8 +90,17 @@ public class MassTransitMessageStreamProvider : IMessageStreamProvider
         
         var stream = _streams.GetOrAdd(agentId, id => 
         {
-            logger?.LogInformation("[MassTransitMessageStreamProvider] Creating NEW stream - StreamId={StreamId}, Category={Category}, TotalStreams={Total}",
-                id, category ?? "null", _streams.Count + 1);
+            logger?.LogInformation("[MassTransitMessageStreamProvider] Creating NEW stream - StreamId='{StreamId}', StreamIdLength={Length}, Category={Category}, TotalStreams={Total}",
+                id, id?.Length ?? 0, category ?? "null", _streams.Count + 1);
+            
+            // Log raw bytes to detect hidden characters
+            if (!string.IsNullOrEmpty(id))
+            {
+                var bytes = System.Text.Encoding.UTF8.GetBytes(id);
+                var hex = string.Join(" ", bytes.Take(50).Select(b => b.ToString("X2")));
+                logger?.LogDebug("[MassTransitMessageStreamProvider] StreamId raw bytes (first 50): {Hex}", hex);
+            }
+            
             return new MassTransitMessageStream(id, category, _bus, _serviceProvider, _options);
         });
         
@@ -114,8 +124,26 @@ public class MassTransitMessageStreamProvider : IMessageStreamProvider
         
         if (!found)
         {
-            logger?.LogWarning("[MassTransitMessageStreamProvider] Stream NOT FOUND - StreamId={StreamId}, TotalRegistered={Total}, RegisteredIds=[{Ids}]",
-                streamId, _streams.Count, string.Join(", ", _streams.Keys.Take(10)));
+            // Detailed comparison: check if any registered stream matches after normalization
+            var lookupLength = streamId?.Length ?? 0;
+            var matchingStreams = _streams.Keys
+                .Where(k => k.Length == lookupLength || k.Replace("\"", "").Length == lookupLength)
+                .Take(5)
+                .ToList();
+            
+            logger?.LogWarning("[MassTransitMessageStreamProvider] Stream NOT FOUND - LookupStreamId='{StreamId}', LookupLength={Length}, TotalRegistered={Total}",
+                streamId, lookupLength, _streams.Count);
+            
+            if (matchingStreams.Any())
+            {
+                logger?.LogWarning("[MassTransitMessageStreamProvider] Similar registered streams (by length): {Similar}",
+                    string.Join(", ", matchingStreams.Select(s => $"'{s}' (len={s.Length})")));
+            }
+            else
+            {
+                logger?.LogWarning("[MassTransitMessageStreamProvider] Registered streams (first 10): {Ids}",
+                    string.Join(", ", _streams.Keys.Take(10).Select(s => $"'{s}' (len={s.Length})")));
+            }
         }
         else
         {

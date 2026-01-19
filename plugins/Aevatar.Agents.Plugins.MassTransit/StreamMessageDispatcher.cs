@@ -1,3 +1,4 @@
+using System.Linq;
 using Aevatar.Agents.Abstractions;
 using MassTransit;
 using Microsoft.Extensions.DependencyInjection;
@@ -75,8 +76,16 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
                 streamId, streamIdLength, streamIdLength > 0 ? streamId[0] : '?', streamIdLength > 1 ? streamId[streamIdLength - 1] : '?');
         }
         
-        _logger.LogInformation("[StreamMessageDispatcher] Consuming message - StreamId='{StreamId}', OriginalLength={OriginalLength}, DispatchHandler={DispatchHandler}",
-            streamId, originalStreamId?.Length ?? 0, _dispatchHandler);
+        _logger.LogInformation("[StreamMessageDispatcher] Consuming message - StreamId='{StreamId}', StreamIdLength={Length}, OriginalLength={OriginalLength}, DispatchHandler={DispatchHandler}",
+            streamId, streamId?.Length ?? 0, originalStreamId?.Length ?? 0, _dispatchHandler);
+        
+        // Log raw bytes to detect hidden characters or encoding issues
+        if (!string.IsNullOrEmpty(streamId))
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(streamId);
+            var hex = string.Join(" ", bytes.Take(50).Select(b => b.ToString("X2")));
+            _logger.LogDebug("[StreamMessageDispatcher] StreamId raw bytes (first 50): {Hex}", hex);
+        }
         
         // Parse the envelope first
         EventEnvelope envelope;

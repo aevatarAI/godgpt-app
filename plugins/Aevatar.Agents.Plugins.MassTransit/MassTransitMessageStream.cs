@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Linq;
 using Aevatar.Agents.Abstractions;
 using Google.Protobuf;
 using MassTransit;
@@ -125,8 +126,17 @@ public class MassTransitMessageStream : IMessageStream
 
         _handlers.TryAdd(subscriptionId, wrapperHandler);
         
-        _logger.LogInformation("[MassTransitMessageStream] Handler REGISTERED - StreamId={StreamId}, SubscriptionId={SubscriptionId}, HandlerType={HandlerType}, TotalHandlers={Total}",
-            StreamId, subscriptionId, typeof(T).Name, _handlers.Count);
+        // Log with explicit format to show actual value (not Serilog-quoted)
+        _logger.LogInformation("[MassTransitMessageStream] Handler REGISTERED - StreamId='{StreamId}', StreamIdLength={Length}, SubscriptionId={SubscriptionId}, HandlerType={HandlerType}, TotalHandlers={Total}",
+            StreamId, StreamId?.Length ?? 0, subscriptionId, typeof(T).Name, _handlers.Count);
+        
+        // Also log raw bytes to detect hidden characters
+        if (!string.IsNullOrEmpty(StreamId))
+        {
+            var bytes = System.Text.Encoding.UTF8.GetBytes(StreamId);
+            var hex = string.Join(" ", bytes.Take(50).Select(b => b.ToString("X2")));
+            _logger.LogDebug("[MassTransitMessageStream] StreamId raw bytes (first 50): {Hex}", hex);
+        }
 
         return Task.FromResult<IMessageStreamSubscription>(
             new MassTransitMessageStreamSubscription(
