@@ -156,6 +156,7 @@ message UpdateCreditsEvent {
 
 message UpdateCanReceiveInviteRewardEvent {
     bool can_receive_invite_reward = 1;
+    google.protobuf.Timestamp created_at = 2;
 }
 
 message ClearAllQuotaEvent {

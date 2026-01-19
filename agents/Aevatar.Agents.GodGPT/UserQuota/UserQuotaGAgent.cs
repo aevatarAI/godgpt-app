@@ -89,6 +89,23 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
     {
     }
 
+    protected override async Task OnActivateAsync(CancellationToken ct = default)
+    {
+        await base.OnActivateAsync(ct);
+
+        // New users should be eligible for invite rewards. Guard to avoid reactivations
+        // overriding previously consumed/blocked state.
+        if (State.CreatedAt == null)
+        {
+            RaiseEvent(new UpdateCanReceiveInviteRewardEvent
+            {
+                CanReceiveInviteReward = true,
+                CreatedAt = Timestamp.FromDateTime(DateTime.UtcNow)
+            });
+            await ConfirmEventsAsync();
+        }
+    }
+
     public override Task<string> GetDescriptionAsync()
     {
         return Task.FromResult("User Quota Management GAgent");
@@ -893,6 +910,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
             case UpdateCanReceiveInviteRewardEvent updateCanReceiveInviteReward:
                 state.CanReceiveInviteReward = updateCanReceiveInviteReward.CanReceiveInviteReward;
+                if (updateCanReceiveInviteReward.CreatedAt != null)
+                {
+                    state.CreatedAt = updateCanReceiveInviteReward.CreatedAt;
+                }
                 break;
 
             case UpdateDailyImageConversationEvent updateDailyImageConversation:
