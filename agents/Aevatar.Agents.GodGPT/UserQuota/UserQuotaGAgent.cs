@@ -166,6 +166,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         var startDate = subscriptionInfo.StartDate?.ToDateTime() ?? DateTime.MinValue;
         var endDate = subscriptionInfo.EndDate?.ToDateTime() ?? DateTime.MinValue;
         var isSubscribed = subscriptionInfo.IsActive && startDate <= now && endDate > now;
+        
+        Logger.LogInformation("[UserQuotaGAgent][IsSubscribedAsync] UserId={UserId}, Ultimate={Ultimate}, IsActive={IsActive}, StartDate={StartDate}, EndDate={EndDate}, Now={Now}, Result={Result}",
+            Id, ultimate, subscriptionInfo.IsActive, startDate, endDate, now, isSubscribed);
 
         if (subscriptionInfo.IsActive && endDate <= now)
         {
