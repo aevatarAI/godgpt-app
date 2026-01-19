@@ -41,8 +41,6 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
         _logger = logger;
         _serviceProvider = serviceProvider;
         _dispatchHandler = options?.Value?.Consumer?.DispatchHandler ?? DispatchHandler.GrainHandler;
-        
-        _logger.LogInformation("StreamMessageDispatcher initialized with DispatchHandler: {DispatchHandler}", _dispatchHandler);
     }
 
     public async Task Consume(ConsumeContext<ByteArrayMessage> context)
