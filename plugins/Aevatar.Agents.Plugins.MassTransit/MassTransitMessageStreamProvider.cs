@@ -119,8 +119,7 @@ public class MassTransitMessageStreamProvider : IMessageStreamProvider
     /// </summary>
     internal MassTransitMessageStream? GetStreamInternal(string streamId)
     {
-        // CRITICAL FIX: Try lookup with stripped quotes if direct lookup fails
-        // This handles cases where StreamId from Kafka has quotes but registered stream doesn't
+        // Defensive: Try lookup with stripped quotes if direct lookup fails
         var found = _streams.TryGetValue(streamId, out var stream);
         
         if (!found && !string.IsNullOrEmpty(streamId))

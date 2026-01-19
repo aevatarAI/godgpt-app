@@ -120,8 +120,7 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
         
         var traceIdPrefix = traceId != null ? $"[TraceId={traceId}]" : "";
         
-        // CRITICAL FIX: Strip quotes from StreamId if present (MassTransit JSON serialization may add quotes)
-        // This ensures StreamId matches the registered stream key
+        // Defensive: Strip quotes from StreamId if present (handles edge cases in JSON serialization)
         var originalStreamId = streamId;
         if (!string.IsNullOrEmpty(streamId))
         {
