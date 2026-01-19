@@ -1,5 +1,6 @@
 using System.Linq;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.GodGPT.Protos.GodChatStream;
 using MassTransit;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -56,6 +57,41 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
             return;
         }
         
+        // Parse the envelope first to extract TraceId
+        EventEnvelope envelope;
+        try
+        {
+            envelope = EventEnvelope.Parser.ParseFrom(data);
+        }
+        catch (System.Exception ex)
+        {
+            _logger.LogError(ex, "[StreamMessageDispatcher] Failed to parse EventEnvelope for StreamId {StreamId}", streamId);
+            throw;
+        }
+        
+        // Extract TraceId from envelope for ES correlation: SessionId_ChatId
+        string? traceId = null;
+        try
+        {
+            // Try to extract ChatId from GodChatStreamEnvelopeProto
+            if (envelope.Payload.Is(GodChatStreamEnvelopeProto.Descriptor))
+            {
+                var streamProto = envelope.Payload.Unpack<GodChatStreamEnvelopeProto>();
+                if (!string.IsNullOrEmpty(streamProto.StreamId) && !string.IsNullOrEmpty(streamProto.ChatId))
+                {
+                    // Format: SessionId_ChatId (SessionId without dashes for shorter format)
+                    var sessionIdGuid = Guid.TryParse(streamProto.StreamId.Replace("\"", ""), out var parsed) ? parsed : Guid.Empty;
+                    traceId = sessionIdGuid != Guid.Empty ? $"{sessionIdGuid:N}_{streamProto.ChatId}" : null;
+                }
+            }
+        }
+        catch
+        {
+            // Ignore - TraceId is optional for non-GodChat messages
+        }
+        
+        var traceIdPrefix = traceId != null ? $"[TraceId={traceId}]" : "";
+        
         // DIAGNOSTIC: Check if StreamId contains unexpected quotes from JSON serialization
         var originalStreamId = streamId;
         var streamIdLength = streamId?.Length ?? 0;
@@ -63,8 +99,8 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
         // Log first and last character ASCII codes for precise diagnosis
         var firstCharCode = streamIdLength > 0 ? (int)streamId[0] : -1;
         var lastCharCode = streamIdLength > 1 ? (int)streamId[streamIdLength - 1] : -1;
-        _logger.LogDebug("[StreamMessageDispatcher] StreamId analysis - Length={Length}, FirstChar='{First}' (0x{FirstHex:X2}), LastChar='{Last}' (0x{LastHex:X2})",
-            streamIdLength, 
+        _logger.LogDebug("[StreamMessageDispatcher]{TraceId} StreamId analysis - Length={Length}, FirstChar='{First}' (0x{FirstHex:X2}), LastChar='{Last}' (0x{LastHex:X2})",
+            traceIdPrefix, streamIdLength, 
             streamIdLength > 0 ? streamId[0] : '?', firstCharCode, 
             streamIdLength > 1 ? streamId[streamIdLength - 1] : '?', lastCharCode);
         
@@ -75,8 +111,8 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
         {
             // Strip JSON-encoded quotes (including Unicode quotes)
             streamId = streamId[1..^1];
-            _logger.LogWarning("[StreamMessageDispatcher] StreamId had quotes, stripped: Original='{Original}' (len={OrigLen}) -> Stripped='{Stripped}' (len={StrippedLen})",
-                originalStreamId, originalStreamId?.Length ?? 0, streamId, streamId?.Length ?? 0);
+            _logger.LogWarning("[StreamMessageDispatcher]{TraceId} StreamId had quotes, stripped: Original='{Original}' (len={OrigLen}) -> Stripped='{Stripped}' (len={StrippedLen})",
+                traceIdPrefix, originalStreamId, originalStreamId?.Length ?? 0, streamId, streamId?.Length ?? 0);
         }
         else if (streamId?.Contains('"') == true || streamId?.Contains('\'') == true || 
                  streamId?.Contains('\u201C') == true || streamId?.Contains('\u201D') == true)
@@ -103,27 +139,15 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
             }
         }
         
-        _logger.LogInformation("[StreamMessageDispatcher] Consuming message - StreamId='{StreamId}', StreamIdLength={Length}, OriginalLength={OriginalLength}, DispatchHandler={DispatchHandler}",
-            streamId, streamId?.Length ?? 0, originalStreamId?.Length ?? 0, _dispatchHandler);
+        _logger.LogInformation("[StreamMessageDispatcher]{TraceId} Consuming message - StreamId='{StreamId}', StreamIdLength={Length}, OriginalLength={OriginalLength}, DispatchHandler={DispatchHandler}",
+            traceIdPrefix, streamId, streamId?.Length ?? 0, originalStreamId?.Length ?? 0, _dispatchHandler);
         
         // Log raw bytes to detect hidden characters or encoding issues
         if (!string.IsNullOrEmpty(streamId))
         {
             var bytes = System.Text.Encoding.UTF8.GetBytes(streamId);
             var hex = string.Join(" ", bytes.Take(50).Select(b => b.ToString("X2")));
-            _logger.LogDebug("[StreamMessageDispatcher] StreamId raw bytes (first 50): {Hex}", hex);
-        }
-        
-        // Parse the envelope first
-        EventEnvelope envelope;
-        try
-        {
-            envelope = EventEnvelope.Parser.ParseFrom(data);
-        }
-        catch (System.Exception ex)
-        {
-            _logger.LogError(ex, "Failed to parse EventEnvelope for StreamId {StreamId}", streamId);
-            throw;
+            _logger.LogDebug("[StreamMessageDispatcher]{TraceId} StreamId raw bytes (first 50): {Hex}", traceIdPrefix, hex);
         }
         
         // ============================================================

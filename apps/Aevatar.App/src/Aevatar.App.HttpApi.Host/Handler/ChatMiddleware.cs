@@ -139,8 +139,11 @@ public class ChatMiddleware
 
             // Get message stream
             var sessionIdStr = request.SessionId.ToString();
-            _logger.LogInformation("[ChatMiddleware] Getting message stream - SessionId={SessionId}, SessionIdString='{SessionIdString}', Length={Length}",
-                request.SessionId, sessionIdStr, sessionIdStr.Length);
+            var chatId = Guid.NewGuid().ToString();
+            var traceId = $"{request.SessionId:N}_{chatId}";
+            
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] Getting message stream - SessionId={SessionId}, SessionIdString='{SessionIdString}', Length={Length}",
+                traceId, request.SessionId, sessionIdStr, sessionIdStr.Length);
             
             var messageStream = GetMessageStream(sessionIdStr);
             if (messageStream == null)
@@ -149,12 +152,11 @@ public class ChatMiddleware
                 return;
             }
             
-            _logger.LogInformation("[ChatMiddleware] Message stream obtained - SessionId={SessionId}, StreamId={StreamId}",
-                request.SessionId, messageStream.StreamId);
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] Message stream obtained - SessionId={SessionId}, StreamId={StreamId}",
+                traceId, request.SessionId, messageStream.StreamId);
 
             var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(request.SessionId.ToString());
             var godChat = godChatActor.As<IGodChat>();
-            var chatId = Guid.NewGuid().ToString();
 
             // Build proto input
             var protoInput = BuildStartStreamChatInput(request, chatId);
@@ -164,19 +166,19 @@ public class ChatMiddleware
                 request.SessionId.ToString(), chatId, stopwatch, context.RequestAborted);
             sseHandler.SetupSseHeaders();
             
-            _logger.LogInformation("[ChatMiddleware] STEP1 - Subscribing to stream: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
-                request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] STEP1 - Subscribing to stream: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
+                traceId, request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
             
             var exitSignal = await sseHandler.SubscribeAsync(messageStream);
             
-            _logger.LogInformation("[ChatMiddleware] STEP2 - Subscription done, calling StartStreamChatAsync: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
-                request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] STEP2 - Subscription done, calling StartStreamChatAsync: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
+                traceId, request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
             
             // Trigger chat - this should return quickly (fire-and-forget for HTTP requests)
             await godChat.StartStreamChatAsync(protoInput);
             
-            _logger.LogInformation("[ChatMiddleware] STEP3 - StartStreamChatAsync returned, waiting for stream: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
-                request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] STEP3 - StartStreamChatAsync returned, waiting for stream: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
+                traceId, request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
             
             // Wait and cleanup
             await sseHandler.WaitForCompletionAsync();
