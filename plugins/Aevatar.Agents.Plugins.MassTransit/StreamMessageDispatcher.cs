@@ -181,7 +181,7 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
         }
         
         // If still not handled, throw to trigger MassTransit retry
-        _logger.LogWarning("GrainHandler: No handler for StreamId {StreamId}. Throwing to trigger retry.", streamId);
+        _logger.LogWarning("Message dropped - StreamId={StreamId}, Reason=NoHandler (will retry)", streamId);
         throw new System.InvalidOperationException($"No handler for StreamId {streamId}. Actor might be failing to activate.");
     }
     
@@ -192,7 +192,7 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
     {
         if (_serviceProvider == null)
         {
-            _logger.LogWarning("LocalHandler: ServiceProvider is null for StreamId {StreamId}", streamId);
+            _logger.LogWarning("Message dropped - StreamId={StreamId}, Reason=ServiceProviderNull", streamId);
             return false;
         }
         
@@ -201,7 +201,7 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
             var streamProvider = _serviceProvider.GetService<MassTransitMessageStreamProvider>();
             if (streamProvider == null)
             {
-                _logger.LogWarning("LocalHandler: MassTransitMessageStreamProvider not found for StreamId {StreamId}", streamId);
+                _logger.LogWarning("Message dropped - StreamId={StreamId}, Reason=StreamProviderNotFound", streamId);
                 return false;
             }
             
@@ -211,22 +211,19 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
                 var handlerCount = localStream.GetHandlerCount();
                 if (handlerCount == 0)
                 {
-                    // Stream exists but no handlers - race condition between early filter and dispatch
-                    _logger.LogDebug("LocalHandler: Stream {StreamId} has no handlers, skipping", streamId);
+                    // Race condition: subscriber removed between early filter and dispatch
+                    _logger.LogWarning("Message dropped - StreamId={StreamId}, Reason=NoHandlers (race condition)", streamId);
                     return false;
                 }
                 
                 await localStream.DispatchAsync(data);
-                _logger.LogDebug("LocalHandler: Dispatched to {HandlerCount} handlers for StreamId {StreamId}", 
-                    handlerCount, streamId);
+                _logger.LogInformation("Message dispatched - StreamId={StreamId}, Handlers={HandlerCount}", streamId, handlerCount);
                 return true;
             }
             else
             {
-                // Log all registered stream IDs to help diagnose mismatch
-                var registeredIds = streamProvider.GetAllStreamIds();
-                _logger.LogWarning("LocalHandler: No local stream found for StreamId '{StreamId}'. Registered streams: [{RegisteredIds}]", 
-                    streamId, string.Join(", ", registeredIds));
+                // Should not happen after early filter, but log for safety
+                _logger.LogWarning("Message dropped - StreamId={StreamId}, Reason=StreamNotFound", streamId);
             }
         }
         catch (System.Exception ex)
@@ -249,15 +246,15 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
                 var handled = await handler.HandleEventAsync(streamId, envelope);
                 if (handled)
                 {
-                    _logger.LogDebug("Event {EventId} handled by {HandlerType} for StreamId {StreamId}", 
-                        envelope.Id, handler.GetType().Name, streamId);
+                    _logger.LogInformation("Message dispatched - StreamId={StreamId}, Handler={HandlerType}", 
+                        streamId, handler.GetType().Name);
                     return true;
                 }
             }
             catch (System.Exception ex)
             {
-                _logger.LogWarning(ex, "Event handler {HandlerType} failed for StreamId {StreamId}", 
-                    handler.GetType().Name, streamId);
+                _logger.LogWarning(ex, "Handler failed - StreamId={StreamId}, Handler={HandlerType}", 
+                    streamId, handler.GetType().Name);
             }
         }
         
@@ -269,7 +266,7 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
     /// </summary>
     private async Task<bool> TryActivateAndRetryAsync(string streamId, EventEnvelope envelope)
     {
-        _logger.LogDebug("No event handler found for StreamId {StreamId}, trying activation handlers...", streamId);
+        _logger.LogDebug("Trying activation for StreamId={StreamId}", streamId);
         
         foreach (var notFoundHandler in _notFoundHandlers)
         {
@@ -279,7 +276,7 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
             }
             catch (System.Exception ex)
             {
-                _logger.LogError(ex, "StreamNotFoundHandler failed for StreamId {StreamId}", streamId);
+                _logger.LogError(ex, "Activation failed - StreamId={StreamId}", streamId);
             }
         }
         
@@ -291,15 +288,13 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
                 var handled = await handler.HandleEventAsync(streamId, envelope);
                 if (handled)
                 {
-                    _logger.LogDebug("Event {EventId} handled after activation for StreamId {StreamId}", 
-                        envelope.Id, streamId);
+                    _logger.LogInformation("Message dispatched (after activation) - StreamId={StreamId}", streamId);
                     return true;
                 }
             }
             catch (System.Exception ex)
             {
-                _logger.LogWarning(ex, "Event handler failed after activation for StreamId {StreamId}", 
-                    handler.GetType().Name);
+                _logger.LogWarning(ex, "Handler failed (after activation) - StreamId={StreamId}", streamId);
             }
         }
         
