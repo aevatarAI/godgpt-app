@@ -57,6 +57,24 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
             return;
         }
         
+        // ============================================================
+        // EARLY FILTER: For LocalHandler (broadcast mode), check if we have
+        // a local subscriber BEFORE any heavy processing (deserialization, reflection).
+        // This is O(1) lookup - avoids wasting resources on irrelevant messages.
+        // ============================================================
+        if (_dispatchHandler == DispatchHandler.LocalHandler)
+        {
+            var streamProvider = _serviceProvider?.GetService<MassTransitMessageStreamProvider>();
+            if (streamProvider == null || !streamProvider.HasSubscriber(streamId))
+            {
+                // No local subscriber - skip immediately without heavy processing
+                // Silent return - this is expected in broadcast mode, other instances handle it
+                return;
+            }
+        }
+        
+        // === Proceed with heavy processing only for relevant messages ===
+        
         // Parse the envelope first to extract TraceId
         EventEnvelope envelope;
         try
@@ -142,16 +160,9 @@ public class StreamMessageDispatcher : IConsumer<ByteArrayMessage>
         // ============================================================
         if (_dispatchHandler == DispatchHandler.LocalHandler)
         {
-            // LocalHandler: Dispatch to local memory stream subscribers (HttpApi Client)
-            // In broadcast mode, each instance receives all messages but only processes
-            // those with local subscribers. This is how Orleans Stream works for Clients.
-            var dispatched = await TryDispatchToLocalStreamAsync(streamId, data, envelope);
-            if (!dispatched)
-            {
-                // No local subscriber - this is expected in broadcast mode
-                // Other instances may have the subscriber
-                _logger.LogDebug("LocalHandler: No local subscribers for StreamId {StreamId}, skipping", streamId);
-            }
+            // LocalHandler: Already confirmed subscriber exists in early filter
+            // Dispatch to local memory stream subscribers
+            await TryDispatchToLocalStreamAsync(streamId, data, envelope);
             return;
         }
         

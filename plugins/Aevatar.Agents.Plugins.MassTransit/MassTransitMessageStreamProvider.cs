@@ -152,4 +152,28 @@ public class MassTransitMessageStreamProvider : IMessageStreamProvider
     /// Gets all registered stream IDs (for debugging).
     /// </summary>
     internal IEnumerable<string> GetAllStreamIds() => _streams.Keys;
+
+    /// <summary>
+    /// Fast check if there's a local subscriber for the given streamId.
+    /// Used by StreamMessageDispatcher for early filtering in broadcast mode.
+    /// This is O(1) lookup - no heavy processing.
+    /// </summary>
+    internal bool HasSubscriber(string streamId)
+    {
+        if (string.IsNullOrEmpty(streamId))
+            return false;
+
+        // Direct lookup
+        if (_streams.TryGetValue(streamId, out var stream) && stream.GetHandlerCount() > 0)
+            return true;
+
+        // Defensive: try with stripped quotes
+        var stripped = streamId.Trim('"', '\'', '\u201C', '\u201D', ' ', '\t');
+        if (stripped.Length != streamId.Length && 
+            _streams.TryGetValue(stripped, out stream) && 
+            stream.GetHandlerCount() > 0)
+            return true;
+
+        return false;
+    }
 }
