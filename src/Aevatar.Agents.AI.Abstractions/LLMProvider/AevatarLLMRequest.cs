@@ -34,4 +34,30 @@ public class AevatarLLMRequest
     /// 上下文窗口中的额外信息
     /// </summary>
     public Dictionary<string, object>? Context { get; set; }
+    
+    /// <summary>
+    /// Images for multimodal input (already resolved with data)
+    /// </summary>
+    public IList<AevatarImageData>? Images { get; set; }
+}
+
+/// <summary>
+/// Resolved image data for LLM multimodal requests
+/// </summary>
+public class AevatarImageData
+{
+    /// <summary>
+    /// Original key from blob storage
+    /// </summary>
+    public string Key { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Raw image bytes
+    /// </summary>
+    public ReadOnlyMemory<byte> Data { get; set; }
+    
+    /// <summary>
+    /// MIME type (e.g., "image/jpeg", "image/png")
+    /// </summary>
+    public string MediaType { get; set; } = "image/jpeg";
 }

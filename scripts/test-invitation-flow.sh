@@ -14,6 +14,8 @@ source "$SCRIPT_DIR/test-common.sh"
 
 # Variables
 INVITE_CODE=""  # Will be populated after generating invite code
+GENERATED_TRIAL_CODES=()  # Array to store generated trial codes
+GENERATED_BATCH_ID=""  # Batch ID of generated codes
 
 # Check if jq is installed
 check_dependencies() {
@@ -173,12 +175,93 @@ test_generate_trial_code() {
     
     log_response "$response"
     
-    if echo "$response" | jq -e '.success' > /dev/null 2>&1; then
-        log_info "Generate trial code endpoint tested ✓"
+    local success=$(echo "$response" | jq -r '.success // .data.success // false' 2>/dev/null)
+    if [ "$success" == "true" ]; then
+        # Extract generated codes
+        GENERATED_BATCH_ID=$(echo "$response" | jq -r '.batchId // .data.batchId // empty')
+        local codes_array=$(echo "$response" | jq -r '.codes // .data.codes // [] | .[]' 2>/dev/null)
+        
+        if [ -n "$codes_array" ]; then
+            # Convert to array
+            GENERATED_TRIAL_CODES=()
+            while IFS= read -r code; do
+                if [ -n "$code" ] && [ "$code" != "null" ]; then
+                    GENERATED_TRIAL_CODES+=("$code")
+                fi
+            done <<< "$codes_array"
+            
+            log_info "Generate trial code succeeded ✓"
+            log_info "Batch ID: $GENERATED_BATCH_ID"
+            log_info "Generated Count: $(echo "$response" | jq -r '.generatedCount // .data.generatedCount // 0')"
+            log_info "Generated Codes (first 3):"
+            local count=0
+            for code in "${GENERATED_TRIAL_CODES[@]}"; do
+                if [ $count -lt 3 ]; then
+                    log_info "  - $code"
+                    ((count++))
+                fi
+            done
+            if [ ${#GENERATED_TRIAL_CODES[@]} -gt 3 ]; then
+                log_info "  ... and $(( ${#GENERATED_TRIAL_CODES[@]} - 3 )) more codes"
+            fi
+        else
+            log_warn "Generate succeeded but no codes returned in response"
+        fi
         return 0
     else
         log_warn "Generate trial code may have failed (expected if not manager)"
         return 0  # Don't fail if permission denied
+    fi
+}
+
+# Test 7: Redeem Generated Trial Code
+test_redeem_generated_trial_code() {
+    log_step "Test 7: Redeeming generated trial code..."
+    
+    if [ ${#GENERATED_TRIAL_CODES[@]} -eq 0 ]; then
+        log_warn "No generated trial codes available, skipping test"
+        log_warn "Note: This test requires Test 6 to succeed first"
+        return 0  # Don't fail, just skip
+    fi
+    
+    # Use the first generated code
+    local code_to_redeem="${GENERATED_TRIAL_CODES[0]}"
+    log_info "Attempting to redeem generated code: $code_to_redeem"
+    log_warn "Note: This may fail if Stripe coupon was not created for this code"
+    
+    # Add a small delay to allow for potential async processing
+    log_info "Waiting 2 seconds for potential async processing..."
+    sleep 2
+    
+    local response=$(api_post "/api/godgpt/invitation/redeem" "{
+        \"InviteCode\": \"$code_to_redeem\",
+        \"IsWeb\": true
+    }")
+    
+    log_response "$response"
+    
+    # Check if response is valid JSON with isValid field
+    if echo "$response" | jq -e '.isValid != null or .IsValid != null or .data.isValid != null or .data.IsValid != null' > /dev/null 2>&1; then
+        local is_valid=$(echo "$response" | jq -r '.IsValid // .isValid // .data.IsValid // .data.isValid // false')
+        if [ "$is_valid" == "true" ]; then
+            log_info "Redeem generated trial code succeeded ✓"
+            log_info "Checkout URL: $(echo "$response" | jq -r '.url // .URL // .data.url // .data.URL // "N/A"')"
+            return 0
+        else
+            local error_msg=$(echo "$response" | jq -r '.error // .message // .data.error // .data.message // "Unknown error"' 2>/dev/null || echo "Validation failed")
+            log_warn "Redeem generated trial code failed: $error_msg"
+            log_warn "This may indicate that Stripe coupon was not created for the code"
+            log_warn "Code exists locally but may not be available in Stripe"
+            return 0  # Don't fail test, but log the issue
+        fi
+    elif echo "$response" | jq -e '.error' > /dev/null 2>&1; then
+        local error_msg=$(echo "$response" | jq -r '.error.message // .error // "Unknown error"' 2>/dev/null || echo "$response")
+        log_warn "Redeem generated trial code returned error: $error_msg"
+        log_warn "This may indicate that Stripe coupon was not created for the code"
+        return 0  # Don't fail test, but log the issue
+    else
+        log_warn "Redeem generated trial code endpoint may have failed"
+        return 1
     fi
 }
 
@@ -230,14 +313,34 @@ run_all_tests() {
     fi
     echo ""
     
-    test_generate_trial_code
-    ((passed++))
+    if test_generate_trial_code; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
+    echo ""
+    
+    # Test 7: Try to redeem the generated trial code
+    if test_redeem_generated_trial_code; then
+        ((passed++))
+    else
+        ((failed++))
+    fi
     echo ""
     
     log_info "========================================"
     log_info "Test Results: $passed passed, $failed failed"
     log_info "========================================"
     log_info "Note: Redeem test may fail if user tries to redeem their own code (expected behavior)"
+    if [ ${#GENERATED_TRIAL_CODES[@]} -gt 0 ]; then
+        log_info ""
+        log_info "Generated Trial Codes (for manual testing):"
+        for code in "${GENERATED_TRIAL_CODES[@]}"; do
+            log_info "  $code"
+        done
+        log_info ""
+        log_info "Note: If redeem fails, check if Stripe coupons were created for these codes"
+    fi
 }
 
 # Main function
@@ -276,6 +379,13 @@ main() {
             ;;
         "generate")
             test_generate_trial_code
+            ;;
+        "redeem-generated")
+            # First generate codes, then redeem
+            if test_generate_trial_code; then
+                echo ""
+                test_redeem_generated_trial_code
+            fi
             ;;
         "all"|*)
             run_all_tests

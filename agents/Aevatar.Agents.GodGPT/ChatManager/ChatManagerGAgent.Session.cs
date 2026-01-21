@@ -200,7 +200,6 @@ public partial class ChatGAgentManager
     public async Task<ChatMessageListProto> GetSessionMessageListAsync(Guid sessionId)
     {
         var sw = Stopwatch.StartNew();
-        Logger.LogInformation("[PERF][ChatGAgentManager] GetSessionMessageListAsync START - SessionId: {SessionId}", sessionId);
         var sessionInfo = State.GetSession(sessionId);
 
         if (sessionInfo == null)
@@ -208,13 +207,22 @@ public partial class ChatGAgentManager
             throw new InvalidOperationException($"Unable to load conversation {sessionId}");
         }
 
-        Logger.LogInformation("[PERF][ChatGAgentManager] GetSessionMessageListAsync creating GodChatGAgent - Elapsed: {Elapsed}ms", sw.ElapsedMilliseconds);
+        // Step A: Create GodChatGAgent Actor
+        var stepAStart = sw.ElapsedMilliseconds;
         var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(sessionInfo.SessionId);
-        var godChat = godChatActor.As<IGodChat>();
-        Logger.LogInformation("[PERF][ChatGAgentManager] GetSessionMessageListAsync GodChatGAgent created - Elapsed: {Elapsed}ms", sw.ElapsedMilliseconds);
+        var stepAEnd = sw.ElapsedMilliseconds;
         
+        var godChat = godChatActor.As<IGodChat>();
+        
+        // Step B: Call GetChatMessageAsync RPC
+        var stepBStart = sw.ElapsedMilliseconds;
         var result = await godChat.GetChatMessageAsync();
-        Logger.LogInformation("[PERF][ChatGAgentManager] GetSessionMessageListAsync END - Elapsed: {Elapsed}ms, MessageCount: {Count}", sw.ElapsedMilliseconds, result?.Messages?.Count ?? 0);
+        var stepBEnd = sw.ElapsedMilliseconds;
+        
+        Logger.LogInformation(
+            "[PERF][GetMessages] TOTAL={TotalMs}ms - CreateActor={CreateActorMs}ms, GetChatMessage={GetChatMs}ms - SessionId: {SessionId}, MessageCount: {Count}",
+            sw.ElapsedMilliseconds, stepAEnd - stepAStart, stepBEnd - stepBStart, sessionId, result?.Messages?.Count ?? 0);
+        
         return result;
     }
 
@@ -330,7 +338,7 @@ public partial class ChatGAgentManager
 
         RaiseEvent(new ClearAllEvent());
         await ConfirmEventsAsync();
-        return Guid.Parse(Id);
+        return Guid.Parse(AgentId.ExtractRawId(Id));
     }
 }
 

@@ -89,6 +89,23 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
     {
     }
 
+    protected override async Task OnActivateAsync(CancellationToken ct = default)
+    {
+        await base.OnActivateAsync(ct);
+
+        // New users should be eligible for invite rewards. Guard to avoid reactivations
+        // overriding previously consumed/blocked state.
+        if (State.CreatedAt == null)
+        {
+            RaiseEvent(new UpdateCanReceiveInviteRewardEvent
+            {
+                CanReceiveInviteReward = true,
+                CreatedAt = Timestamp.FromDateTime(DateTime.UtcNow)
+            });
+            await ConfirmEventsAsync();
+        }
+    }
+
     public override Task<string> GetDescriptionAsync()
     {
         return Task.FromResult("User Quota Management GAgent");
@@ -149,6 +166,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         var startDate = subscriptionInfo.StartDate?.ToDateTime() ?? DateTime.MinValue;
         var endDate = subscriptionInfo.EndDate?.ToDateTime() ?? DateTime.MinValue;
         var isSubscribed = subscriptionInfo.IsActive && startDate <= now && endDate > now;
+        
+        Logger.LogInformation("[UserQuotaGAgent][IsSubscribedAsync] UserId={UserId}, Ultimate={Ultimate}, IsActive={IsActive}, StartDate={StartDate}, EndDate={EndDate}, Now={Now}, Result={Result}",
+            Id, ultimate, subscriptionInfo.IsActive, startDate, endDate, now, isSubscribed);
 
         if (subscriptionInfo.IsActive && endDate <= now)
         {
@@ -374,12 +394,17 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         var isVoiceMessage = actionTypeEnum == ActionType.VoiceConversation;
         var actionType = actionTypeEnum.ToString().ToLowerInvariant();
 
-        if (await IsSubscribedAsync(true))
+        var isUltimate = await IsSubscribedAsync(true);
+        if (isUltimate)
         {
+            Logger.LogInformation("[UserQuotaGAgent][ExecuteStandardActionAsync] UserId={UserId} is Ultimate subscriber, skipping credits deduction", Id);
             return new ExecuteActionResultProto { Success = true };
         }
 
         var isSubscribed = await IsSubscribedAsync(false);
+        var creditsPerConversation = CreditsOptions?.CurrentValue.CreditsPerConversation ?? -1;
+        Logger.LogInformation("[UserQuotaGAgent][ExecuteStandardActionAsync] UserId={UserId}, IsSubscribed={IsSubscribed}, CreditsPerConversation={CreditsPerConversation}, CurrentCredits={CurrentCredits}",
+            Id, isSubscribed, creditsPerConversation, State.Credits);
         var maxTokens = isSubscribed
             ? (isVoiceMessage ? (RateLimiterOptions?.CurrentValue.VoiceSubscribedUserMaxRequests ?? 0) : (RateLimiterOptions?.CurrentValue.SubscribedUserMaxRequests ?? 0))
             : (isVoiceMessage ? (RateLimiterOptions?.CurrentValue.VoiceUserMaxRequests ?? 0) : (RateLimiterOptions?.CurrentValue.UserMaxRequests ?? 0));
@@ -458,7 +483,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         {
             try
             {
-                var newCredits = State.Credits - (CreditsOptions?.CurrentValue.CreditsPerConversation ?? 0);
+                var deductAmount = CreditsOptions?.CurrentValue.CreditsPerConversation ?? 0;
+                var newCredits = State.Credits - deductAmount;
+                Logger.LogInformation("[UserQuotaGAgent][ExecuteStandardActionAsync] Deducting credits: UserId={UserId}, Before={Before}, Deduct={Deduct}, After={After}",
+                    Id, State.Credits, deductAmount, newCredits);
                 RaiseEvent(new UpdateCreditsEvent { NewCredits = newCredits });
 
                 if (newCredits == 0)
@@ -471,6 +499,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 Logger.LogWarning($"[UserQuotaGAgent][ExecuteStandardActionAsync] ReportCreditsExhaustedAsync error msg:{e.Message}");
             }
         }
+        else
+        {
+            Logger.LogInformation("[UserQuotaGAgent][ExecuteStandardActionAsync] UserId={UserId} is subscribed, skipping credits deduction", Id);
+        }
 
         var updatedRateLimitInfo = State.RateLimits[actionType];
         var newRateLimitInfo = new RateLimitInfoProto
@@ -480,6 +512,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         };
         RaiseEvent(new UpdateRateLimitEvent { ActionType = actionType, RateLimitInfo = newRateLimitInfo });
 
+        // CRITICAL: Persist credits deduction and rate limit update events
+        await ConfirmEventsAsync();
+        
         return new ExecuteActionResultProto { Success = true };
     }
 
@@ -893,6 +928,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
             case UpdateCanReceiveInviteRewardEvent updateCanReceiveInviteReward:
                 state.CanReceiveInviteReward = updateCanReceiveInviteReward.CanReceiveInviteReward;
+                if (updateCanReceiveInviteReward.CreatedAt != null)
+                {
+                    state.CreatedAt = updateCanReceiveInviteReward.CreatedAt;
+                }
                 break;
 
             case UpdateDailyImageConversationEvent updateDailyImageConversation:

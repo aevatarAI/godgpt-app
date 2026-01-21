@@ -91,9 +91,18 @@ public class GodGPTSessionService : ApplicationService, IGodGPTSessionService
     /// <inheritdoc />
     public async Task<Aevatar.Quantum.SessionCreationInfoDto?> GetSessionCreationInfoAsync(Guid userId, Guid sessionId)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        
         var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
+        var createActorMs = sw.ElapsedMilliseconds;
+        
         var manager = managerActor.As<IChatManagerGAgent>();
         var grainsResult = await manager.GetSessionCreationInfoAsync(sessionId);
+        var grainCallMs = sw.ElapsedMilliseconds - createActorMs;
+        
+        _logger.LogInformation(
+            "[GodGPTSessionService][GetSessionCreationInfoAsync] userId={UserId}, sessionId={SessionId}, CreateActorMs={CreateActorMs}, GrainCallMs={GrainCallMs}, TotalMs={TotalMs}",
+            userId, sessionId, createActorMs, grainCallMs, sw.ElapsedMilliseconds);
 
         if (grainsResult != null)
         {

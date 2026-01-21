@@ -92,3 +92,37 @@ public class GetRecentPredictionsApiRequest
 {
     public string Date { get; set; } = string.Empty;
 }
+
+/// <summary>
+/// API response for Lumen user profile (Controller layer)
+/// </summary>
+public class LumenUserProfileApiDto
+{
+    public string UserId { get; set; } = string.Empty;
+    public string FullName { get; set; } = string.Empty;
+    public GenderEnum Gender { get; set; }
+    public DateValue BirthDate { get; set; } = new();
+    public TimeValue? BirthTime { get; set; }
+    public string BirthCity { get; set; } = string.Empty;
+    public string LatLong { get; set; } = string.Empty;
+    public CalendarTypeEnum? CalendarType { get; set; }
+    public string CreatedAt { get; set; } = string.Empty;
+    public string? CurrentResidence { get; set; }
+    public string UpdatedAt { get; set; } = string.Empty;
+    public Dictionary<string, string> WelcomeNote { get; set; } = new();
+    public string ZodiacSign { get; set; } = string.Empty;
+    public ZodiacSignEnum ZodiacSignEnum { get; set; }
+    public string ChineseZodiac { get; set; } = string.Empty;
+    public ChineseZodiacEnum ChineseZodiacEnum { get; set; }
+    public string? Occupation { get; set; }
+    public MbtiTypeEnum? MbtiType { get; set; }
+    public RelationshipStatusEnum? RelationshipStatus { get; set; }
+    public string? Interests { get; set; }
+    public List<InterestEnum> InterestsList { get; set; } = new();
+    public string? Email { get; set; }
+    public string? Icon { get; set; }
+    public string? CurrentTimeZone { get; set; }
+    public string CurrentLanguage { get; set; } = string.Empty;
+    public string? LatLongInferred { get; set; }
+    public string? InferredFromCity { get; set; }
+}

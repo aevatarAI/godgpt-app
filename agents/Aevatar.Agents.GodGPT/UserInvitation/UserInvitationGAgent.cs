@@ -84,6 +84,9 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
 
         if (!isValid)
         {
+            Logger.LogInformation(
+                "[UserInvitationGAgent][RedeemInviteCodeAsync] Invite code invalid. Code: {Code}, InviterId: {InviterId}",
+                inviteCode, string.IsNullOrEmpty(inviterId) ? "<empty>" : inviterId);
             Logger.LogWarning($"Invalid invite code redemption attempt: {inviteCode}");
             return false;
         }
@@ -122,8 +125,9 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
             return false;
         }
 
-        Logger.LogDebug(
-            $"[UserInvitationGAgent][RedeemInviteCodeAsync] User {rawUserId} RegisteredAtUtc={registeredAtUtc.ToDateTime()}");
+        Logger.LogInformation(
+            "[UserInvitationGAgent][RedeemInviteCodeAsync] User {UserId} RegisteredAtUtc={RegisteredAtUtc}",
+            rawUserId, registeredAtUtc.ToDateTime());
 
         // Attempt to redeem initial reward
         redeemResult = await userQuotaGAgent.RedeemInitialRewardAsync(rawUserId, registeredAtUtc.ToDateTime());
@@ -205,6 +209,10 @@ public class UserInvitationGAgent : GAgentBase<UserInvitationState>, IUserInvita
     {
         switch (evt)
         {
+            case SetRegisteredAtUtcEvent setRegisteredAtUtcEvent:
+                state.RegisteredAtUtc = setRegisteredAtUtcEvent.RegisteredAtUtc;
+                break;
+
             case SetInviterEvent setInviterEvent:
                 state.InviterId = setInviterEvent.InviterId;
                 break;

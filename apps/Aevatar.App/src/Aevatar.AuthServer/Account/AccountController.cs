@@ -3,6 +3,7 @@ using Aevatar.App.Domain.Shared;
 using Aevatar.AuthServer.Account.Dtos;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Orleans.Runtime;
 using Volo.Abp;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Identity;
@@ -92,11 +93,21 @@ public class AppAccountController : AbpController
 
     /// <summary>
     /// Send password reset link to email
+    /// Reads X-Is-CN header from proxy to determine reset URL (CN vs global)
     /// </summary>
     [HttpPost("send-password-reset-code")]
     public async Task SendPasswordResetCodeAsync([FromBody] SendPasswordResetCodeDto input)
     {
         var language = GetLanguageFromHeader();
+        
+        // Read CN location flag from proxy header (set by AccountProxyController)
+        if (HttpContext.Request.Headers.TryGetValue("X-Is-CN", out var isCNHeader))
+        {
+            var isCN = string.Equals(isCNHeader.ToString(), "true", System.StringComparison.OrdinalIgnoreCase);
+            RequestContext.Set("IsCN", isCN);
+            _logger.LogDebug("[AccountController] X-Is-CN header: {IsCN}", isCN);
+        }
+        
         await _accountService.SendPasswordResetCodeAsync(input, language);
     }
 

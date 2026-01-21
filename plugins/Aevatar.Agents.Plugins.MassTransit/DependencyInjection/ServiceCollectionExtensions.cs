@@ -332,11 +332,24 @@ public static class ServiceCollectionExtensions
 
                             if (options.Consumer.Enabled)
                             {
+                                // Broadcast Mode for LocalHandler (HttpApi):
+                                // Each instance uses a unique ConsumerGroupId so all instances receive all messages.
+                                // Messages are filtered locally by checking if there's a subscriber for the StreamId.
+                                // This is how Orleans Stream works for Clients - simple and reliable.
+                                var baseGroupId = options.Kafka?.ConsumerGroupId ?? "aevatar-agents-group";
+                                var isBroadcastMode = options.Consumer.DispatchHandler == DispatchHandler.LocalHandler;
+                                var consumerGroupId = isBroadcastMode
+                                    ? $"{baseGroupId}-{Environment.MachineName}-{System.Diagnostics.Process.GetCurrentProcess().Id}"
+                                    : baseGroupId;
+                                
+                                // Log to console during startup (logger not available in DI config phase)
+                                Console.WriteLine($"[MassTransit] Kafka ConsumerGroupId: {consumerGroupId} (DispatchHandler={options.Consumer.DispatchHandler}, Broadcast={isBroadcastMode})");
+                                
                                 foreach (var topic in consumerTopics)
                                 {
                                     k.TopicEndpoint<ByteArrayMessage>(
                                         topic, 
-                                        options.Kafka?.ConsumerGroupId ?? "aevatar-agents-group", 
+                                        consumerGroupId, 
                                         e =>
                                         {
                                             e.AutoOffsetReset = Confluent.Kafka.AutoOffsetReset.Earliest;

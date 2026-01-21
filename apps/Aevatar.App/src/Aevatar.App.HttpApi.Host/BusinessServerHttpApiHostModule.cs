@@ -30,6 +30,7 @@ using Aevatar.App.HttpApi.Host.Handler;
 using Aevatar.Agents.Plugins.MassTransit.DependencyInjection;
 using Aevatar.App.HttpApi.Host.BackgroundJobs;
 using Aevatar.App.Application.Options;
+using Aevatar.Controllers;
 using AutoResponseWrapper;
 
 namespace Aevatar.App.HttpApi.Host;
@@ -97,6 +98,9 @@ public class AppHttpApiHostModule : AbpModule
         
         // Configure State Migration Job
         ConfigureStateMigration(context, configuration);
+        
+        // Configure AuthServer Proxy for backward compatibility with /api/account routes
+        ConfigureAuthServerProxy(context, configuration);
     }
     
     private void ConfigureStateMigration(ServiceConfigurationContext context, IConfiguration configuration)
@@ -110,6 +114,33 @@ public class AppHttpApiHostModule : AbpModule
         context.Services.AddScoped<StateMigrationJob>();
     }
     
+    /// <summary>
+    /// Configure HttpClient for proxying requests to AuthServer.
+    /// This enables backward compatibility for old /api/account routes.
+    /// </summary>
+    private void ConfigureAuthServerProxy(ServiceConfigurationContext context, IConfiguration configuration)
+    {
+        // Configure AuthServerProxyOptions from appsettings
+        context.Services.Configure<AuthServerProxyOptions>(options =>
+        {
+            // Use AuthServer:Authority URL, removing trailing slash
+            var authority = configuration["AuthServer:Authority"]?.TrimEnd('/') ?? "http://localhost:8001";
+            options.BaseUrl = authority;
+        });
+        
+        // Register named HttpClient for AuthServer communication
+        context.Services.AddHttpClient("AuthServer", client =>
+        {
+            var authority = configuration["AuthServer:Authority"]?.TrimEnd('/') ?? "http://localhost:8001";
+            client.BaseAddress = new Uri(authority);
+            client.Timeout = TimeSpan.FromSeconds(30);
+        }).ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler
+        {
+            // Allow self-signed certificates in development
+            ServerCertificateCustomValidationCallback = (message, cert, chain, errors) => true
+        });
+    }
+    
     private static void ConfigureAutoResponseWrapper(ServiceConfigurationContext context)
     {
         context.Services.AddAutoResponseWrapper();
@@ -117,20 +148,13 @@ public class AppHttpApiHostModule : AbpModule
     
     private void ConfigureBlobStorage(ServiceConfigurationContext context, IConfiguration configuration)
     {
-        Configure<AbpBlobStoringOptions>(options =>
-        {
-            options.Containers.ConfigureDefault(container =>
-            {
-                var configSection = configuration.GetSection("AwsS3");
-                container.UseAws(o =>
-                {
-                    o.AccessKeyId = configSection.GetValue<string>("AccessKeyId", "None");
-                    o.SecretAccessKey = configSection.GetValue<string>("SecretAccessKey", "None");
-                    o.Region = configSection.GetValue<string>("Region", "None");
-                    o.ContainerName = configSection.GetValue<string>("ContainerName", "None");
-                });
-            });
-        });
+        // Use custom AwsS3BlobContainer instead of ABP's AWS provider
+        // This ensures consistent key format (no prefix) across HttpApi and Silo
+        context.Services.Configure<App.Application.Services.AwsS3Options>(
+            configuration.GetSection("AwsS3"));
+        context.Services.AddSingleton<App.Application.Services.AwsS3BlobContainer>();
+        context.Services.AddSingleton<IBlobContainer>(sp => 
+            sp.GetRequiredService<App.Application.Services.AwsS3BlobContainer>());
     }
 
     private void ConfigureAgentRuntime(ServiceConfigurationContext context, IConfiguration configuration)

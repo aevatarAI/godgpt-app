@@ -39,11 +39,12 @@
     <PackageReference Include="Microsoft.Orleans.Client" />
   </ItemGroup>
 
-  <!-- Image Processing & GeoIP -->
+  <!-- Image Processing & GeoIP & AWS S3 -->
   <ItemGroup>
     <PackageReference Include="SixLabors.ImageSharp" />
     <PackageReference Include="MaxMind.GeoIP2" />
     <PackageReference Include="Volo.Abp.BlobStoring" />
+    <PackageReference Include="AWSSDK.S3" />
   </ItemGroup>
 
   <!-- Protobuf -->

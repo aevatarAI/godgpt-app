@@ -108,7 +108,9 @@ public class LumenPredictionHistoryGAgentTests
 
         // Assert
         result.ShouldNotBeNull();
-        result!.PredictionId.ShouldBe("pred-001");
+        result.Success.ShouldBeTrue();
+        result.Prediction.ShouldNotBeNull();
+        result.Prediction.PredictionId.ShouldBe("pred-001");
     }
 
     [Fact(DisplayName = "GetPredictionByDateAsync should return null when date does not exist")]
@@ -124,7 +126,9 @@ public class LumenPredictionHistoryGAgentTests
         var result = await agent.GetPredictionByDateAsync(date);
 
         // Assert
-        result.ShouldBeNull();
+        result.ShouldNotBeNull();
+        result.Success.ShouldBeTrue();
+        result.Prediction.ShouldBeNull();
     }
 
     [Fact(DisplayName = "GetRecentPredictionsAsync should return recent predictions")]
@@ -149,7 +153,8 @@ public class LumenPredictionHistoryGAgentTests
         var result = await agent.GetRecentPredictionsAsync(10);
 
         // Assert
-        result.Count.ShouldBe(3);
+        result.Success.ShouldBeTrue();
+        result.Predictions.Count.ShouldBe(3);
     }
 
     [Fact(DisplayName = "GetMonthlyPredictionsAsync should return predictions for month")]
@@ -171,7 +176,8 @@ public class LumenPredictionHistoryGAgentTests
         var result = await agent.GetMonthlyPredictionsAsync(now.Year, now.Month);
 
         // Assert
-        result.Count.ShouldBe(2);
+        result.Success.ShouldBeTrue();
+        result.Predictions.Count.ShouldBe(2);
     }
 
     [Fact(DisplayName = "ClearHistoryAsync should remove all predictions")]
@@ -258,7 +264,8 @@ public class LumenPredictionHistoryGAgentTests
         var result = await agent.GetRecentPredictionsAsync(5);
 
         // Assert - newest (day 0 = today) should be first
-        result[0].PredictionId.ShouldBe("pred-day-0");
+        result.Success.ShouldBeTrue();
+        result.Predictions[0].PredictionId.ShouldBe("pred-day-0");
     }
 }
 

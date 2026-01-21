@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Volo.Abp;
 using GrainPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
 using BillingCycle = Aevatar.Payment.Abstractions.BillingCycle;
+using QuotaPlanType = Aevatar.Agents.GodGPT.Protos.UserQuota.QuotaPlanType;
 
 namespace Aevatar.Controllers;
 
@@ -60,11 +61,13 @@ public class GodGPTPaymentController : AevatarController
         var result = products.Select(p => new StripeProductDto
         {
             PriceId = p.ProductId,
-            PlanType = MapBillingCycleToPlanType(p.BillingCycle).ToQuotaPlanType(),
+            // Use original PlanType from config metadata (matches legacy API)
+            PlanType = GetOriginalPlanType(p),
             Mode = "subscription",
             Amount = p.Price,
             Currency = p.Currency,
-            DailyAvgPrice = CalculateDailyAvgPrice(p.Price, p.BillingCycle),
+            // Use dailyAvgPrice from metadata (pure number format like "0.85")
+            DailyAvgPrice = GetDailyAvgPrice(p),
             IsUltimate = p.PlanType == PlanType.Premium,
             Credits = 0
         }).ToList();
@@ -87,10 +90,12 @@ public class GodGPTPaymentController : AevatarController
             ProductId = p.ProductId,
             Name = p.Name,
             Description = p.Description,
-            PlanType = (int)MapBillingCycleToPlanType(p.BillingCycle),
+            // Use original PlanType from config metadata (matches legacy API)
+            PlanType = (int)GetOriginalPlanType(p),
             Amount = p.Price,
             Currency = p.Currency,
-            DailyAvgPrice = CalculateDailyAvgPrice(p.Price, p.BillingCycle)
+            // Use dailyAvgPrice from metadata (pure number format)
+            DailyAvgPrice = GetDailyAvgPrice(p)
         }).ToList();
         
         _logger.LogDebug("[GodGPTPaymentController][GetAppleProductsAsync] userId: {UserId}, duration: {Duration}ms",
@@ -115,18 +120,26 @@ public class GodGPTPaymentController : AevatarController
                 new SubscriptionRequest
                 {
                     ProductId = input.PriceId,
-                    CancelUrl = input.CancelUrl
+                    CancelUrl = input.CancelUrl,
+                    Mode = input.Mode,
+                    UiMode = input.UiMode
                 });
 
-            _logger.LogDebug("[GodGPTPaymentController][CreateCheckoutSessionAsync] userId: {UserId}, duration: {Duration}ms",
-                currentUserId, stopwatch.ElapsedMilliseconds);
+            _logger.LogDebug("[GodGPTPaymentController][CreateCheckoutSessionAsync] userId: {UserId}, uiMode: {UiMode}, duration: {Duration}ms",
+                currentUserId, input.UiMode, stopwatch.ElapsedMilliseconds);
 
-            return Ok(new
+            // Return format compatible with legacy API
+            // EMBEDDED mode: return clientSecret (string)
+            // HOSTED mode: return session URL (string)
+            if (string.Equals(input.UiMode, "embedded", StringComparison.OrdinalIgnoreCase))
             {
-                sessionId = result.SubscriptionId,
-                sessionUrl = result.SessionUrl,
-                clientSecret = result.AdditionalData.GetValueOrDefault("clientSecret")
-            });
+                var clientSecret = result.AdditionalData.GetValueOrDefault("clientSecret")?.ToString() ?? string.Empty;
+                return Ok(clientSecret);
+            }
+            else
+            {
+                return Ok(result.SessionUrl ?? string.Empty);
+            }
         }
         catch (Exception e)
         {
@@ -180,7 +193,7 @@ public class GodGPTPaymentController : AevatarController
             Amount = h.Amount,
             Currency = h.Currency,
             Status = h.Status.ToString(),
-            CreatedAt = h.CreatedAt
+            CreatedAt = DateTimeFormatHelper.ToIso8601String(h.CreatedAt)
         }).ToList();
         
         _logger.LogDebug("[GodGPTPaymentController][GetPaymentHistoryAsync] userId: {UserId}, duration: {Duration}ms",
@@ -267,7 +280,7 @@ public class GodGPTPaymentController : AevatarController
             Success = result.Success,
             Error = result.ErrorMessage,
             SubscriptionId = result.SubscriptionId,
-            ExpiresAt = result.ExpiresAt
+            ExpiresAt = DateTimeFormatHelper.ToIso8601String(result.ExpiresAt)
         };
     }
 
@@ -356,6 +369,33 @@ public class GodGPTPaymentController : AevatarController
     #region Helper Methods
 
     /// <summary>
+    /// Gets original PlanType from product metadata (matches legacy API: 1=Day, 2=Month, 3=Year, 4=Week)
+    /// </summary>
+    private static QuotaPlanType GetOriginalPlanType(ProductDto product)
+    {
+        if (product.Metadata.TryGetValue("originalPlanType", out var planTypeStr) 
+            && int.TryParse(planTypeStr, out var planType))
+        {
+            return (QuotaPlanType)planType;
+        }
+        // Fallback: map from BillingCycle
+        return MapBillingCycleToPlanType(product.BillingCycle).ToQuotaPlanType();
+    }
+
+    /// <summary>
+    /// Gets dailyAvgPrice from product metadata (pure number format like "0.85")
+    /// </summary>
+    private static string GetDailyAvgPrice(ProductDto product)
+    {
+        if (product.Metadata.TryGetValue("dailyAvgPrice", out var dailyAvgPrice))
+        {
+            return dailyAvgPrice;
+        }
+        // Fallback: calculate from price and BillingCycle
+        return CalculateDailyAvgPriceLegacy(product.Price, product.BillingCycle);
+    }
+
+    /// <summary>
     /// Maps BillingCycle (new design) to old PlanType (Day/Month/Year/Week)
     /// </summary>
     private static GrainPlanType MapBillingCycleToPlanType(BillingCycle billingCycle)
@@ -365,14 +405,17 @@ public class GodGPTPaymentController : AevatarController
             BillingCycle.Daily => GrainPlanType.Day,
             BillingCycle.Weekly => GrainPlanType.Week,
             BillingCycle.Monthly => GrainPlanType.Month,
-            BillingCycle.Quarterly => GrainPlanType.Month, // Closest approximation
+            BillingCycle.Quarterly => GrainPlanType.Month,
             BillingCycle.Yearly => GrainPlanType.Year,
-            BillingCycle.Lifetime => GrainPlanType.Year, // Treat lifetime as yearly
+            BillingCycle.Lifetime => GrainPlanType.Year,
             _ => GrainPlanType.None
         };
     }
 
-    private static string CalculateDailyAvgPrice(decimal price, BillingCycle billingCycle)
+    /// <summary>
+    /// Legacy dailyAvgPrice calculation (pure number format)
+    /// </summary>
+    private static string CalculateDailyAvgPriceLegacy(decimal price, BillingCycle billingCycle)
     {
         var days = billingCycle switch
         {
@@ -381,11 +424,10 @@ public class GodGPTPaymentController : AevatarController
             BillingCycle.Monthly => 30,
             BillingCycle.Quarterly => 90,
             BillingCycle.Yearly => 365,
-            BillingCycle.Lifetime => 3650, // ~10 years
+            BillingCycle.Lifetime => 3650,
             _ => 30
         };
-        var dailyPrice = price / days;
-        return $"${dailyPrice:F2}/day";
+        return Math.Round(price / days, 2).ToString("F2");
     }
 
     #endregion
@@ -405,7 +447,7 @@ public class PaymentSummaryDto
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
     public string Status { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; }
+    public string CreatedAt { get; set; } = string.Empty;
 }
 
 public class AppStoreSubscriptionResponseDto
@@ -413,7 +455,7 @@ public class AppStoreSubscriptionResponseDto
     public bool Success { get; set; }
     public string? Error { get; set; }
     public string? SubscriptionId { get; set; }
-    public DateTime? ExpiresAt { get; set; }
+    public string? ExpiresAt { get; set; }
 }
 
 public class GetPaymentHistoryInput

@@ -81,6 +81,11 @@ public partial class AwakeningGAgent
             };
         }
         
+        // Log state for debugging
+        _logger.LogInformation(
+            "[AwakeningGAgent] Building content from State for user {UserId}: Level={Level}, MessageLength={MessageLength}, Status={Status}, LastGeneratedTimestamp={Timestamp}",
+            Id, State.AwakeningLevel, State.AwakeningMessage?.Length ?? 0, State.Status, State.LastGeneratedTimestamp);
+        
         // Return current content with status
         return new AwakeningContentDtoProto
         {

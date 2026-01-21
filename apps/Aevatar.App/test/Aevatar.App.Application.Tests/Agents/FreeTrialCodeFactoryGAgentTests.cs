@@ -5,11 +5,9 @@ using System.Threading.Tasks;
 using Aevatar.Agents.GodGPT.Protos.FreeTrialCode;
 using Aevatar.Application.Grains.Common;
 using Aevatar.Application.Grains.Common.Constants;
-using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Google.Protobuf.WellKnownTypes;
-using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
@@ -23,45 +21,22 @@ public class FreeTrialCodeFactoryGAgentTests
 {
     private FreeTrialCodeFactoryGAgent CreateAgent()
     {
-        var agent = TestHelpers.CreateAgent<FreeTrialCodeFactoryGAgent>();
-        
-        // Setup StripeOptions
-        var stripeOptions = new StripeOptions
-        {
-            Products = new List<StripeProduct>
-            {
-                new StripeProduct
-                {
-                    PriceId = "price_test_monthly",
-                    PlanType = (int)PlanType.Month,
-                    Amount = 9.99m,
-                    Currency = "USD",
-                    IsUltimate = false,
-                    Credits = 1000
-                }
-            }
-        };
-        var mockStripeOptions = new TestOptionsMonitor<StripeOptions>(stripeOptions);
-        agent.StripeOptions = mockStripeOptions;
-
-        // Setup CreditsOptions
-        var creditsOptions = new CreditsOptions
-        {
-            OperatorUserId = new List<string> { "test-operator-1" }
-        };
-        var mockCreditsOptions = new TestOptionsMonitor<CreditsOptions>(creditsOptions);
-        agent.CreditsOptions = mockCreditsOptions;
-        
-        return agent;
+        return TestHelpers.CreateAgent<FreeTrialCodeFactoryGAgent>();
     }
-    
-    private class TestOptionsMonitor<T> : IOptionsMonitor<T> where T : class
+
+    private static BatchConfig CreateBatchConfig()
     {
-        private readonly T _value;
-        public TestOptionsMonitor(T value) => _value = value;
-        public T CurrentValue => _value;
-        public T Get(string? name) => _value;
-        public IDisposable? OnChange(Action<T, string?> listener) => null;
+        return new BatchConfig
+        {
+            TrialDays = 30,
+            ProductId = "price_test_monthly",
+            PlanType = FactoryPlanType.Month,
+            IsUltimate = false,
+            Platform = FactoryPaymentPlatform.Stripe,
+            StartTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc)),
+            EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow.AddDays(30), DateTimeKind.Utc)),
+            Description = "Test batch"
+        };
     }
 
     [Fact(DisplayName = "FreeTrialCodeFactoryGAgent should initialize with correct state")]
@@ -92,7 +67,8 @@ public class FreeTrialCodeFactoryGAgentTests
             EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow.AddDays(30), DateTimeKind.Utc)),
             Quantity = 5,
             OperatorUserId = "test-operator-1",
-            Description = "Test batch"
+            Description = "Test batch",
+            BatchConfig = CreateBatchConfig()
         };
 
         // Act
@@ -112,8 +88,8 @@ public class FreeTrialCodeFactoryGAgentTests
         state.TotalCodesGenerated.ShouldBe(5);
     }
 
-    [Fact(DisplayName = "GenerateCodesAsync should reject unauthorized users")]
-    public async Task GenerateCodesAsync_ShouldRejectUnauthorizedUsers()
+    [Fact(DisplayName = "GenerateCodesAsync should reject missing batch config")]
+    public async Task GenerateCodesAsync_ShouldRejectMissingBatchConfig()
     {
         // Arrange
         var agent = CreateAgent();
@@ -127,7 +103,7 @@ public class FreeTrialCodeFactoryGAgentTests
             StartTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow, DateTimeKind.Utc)),
             EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow.AddDays(30), DateTimeKind.Utc)),
             Quantity = 5,
-            OperatorUserId = "unauthorized-user",
+            OperatorUserId = "test-operator-1",
             Description = "Test batch"
         };
 
@@ -137,7 +113,7 @@ public class FreeTrialCodeFactoryGAgentTests
         // Assert
         result.ShouldNotBeNull();
         result.Success.ShouldBeFalse();
-        result.Message.ShouldContain("Unauthorized");
+        result.Message.ShouldContain("Factory not initialized");
         result.ErrorCode.ShouldBe((int)FreeTrialCodeError.InternalError);
     }
 
@@ -157,7 +133,8 @@ public class FreeTrialCodeFactoryGAgentTests
             EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow.AddDays(30), DateTimeKind.Utc)),
             Quantity = 10001, // Exceeds MaxQuantity (10000)
             OperatorUserId = "test-operator-1",
-            Description = "Test batch"
+            Description = "Test batch",
+            BatchConfig = CreateBatchConfig()
         };
 
         // Act
@@ -187,7 +164,8 @@ public class FreeTrialCodeFactoryGAgentTests
             EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow.AddDays(30), DateTimeKind.Utc)),
             Quantity = 3,
             OperatorUserId = "test-operator-1",
-            Description = "Test batch"
+            Description = "Test batch",
+            BatchConfig = CreateBatchConfig()
         };
         await agent.GenerateCodesAsync(generateRequest);
 
@@ -220,7 +198,8 @@ public class FreeTrialCodeFactoryGAgentTests
             EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow.AddDays(30), DateTimeKind.Utc)),
             Quantity = 3,
             OperatorUserId = "test-operator-1",
-            Description = "Test batch"
+            Description = "Test batch",
+            BatchConfig = CreateBatchConfig()
         };
         var generateResult = await agent.GenerateCodesAsync(generateRequest);
         var codeToUse = generateResult.Codes.First();
@@ -258,7 +237,8 @@ public class FreeTrialCodeFactoryGAgentTests
             EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow.AddDays(30), DateTimeKind.Utc)),
             Quantity = 3,
             OperatorUserId = "test-operator-1",
-            Description = "Test batch"
+            Description = "Test batch",
+            BatchConfig = CreateBatchConfig()
         };
         var generateResult = await agent.GenerateCodesAsync(generateRequest);
         var validCode = generateResult.Codes.First();
@@ -293,7 +273,8 @@ public class FreeTrialCodeFactoryGAgentTests
             EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(DateTime.UtcNow.AddDays(30), DateTimeKind.Utc)),
             Quantity = 3,
             OperatorUserId = "test-operator-1",
-            Description = "Test batch"
+            Description = "Test batch",
+            BatchConfig = CreateBatchConfig()
         };
         var generateResult = await agent.GenerateCodesAsync(generateRequest);
         var codeToUse = generateResult.Codes.First();

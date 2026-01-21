@@ -432,9 +432,61 @@ Reuse existing SMTP configuration from ABP's email module.
 
 ---
 
-## 12. Appendix
+## 12. Backward Compatibility
 
-### A. Files to Migrate from old/godgpt-api
+### 12.1 URL Mapping
+
+为了兼容旧的 URL 请求，在 HttpApi 中添加了 `AccountProxyController`，将旧路由请求转发到 AuthServer：
+
+| 旧 URL (HttpApi) | 新 URL (AuthServer) | 状态 |
+|-----------------|---------------------|------|
+| `POST /api/account/send-register-code` | `POST /api/app/account/send-register-code` | ✅ 完全兼容 |
+| `POST /api/account/register` | `POST /api/app/account/register` | ✅ 自动添加 AppName |
+| `POST /api/account/godgpt-register` | `POST /api/app/account/register` | ✅ 映射到 register + AppName="GodGPT" |
+| `POST /api/account/verify-register-code` | `POST /api/app/account/verify-register-code` | ✅ 完全兼容 |
+| `POST /api/account/check-email-registered` | `POST /api/app/account/check-email-registered` | ✅ 完全兼容 |
+| `POST /api/account/send-password-reset-code` | `POST /api/app/account/send-password-reset-code` | ✅ 完全兼容 |
+| `POST /api/account/verify-password-reset-token` | `POST /api/app/account/verify-password-reset-token` | ✅ 完全兼容 |
+| `POST /api/account/reset-password` | `POST /api/app/account/reset-password` | ✅ 完全兼容 |
+
+### 12.2 Implementation Details
+
+**AccountProxyController** (`Aevatar.App.HttpApi/Controllers/AccountProxyController.cs`):
+- 使用 `IHttpClientFactory` 创建到 AuthServer 的 HTTP 客户端
+- 自动转发 `GodGPTLanguage` 和 `Authorization` 请求头
+- 为旧 DTO 自动添加 `AppName` 字段（默认 "GodGPT"）
+- 透明代理响应和错误
+
+**Configuration** (`BusinessServerHttpApiHostModule.cs`):
+```csharp
+// AuthServer HttpClient configuration
+context.Services.AddHttpClient("AuthServer", client =>
+{
+    var authority = configuration["AuthServer:Authority"]?.TrimEnd('/');
+    client.BaseAddress = new Uri(authority);
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+```
+
+### 12.3 Migration Path
+
+1. **Phase 1 (当前)**: 保留双端点
+   - 旧前端继续使用 `/api/account/*`
+   - 新前端可以使用 `/api/app/account/*`
+
+2. **Phase 2 (未来)**: 逐步迁移
+   - 监控旧端点使用情况
+   - 通知前端团队迁移到新 URL
+   
+3. **Phase 3 (最终)**: 移除代理
+   - 当所有客户端迁移完成后
+   - 移除 AccountProxyController
+
+---
+
+## 13. Appendix
+
+### 13.1 Files to Migrate from old/godgpt-api
 
 | Source | Target |
 |--------|--------|
@@ -444,7 +496,7 @@ Reuse existing SMTP configuration from ABP's email module.
 | `old/godgpt-api/.../Account/Templates/*.cs` | `AuthServer/Account/Templates/*.cs` |
 | `old/godgpt-api/.../Account/Templates/*.tpl` | `AuthServer/Account/Templates/*.tpl` |
 
-### B. Existing DTOs in Application.Contracts
+### 13.2 Existing DTOs in Application.Contracts
 
 These can be referenced or copied:
 - `SendRegisterCodeDto`
@@ -457,7 +509,8 @@ These can be referenced or copied:
 
 ---
 
-*Document Version: 1.0*
+*Document Version: 1.1*
 *Created: 2026-01-06*
+*Updated: 2026-01-12 - Added backward compatibility section*
 *Author: HyperEcho*
 

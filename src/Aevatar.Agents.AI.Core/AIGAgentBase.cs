@@ -782,6 +782,16 @@ Open questions:
             // Build LLM request from chat request
             var llmRequest = BuildLLMRequest(request);
 
+            // Resolve images for multimodal requests
+            if (request.ImageKeys.Count > 0)
+            {
+                llmRequest.Images = await ResolveImageKeysAsync(request.ImageKeys, cancellationToken);
+                if (llmRequest.Images?.Count > 0)
+                {
+                    Logger.LogInformation("Resolved {Count} images for multimodal request", llmRequest.Images.Count);
+                }
+            }
+
             // Optional: persist conversation to State.History (default off)
             if (EnableChatHistoryInState)
             {
@@ -928,6 +938,25 @@ Open questions:
     }
 
     /// <summary>
+    /// Resolve image keys to actual image data for multimodal LLM requests.
+    /// Override this method in subclasses to provide actual blob storage integration.
+    /// 解析图片 key 为实际图片数据，用于多模态 LLM 请求
+    /// 子类应覆盖此方法以提供实际的 Blob 存储集成
+    /// </summary>
+    /// <param name="imageKeys">List of image keys from blob storage</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>List of resolved image data, or null if not supported</returns>
+    protected virtual Task<IList<AevatarImageData>?> ResolveImageKeysAsync(
+        IEnumerable<string> imageKeys,
+        CancellationToken cancellationToken = default)
+    {
+        // Default implementation: no image resolution
+        // Subclasses should override this to provide actual blob storage integration
+        Logger.LogWarning("Image resolution not implemented. Override ResolveImageKeysAsync in subclass.");
+        return Task.FromResult<IList<AevatarImageData>?>(null);
+    }
+
+    /// <summary>
     /// Determine the effective system prompt, preferring configuration override.
     /// </summary>
     protected virtual string? GetEffectiveSystemPrompt()
@@ -998,6 +1027,21 @@ Open questions:
 
         // Build LLM request
         var llmRequest = BuildLLMRequest(request);
+
+        // Resolve images for multimodal requests
+        Logger.LogWarning("[AIGAgentBase][IMAGE_DEBUG] ChatStreamAsync - ImageKeys count: {Count}", request.ImageKeys.Count);
+        if (request.ImageKeys.Count > 0)
+        {
+            Logger.LogWarning("[AIGAgentBase][IMAGE_DEBUG] Calling ResolveImageKeysAsync for keys: {Keys}", 
+                string.Join(",", request.ImageKeys));
+            llmRequest.Images = await ResolveImageKeysAsync(request.ImageKeys, cancellationToken);
+            Logger.LogWarning("[AIGAgentBase][IMAGE_DEBUG] ResolveImageKeysAsync returned {Count} images", 
+                llmRequest.Images?.Count ?? 0);
+            if (llmRequest.Images?.Count > 0)
+            {
+                Logger.LogInformation("Resolved {Count} images for multimodal streaming request", llmRequest.Images.Count);
+            }
+        }
 
         // Optional: persist the user message (default off)
         if (EnableChatHistoryInState)

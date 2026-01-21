@@ -56,9 +56,10 @@ public interface IGodChat : IGAgent
     Task<ChatMessageListProto> ChatWithHistory(Guid sessionId, string systemLLM, string content, string chatId, 
         ExecutionPromptSettings promptSettings = null, bool isHttpRequest = false, string? region = null);
     
-    Task<ChatMessageListProto> ChatWithoutHistoryAsync(Guid sessionId, string systemLLM, string content, string chatId, 
-        ExecutionPromptSettings promptSettings = null, bool isHttpRequest = false, string? region = null);
-
+    /// <summary>
+    /// Chat without history using Protobuf input (for RPC calls with custom settings)
+    /// </summary>
+    Task<ChatMessageListProto> ChatWithoutHistoryProtoAsync(ChatWithHistoryInputProto input, bool isHttpRequest = false, string? region = null);
 
     [ReadOnly]
     Task<DateTime?> GetFirstChatTimeAsync();

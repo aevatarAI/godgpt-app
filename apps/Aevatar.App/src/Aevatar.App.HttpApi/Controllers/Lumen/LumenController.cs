@@ -142,7 +142,7 @@ public partial class LumenController : AppController
     /// Get current user profile
     /// </summary>
     [HttpGet("user/profile")]
-    public virtual async Task<LumenUserProfileDto> GetUserProfileAsync()
+    public virtual async Task<LumenUserProfileApiDto> GetUserProfileAsync()
     {
         var stopwatch = Stopwatch.StartNew();
         var userId = GetCurrentUserId();
@@ -160,7 +160,7 @@ public partial class LumenController : AppController
             _logger.LogInformation("[LumenController][GetUserProfileAsync] SUCCESS - UserId: {UserId}, Duration: {Duration}ms",
                 userId, stopwatch.ElapsedMilliseconds);
 
-            return result.UserProfile;
+            return MapToUserProfileApiDto(result.UserProfile);
         }
         catch (UserFriendlyException)
         {

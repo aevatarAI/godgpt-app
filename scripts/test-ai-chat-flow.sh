@@ -234,9 +234,27 @@ Please make the response comprehensive, at least 500 words."
         if echo "$line" | grep -q "^data: "; then
             ((chunk_count++))
             # Extract response content length
-            local content=$(echo "$line" | sed 's/^data: //' | jq -r '.Response // empty' 2>/dev/null)
+            local json_data=$(echo "$line" | sed 's/^data: //')
+            local content=$(echo "$json_data" | jq -r '.Response // empty' 2>/dev/null)
             if [ -n "$content" ]; then
                 total_content_length=$((total_content_length + ${#content}))
+            fi
+            
+            # Check if this is the last chunk and verify suggestedItems/SUGGESTIONS cleaning
+            local is_last=$(echo "$json_data" | jq -r '.IsLastChunk // false' 2>/dev/null)
+            if [ "$is_last" == "true" ]; then
+                local suggested_items=$(echo "$json_data" | jq -r '.SuggestedItems // null' 2>/dev/null)
+                if [ "$suggested_items" != "null" ] && [ "$suggested_items" != "" ]; then
+                    local items_count=$(echo "$suggested_items" | jq 'length' 2>/dev/null || echo "0")
+                    log_info "✓ Last chunk contains suggestedItems with $items_count items"
+                fi
+                
+                # Verify no SUGGESTIONS marker in response content (critical check)
+                if echo "$content" | grep -qi "\[SUGGESTIONS\]"; then
+                    log_error "❌ Last chunk response contains [SUGGESTIONS] marker (should be cleaned)"
+                elif echo "$content" | grep -qi "SUGGESTIONS"; then
+                    log_error "❌ Last chunk response contains SUGGESTIONS text (should be cleaned)"
+                fi
             fi
             
             # Log progress every 10 chunks
@@ -316,6 +334,251 @@ test_guest_chat_sse() {
     fi
 
     log_warn "Guest SSE did not return 'data:' (may be limited or error message returned)"
+    ((TESTS_PASSED++))
+    return 0
+}
+
+# =============================================================================
+# Test 2d: Voice Chat SSE (Critical for voice streaming)
+# =============================================================================
+test_voice_chat_sse() {
+    log_step "Test 2d: Voice chat SSE (testing voice streaming completion)..."
+    
+    if [ -z "$SESSION_ID" ]; then
+        log_warn "No session ID, skipping"
+        return 0
+    fi
+    
+    local start_time=$(get_time_ms)
+    local chunk_count=0
+    local has_last_chunk=false
+    local has_voice_content_type=false
+    local has_all_completed=false
+    local voice_content_types_seen=""
+    
+    # Note: Voice chat requires actual audio data. For testing, we'll send
+    # a minimal base64-encoded audio payload (this may fail if STT rejects it,
+    # but we can still test if the endpoint responds with SSE format)
+    
+    log_info "Testing voice chat endpoint SSE completion signal..."
+    
+    # Stream and analyze response
+    while IFS= read -r line; do
+        if echo "$line" | grep -q "^data: "; then
+            ((chunk_count++))
+            local json_data=$(echo "$line" | sed 's/^data: //')
+            
+            # Check VoiceContentType field (critical for backward compatibility)
+            local voice_type=$(echo "$json_data" | jq -r '.VoiceContentType // -1' 2>/dev/null)
+            if [ "$voice_type" != "-1" ] && [ "$voice_type" != "null" ]; then
+                has_voice_content_type=true
+                voice_content_types_seen="${voice_content_types_seen}${voice_type},"
+                
+                # VoiceToText = 0, VoiceResponse = 1
+                if [ "$voice_type" == "0" ]; then
+                    log_info "✓ Received VoiceContentType=0 (VoiceToText/STT result)"
+                elif [ "$voice_type" == "1" ]; then
+                    log_info "✓ Received VoiceContentType=1 (VoiceResponse/AI reply)"
+                fi
+            fi
+            
+            # Check IsLastChunk - critical for SSE connection closing
+            local is_last=$(echo "$json_data" | jq -r '.IsLastChunk // false' 2>/dev/null)
+            if [ "$is_last" == "true" ]; then
+                has_last_chunk=true
+                has_all_completed=true
+                log_info "✓ Received IsLastChunk=true (SSE will close properly)"
+            fi
+            
+            # Log first few chunks
+            if [ $chunk_count -le 3 ]; then
+                log_info "Chunk #${chunk_count}: $(echo "$json_data" | jq -c '{VoiceContentType,IsLastChunk,Response:.Response[0:50]}' 2>/dev/null || echo "$json_data")"
+            fi
+        fi
+        
+        # Check for 'event: completed' (explicit SSE completion)
+        if echo "$line" | grep -q "^event: completed"; then
+            has_all_completed=true
+            log_info "✓ Received 'event: completed' signal"
+        fi
+        
+        # Break on completion
+        if echo "$line" | grep -q '"IsLastChunk":true'; then
+            break
+        fi
+    done < <(curl -k -s -N -X POST "$API_URL/api/godgpt/voice/chat" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "Accept: text/event-stream" \
+        -H "GodgptLanguage: en" \
+        --max-time 45 \
+        -d "{
+            \"sessionId\": \"$SESSION_ID\",
+            \"content\": \"SGVsbG8gd29ybGQ=\",
+            \"region\": null,
+            \"voiceLanguage\": 0,
+            \"voiceDurationSeconds\": 1.0
+        }" 2>/dev/null)
+    
+    local end_time=$(get_time_ms)
+    local duration=$((end_time - start_time))
+    
+    echo ""
+    log_info "========================================"
+    log_info "📊 Voice Chat SSE Test Summary"
+    log_info "========================================"
+    log_info "⏱️  Duration: ${duration}ms"
+    log_info "📦 Total Chunks: ${chunk_count}"
+    log_info "🔊 VoiceContentType present: $([ "$has_voice_content_type" == "true" ] && echo "Yes ✓" || echo "No ⚠️")"
+    log_info "🔊 VoiceContentTypes seen: ${voice_content_types_seen:-none}"
+    log_info "✅ IsLastChunk received: $([ "$has_last_chunk" == "true" ] && echo "Yes ✓" || echo "No ❌")"
+    log_info "✅ Completion signal: $([ "$has_all_completed" == "true" ] && echo "Yes ✓" || echo "No ❌")"
+    log_info "========================================"
+    
+    # Test results evaluation
+    if [ $chunk_count -eq 0 ]; then
+        log_warn "No SSE chunks received (voice chat may require valid audio, endpoint may not be configured)"
+        log_warn "This is expected if STT service rejects the test audio payload"
+        ((TESTS_PASSED++))
+        return 0
+    fi
+    
+    # Critical check: If we got chunks, we MUST get IsLastChunk=true for SSE to close
+    if [ "$has_last_chunk" != "true" ]; then
+        log_error "❌ CRITICAL: Received chunks but no IsLastChunk=true - SSE connection will hang!"
+        log_error "This was the bug we fixed: AllCompleted signal not being sent for voice chat"
+        ((TESTS_FAILED++))
+        return 1
+    fi
+    
+    log_info "Voice chat SSE test passed ✓"
+    ((TESTS_PASSED++))
+    return 0
+}
+
+# =============================================================================
+# Test 2c: Test SuggestedItems Field in Last Chunk
+# =============================================================================
+test_suggested_items_field() {
+    log_step "Test 2c: Testing suggestedItems field in last chunk..."
+    
+    if [ -z "$SESSION_ID" ]; then
+        log_warn "No session ID, skipping"
+        return 0
+    fi
+    
+    local start_time=$(get_time_ms)
+    local last_chunk=""
+    local has_suggested_items=false
+    local suggested_items_count=0
+    local has_suggestions_marker=false
+    
+    # Send a question that might trigger suggestions
+    # Use a question that typically generates conversation suggestions
+    local question="What are some interesting topics we could discuss?"
+    
+    log_info "Sending question to test suggestedItems field..."
+    
+    # Stream and capture last chunk
+    while IFS= read -r line; do
+        if echo "$line" | grep -q "^data: "; then
+            local json_data=$(echo "$line" | sed 's/^data: //')
+            
+            # Check if this is the last chunk
+            local is_last=$(echo "$json_data" | jq -r '.IsLastChunk // false' 2>/dev/null)
+            
+            if [ "$is_last" == "true" ]; then
+                last_chunk="$json_data"
+                
+                # Check for suggestedItems field
+                local suggested_items=$(echo "$json_data" | jq -r '.SuggestedItems // null' 2>/dev/null)
+                
+                if [ "$suggested_items" != "null" ] && [ "$suggested_items" != "" ]; then
+                    has_suggested_items=true
+                    suggested_items_count=$(echo "$suggested_items" | jq 'length' 2>/dev/null || echo "0")
+                    
+                    log_info "✓ Found suggestedItems field with $suggested_items_count items"
+                    log_response "$(echo "$suggested_items" | jq . 2>/dev/null || echo "$suggested_items")"
+                fi
+                
+                # Check if response content contains SUGGESTIONS marker (should NOT)
+                local response_content=$(echo "$json_data" | jq -r '.Response // ""' 2>/dev/null)
+                if echo "$response_content" | grep -qi "\[SUGGESTIONS\]"; then
+                    has_suggestions_marker=true
+                    log_error "❌ Response content contains [SUGGESTIONS] marker (should be cleaned)"
+                fi
+                
+                # Check for partial markers (but allow "suggestions" as normal word in content)
+                # Only flag if it looks like a marker pattern, not just the word "suggestions"
+                if echo "$response_content" | grep -qiE "\[.*SUGGESTIONS|SUGGESTIONS.*\]|\[SUGGESTIONS\]"; then
+                    has_suggestions_marker=true
+                    log_error "❌ Response content contains SUGGESTIONS marker pattern (should be cleaned)"
+                fi
+            fi
+        fi
+        
+        # Check for completion
+        if echo "$line" | grep -q '"IsLastChunk":true'; then
+            break
+        fi
+    done < <(curl -k -s -N -X POST "$API_URL/api/gotgpt/chat" \
+        -H "Authorization: Bearer $ACCESS_TOKEN" \
+        -H "Content-Type: application/json" \
+        -H "Accept: text/event-stream" \
+        -H "GodgptLanguage: en" \
+        --max-time 60 \
+        -d "{
+            \"sessionId\": \"$SESSION_ID\",
+            \"content\": \"$question\",
+            \"region\": null,
+            \"images\": [],
+            \"userLocalTime\": \"2024-12-23T10:00:00Z\",
+            \"userTimeZoneId\": \"UTC\"
+        }" 2>/dev/null)
+    
+    local end_time=$(get_time_ms)
+    local duration=$((end_time - start_time))
+    
+    echo ""
+    log_info "========================================"
+    log_info "📊 SuggestedItems Test Summary"
+    log_info "========================================"
+    log_info "⏱️  Duration: ${duration}ms"
+    log_info "📦 Last chunk found: $([ -n "$last_chunk" ] && echo "Yes" || echo "No")"
+    log_info "✅ Has suggestedItems field: $([ "$has_suggested_items" == "true" ] && echo "Yes" || echo "No")"
+    if [ "$has_suggested_items" == "true" ]; then
+        log_info "📝 SuggestedItems count: $suggested_items_count"
+    fi
+    log_info "❌ Contains SUGGESTIONS marker: $([ "$has_suggestions_marker" == "true" ] && echo "Yes (ERROR)" || echo "No (OK)")"
+    log_info "========================================"
+    
+    # Test passes if:
+    # 1. Last chunk was received
+    # 2. Either suggestedItems exists OR response doesn't contain SUGGESTIONS marker
+    # 3. Response content doesn't contain SUGGESTIONS marker (critical)
+    
+    if [ -z "$last_chunk" ]; then
+        log_error "No last chunk received"
+        ((TESTS_FAILED++))
+        return 1
+    fi
+    
+    if [ "$has_suggestions_marker" == "true" ]; then
+        log_error "Response content contains SUGGESTIONS marker - cleaning logic failed!"
+        log_response "$last_chunk"
+        ((TESTS_FAILED++))
+        return 1
+    fi
+    
+    # Note: suggestedItems may or may not be present depending on AI response
+    # The important thing is that SUGGESTIONS markers are cleaned
+    if [ "$has_suggested_items" == "true" ]; then
+        log_info "✓ suggestedItems field present and SUGGESTIONS markers cleaned ✓"
+    else
+        log_warn "suggestedItems field not present (may be normal if AI didn't generate suggestions)"
+    fi
+    
+    log_info "SuggestedItems test passed ✓"
     ((TESTS_PASSED++))
     return 0
 }
@@ -458,7 +721,11 @@ test_send_message_to_ai
 echo ""
 test_send_complex_message_to_ai
 echo ""
+test_suggested_items_field
+echo ""
 test_guest_chat_sse
+echo ""
+test_voice_chat_sse
 echo ""
 test_get_session_messages
 echo ""

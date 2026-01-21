@@ -117,7 +117,9 @@ modules/Aevatar.Payment/         # 独立支付模块
 #### ❌ 不再使用 (3个)
 
 - DailyPushController - 已删除（新业务不需要）
-- GodGPTController - 已注释（被拆分）
+- GodGPTController - 已注释（被拆分为多个专用Controller）
+  - `GetTodayAwakeningAsync` → 已迁移至 `GodGPTContentController`
+  - 其他方法已拆分到对应的专用Controller
 - GodGPTTwitterManagementController - 跳过
 
 ### Service层
@@ -221,7 +223,9 @@ var id = this.Id;
 ### 低优先级
 
 - [ ] 清理 GodGPTService.cs（已无Controller依赖）
-- [ ] 清理 GodGPTController.cs（已注释）
+- [ ] 清理 GodGPTController.cs（已注释，所有方法已迁移到专用Controller）
+  - ✅ `GetTodayAwakeningAsync` 已迁移至 `GodGPTContentController`
+  - ✅ 其他方法已拆分到对应的专用Controller
 
 ## 🔧 最近修复
 

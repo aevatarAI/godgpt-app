@@ -9,7 +9,7 @@
   </PropertyGroup>
   <ItemGroup>
     <!-- Microsoft Extensions - .NET 10 -->
-    <PackageVersion Include="Microsoft.Extensions.AI" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.AI" Version="9.0.0-preview.9.24507.7" />
     <PackageVersion Include="Microsoft.Extensions.AI.OpenAI" Version="10.0.0-preview.1.25560.10" />
     <PackageVersion Include="Microsoft.Extensions.AI.AzureAIInference" Version="10.0.0-preview.1.25559.3" />
     <PackageVersion Include="Microsoft.Extensions.Caching.Memory" Version="10.0.1" />
@@ -418,6 +418,8 @@
     <PackageVersion Include="UglyToad.PdfPig" Version="1.7.0-custom-5" />
     <!-- Astrology Calculation -->
     <PackageVersion Include="SwissEphNet" Version="2.8.0.2" />
+    <!-- AWS SDK -->
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.7.2" />
     <!-- Hangfire - Distributed Background Job Processing -->
     <PackageVersion Include="Hangfire.Core" Version="1.8.20" />
     <PackageVersion Include="Hangfire.AspNetCore" Version="1.8.20" />

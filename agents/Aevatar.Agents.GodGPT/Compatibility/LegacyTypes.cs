@@ -118,12 +118,13 @@ namespace Aevatar.GAgents.ChatAgent.Dtos
 {
     /// <summary>
     /// Chat role enum - widely used across the codebase
+    /// Note: Values match old Aevatar.GAgents.ChatAgent package for API compatibility
     /// </summary>
     public enum ChatRole
     {
-        System = 0,
-        User = 1,
-        Assistant = 2,
+        User = 0,
+        Assistant = 1,
+        System = 2,
         Tool = 3
     }
 }

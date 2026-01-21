@@ -226,17 +226,33 @@ public partial class GodChatGAgent
             }
 
             // Parse conversation suggestions only for text chat
+            // CRITICAL: If ExtractedSuggestions exists, AIAgentStatusProxy already cleaned AggregationMsg
+            // Trust the cleaned content - no need to clean again
             if (!isAggregationVoiceChat && !string.IsNullOrEmpty(chatContent.AggregationMsg))
             {
-                var suggestionParseResult = SuggestionParser.ParseResponseWithSuggestions(chatContent.AggregationMsg);
-                if (suggestionParseResult.Suggestions?.Any() == true)
+                // If ExtractedSuggestions exists, StreamingSuggestionsFilter already processed and cleaned
+                if (chatContent.ExtractedSuggestions != null && chatContent.ExtractedSuggestions.Any())
                 {
-                    conversationSuggestions = suggestionParseResult.Suggestions;
-                    cleanMainContent = suggestionParseResult.MainContent; // Use clean content without suggestions
+                    conversationSuggestions = chatContent.ExtractedSuggestions;
+                    // AggregationMsg is already cleaned by AIAgentStatusProxy, use it directly
+                    cleanMainContent = chatContent.AggregationMsg;
                     Logger.LogDebug(
-                        $"[GodChatGAgent][ChatMessageCallbackAsync] Parsed {suggestionParseResult.Suggestions.Count} conversation suggestions for text chat");
-                    Logger.LogDebug(
-                        $"[GodChatGAgent][ChatMessageCallbackAsync] Cleaned main content length: {cleanMainContent?.Length ?? 0}");
+                        $"[GodChatGAgent][ChatMessageCallbackAsync] Using ExtractedSuggestions from AIAgentStatusProxy - " +
+                        $"Count: {conversationSuggestions.Count}, Content length: {cleanMainContent?.Length ?? 0}");
+                }
+                else
+                {
+                    // Fallback to parsing if ExtractedSuggestions not available (legacy path)
+                    var suggestionParseResult = SuggestionParser.ParseResponseWithSuggestions(chatContent.AggregationMsg);
+                    if (suggestionParseResult.Suggestions?.Any() == true)
+                    {
+                        conversationSuggestions = suggestionParseResult.Suggestions;
+                        cleanMainContent = suggestionParseResult.MainContent; // Use clean content without suggestions
+                        Logger.LogDebug(
+                            $"[GodChatGAgent][ChatMessageCallbackAsync] Parsed {suggestionParseResult.Suggestions.Count} conversation suggestions for text chat");
+                        Logger.LogDebug(
+                            $"[GodChatGAgent][ChatMessageCallbackAsync] Cleaned main content length: {cleanMainContent?.Length ?? 0}");
+                    }
                 }
             }
 
@@ -320,11 +336,29 @@ public partial class GodChatGAgent
             }
         }
 
+        // CRITICAL: If ExtractedSuggestions exists, StreamingSuggestionsFilter already processed this content
+        // Skip accumulation logic to avoid double processing and conflicts
+        // Content is already clean, no need to clean again
+        bool alreadyFilteredByAIAgent = chatContent.ExtractedSuggestions != null && chatContent.ExtractedSuggestions.Any();
+        if (alreadyFilteredByAIAgent)
+        {
+            Logger.LogDebug(
+                $"[ChatMessageCallbackAsync][DEBUG] Content already filtered by AIAgentStatusProxy StreamingSuggestionsFilter - " +
+                $"ExtractedSuggestions count: {chatContent.ExtractedSuggestions.Count}, skipping accumulation logic");
+            
+            // Store extracted suggestions from AIAgentStatusProxy
+            Context?.Set(GodGPTContextKeys.ConversationSuggestions, chatContent.ExtractedSuggestions);
+            
+            // Content is already clean from StreamingSuggestionsFilter, use it directly
+            // No need to clean again - trust the filter
+        }
+
         // Get current accumulation state from instance variables (reliable across chunks)
         bool shouldStartAccumulating = false;
 
         // Apply conversation suggestions filtering (text chat only)
-        if (!isFilteringVoiceChat && !string.IsNullOrEmpty(streamingContent))
+        // Skip if already filtered by AIAgentStatusProxy
+        if (!alreadyFilteredByAIAgent && !isFilteringVoiceChat && !string.IsNullOrEmpty(streamingContent))
         {
             // Check for [SUGGESTIONS] marker and partial forms using optimized method
             bool contains_suggestions = streamingContent.Contains("[SUGGESTIONS]", StringComparison.OrdinalIgnoreCase);
@@ -464,7 +498,8 @@ public partial class GodChatGAgent
                 var storedSuggestions = Context?.Get(GodGPTContextKeys.ConversationSuggestions);
                 if (storedSuggestions?.Any() == true)
                 {
-                    partialMessage.SuggestedItems = storedSuggestions;
+                    // Ensure fixed "I don't understand" suggestion is present (always 4 items)
+                    partialMessage.SuggestedItems = FixedSuggestions.EnsureFixedSuggestion(storedSuggestions);
                     Logger.LogDebug(
                         $"[GodChatGAgent][ChatMessageCallbackAsync] Added {storedSuggestions.Count} suggestions to last chunk");
 
@@ -703,6 +738,59 @@ public partial class GodChatGAgent
                 ErrorCode = (int)chatMessage.ErrorCode
             };
         }
+        else if (chatMessage.IsLastChunk && chatMessage.SuggestedItems != null && chatMessage.SuggestedItems.Any())
+        {
+            // Last chunk with suggested items: send text chunk with is_last=true and suggestedItems,
+            // then send control message to signal completion
+            // Content is already clean from AIAgentStatusProxy's StreamingSuggestionsFilter
+            streamEnvelope.Text = new TextChunkProto
+            {
+                Content = chatMessage.Response ?? "",
+                IsLast = true,
+                SentenceIndex = 0,
+                // VoiceResponse (1) is default for AI responses
+                VoiceContentType = (int)VoiceContentType.VoiceResponse
+            };
+            // Ensure fixed "I don't understand" suggestion is present (always 4 items)
+            var ensuredSuggestions = FixedSuggestions.EnsureFixedSuggestion(chatMessage.SuggestedItems);
+            streamEnvelope.Text.SuggestedItems.AddRange(ensuredSuggestions);
+            
+            var textEnvelope = new EventEnvelope
+            {
+                Id = Guid.NewGuid().ToString(),
+                Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
+                Version = 0,
+                Payload = Any.Pack(streamEnvelope)
+            };
+            await stream.ProduceAsync(textEnvelope);
+            
+            // Send control message to signal completion
+            var controlEnvelope = new GodChatStreamEnvelopeProto
+            {
+                StreamId = streamId,
+                ChatId = chatMessage.ChatId ?? "",
+                RequestId = chatMessage.ChatId ?? "",
+                Seq = chatMessage.SerialNumber + 1,
+                Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
+                Control = new ControlProto
+                {
+                    Type = ControlProto.Types.ControlType.AllCompleted,
+                    Scope = "all",
+                    Message = "",
+                    ErrorCode = 0
+                }
+            };
+            var controlEventEnvelope = new EventEnvelope
+            {
+                Id = Guid.NewGuid().ToString(),
+                Timestamp = Timestamp.FromDateTime(DateTime.UtcNow),
+                Version = 0,
+                Payload = Any.Pack(controlEnvelope)
+            };
+            await stream.ProduceAsync(controlEventEnvelope);
+            Logger.LogInformation($"[GodChatGAgent][PushMessageToClientAsync] Successfully pushed message with suggestedItems to MassTransit stream, StreamId={streamId}");
+            return;
+        }
         else if (chatMessage.IsLastChunk)
         {
             // Legacy voice/text code may mark last chunk; treat as terminal.
@@ -731,11 +819,15 @@ public partial class GodChatGAgent
         else
         {
             // Default: publish as text chunk.
+            // Content is already clean from AIAgentStatusProxy's StreamingSuggestionsFilter
             streamEnvelope.Text = new TextChunkProto
             {
                 Content = chatMessage.Response ?? "",
                 IsLast = false,
-                SentenceIndex = 0
+                SentenceIndex = 0,
+                // Preserve VoiceContentType for backward compatibility
+                // VoiceToText (0) indicates STT result, VoiceResponse (1) is default
+                VoiceContentType = (int)chatMessage.VoiceContentType
             };
         }
         var envelope = new EventEnvelope

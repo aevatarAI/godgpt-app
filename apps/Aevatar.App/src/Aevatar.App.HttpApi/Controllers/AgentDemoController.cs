@@ -6,6 +6,7 @@ using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.Agents.Core.Hierarchy;
 using Aevatar.App.Agents.Agents;
+using Aevatar.App.HttpApi.Controllers;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Volo.Abp.AspNetCore.Mvc;
@@ -60,7 +61,7 @@ public class AgentDemoController : AbpControllerBase
                 // Return the normalized ActorId (Type:RawId) so clients can use it for follow-up calls.
                 AgentId = actor.Id,
                 Description = description,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTimeFormatHelper.ToIso8601String(DateTime.UtcNow)
             });
         }
         catch (Exception ex)
@@ -123,7 +124,7 @@ public class AgentDemoController : AbpControllerBase
             {
                 AgentId = actorId,
                 Response = description,
-                ProcessedAt = DateTime.UtcNow
+                ProcessedAt = DateTimeFormatHelper.ToIso8601String(DateTime.UtcNow)
             });
         }
         catch (Exception ex)
@@ -170,7 +171,7 @@ public class AgentDemoController : AbpControllerBase
                 AgentId = actorId,
                 ProcessedEventsCount = 0, // Stats are embedded in description
                 LastMessage = description,
-                LastUpdated = DateTime.UtcNow
+                LastUpdated = DateTimeFormatHelper.ToIso8601String(DateTime.UtcNow)
             });
         }
         catch (Exception ex)
@@ -269,7 +270,7 @@ public class AgentDemoController : AbpControllerBase
     [HttpGet("health")]
     public IActionResult GetHealth()
     {
-        return Ok(new { Status = "Healthy", Timestamp = DateTime.UtcNow });
+        return Ok(new { Status = "Healthy", Timestamp = DateTimeFormatHelper.ToIso8601String(DateTime.UtcNow) });
     }
 
     // ========== Complex State Agent Endpoints (for CQRS ES testing) ==========
@@ -314,7 +315,7 @@ public class AgentDemoController : AbpControllerBase
                 AgentId = actor.Id,
                 Description = description,
                 AgentType = "Aevatar.App.Agents.Agents.ComplexStateAgent",
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = DateTimeFormatHelper.ToIso8601String(DateTime.UtcNow),
                 TestDataInitialized = agent != null
             });
         }
@@ -420,8 +421,8 @@ public class AgentDemoController : AbpControllerBase
                     metadata = state.Metadata.ToDictionary(x => x.Key, x => x.Value),
                     scores = state.Scores.ToDictionary(x => x.Key, x => x.Value),
                     luckyNumbers = state.LuckyNumbers.ToList(),
-                    createdAt = state.CreatedAt?.ToDateTime(),
-                    lastUpdated = state.LastUpdated?.ToDateTime()
+                    createdAt = DateTimeFormatHelper.ToIso8601String(state.CreatedAt),
+                    lastUpdated = DateTimeFormatHelper.ToIso8601String(state.LastUpdated)
                 });
             }
             else
@@ -445,7 +446,7 @@ public class AgentCreatedResponse
 {
     public string AgentId { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; }
+    public string CreatedAt { get; set; } = string.Empty;
 }
 
 public class AgentMessageRequest
@@ -457,7 +458,7 @@ public class AgentMessageResponse
 {
     public string AgentId { get; set; } = string.Empty;
     public string Response { get; set; } = string.Empty;
-    public DateTime ProcessedAt { get; set; }
+    public string ProcessedAt { get; set; } = string.Empty;
 }
 
 public class AgentStatsResponse
@@ -465,7 +466,7 @@ public class AgentStatsResponse
     public string AgentId { get; set; } = string.Empty;
     public int ProcessedEventsCount { get; set; }
     public string LastMessage { get; set; } = string.Empty;
-    public DateTime LastUpdated { get; set; }
+    public string LastUpdated { get; set; } = string.Empty;
 }
 
 public class AgentEventRequest
@@ -478,6 +479,6 @@ public class ComplexAgentCreatedResponse
     public string AgentId { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string AgentType { get; set; } = string.Empty;
-    public DateTime CreatedAt { get; set; }
+    public string CreatedAt { get; set; } = string.Empty;
     public bool TestDataInitialized { get; set; }
 }

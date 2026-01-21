@@ -36,6 +36,10 @@
     
     <!-- Elasticsearch -->
     <PackageReference Include="Elastic.Clients.Elasticsearch" />
+    
+    <!-- ABP BlobStoring Interface + AWS SDK -->
+    <PackageReference Include="Volo.Abp.BlobStoring" />
+    <PackageReference Include="AWSSDK.S3" />
   </ItemGroup>
 
   <!-- Protobuf Files -->

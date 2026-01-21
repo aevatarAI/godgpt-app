@@ -39,10 +39,12 @@ namespace Aevatar.Controllers;
 [Authorize]
 public class GodGPTInvitationController : AevatarController
 {
-    private readonly ILogger<GodGPTPaymentController> _logger;
+    private readonly ILogger<GodGPTInvitationController> _logger;
     private readonly IInvitationService _invitationService;
 
-    public GodGPTInvitationController(ILogger<GodGPTPaymentController> logger, IInvitationService invitationService)
+    public GodGPTInvitationController(
+        ILogger<GodGPTInvitationController> logger, 
+        IInvitationService invitationService)
     {
         _logger = logger;
         _invitationService = invitationService;
@@ -103,5 +105,5 @@ public class GodGPTInvitationController : AevatarController
         return response;
     }
     
-    // NOTE: Twitter endpoints removed - feature deprecated
+    // NOTE: Twitter endpoints moved to GodGPTTwitterController to avoid PaymentService DI chain
 }

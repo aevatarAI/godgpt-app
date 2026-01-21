@@ -104,6 +104,12 @@ public sealed class SiloGAgentActor : IGAgentActor
         return await _grain!.InvokeRpcAsync(requestBytes);
     }
 
+    public async Task<byte[]> InvokeReadOnlyRpcAsync(byte[] requestBytes)
+    {
+        EnsureGrain();
+        return await _grain!.InvokeReadOnlyRpcAsync(requestBytes);
+    }
+
     public async Task<string> PublishEventAsync<TEvent>(
         TEvent evt,
         EventDirection direction = EventDirection.Down,

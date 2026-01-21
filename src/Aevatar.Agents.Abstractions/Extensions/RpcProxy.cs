@@ -166,10 +166,17 @@ internal class RpcProxy<TInterface> : DispatchProxy where TInterface : class
         foreach (var arg in args ?? [])
             request.Args.Add(ProtobufPacker.Pack(arg));
 
+        // Check if method is marked as read-only (safe for concurrent execution):
+        // - [ReadOnlyRpc] - our framework attribute (recommended)
+        // - [ReadOnly] - Orleans attribute (for compatibility with existing code)
+        var isReadOnlyRpc = targetMethod.GetCustomAttributes(true)
+            .Any(attr => attr.GetType().Name == "ReadOnlyRpcAttribute" 
+                      || attr.GetType().Name == "ReadOnlyAttribute");
+
         var returnType = targetMethod.ReturnType;
 
         if (returnType == typeof(Task))
-            return InvokeVoidAsync(request);
+            return InvokeVoidAsync(request, isReadOnlyRpc);
 
         if (returnType.IsGenericType && returnType.GetGenericTypeDefinition() == typeof(Task<>))
         {
@@ -179,16 +186,19 @@ internal class RpcProxy<TInterface> : DispatchProxy where TInterface : class
                 .First(m => m.Name == nameof(InvokeAsync) && m.IsGenericMethod);
             return invokeMethod
                 .MakeGenericMethod(resultType)
-                .Invoke(this, [request]);
+                .Invoke(this, [request, isReadOnlyRpc]);
         }
 
         throw new NotSupportedException(
             $"Return type '{returnType.Name}' not supported. Use Task or Task<T>.");
     }
 
-    private async Task InvokeVoidAsync(RpcRequest request)
+    private async Task InvokeVoidAsync(RpcRequest request, bool isReadOnlyRpc)
     {
-        var responseBytes = await _actor.InvokeRpcAsync(request.ToByteArray());
+        var requestBytes = request.ToByteArray();
+        var responseBytes = isReadOnlyRpc 
+            ? await _actor.InvokeReadOnlyRpcAsync(requestBytes)
+            : await _actor.InvokeRpcAsync(requestBytes);
         var response = RpcResponse.Parser.ParseFrom(responseBytes);
 
         if (!response.Success)
@@ -196,9 +206,12 @@ internal class RpcProxy<TInterface> : DispatchProxy where TInterface : class
                 $"RPC call '{request.MethodName}' failed: {response.Error?.Message ?? "Unknown error"}");
     }
 
-    private async Task<TResult> InvokeAsync<TResult>(RpcRequest request)
+    private async Task<TResult> InvokeAsync<TResult>(RpcRequest request, bool isReadOnlyRpc)
     {
-        var responseBytes = await _actor.InvokeRpcAsync(request.ToByteArray());
+        var requestBytes = request.ToByteArray();
+        var responseBytes = isReadOnlyRpc 
+            ? await _actor.InvokeReadOnlyRpcAsync(requestBytes)
+            : await _actor.InvokeRpcAsync(requestBytes);
         var response = RpcResponse.Parser.ParseFrom(responseBytes);
 
         if (!response.Success)

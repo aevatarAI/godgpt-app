@@ -127,6 +127,13 @@ public class ChatMiddleware
         try
         {
             var stopwatch = Stopwatch.StartNew();
+            
+            // Try to get CorrelationId from HttpContext (set by UseCorrelationId middleware)
+            // Fallback to HttpContext.TraceIdentifier if CorrelationId is not available
+            var correlationIdHeader = context.Request.Headers["X-Correlation-ID"].ToString();
+            var correlationId = !string.IsNullOrEmpty(correlationIdHeader) 
+                               ? correlationIdHeader 
+                               : context.TraceIdentifier;
 
             // Validate session
             var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userId.ToString());
@@ -138,16 +145,30 @@ public class ChatMiddleware
             }
 
             // Get message stream
-            var messageStream = GetMessageStream(request.SessionId.ToString());
+            var sessionIdStr = request.SessionId.ToString();
+            var chatId = Guid.NewGuid().ToString();
+            
+            // Generate TraceId: CorrelationId_SessionId_ChatId (for ES query correlation)
+            // Use CorrelationId from middleware if available, otherwise use SessionId_ChatId
+            var traceId = !string.IsNullOrEmpty(correlationId) && correlationId != context.TraceIdentifier
+                ? $"{correlationId}_{request.SessionId:N}_{chatId}"
+                : $"{request.SessionId:N}_{chatId}";
+            
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] Getting message stream - SessionId={SessionId}, CorrelationId={CorrelationId}",
+                traceId, request.SessionId, correlationId);
+            
+            var messageStream = GetMessageStream(sessionIdStr);
             if (messageStream == null)
             {
-                await WriteStreamNotAvailableError(context, request.SessionId.ToString());
+                await WriteStreamNotAvailableError(context, sessionIdStr);
                 return;
             }
+            
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] Message stream obtained - SessionId={SessionId}, StreamId={StreamId}",
+                traceId, request.SessionId, messageStream.StreamId);
 
             var godChatActor = await _actorFactory.CreateGAgentActorAsync<GodChatGAgent>(request.SessionId.ToString());
             var godChat = godChatActor.As<IGodChat>();
-            var chatId = Guid.NewGuid().ToString();
 
             // Build proto input
             var protoInput = BuildStartStreamChatInput(request, chatId);
@@ -157,10 +178,19 @@ public class ChatMiddleware
                 request.SessionId.ToString(), chatId, stopwatch, context.RequestAborted);
             sseHandler.SetupSseHeaders();
             
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] STEP1 - Subscribing to stream: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
+                traceId, request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
+            
             var exitSignal = await sseHandler.SubscribeAsync(messageStream);
             
-            // Trigger chat
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] STEP2 - Subscription done, calling StartStreamChatAsync: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
+                traceId, request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
+            
+            // Trigger chat - this should return quickly (fire-and-forget for HTTP requests)
             await godChat.StartStreamChatAsync(protoInput);
+            
+            _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] STEP3 - StartStreamChatAsync returned, waiting for stream: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
+                traceId, request.SessionId, chatId, stopwatch.ElapsedMilliseconds);
             
             // Wait and cleanup
             await sseHandler.WaitForCompletionAsync();

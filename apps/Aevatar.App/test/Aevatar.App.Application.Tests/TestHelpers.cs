@@ -1,8 +1,13 @@
+using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.EventSourcing;
+using Aevatar.Agents.Abstractions.Rpc;
 using Aevatar.Agents.Core.EventSourcing;
 using Aevatar.Agents.Core.Helpers;
+using Aevatar.Agents.Rpc;
+using Google.Protobuf;
 using Microsoft.Extensions.DependencyInjection;
+using NSubstitute;
 
 namespace Aevatar.App;
 
@@ -29,6 +34,64 @@ public static class TestHelpers
         AgentEventStoreInjector.InjectEventStore(agent, serviceProvider);
         
         return agent;
+    }
+    
+    /// <summary>
+    /// Setup mock IGAgentActor to handle RPC calls via As&lt;T&gt;() extension
+    /// </summary>
+    public static void SetupRpcMock<TInterface>(
+        IGAgentActor mockActor, 
+        string methodName, 
+        IMessage response) where TInterface : class
+    {
+        mockActor.InvokeRpcAsync(Arg.Is<byte[]>(bytes => 
+            RpcRequest.Parser.ParseFrom(bytes).MethodName == methodName))
+            .Returns(callInfo =>
+            {
+                var rpcResponse = new RpcResponse
+                {
+                    Success = true,
+                    Result = ProtobufPacker.Pack(response)
+                };
+                return Task.FromResult(rpcResponse.ToByteArray());
+            });
+    }
+    
+    /// <summary>
+    /// Setup mock IGAgentActor to handle RPC calls that return primitive types
+    /// </summary>
+    public static void SetupRpcMock<TResult>(
+        IGAgentActor mockActor, 
+        string methodName, 
+        TResult response)
+    {
+        mockActor.InvokeRpcAsync(Arg.Is<byte[]>(bytes => 
+            RpcRequest.Parser.ParseFrom(bytes).MethodName == methodName))
+            .Returns(callInfo =>
+            {
+                var rpcResponse = new RpcResponse
+                {
+                    Success = true,
+                    Result = ProtobufPacker.Pack(response)
+                };
+                return Task.FromResult(rpcResponse.ToByteArray());
+            });
+    }
+    
+    /// <summary>
+    /// Setup mock IGAgentActor to handle RPC calls that return void (Task)
+    /// </summary>
+    public static void SetupRpcMockVoid(
+        IGAgentActor mockActor, 
+        string methodName)
+    {
+        mockActor.InvokeRpcAsync(Arg.Is<byte[]>(bytes => 
+            RpcRequest.Parser.ParseFrom(bytes).MethodName == methodName))
+            .Returns(callInfo =>
+            {
+                var rpcResponse = new RpcResponse { Success = true };
+                return Task.FromResult(rpcResponse.ToByteArray());
+            });
     }
 }
 

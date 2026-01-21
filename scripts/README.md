@@ -66,6 +66,35 @@
 ./scripts/test-payment-flow.sh new-api     # 测试新的 Payment API
 ```
 
+### 4. 测试 Twitter 流程 (`test-twitter-flow.sh`)
+
+测试 Twitter OAuth2 认证、绑定和奖励系统：
+
+```bash
+# 运行所有测试
+./scripts/test-twitter-flow.sh
+
+# 用户级测试
+./scripts/test-twitter-flow.sh user           # 运行用户级测试
+./scripts/test-twitter-flow.sh auth-params    # 获取 OAuth2 认证参数
+./scripts/test-twitter-flow.sh bind-status    # 获取绑定状态
+./scripts/test-twitter-flow.sh verify         # 测试验证端点
+./scripts/test-twitter-flow.sh unbind         # 测试解绑端点
+
+# 管理级测试 (需要管理员权限)
+./scripts/test-twitter-flow.sh management     # 运行管理级测试
+./scripts/test-twitter-flow.sh monitor-status # 获取监控状态
+./scripts/test-twitter-flow.sh monitor-start  # 启动监控
+./scripts/test-twitter-flow.sh monitor-stop   # 停止监控
+./scripts/test-twitter-flow.sh fetch          # 手动抓取推文
+./scripts/test-twitter-flow.sh reward-status  # 获取奖励状态
+./scripts/test-twitter-flow.sh reward-start   # 启动奖励计算
+./scripts/test-twitter-flow.sh reward-stop    # 停止奖励计算
+./scripts/test-twitter-flow.sh reward-history # 获取奖励历史
+./scripts/test-twitter-flow.sh tweets         # 查询推文
+./scripts/test-twitter-flow.sh user-rewards   # 获取用户奖励记录
+```
+
 ## 测试流程
 
 ### 完整的端到端测试
@@ -137,6 +166,30 @@ stripe trigger customer.subscription.updated
 | POST | `/api/payment/webhook/stripe` | Stripe Webhook |
 | POST | `/api/payment/webhook/apple` | Apple App Store Webhook |
 | POST | `/api/payment/webhook/google` | Google Play Webhook |
+
+### Twitter API - 用户级 `/api/godgpt/invitation/twitter`
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/params` | 获取 OAuth2 PKCE 认证参数 |
+| GET | `/bind-status` | 获取 Twitter 绑定状态 |
+| POST | `/verify` | 验证 Twitter 授权码并绑定 |
+| POST | `/unbind` | 解绑 Twitter 账号 |
+
+### Twitter API - 管理级 `/api/godgpt/twitter-management`
+
+| 方法 | 端点 | 说明 |
+|------|------|------|
+| GET | `/monitor/status` | 获取监控状态 |
+| POST | `/monitor/start` | 启动自动监控 |
+| POST | `/monitor/stop` | 停止自动监控 |
+| POST | `/monitor/fetch-manually` | 手动触发推文抓取 |
+| GET | `/monitor/tweets` | 按时间范围查询推文 |
+| GET | `/reward/status` | 获取奖励计算状态 |
+| POST | `/reward/start` | 启动奖励计算 |
+| POST | `/reward/stop` | 停止奖励计算 |
+| GET | `/reward/history` | 获取奖励计算历史 |
+| GET | `/reward/user-records` | 获取用户奖励记录 |
 
 ## 故障排除
 

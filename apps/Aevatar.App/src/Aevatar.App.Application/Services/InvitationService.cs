@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
@@ -11,6 +12,7 @@ using Aevatar.Application.Grains.Agents.Invitation;
 using Aevatar.Application.Grains.Common;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Helpers;
+using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
@@ -24,9 +26,12 @@ using CsPaymentPlatform = Aevatar.Application.Grains.Common.Constants.PaymentPla
 using Aevatar.Payment.Abstractions;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using NewPaymentPlatform = Aevatar.Payment.Abstractions.PaymentPlatform;
 using InvitationProtos = Aevatar.Agents.GodGPT.Protos.Invitation;
 using CsInvitationCodeType = Aevatar.Application.Grains.Common.Constants.InvitationCodeType;
+using PaymentStripeOptions = Aevatar.Payment.Providers.StripeOptions;
+using PaymentStripeProductConfig = Aevatar.Payment.Providers.StripeProductConfig;
 
 namespace Aevatar.App.Application.Services;
 
@@ -39,15 +44,21 @@ public class InvitationService : IInvitationService
     private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<InvitationService> _logger;
     private readonly IPaymentService _paymentService;
+    private readonly IOptionsMonitor<CreditsOptions> _creditsOptions;
+    private readonly IOptionsMonitor<PaymentStripeOptions> _stripeOptions;
 
     public InvitationService(
         IGAgentActorFactory actorFactory,
         ILogger<InvitationService> logger,
-        IPaymentService paymentService)
+        IPaymentService paymentService,
+        IOptionsMonitor<CreditsOptions> creditsOptions,
+        IOptionsMonitor<PaymentStripeOptions> stripeOptions)
     {
         _actorFactory = actorFactory;
         _logger = logger;
         _paymentService = paymentService;
+        _creditsOptions = creditsOptions;
+        _stripeOptions = stripeOptions;
     }
 
     private async Task<IInvitationGAgent> GetInvitationAgentAsync(Guid userId)
@@ -79,19 +90,25 @@ public class InvitationService : IInvitationService
 
     public async Task<RedeemInviteCodeResponse> RedeemInviteCodeAsync(Guid userId, RedeemInviteCodeRequest input)
     {
-        _logger.LogInformation("[InvitationService] Redeeming invite code for user {UserId}", userId);
+        _logger.LogInformation("[InvitationService] Redeeming invite code for user {UserId}, code {Code}", 
+            userId, input.InviteCode);
 
         var protoCodeType = InvitationCodeHelper.GetCodeType(input.InviteCode);
         var codeType = protoCodeType.HasValue 
             ? (CsInvitationCodeType)(int)protoCodeType.Value 
             : CsInvitationCodeType.FriendInvitation;
         
+        _logger.LogInformation("[InvitationService] Invite code type resolved. UserId: {UserId}, Code: {Code}, CodeType: {CodeType}",
+            userId, input.InviteCode, codeType);
+
         if (codeType == CsInvitationCodeType.FriendInvitation)
         {
             // Use UserInvitationGAgent for friend invitation redemption
             var userInvitationActor = await _actorFactory.CreateGAgentActorAsync<UserInvitationGAgent>(userId.ToString());
             var userInvitationGAgent = userInvitationActor.As<IUserInvitationGAgent>();
             var result = await userInvitationGAgent.RedeemInviteCodeAsync(input.InviteCode);
+            _logger.LogInformation("[InvitationService] Friend invite redemption result. UserId: {UserId}, Code: {Code}, Success: {Result}",
+                userId, input.InviteCode, result);
             
             return new RedeemInviteCodeResponse
             {
@@ -114,17 +131,60 @@ public class InvitationService : IInvitationService
             
             try
             {
-                // Use PaymentService to create checkout session with trial code
-                // Stripe will validate the coupon code - if invalid, it will throw exception or return Success=false
+                var batchId = InvitationCodeHelper.ParseBatchTimestampFromCode(input.InviteCode);
+                var agentId = CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId);
+                var actor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(agentId.ToString());
+                var factoryAgent = actor.As<IFreeTrialCodeFactoryGAgent>();
+                var isAvailable = await factoryAgent.ValidateCodeAvailableAsync(new ValidateCodeRequestProto
+                {
+                    Code = input.InviteCode
+                });
+                if (!isAvailable)
+                {
+                    _logger.LogWarning("[InvitationService] FreeTrialCode not available. UserId: {UserId}, Code: {Code}", 
+                        userId, input.InviteCode);
+                    return new RedeemInviteCodeResponse
+                    {
+                        IsValid = false,
+                        CodeType = codeType,
+                        URL = null
+                    };
+                }
+                
+                var batchInfo = await factoryAgent.GetBatchInfoAsync();
+                if (batchInfo.Config == null)
+                {
+                    _logger.LogWarning("[InvitationService] FreeTrialCode batch config missing. UserId: {UserId}, Code: {Code}", 
+                        userId, input.InviteCode);
+                    return new RedeemInviteCodeResponse
+                    {
+                        IsValid = false,
+                        CodeType = codeType,
+                        URL = null
+                    };
+                }
+                
+                if (!TryMapPaymentPlatform(batchInfo.Config.Platform, out var paymentPlatform))
+                {
+                    _logger.LogWarning("[InvitationService] Unsupported payment platform for FreeTrialCode. UserId: {UserId}, Code: {Code}, Platform: {Platform}", 
+                        userId, input.InviteCode, batchInfo.Config.Platform);
+                    return new RedeemInviteCodeResponse
+                    {
+                        IsValid = false,
+                        CodeType = codeType,
+                        URL = null
+                    };
+                }
+                
                 var result = await _paymentService.CreateSubscriptionAsync(
                     userId,
-                    NewPaymentPlatform.Stripe,
+                    paymentPlatform,
                     new SubscriptionRequest
                     {
-                        CouponCode = input.InviteCode // TrialCode maps to CouponCode
+                        ProductId = batchInfo.Config.ProductId,
+                        TrialDays = batchInfo.Config.TrialDays
                     });
                 
-                // Check if Stripe successfully created the checkout session
                 if (!result.Success || string.IsNullOrEmpty(result.SessionUrl))
                 {
                     _logger.LogWarning("[InvitationService] Failed to create checkout session for user {UserId}, code {Code}. Error: {Error}", 
@@ -135,6 +195,17 @@ public class InvitationService : IInvitationService
                         CodeType = codeType,
                         URL = null
                     };
+                }
+                
+                var marked = await factoryAgent.MarkCodeAsUsedAsync(new MarkCodeUsedRequestProto
+                {
+                    Code = input.InviteCode,
+                    UserId = userId.ToString()
+                });
+                if (!marked)
+                {
+                    _logger.LogWarning("[InvitationService] FreeTrialCode marked used failed. UserId: {UserId}, Code: {Code}", 
+                        userId, input.InviteCode);
                 }
                 
                 return new RedeemInviteCodeResponse
@@ -166,6 +237,79 @@ public class InvitationService : IInvitationService
         }
     }
 
+    private static bool TryMapPaymentPlatform(FactoryPaymentPlatform platform, out NewPaymentPlatform mappedPlatform)
+    {
+        switch (platform)
+        {
+            case FactoryPaymentPlatform.Stripe:
+                mappedPlatform = NewPaymentPlatform.Stripe;
+                return true;
+            case FactoryPaymentPlatform.AppStore:
+                mappedPlatform = NewPaymentPlatform.AppStore;
+                return true;
+            case FactoryPaymentPlatform.GooglePlay:
+                mappedPlatform = NewPaymentPlatform.GooglePlay;
+                return true;
+            default:
+                mappedPlatform = NewPaymentPlatform.Stripe;
+                return false;
+        }
+    }
+
+    private bool IsOperatorAuthorized(Guid userId)
+    {
+        var operators = _creditsOptions.CurrentValue.OperatorUserId ?? new List<string>();
+        return operators.Contains(userId.ToString());
+    }
+
+    private bool TryGetStripeProductConfig(string productId, out PaymentStripeProductConfig productConfig, out string errorMessage)
+    {
+        productConfig = null!;
+        errorMessage = string.Empty;
+
+        var products = _stripeOptions.CurrentValue.Products;
+        if (products == null || products.Count == 0)
+        {
+            errorMessage = "Stripe products are not configured";
+            return false;
+        }
+
+        var matched = products.FirstOrDefault(p => p.PriceId == productId);
+        if (matched == null)
+        {
+            errorMessage = $"Invalid priceId: {productId}. Product not found in configuration.";
+            return false;
+        }
+
+        productConfig = matched;
+        return true;
+    }
+
+    private static FactoryPlanType MapPlanType(int planType)
+    {
+        return planType switch
+        {
+            1 => FactoryPlanType.Day,
+            2 => FactoryPlanType.Month,
+            3 => FactoryPlanType.Year,
+            4 => FactoryPlanType.Week,
+            _ => FactoryPlanType.None
+        };
+    }
+
+    private static GenerateCodesResultDto BuildGenerateCodesFailure(string message)
+    {
+        return new GenerateCodesResultDto
+        {
+            Success = false,
+            Message = message,
+            Codes = new HashSet<string>(),
+            GeneratedCount = 0,
+            ErrorCode = FreeTrialCodeError.InternalError,
+            BatchId = 0
+        };
+    }
+
     public Task<GetInvitationCodeTypeResponse> GetInvitationCodeTypeAsync(Guid userId, GetInvitationCodeTypeRequest request)
     {
         var protoCodeType = InvitationCodeHelper.GetCodeType(request.InviteCode);
@@ -182,11 +326,41 @@ public class InvitationService : IInvitationService
     {
         _logger.LogInformation("[InvitationService] Generating free trial code for user {UserId}", userId);
 
+        if (!IsOperatorAuthorized(userId))
+        {
+            _logger.LogWarning("[InvitationService] Unauthorized attempt to generate codes by user {UserId}", userId);
+            return BuildGenerateCodesFailure("Unauthorized attempt to generate code");
+        }
+
+        if (request.Platform != CsPaymentPlatform.Stripe)
+        {
+            _logger.LogWarning("[InvitationService] Unsupported payment platform: {Platform}", request.Platform);
+            return BuildGenerateCodesFailure($"Unsupported payment platform: {request.Platform}");
+        }
+
+        if (!TryGetStripeProductConfig(request.ProductId, out var productConfig, out var productError))
+        {
+            _logger.LogWarning("[InvitationService] Invalid product id for free trial code: {ProductId}", request.ProductId);
+            return BuildGenerateCodesFailure(productError);
+        }
+
         var batchId = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         var agentId = CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId);
         
         var actor = await _actorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(agentId.ToString());
         var agent = actor.As<IFreeTrialCodeFactoryGAgent>();
+
+        var batchConfig = new BatchConfig
+        {
+            TrialDays = request.TrialDays,
+            ProductId = productConfig.PriceId,
+            PlanType = MapPlanType((int)productConfig.PlanType),
+            IsUltimate = productConfig.IsUltimate,
+            Platform = (FactoryPaymentPlatform)request.Platform,
+            StartTime = Timestamp.FromDateTime(DateTime.SpecifyKind(request.StartTime, DateTimeKind.Utc)),
+            EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(request.EndTime, DateTimeKind.Utc)),
+            Description = request.Description ?? string.Empty
+        };
         
         // Convert DTO to Protobuf
         var protoRequest = new GenerateCodesRequestProto
@@ -199,7 +373,8 @@ public class InvitationService : IInvitationService
             EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(request.EndTime, DateTimeKind.Utc)),
             Quantity = request.Quantity,
             OperatorUserId = userId.ToString(),
-            Description = request.Description ?? string.Empty
+            Description = request.Description ?? string.Empty,
+            BatchConfig = batchConfig
         };
         
         var protoResult = await agent.GenerateCodesAsync(protoRequest);

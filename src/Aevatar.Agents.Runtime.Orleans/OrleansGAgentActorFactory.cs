@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Helpers;
 using Aevatar.Agents.Core.Context;
@@ -13,6 +14,8 @@ namespace Aevatar.Agents.Runtime.Orleans;
 /// 
 /// Creates lightweight actor proxies that forward to Grains.
 /// Agent instances are created and executed in the Grain (Silo) side.
+/// 
+/// Actor proxies are cached to avoid repeated RPC calls to InitializeAgentAsync.
 /// </summary>
 public class OrleansGAgentActorFactory : IGAgentActorFactory
 {
@@ -23,6 +26,17 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
     private readonly StreamingOptions _streamingOptions;
     private readonly IMessageStreamProvider? _messageStreamProvider;
     private readonly IOptions<MessageStreamProviderOptions>? _providerOptions;
+    
+    /// <summary>
+    /// Cache for actor proxies. Key = "AgentTypeShortName:RawId"
+    /// This avoids repeated InitializeAgentAsync RPC calls for the same agent.
+    /// </summary>
+    private readonly ConcurrentDictionary<string, IGAgentActor> _actorCache = new();
+    
+    /// <summary>
+    /// Unique identifier for this factory instance (for debugging singleton behavior)
+    /// </summary>
+    private readonly string _factoryInstanceId = Guid.NewGuid().ToString("N")[..8];
 
     public OrleansGAgentActorFactory(
         IServiceProvider serviceProvider,
@@ -36,6 +50,8 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
         _logger = logger;
         _messageStreamProvider = messageStreamProvider;
         _providerOptions = providerOptions;
+        
+        _logger.LogInformation("[ActorFactory] Created new instance: {FactoryId}", _factoryInstanceId);
 
         // Get StreamingOptions from configuration
         _streamingOptions = serviceProvider.GetService<IOptions<StreamingOptions>>()?.Value
@@ -57,7 +73,8 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
     }
 
     /// <summary>
-    /// Create agent actor by type
+    /// Create or get cached agent actor by type.
+    /// Actor proxies are cached to avoid repeated InitializeAgentAsync RPC calls.
     /// </summary>
     public async Task<IGAgentActor> CreateGAgentActorAsync(
         Type agentType, 
@@ -70,10 +87,22 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
         var actorId = AgentId.Normalize(agentType, inputId);
         var rawId = AgentId.ExtractRawId(actorId);
         var agentTypeName = agentType.AssemblyQualifiedName ?? agentType.FullName ?? agentType.Name;
+        
+        // Build cache key: "AgentTypeShortName:RawId"
+        var agentTypeShortName = AgentId.GetAgentTypeShortName(agentTypeName);
+        var cacheKey = $"{agentTypeShortName}:{rawId}";
+        
+        // Check cache first - fast path without RPC
+        if (_actorCache.TryGetValue(cacheKey, out var cachedActor))
+        {
+            _logger.LogInformation("[ActorCache] ✅ HIT factoryId={FactoryId}, cacheKey={CacheKey}, cacheSize={CacheSize}", 
+                _factoryInstanceId, cacheKey, _actorCache.Count);
+            return cachedActor;
+        }
 
         _logger.LogInformation(
-            "Creating Orleans Actor proxy for Agent - Type: {AgentType}, inputId={InputId}, actorId={ActorId}",
-            agentType.Name, inputId, actorId);
+            "[ActorCache] ❌ MISS factoryId={FactoryId}, cacheKey={CacheKey}, cacheSize={CacheSize} - Creating new Actor proxy for {AgentType}",
+            _factoryInstanceId, cacheKey, _actorCache.Count, agentType.Name);
 
         // Create lightweight actor proxy (Agent will be created in Grain/Silo)
         var contextPropagator = _serviceProvider.GetService<AgentContextPropagator>();
@@ -90,8 +119,12 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
 
         // Activate - This will initialize Agent in the Grain (Silo side)
         await actor.ActivateAsync(ct);
+        
+        // Cache the actor proxy
+        var added = _actorCache.TryAdd(cacheKey, actor);
 
-        _logger.LogInformation("✅ Created Orleans Actor proxy {ActorId}, Agent running in Silo", actor.Id);
+        _logger.LogInformation("[ActorCache] ✅ ADDED factoryId={FactoryId}, cacheKey={CacheKey}, added={Added}, newCacheSize={CacheSize}", 
+            _factoryInstanceId, cacheKey, added, _actorCache.Count);
 
         return actor;
     }

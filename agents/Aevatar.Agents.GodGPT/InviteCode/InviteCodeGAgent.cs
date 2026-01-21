@@ -45,6 +45,9 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
     {
         if (!State.IsActive || string.IsNullOrEmpty(State.InviterId))
         {
+            Logger.LogInformation(
+                "[InviteCodeGAgent][ValidateAndGetInviterAsync] Invalid invite code state. IsActive={IsActive}, InviterIdEmpty={InviterIdEmpty}",
+                State.IsActive, string.IsNullOrEmpty(State.InviterId));
             return new ValidateInviteCodeResponse
             {
                 IsValid = false,

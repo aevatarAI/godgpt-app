@@ -62,7 +62,10 @@ public static class GodChatConversions
         var proto = new ChatMessageProto
         {
             Id = Guid.NewGuid().ToString(),
-            Role = msg.Role ?? "user",
+            // Fix: Derive Role string from ChatRole enum when Role is empty
+            Role = string.IsNullOrEmpty(msg.Role) 
+                ? GetRoleStringFromEnum(msg.ChatRole) 
+                : msg.Role,
             Content = msg.Content ?? "",
             Timestamp = Timestamp.FromDateTime(DateTime.SpecifyKind(msg.Timestamp, DateTimeKind.Utc)),
             ChatRole = (int)msg.ChatRole
@@ -72,6 +75,22 @@ public static class GodChatConversions
             proto.ImageKeys.AddRange(msg.ImageKeys);
         }
         return proto;
+    }
+    
+    /// <summary>
+    /// Convert ChatRole enum to role string for Protobuf serialization
+    /// Note: Enum values are User=0, Assistant=1, System=2, Tool=3 for API compatibility
+    /// </summary>
+    private static string GetRoleStringFromEnum(ChatRole chatRole)
+    {
+        return chatRole switch
+        {
+            ChatRole.User => "user",
+            ChatRole.Assistant => "assistant",
+            ChatRole.System => "system",
+            ChatRole.Tool => "tool",
+            _ => "user"
+        };
     }
     
     public static ChatMessage FromProto(this ChatMessageProto proto)

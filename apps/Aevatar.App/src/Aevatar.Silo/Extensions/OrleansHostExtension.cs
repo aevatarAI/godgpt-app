@@ -95,6 +95,15 @@ public static class OrleansHostExtension
                 // Shorter refresh interval helps detect dead silos faster
                 options.TableRefreshTimeout = TimeSpan.FromSeconds(10);
             });
+            
+            // 4.6. Configure Grain Collection (keep grains alive longer to reduce activation overhead)
+            siloBuilder.Configure<GrainCollectionOptions>(options =>
+            {
+                // Default is 2 hours, extend to 8 hours to reduce reactivation frequency
+                options.CollectionAge = TimeSpan.FromHours(8);
+                // How often to check for idle grains (default 30 seconds is fine)
+                options.CollectionQuantum = TimeSpan.FromSeconds(30);
+            });
 
             // 5. Configure Storage (Using shared client)
             Log.Information("💾 Configuring MongoDB Storage (Using Shared Client)...");

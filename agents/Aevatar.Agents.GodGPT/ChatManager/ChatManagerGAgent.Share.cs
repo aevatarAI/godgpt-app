@@ -34,13 +34,46 @@ public partial class ChatGAgentManager
             throw new UserFriendlyException(localizedMessage);
         }
 
-        Logger.LogInformation("[PERF][ChatGAgentManager] GenerateChatShareContentAsync calling GetSessionMessageListAsync - Elapsed: {Elapsed}ms", methodStart.ElapsedMilliseconds);
-        var chatMessagesProto = await GetSessionMessageListAsync(sessionId);
-        Logger.LogInformation("[PERF][ChatGAgentManager] GenerateChatShareContentAsync GetSessionMessageListAsync completed - Elapsed: {Elapsed}ms", methodStart.ElapsedMilliseconds);
+        // Step 1: Verify session exists before getting messages
+        var sessionInfo = State.GetSession(sessionId);
+        if (sessionInfo == null)
+        {
+            Logger.LogWarning(
+                "[ChatGAgentManager][GenerateChatShareContentAsync] Session NOT FOUND - SessionId: {SessionId}, UserId: {UserId}, AvailableSessions: {Count}",
+                sessionId, Id, State.SessionInfoList.Count);
+            var localizedMessage =
+                _localizationService.GetLocalizedException(ExceptionMessageKeys.InvalidSession, language);
+            throw new UserFriendlyException(localizedMessage);
+        }
+
+        // Step 2: Get session messages
+        var step1Start = methodStart.ElapsedMilliseconds;
+        ChatMessageListProto chatMessagesProto;
+        try
+        {
+            chatMessagesProto = await GetSessionMessageListAsync(sessionId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex,
+                "[ChatGAgentManager][GenerateChatShareContentAsync] Failed to get messages - SessionId: {SessionId}, UserId: {UserId}",
+                sessionId, Id);
+            var localizedMessage =
+                _localizationService.GetLocalizedException(ExceptionMessageKeys.InvalidSession, language);
+            throw new UserFriendlyException(localizedMessage);
+        }
+        
+        var step1End = methodStart.ElapsedMilliseconds;
+        var messageCount = chatMessagesProto?.Messages.Count ?? 0;
+        Logger.LogInformation("[PERF][Share] Step1_GetMessages: {Ms}ms, MessageCount: {Count}", 
+            step1End - step1Start, messageCount);
+        
         if (chatMessagesProto == null || chatMessagesProto.Messages.Count == 0)
         {
-            Logger.LogDebug(
-                $"[ChatGAgentManager][GenerateChatShareContentAsync] - session: {sessionId.ToString()}, chatMessages is null");
+            Logger.LogWarning(
+                "[ChatGAgentManager][GenerateChatShareContentAsync] Session has NO MESSAGES - SessionId: {SessionId}, UserId: {UserId}, " +
+                "SessionExists: {Exists}, SessionTitle: {Title}, MessageCount: {Count}",
+                sessionId, Id, sessionInfo != null, sessionInfo?.Title ?? "(null)", messageCount);
             var localizedMessage =
                 _localizationService.GetLocalizedException(ExceptionMessageKeys.InvalidSession, language);
             throw new UserFriendlyException(localizedMessage);
@@ -48,8 +81,12 @@ public partial class ChatGAgentManager
 
         var shareId = Guid.NewGuid();
         
-        // Use new ShareLinkGAgent instead of Orleans Grain
+        // Step 3: Create ShareLinkGAgent Actor
+        var step2Start = methodStart.ElapsedMilliseconds;
         var shareLinkActor = await _actorFactory.CreateGAgentActorAsync<ShareLinkGAgent>(shareId.ToString());
+        var step2End = methodStart.ElapsedMilliseconds;
+        Logger.LogInformation("[PERF][Share] Step2_CreateActor: {Ms}ms", step2End - step2Start);
+        
         var shareLink = shareLinkActor.As<IShareLinkGAgent>();
         
         // Build ShareLinkProto directly
@@ -61,18 +98,16 @@ public partial class ChatGAgentManager
         };
         shareLinkProto.Messages.AddRange(chatMessagesProto.Messages);
         
+        // Step 4: Save share content via RPC
+        var step3Start = methodStart.ElapsedMilliseconds;
         await shareLink.SaveShareContentAsync(shareLinkProto);
-        
-        Logger.LogInformation(
-            "[ChatGAgentManager][GenerateChatShareContentAsync] ShareLinkGAgent saved. SessionId: {SessionId}, ShareId: {ShareId}",
-            sessionId, shareId);
+        var step3End = methodStart.ElapsedMilliseconds;
+        Logger.LogInformation("[PERF][Share] Step3_SaveContent: {Ms}ms, ProtoSize: {Size}bytes", 
+            step3End - step3Start, shareLinkProto.CalculateSize());
         
         // Log state before raising event
         var sessionBeforeEvent = State.GetSession(sessionId);
         var shareIdsBefore = sessionBeforeEvent?.GetShareIds() ?? new List<Guid>();
-        Logger.LogInformation(
-            "[ChatGAgentManager][GenerateChatShareContentAsync] State BEFORE RaiseEvent - SessionExists: {Exists}, ShareIdCount: {Count}",
-            sessionBeforeEvent != null, shareIdsBefore.Count);
         
         RaiseEvent(new GenerateChatShareContentEvent
         {
@@ -80,7 +115,11 @@ public partial class ChatGAgentManager
             ShareId = shareId.ToString()
         });
 
+        // Step 5: Confirm events (EventSourcing persistence)
+        var step4Start = methodStart.ElapsedMilliseconds;
         await ConfirmEventsAsync();
+        var step4End = methodStart.ElapsedMilliseconds;
+        Logger.LogInformation("[PERF][Share] Step4_ConfirmEvents: {Ms}ms", step4End - step4Start);
         
         // Log state after confirming event
         var sessionAfterEvent = State.GetSession(sessionId);
@@ -102,8 +141,10 @@ public partial class ChatGAgentManager
         }
         
         Logger.LogInformation(
-            "[ChatGAgentManager][GenerateChatShareContentAsync] SUCCESS - ShareId {ShareId} saved for session {SessionId}",
-            shareId, sessionId);
+            "[PERF][Share] TOTAL: {TotalMs}ms - Step1={Step1}ms, Step2={Step2}ms, Step3={Step3}ms, Step4={Step4}ms - SessionId: {SessionId}, ShareId: {ShareId}",
+            methodStart.ElapsedMilliseconds, 
+            step1End - step1Start, step2End - step2Start, step3End - step3Start, step4End - step4Start,
+            sessionId, shareId);
         
         return shareId;
     }

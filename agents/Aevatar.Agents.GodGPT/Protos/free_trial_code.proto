@@ -106,6 +106,7 @@ message GenerateCodesRequestProto {
     int32 quantity = 7;
     string operator_user_id = 8;  // Guid -> string
     string description = 9;
+    BatchConfig batch_config = 10;
 }
 
 message GenerateCodesResultProto {
