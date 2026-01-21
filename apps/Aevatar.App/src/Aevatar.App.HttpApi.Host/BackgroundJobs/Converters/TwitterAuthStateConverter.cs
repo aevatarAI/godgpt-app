@@ -1,58 +1,59 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
-using Aevatar.Agents.Twitter;
+using Aevatar.Agents.GodGPT.Protos.Twitter;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 
 namespace Aevatar.App.HttpApi.Host.BackgroundJobs.Converters;
 
 /// <summary>
-/// TwitterAuth State converter
+/// TwitterAuth State converter - converts old TwitterAuthGAgent state to godgpt TwitterAuthState
 /// </summary>
 public class TwitterAuthStateConverter : IStateConverter
 {
     public IMessage? Convert(Dictionary<string, object?>? oldState)
     {
         if (oldState == null)
-            return new TwitterAuthStateProto();
+            return new TwitterAuthState();
 
-        var newState = new TwitterAuthStateProto();
+        var newState = new TwitterAuthState();
 
+        // Map TwitterId -> twitter_user_id
         if (oldState.TryGetValue("TwitterId", out var twitterIdObj))
-            newState.TwitterId = ConvertToString(twitterIdObj);
+            newState.TwitterUserId = ConvertToString(twitterIdObj);
 
+        // Map UserId -> user_id
         if (oldState.TryGetValue("UserId", out var userIdObj))
             newState.UserId = ConvertToString(userIdObj);
 
+        // Map ScreenName -> username
         if (oldState.TryGetValue("ScreenName", out var screenNameObj))
-            newState.ScreenName = ConvertToString(screenNameObj);
+            newState.Username = ConvertToString(screenNameObj);
 
+        // Map AccessToken -> access_token
         if (oldState.TryGetValue("AccessToken", out var accessTokenObj))
             newState.AccessToken = ConvertToString(accessTokenObj);
 
-        if (oldState.TryGetValue("AccessTokenSecret", out var accessTokenSecretObj))
-            newState.AccessTokenSecret = ConvertToString(accessTokenSecretObj);
+        // AccessTokenSecret is not in godgpt TwitterAuthState (OAuth2 uses refresh_token instead)
+        // RefreshToken is not in old state, leave empty
 
-        if (oldState.TryGetValue("DisplayName", out var displayNameObj))
-            newState.DisplayName = ConvertToString(displayNameObj);
-
-        if (oldState.TryGetValue("ProfileImageUrl", out var profileImageUrlObj))
-            newState.ProfileImageUrl = ConvertToString(profileImageUrlObj);
-
-        if (oldState.TryGetValue("AuthTime", out var authTimeObj))
-        {
-            var dt = ConvertToDateTime(authTimeObj);
-            if (dt.HasValue)
-                newState.AuthTime = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
-        }
-
+        // Map TokenExpiresAt -> token_expires_at
         if (oldState.TryGetValue("TokenExpiresAt", out var tokenExpiresAtObj))
         {
             var dt = ConvertToDateTime(tokenExpiresAtObj);
             if (dt.HasValue)
                 newState.TokenExpiresAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
         }
+
+        // Map ProfileImageUrl -> profile_image_url
+        if (oldState.TryGetValue("ProfileImageUrl", out var profileImageUrlObj))
+            newState.ProfileImageUrl = ConvertToString(profileImageUrlObj);
+
+        // Set is_bound based on whether we have tokens
+        newState.IsBound = !string.IsNullOrEmpty(newState.AccessToken);
+
+        // AuthTime, DisplayName, AccessTokenSecret are not in godgpt version - skip
 
         return newState;
     }

@@ -1,48 +1,58 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
-using Aevatar.Agents.Twitter;
+using Aevatar.Agents.GodGPT.Protos.Twitter;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 
 namespace Aevatar.App.HttpApi.Host.BackgroundJobs.Converters;
 
 /// <summary>
-/// TwitterIdentityBinding State converter
+/// TwitterIdentityBinding State converter - converts from old system to godgpt TwitterIdentityBindingState
 /// </summary>
 public class TwitterIdentityBindingStateConverter : IStateConverter
 {
     public IMessage? Convert(Dictionary<string, object?>? oldState)
     {
         if (oldState == null)
-            return new TwitterIdentityBindingStateProto();
+            return new TwitterIdentityBindingState();
 
-        var newState = new TwitterIdentityBindingStateProto();
+        var newState = new TwitterIdentityBindingState();
 
+        // Map old field names to new godgpt field names
         if (oldState.TryGetValue("TwitterId", out var twitterIdObj))
-            newState.TwitterId = ConvertToString(twitterIdObj);
+            newState.TwitterUserId = ConvertToString(twitterIdObj);
 
         if (oldState.TryGetValue("UserId", out var userIdObj))
             newState.UserId = ConvertToString(userIdObj);
 
         if (oldState.TryGetValue("ScreenName", out var screenNameObj))
-            newState.ScreenName = ConvertToString(screenNameObj);
+            newState.TwitterUsername = ConvertToString(screenNameObj);
 
-        if (oldState.TryGetValue("DisplayName", out var displayNameObj))
-            newState.DisplayName = ConvertToString(displayNameObj);
+        // DisplayName is not in godgpt TwitterIdentityBindingState
+
+        if (oldState.TryGetValue("ProfileImageUrl", out var profileImageUrlObj))
+            newState.ProfileImageUrl = ConvertToString(profileImageUrlObj);
 
         if (oldState.TryGetValue("BoundAt", out var boundAtObj))
         {
             var dt = ConvertToDateTime(boundAtObj);
             if (dt.HasValue)
-                newState.BoundAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
+                newState.CreatedAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
         }
 
         if (oldState.TryGetValue("LastUsedAt", out var lastUsedAtObj))
         {
             var dt = ConvertToDateTime(lastUsedAtObj);
             if (dt.HasValue)
-                newState.LastUsedAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
+                newState.UpdatedAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
+        }
+        else if (oldState.TryGetValue("BoundAt", out var boundAtObj2))
+        {
+            // If no LastUsedAt, use BoundAt for UpdatedAt
+            var dt = ConvertToDateTime(boundAtObj2);
+            if (dt.HasValue)
+                newState.UpdatedAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
         }
 
         return newState;
