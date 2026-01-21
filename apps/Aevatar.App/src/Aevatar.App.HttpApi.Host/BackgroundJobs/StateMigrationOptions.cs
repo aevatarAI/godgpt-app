@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
 namespace Aevatar.App.HttpApi.Host.BackgroundJobs;
@@ -20,14 +21,10 @@ public class StateMigrationOptions
     public string OldSystemApiBaseUrl { get; set; } = "http://localhost:8001";
 
     /// <summary>
-    /// Bearer token for old system API authentication (optional, will auto-fetch if not provided)
+    /// Token endpoint URL for fetching authentication token
+    /// Required for API authentication
     /// </summary>
-    public string? OldSystemApiToken { get; set; }
-
-    /// <summary>
-    /// Token endpoint URL for auto-fetching token
-    /// </summary>
-    public string? TokenEndpoint { get; set; }
+    public string TokenEndpoint { get; set; } = string.Empty;
 
     /// <summary>
     /// Username for token authentication
@@ -59,4 +56,15 @@ public class StateMigrationOptions
     /// Delay between batches (milliseconds)
     /// </summary>
     public int BatchDelayMs { get; set; } = 100;
+
+    /// <summary>
+    /// Collection type names to skip during migration
+    /// </summary>
+    public List<string> SkipCollections { get; set; } = new();
+
+    /// <summary>
+    /// Fixed collection names to migrate (bypasses GetCollections API)
+    /// If not empty, uses this list instead of calling the old system API
+    /// </summary>
+    public List<string> FixedCollections { get; set; } = new();
 }

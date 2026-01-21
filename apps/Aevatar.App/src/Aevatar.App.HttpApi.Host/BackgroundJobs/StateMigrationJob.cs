@@ -55,10 +55,11 @@ public class StateMigrationJob
 
     /// <summary>
     /// Ensure HTTP client has valid authorization token
+    /// Always fetches token dynamically from TokenEndpoint
     /// </summary>
     private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken)
     {
-        // If token is already set and cached, use it
+        // If token is already cached, use it
         if (!string.IsNullOrEmpty(_cachedToken))
         {
             _httpClient.DefaultRequestHeaders.Authorization =
@@ -66,68 +67,61 @@ public class StateMigrationJob
             return;
         }
 
-        // If token is provided in config, use it
-        if (!string.IsNullOrEmpty(_options.OldSystemApiToken))
+        // Fetch token from TokenEndpoint
+        if (string.IsNullOrEmpty(_options.TokenEndpoint) ||
+            string.IsNullOrEmpty(_options.Username) ||
+            string.IsNullOrEmpty(_options.Password))
         {
-            _cachedToken = _options.OldSystemApiToken;
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new AuthenticationHeaderValue("Bearer", _cachedToken);
+            _logger.LogWarning("[StateMigration] Token credentials not configured (TokenEndpoint, Username, Password required)");
             return;
         }
 
-        // Auto-fetch token if credentials are provided
-        if (!string.IsNullOrEmpty(_options.TokenEndpoint) &&
-            !string.IsNullOrEmpty(_options.Username) &&
-            !string.IsNullOrEmpty(_options.Password))
+        try
         {
-            try
+            _logger.LogInformation("[StateMigration] Fetching authentication token from {TokenEndpoint}", 
+                _options.TokenEndpoint);
+
+            // Use a separate HttpClient for token request (no auth header)
+            var tokenClient = _httpClientFactory.CreateClient();
+            
+            var tokenRequest = new Dictionary<string, string>
             {
-                _logger.LogInformation("[StateMigration] Fetching authentication token from {TokenEndpoint}", 
-                    _options.TokenEndpoint);
+                { "grant_type", "password" },
+                { "username", _options.Username },
+                { "password", _options.Password },
+                { "client_id", _options.ClientId },
+                { "scope", _options.Scope }
+            };
 
-                // Use a separate HttpClient for token request (no auth header)
-                var tokenClient = _httpClientFactory.CreateClient();
+            var requestContent = new FormUrlEncodedContent(tokenRequest);
+            var response = await tokenClient.PostAsync(_options.TokenEndpoint, requestContent, cancellationToken);
+            
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync(cancellationToken);
+                var doc = JsonDocument.Parse(json);
                 
-                var tokenRequest = new Dictionary<string, string>
+                if (doc.RootElement.TryGetProperty("access_token", out var tokenElement))
                 {
-                    { "grant_type", "password" },
-                    { "username", _options.Username },
-                    { "password", _options.Password },
-                    { "client_id", _options.ClientId },
-                    { "scope", _options.Scope }
-                };
-
-                var requestContent = new FormUrlEncodedContent(tokenRequest);
-                var response = await tokenClient.PostAsync(_options.TokenEndpoint, requestContent, cancellationToken);
-                
-                if (response.IsSuccessStatusCode)
-                {
-                    var json = await response.Content.ReadAsStringAsync(cancellationToken);
-                    var doc = JsonDocument.Parse(json);
+                    _cachedToken = tokenElement.GetString();
+                    _httpClient.DefaultRequestHeaders.Authorization =
+                        new AuthenticationHeaderValue("Bearer", _cachedToken);
                     
-                    if (doc.RootElement.TryGetProperty("access_token", out var tokenElement))
-                    {
-                        _cachedToken = tokenElement.GetString();
-                        _httpClient.DefaultRequestHeaders.Authorization =
-                            new AuthenticationHeaderValue("Bearer", _cachedToken);
-                        
-                        _logger.LogInformation("[StateMigration] Successfully obtained authentication token");
-                        return;
-                    }
+                    _logger.LogInformation("[StateMigration] Successfully obtained authentication token");
+                    return;
                 }
+            }
 
-                var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogWarning("[StateMigration] Failed to obtain token: {StatusCode} - {Reason} - {Content}", 
-                    response.StatusCode, response.ReasonPhrase, errorContent);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "[StateMigration] Error fetching authentication token");
-            }
+            var errorContent = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("[StateMigration] Failed to obtain token: {StatusCode} - {Reason} - {Content}", 
+                response.StatusCode, response.ReasonPhrase, errorContent);
+            throw new InvalidOperationException($"Failed to obtain authentication token: {response.StatusCode}");
         }
-
-        // If no token available, log warning but continue (might be public API)
-        _logger.LogWarning("[StateMigration] No authentication token available, requests may fail");
+        catch (Exception ex) when (ex is not InvalidOperationException)
+        {
+            _logger.LogError(ex, "[StateMigration] Error fetching authentication token");
+            throw;
+        }
     }
 
     /// <summary>
@@ -156,12 +150,28 @@ public class StateMigrationJob
             // Ensure authenticated before making API calls
             await EnsureAuthenticatedAsync(cancellationToken);
 
-            // 1. Get collections list from old system API
-            var collections = await GetCollectionsAsync(cancellationToken);
+            // 1. Get collections list - use FixedCollections if configured, otherwise call API
+            List<CollectionInfo> collections;
+            
+            if (_options.FixedCollections.Count > 0)
+            {
+                _logger.LogInformation("[StateMigration] Using {Count} fixed collections from config", 
+                    _options.FixedCollections.Count);
+                    
+                collections = _options.FixedCollections.Select(name => new CollectionInfo
+                {
+                    CollectionName = name,
+                    TypeName = ExtractShortTypeName(name)
+                }).ToList();
+            }
+            else
+            {
+                collections = await GetCollectionsAsync(cancellationToken);
+            }
             
             if (collections.Count == 0)
             {
-                _logger.LogWarning("[StateMigration] No collections found from old system API");
+                _logger.LogWarning("[StateMigration] No collections found");
                 result.Error = "No collections found";
                 return result;
             }
@@ -170,9 +180,24 @@ public class StateMigrationJob
 
             // 2. Filter collections to migrate
             var collectionsToMigrate = collections;
+            
+            // Apply SkipCollections filter first
+            if (_options.SkipCollections.Count > 0)
+            {
+                collectionsToMigrate = collectionsToMigrate.Where(c =>
+                    !_options.SkipCollections.Any(skip => 
+                        c.TypeName.Contains(skip, StringComparison.OrdinalIgnoreCase) ||
+                        c.CollectionName.Contains(skip, StringComparison.OrdinalIgnoreCase)))
+                    .ToList();
+                    
+                _logger.LogInformation("[StateMigration] After SkipCollections filter: {Count} collections", 
+                    collectionsToMigrate.Count);
+            }
+            
+            // Then apply user-specified filter if provided
             if (collectionTypes != null && collectionTypes.Count > 0)
             {
-                collectionsToMigrate = collections.Where(c =>
+                collectionsToMigrate = collectionsToMigrate.Where(c =>
                     collectionTypes.Any(t => 
                         c.TypeName.Contains(t, StringComparison.OrdinalIgnoreCase) ||
                         c.CollectionName.Contains(t, StringComparison.OrdinalIgnoreCase)))
@@ -181,7 +206,7 @@ public class StateMigrationJob
 
             if (collectionsToMigrate.Count == 0)
             {
-                _logger.LogWarning("[StateMigration] No matching collections found");
+                _logger.LogWarning("[StateMigration] No matching collections found after filtering");
                 result.Error = "No matching collections found";
                 return result;
             }
@@ -264,7 +289,7 @@ public class StateMigrationJob
     }
 
     /// <summary>
-    /// Migrate a single collection
+    /// Migrate a single collection (streaming mode - fetch and process batch by batch)
     /// </summary>
     private async Task<CollectionMigrationResult> MigrateCollectionAsync(
         CollectionInfo collection,
@@ -279,92 +304,205 @@ public class StateMigrationJob
         _logger.LogInformation("[StateMigration] Migrating {TypeName} ({Count} records)...", 
             collection.TypeName, collection.Count);
 
-        // Export all records from old system (with pagination)
-        var allRecords = await ExportAllRecordsAsync(collection.CollectionName, cancellationToken);
-        result.TotalRecords = allRecords.Count;
-
-        if (allRecords.Count == 0)
-        {
-            _logger.LogInformation("[StateMigration] No records found in {TypeName}", collection.TypeName);
-            return result;
-        }
-
-        // Convert and write records
+        // Get converter first
         var converter = GetConverter(collection.TypeName);
         if (converter == null)
         {
             _logger.LogWarning("[StateMigration] No converter found for {TypeName}, skipping", collection.TypeName);
-            result.FailedCount = allRecords.Count;
             return result;
         }
 
-        foreach (var record in allRecords)
+        var jsonFormatter = new JsonFormatter(JsonFormatter.Settings.Default);
+        int skip = 0;
+        const int limit = 500; // Increased batch size for better performance
+        const int bulkWriteSize = 100; // Bulk write size for MongoDB
+        int batchNumber = 0;
+        int sampleLogged = 0;
+        var bulkWriteBuffer = new List<(string AgentId, IMessage State, string AgentTypeName)>();
+
+        // Stream processing: fetch and process batch by batch
+        while (!cancellationToken.IsCancellationRequested)
         {
-            if (cancellationToken.IsCancellationRequested)
+            batchNumber++;
+            var fetchStartTime = DateTime.UtcNow;
+            var (records, hasMore) = await FetchBatchAsync(collection.CollectionName, skip, limit, cancellationToken);
+            var fetchDuration = (DateTime.UtcNow - fetchStartTime).TotalMilliseconds;
+            
+            if (records == null || records.Count == 0)
+            {
+                if (batchNumber == 1)
+                    _logger.LogInformation("[StateMigration] No records found in {TypeName}", collection.TypeName);
+                if (!hasMore)
+                    break;
+                // If no records but hasMore, continue to next batch (some records were skipped)
+                skip += limit;
+                continue;
+            }
+
+            _logger.LogInformation("[StateMigration] [{TypeName}] Processing batch {Batch}: {Count} records (skip={Skip}, hasMore={HasMore}, fetchTime={FetchTime}ms)",
+                collection.TypeName, batchNumber, records.Count, skip, hasMore, fetchDuration.ToString("F2"));
+
+            result.TotalRecords += records.Count;
+
+            // Process each record in the batch
+            foreach (var record in records)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                    break;
+
+                try
+                {
+                    // Log sample records (first 3 only)
+                    if (sampleLogged < 3)
+                    {
+                        LogSampleRecord(collection.TypeName, sampleLogged + 1, record, converter, jsonFormatter);
+                        sampleLogged++;
+                    }
+
+                    // Convert Agent ID format
+                    var newAgentId = ConvertAgentId(record.Id, collection.TypeName);
+                    var stateIsEmpty = record.State == null || record.State.Count == 0;
+                    
+                    // Convert State
+                    var newState = converter.Convert(record.State);
+                    if (newState == null)
+                    {
+                        _logger.LogWarning(
+                            "[StateMigration] [{TypeName}] Converter returned null for Id={Id}",
+                            collection.TypeName, record.Id);
+                        result.FailedCount++;
+                        continue;
+                    }
+
+                    // Log first 3 successful conversions
+                    if (result.SuccessCount < 3)
+                    {
+                        var stateBytes = newState.ToByteArray();
+                        var newStateJson = jsonFormatter.Format(newState);
+                        if (newStateJson.Length > 500) newStateJson = newStateJson[..500] + "...(truncated)";
+                        
+                        _logger.LogInformation(
+                            "[StateMigration] [{TypeName}] Converted: OldId={OldId} -> NewId={NewId}, " +
+                            "NewStateType={StateType}, NewStateBytes={Bytes}",
+                            collection.TypeName, record.Id, newAgentId, 
+                            newState.GetType().FullName, stateBytes.Length);
+                    }
+
+                    // Handle agent type name mapping
+                    var targetAgentTypeName = MapAgentTypeName(collection.TypeName);
+                    if (targetAgentTypeName != collection.TypeName && newAgentId.Contains(':'))
+                    {
+                        var parts = newAgentId.Split(':', 2);
+                        if (parts.Length == 2)
+                            newAgentId = $"{targetAgentTypeName}:{parts[1]}";
+                    }
+
+                    // Add to bulk write buffer
+                    bulkWriteBuffer.Add((newAgentId, newState, targetAgentTypeName));
+                    
+                    // Bulk write when buffer reaches threshold
+                    if (bulkWriteBuffer.Count >= bulkWriteSize)
+                    {
+                        var writeStartTime = DateTime.UtcNow;
+                        var writeResult = await BulkWriteStateAsync(bulkWriteBuffer, cancellationToken);
+                        var writeDuration = (DateTime.UtcNow - writeStartTime).TotalMilliseconds;
+                        
+                        result.SuccessCount += writeResult.SuccessCount;
+                        result.FailedCount += writeResult.FailedCount;
+                        
+                        _logger.LogInformation("[StateMigration] [{TypeName}] Bulk write: {Success} success, {Failed} failed, time={Time}ms",
+                            collection.TypeName, writeResult.SuccessCount, writeResult.FailedCount, writeDuration.ToString("F2"));
+                        
+                        bulkWriteBuffer.Clear();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[StateMigration] [{TypeName}] Error converting record {Id}", 
+                        collection.TypeName, record.Id);
+                    result.FailedCount++;
+                }
+            }
+            
+            // Write remaining records in buffer
+            if (bulkWriteBuffer.Count > 0)
+            {
+                var writeStartTime = DateTime.UtcNow;
+                var writeResult = await BulkWriteStateAsync(bulkWriteBuffer, cancellationToken);
+                var writeDuration = (DateTime.UtcNow - writeStartTime).TotalMilliseconds;
+                
+                result.SuccessCount += writeResult.SuccessCount;
+                result.FailedCount += writeResult.FailedCount;
+                
+                _logger.LogInformation("[StateMigration] [{TypeName}] Final bulk write: {Success} success, {Failed} failed, time={Time}ms",
+                    collection.TypeName, writeResult.SuccessCount, writeResult.FailedCount, writeDuration.ToString("F2"));
+                
+                bulkWriteBuffer.Clear();
+            }
+            
+            // Log batch completion
+            _logger.LogInformation("[StateMigration] [{TypeName}] Batch {Batch} done: success={Success}, failed={Failed}",
+                collection.TypeName, batchNumber, result.SuccessCount, result.FailedCount);
+
+            // Check if there are more records using hasMore flag
+            if (!hasMore)
                 break;
 
-            try
-            {
-                // Convert Agent ID format
-                var newAgentId = ConvertAgentId(record.Id, collection.TypeName);
-                
-                // Convert State
-                var newState = converter.Convert(record.State);
-                if (newState == null)
-                {
-                    result.FailedCount++;
-                    continue;
-                }
-
-                // Handle agent type name mapping (e.g., UserBillingGAgent -> PaymentIndexGAgent)
-                var targetAgentTypeName = MapAgentTypeName(collection.TypeName);
-                
-                // Update agent ID if type name changed
-                if (targetAgentTypeName != collection.TypeName && newAgentId.Contains(':'))
-                {
-                    var parts = newAgentId.Split(':', 2);
-                    if (parts.Length == 2)
-                        newAgentId = $"{targetAgentTypeName}:{parts[1]}";
-                }
-
-                // Write to new database
-                var success = await WriteStateAsync(newAgentId, newState, targetAgentTypeName, cancellationToken);
-                
-                if (success)
-                {
-                    result.SuccessCount++;
-                }
-                else
-                {
-                    result.FailedCount++;
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "[StateMigration] Error converting record {Id}", record.Id);
-                result.FailedCount++;
-            }
+            skip += limit;
+            
+            // Delay between batches
+            await Task.Delay(_options.BatchDelayMs, cancellationToken);
         }
 
         _logger.LogInformation(
-            "[StateMigration] {TypeName}: Success={Success}, Failed={Failed}",
-            collection.TypeName, result.SuccessCount, result.FailedCount);
+            "[StateMigration] {TypeName}: Total={Total}, Success={Success}, Failed={Failed}",
+            collection.TypeName, result.TotalRecords, result.SuccessCount, result.FailedCount);
 
         return result;
     }
 
     /// <summary>
-    /// Export all records from a collection (with pagination)
+    /// Log sample record for debugging
     /// </summary>
-    private async Task<List<ExportedRecord>> ExportAllRecordsAsync(
-        string collectionName,
-        CancellationToken cancellationToken)
+    private void LogSampleRecord(string typeName, int index, ExportedRecord record, 
+        IStateConverter converter, JsonFormatter jsonFormatter)
     {
-        var allRecords = new List<ExportedRecord>();
-        int skip = 0;
-        const int limit = 1000;
+        _logger.LogInformation(
+            "[StateMigration] [{TypeName}] Sample record {Index}: Id={Id}, StateKeys=[{StateKeys}]",
+            typeName, index, record.Id,
+            record.State != null ? string.Join(",", record.State.Keys.Take(10)) : "N/A");
+            
+        if (record.State != null)
+        {
+            try
+            {
+                var originalJson = JsonSerializer.Serialize(record.State, 
+                    new JsonSerializerOptions { WriteIndented = false });
+                if (originalJson.Length > 800) originalJson = originalJson[..800] + "...(truncated)";
+                _logger.LogInformation("[StateMigration] [{TypeName}] Sample {Index} OriginalJson: {Json}",
+                    typeName, index, originalJson);
+                    
+                var convertedState = converter.Convert(record.State);
+                if (convertedState != null)
+                {
+                    var newStateJson = jsonFormatter.Format(convertedState);
+                    if (newStateJson.Length > 800) newStateJson = newStateJson[..800] + "...(truncated)";
+                    _logger.LogInformation("[StateMigration] [{TypeName}] Sample {Index} ConvertedJson: {Json}",
+                        typeName, index, newStateJson);
+                }
+            }
+            catch { /* Ignore logging errors */ }
+        }
+    }
 
-        while (true)
+    /// <summary>
+    /// Fetch a single batch of records from old system API
+    /// Returns (records, hasMore) tuple
+    /// </summary>
+    private async Task<(List<ExportedRecord>? Records, bool HasMore)> FetchBatchAsync(
+        string collectionName, int skip, int limit, CancellationToken cancellationToken)
+    {
+        try
         {
             var url = $"{_options.OldSystemApiBaseUrl}/api/admin/export/grain" +
                 $"?collection={Uri.EscapeDataString(collectionName)}&skip={skip}&limit={limit}";
@@ -376,34 +514,41 @@ public class StateMigrationJob
             var doc = JsonDocument.Parse(json);
 
             if (doc.RootElement.TryGetProperty("data", out var dataElement) &&
-                dataElement.ValueKind == JsonValueKind.Object &&
-                dataElement.TryGetProperty("records", out var recordsElement) &&
-                recordsElement.ValueKind == JsonValueKind.Array)
+                dataElement.ValueKind == JsonValueKind.Object)
             {
-                var records = JsonSerializer.Deserialize<List<ExportedRecord>>(
-                    recordsElement.GetRawText(),
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-                if (records == null || records.Count == 0)
-                    break;
-
-                allRecords.AddRange(records);
-
-                // Check if there are more records
-                if (records.Count < limit)
-                    break;
-
-                skip += limit;
+                // Parse hasMore flag
+                var hasMore = false;
+                if (dataElement.TryGetProperty("hasMore", out var hasMoreElement))
+                {
+                    hasMore = hasMoreElement.ValueKind == JsonValueKind.True;
+                }
+                
+                // Parse records
+                if (dataElement.TryGetProperty("records", out var recordsElement) &&
+                    recordsElement.ValueKind == JsonValueKind.Array)
+                {
+                    var records = JsonSerializer.Deserialize<List<ExportedRecord>>(
+                        recordsElement.GetRawText(),
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    return (records, hasMore);
+                }
+                
+                return (null, hasMore);
             }
-            else
-            {
-                break;
-            }
+            
+            return (null, false);
         }
-
-        return allRecords;
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[StateMigration] Error fetching batch: collection={Collection}, skip={Skip}", 
+                collectionName, skip);
+            return (null, false);
+        }
     }
 
+    /// <summary>
+    /// Export all records from a collection (with pagination)
+    /// </summary>
     /// <summary>
     /// Get converter for a specific type
     /// </summary>
@@ -436,7 +581,10 @@ public class StateMigrationJob
             "LumenFeedbackGAgent" => new LumenFeedbackStateConverter(),
             "UserBillingGAgent" => new UserBillingStateConverter(),
             "GoogleAuthGAgent" => new GoogleAuthStateConverter(),
+            "GoogleIdentityBindingGAgent" => new GoogleIdentityBindingStateConverter(),
             "AIAgentStatusProxy" => new AIAgentStatusProxyStateConverter(),
+            "TwitterAuthGAgent" => new TwitterAuthStateConverter(),
+            "TwitterIdentityBindingGAgent" => new TwitterIdentityBindingStateConverter(),
             _ => null
         };
     }
@@ -488,7 +636,98 @@ public class StateMigrationJob
     }
 
     /// <summary>
-    /// Write State to new database (EventWave format)
+    /// Bulk write states to MongoDB using BulkWrite for better performance
+    /// </summary>
+    private async Task<(int SuccessCount, int FailedCount)> BulkWriteStateAsync(
+        List<(string AgentId, IMessage State, string AgentTypeName)> records,
+        CancellationToken cancellationToken)
+    {
+        if (records.Count == 0)
+            return (0, 0);
+
+        int successCount = 0;
+        int failedCount = 0;
+
+        try
+        {
+            var database = _mongoClient.GetDatabase(_databaseName);
+            
+            // Group by StateType to write to correct collections
+            var groupedByStateType = records.GroupBy(r => r.State.GetType().Name);
+
+            foreach (var group in groupedByStateType)
+            {
+                var stateTypeShortName = group.Key;
+                var collectionName = $"agent_states_{stateTypeShortName}";
+                var collection = database.GetCollection<BsonDocument>(collectionName);
+                var stateTypeFullName = group.First().State.GetType().FullName ?? stateTypeShortName;
+
+                var bulkOps = new List<WriteModel<BsonDocument>>();
+
+                foreach (var (agentId, state, _) in group)
+                {
+                    try
+                    {
+                        var stateBytes = state.ToByteArray();
+                        var document = new BsonDocument
+                        {
+                            { "_id", agentId },
+                            { "StateData", new BsonBinaryData(stateBytes, BsonBinarySubType.Binary) },
+                            { "StateType", stateTypeFullName },
+                            { "Version", 1L },
+                            { "UpdatedAt", DateTime.UtcNow }
+                        };
+
+                        var filter = Builders<BsonDocument>.Filter.Eq("_id", agentId);
+                        var replaceOneModel = new ReplaceOneModel<BsonDocument>(filter, document)
+                        {
+                            IsUpsert = true
+                        };
+                        bulkOps.Add(replaceOneModel);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[StateMigration] Error preparing bulk write for {AgentId}", agentId);
+                        failedCount++;
+                    }
+                }
+
+                if (bulkOps.Count > 0)
+                {
+                    try
+                    {
+                        var bulkResult = await collection.BulkWriteAsync(bulkOps, 
+                            new BulkWriteOptions { IsOrdered = false }, cancellationToken);
+                        // ReplaceOneModel with IsUpsert=true: ModifiedCount for updates, InsertedCount for inserts
+                        var totalSuccess = bulkResult.ModifiedCount + bulkResult.InsertedCount;
+                        successCount += (int)totalSuccess;
+                        failedCount += bulkOps.Count - (int)totalSuccess;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "[StateMigration] Bulk write failed for collection {Collection}", collectionName);
+                        failedCount += bulkOps.Count;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[StateMigration] Bulk write operation failed");
+            failedCount += records.Count;
+        }
+
+        return (successCount, failedCount);
+    }
+
+    /// <summary>
+    /// Write State to new database (matching MongoDBStateStore/AgentStateDocument format)
+    /// 
+    /// AgentStateDocument uses:
+    /// - _id: AgentId (via [BsonId] attribute)
+    /// - StateType: Full type name (typeof(TState).FullName)
+    /// 
+    /// Note: This method is kept for backward compatibility but BulkWriteStateAsync is preferred
     /// </summary>
     private async Task<bool> WriteStateAsync(
         string agentId,
@@ -499,26 +738,32 @@ public class StateMigrationJob
         try
         {
             var database = _mongoClient.GetDatabase(_databaseName);
-            // Use the same collection naming convention as MongoDBStateStore: agent_states_{StateTypeName}
-            // For UserStatisticsGAgent, State type is UserStatisticsState, so collection is agent_states_UserStatisticsState
-            var stateTypeName = state.GetType().Name; // e.g., "UserStatisticsState"
-            var collectionName = $"agent_states_{stateTypeName}";
+            
+            // Collection naming: agent_states_{StateTypeName} (short name)
+            var stateTypeShortName = state.GetType().Name; // e.g., "UserStatisticsState"
+            var collectionName = $"agent_states_{stateTypeShortName}";
             var collection = database.GetCollection<BsonDocument>(collectionName);
+
+            // StateType should be full type name (matching MongoDBStateStore)
+            var stateTypeFullName = state.GetType().FullName ?? stateTypeShortName;
 
             // Serialize Protobuf State
             var stateBytes = state.ToByteArray();
 
-            // Use the same document structure as AgentStateDocument
+            // Match AgentStateDocument structure exactly:
+            // - _id: AgentId (not a separate AgentId field!)
+            // - StateType: Full type name
             var document = new BsonDocument
             {
-                { "AgentId", agentId },
+                { "_id", agentId },  // AgentId as _id (matching [BsonId] attribute)
                 { "StateData", new BsonBinaryData(stateBytes, BsonBinarySubType.Binary) },
-                { "StateType", stateTypeName },
+                { "StateType", stateTypeFullName },  // Full type name
                 { "Version", 1L },
                 { "UpdatedAt", DateTime.UtcNow }
             };
 
-            var filter = Builders<BsonDocument>.Filter.Eq("AgentId", agentId);
+            // Use _id for filter (not AgentId)
+            var filter = Builders<BsonDocument>.Filter.Eq("_id", agentId);
             var options = new ReplaceOptions { IsUpsert = true };
 
             await collection.ReplaceOneAsync(filter, document, options, cancellationToken);

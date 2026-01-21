@@ -20,3 +20,17 @@ message GoogleAuthStateProto {
   google.protobuf.Timestamp token_expires_at = 7;
   google.protobuf.Timestamp last_login_at = 8;
 }
+
+// =============================================================================
+// GoogleIdentityBinding State
+// Maps Google identity to user account
+// =============================================================================
+
+message GoogleIdentityBindingStateProto {
+  string google_id = 1;
+  string user_id = 2;
+  string email = 3;
+  string display_name = 4;
+  google.protobuf.Timestamp bound_at = 5;
+  google.protobuf.Timestamp last_used_at = 6;
+}

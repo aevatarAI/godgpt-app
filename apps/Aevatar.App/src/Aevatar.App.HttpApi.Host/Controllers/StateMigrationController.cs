@@ -13,8 +13,9 @@ namespace Aevatar.App.HttpApi.Host.Controllers;
 /// <summary>
 /// API controller for triggering State Migration job
 /// </summary>
+[ApiController]
 [Route("api/admin/migration")]
-[Authorize] // Add your authorization policy here
+[Authorize]
 public class StateMigrationController : AbpControllerBase
 {
     private readonly StateMigrationJob _migrationJob;

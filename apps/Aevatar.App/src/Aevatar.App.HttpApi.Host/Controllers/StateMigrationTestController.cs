@@ -343,9 +343,9 @@ public class StateMigrationTestController : AbpControllerBase
                         Error = "No PaymentIndexGAgent records found in MongoDB. Collection may be empty or use different name."
                     });
                 }
-                else if (paymentIndexDoc != null && paymentIndexDoc.Contains("AgentId"))
+                else if (paymentIndexDoc != null && paymentIndexDoc.Contains("_id"))
                 {
-                    var paymentAgentId = paymentIndexDoc["AgentId"].AsString;
+                    var paymentAgentId = paymentIndexDoc["_id"].AsString;
                     
                     try
                     {
@@ -425,9 +425,9 @@ public class StateMigrationTestController : AbpControllerBase
                         Error = "No GoogleAuthGAgent records found in MongoDB. Collection may be empty or use different name."
                     });
                 }
-                else if (googleAuthDoc != null && googleAuthDoc.Contains("AgentId"))
+                else if (googleAuthDoc != null && googleAuthDoc.Contains("_id"))
                 {
-                    var googleAuthAgentId = googleAuthDoc["AgentId"].AsString;
+                    var googleAuthAgentId = googleAuthDoc["_id"].AsString;
                     
                     // Read state directly from MongoDB (GoogleAuthGAgent may not have RPC interface)
                     var stateData = googleAuthDoc["StateData"].AsBsonBinaryData.Bytes;
@@ -881,7 +881,8 @@ public class StateMigrationTestController : AbpControllerBase
             var collectionName = $"agent_states_{stateTypeName}";
             var collection = database.GetCollection<BsonDocument>(collectionName);
 
-            var filter = Builders<BsonDocument>.Filter.Eq("AgentId", agentId);
+            // Use _id field (matching migration format, AgentStateDocument maps AgentId to _id via [BsonId])
+            var filter = Builders<BsonDocument>.Filter.Eq("_id", agentId);
             var doc = await collection.Find(filter).FirstOrDefaultAsync();
 
             if (doc == null)

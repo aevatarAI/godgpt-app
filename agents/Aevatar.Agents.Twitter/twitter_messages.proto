@@ -6,6 +6,29 @@ import "google/protobuf/timestamp.proto";
 
 // ========== Agent State ==========
 
+// Twitter Auth State - OAuth authentication state
+message TwitterAuthStateProto {
+    string twitter_id = 1;
+    string user_id = 2;
+    string screen_name = 3;
+    string access_token = 4;
+    string access_token_secret = 5;
+    string display_name = 6;
+    string profile_image_url = 7;
+    google.protobuf.Timestamp auth_time = 8;
+    google.protobuf.Timestamp token_expires_at = 9;
+}
+
+// Twitter Identity Binding State - Maps Twitter identity to user account
+message TwitterIdentityBindingStateProto {
+    string twitter_id = 1;
+    string user_id = 2;
+    string screen_name = 3;
+    string display_name = 4;
+    google.protobuf.Timestamp bound_at = 5;
+    google.protobuf.Timestamp last_used_at = 6;
+}
+
 // Twitter Agent State
 message TwitterGAgentState {
     string agent_id = 1;

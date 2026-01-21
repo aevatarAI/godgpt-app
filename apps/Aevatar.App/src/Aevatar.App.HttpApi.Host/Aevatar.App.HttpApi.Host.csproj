@@ -54,6 +54,7 @@
     <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Runtime.Orleans\Aevatar.Agents.Runtime.Orleans.csproj" />
     <ProjectReference Include="..\..\..\..\plugins\Aevatar.Agents.Plugins.CQRS\Aevatar.Agents.Plugins.CQRS.csproj" />
     <ProjectReference Include="..\..\..\..\plugins\Aevatar.Agents.Plugins.MassTransit\Aevatar.Agents.Plugins.MassTransit.csproj" />
+    <ProjectReference Include="..\..\..\..\agents\Aevatar.Agents.Twitter\Aevatar.Agents.Twitter.csproj" />
   </ItemGroup>
   
   <!-- Payment Module -->
