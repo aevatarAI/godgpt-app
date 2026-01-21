@@ -313,19 +313,19 @@ public class StateMigrationJob
         }
 
         var jsonFormatter = new JsonFormatter(JsonFormatter.Settings.Default);
-        int skip = 0;
-        const int limit = 500; // Increased batch size for better performance
+        const int limit = 500; // Batch size for pagination
         const int bulkWriteSize = 100; // Bulk write size for MongoDB
         int batchNumber = 0;
         int sampleLogged = 0;
         var bulkWriteBuffer = new List<(string AgentId, IMessage State, string AgentTypeName)>();
+        string? cursor = null; // Cursor for pagination (null for first page)
 
-        // Stream processing: fetch and process batch by batch
+        // Stream processing: fetch and process batch by batch using cursor pagination
         while (!cancellationToken.IsCancellationRequested)
         {
             batchNumber++;
             var fetchStartTime = DateTime.UtcNow;
-            var (records, hasMore) = await FetchBatchAsync(collection.CollectionName, skip, limit, cancellationToken);
+            var (records, hasMore, nextCursor) = await FetchBatchAsync(collection.CollectionName, limit, cursor, cancellationToken);
             var fetchDuration = (DateTime.UtcNow - fetchStartTime).TotalMilliseconds;
             
             if (records == null || records.Count == 0)
@@ -335,14 +335,17 @@ public class StateMigrationJob
                 if (!hasMore)
                     break;
                 // If no records but hasMore, continue to next batch (some records were skipped)
-                skip += limit;
+                cursor = nextCursor;
                 continue;
             }
 
-            _logger.LogInformation("[StateMigration] [{TypeName}] Processing batch {Batch}: {Count} records (skip={Skip}, hasMore={HasMore}, fetchTime={FetchTime}ms)",
-                collection.TypeName, batchNumber, records.Count, skip, hasMore, fetchDuration.ToString("F2"));
+            _logger.LogInformation("[StateMigration] [{TypeName}] Processing batch {Batch}: {Count} records (cursor={Cursor}, hasMore={HasMore}, fetchTime={FetchTime}ms)",
+                collection.TypeName, batchNumber, records.Count, cursor ?? "skip=0", hasMore, fetchDuration.ToString("F2"));
 
             result.TotalRecords += records.Count;
+            
+            // Update cursor for next iteration
+            cursor = nextCursor;
 
             // Process each record in the batch
             foreach (var record in records)
@@ -447,8 +450,8 @@ public class StateMigrationJob
             // Check if there are more records using hasMore flag
             if (!hasMore)
                 break;
-
-            skip += limit;
+            
+            // Cursor is already updated above (line 348), no need to increment skip
             
             // Delay between batches
             await Task.Delay(_options.BatchDelayMs, cancellationToken);
@@ -496,17 +499,32 @@ public class StateMigrationJob
     }
 
     /// <summary>
-    /// Fetch a single batch of records from old system API
-    /// Returns (records, hasMore) tuple
+    /// Fetch a batch of records from old system API using cursor pagination
+    /// Returns (records, hasMore, nextCursor) tuple
     /// </summary>
-    private async Task<(List<ExportedRecord>? Records, bool HasMore)> FetchBatchAsync(
-        string collectionName, int skip, int limit, CancellationToken cancellationToken)
+    private async Task<(List<ExportedRecord>? Records, bool HasMore, string? NextCursor)> FetchBatchAsync(
+        string collectionName, int limit, string? cursor, CancellationToken cancellationToken)
     {
         try
         {
-            var url = $"{_options.OldSystemApiBaseUrl}/api/admin/export/grain" +
-                $"?collection={Uri.EscapeDataString(collectionName)}&skip={skip}&limit={limit}";
+            // Build URL with cursor (if provided) or skip=0 (for first page)
+            var urlBuilder = new System.Text.StringBuilder();
+            urlBuilder.Append($"{_options.OldSystemApiBaseUrl}/api/admin/export/grain");
+            urlBuilder.Append($"?collection={Uri.EscapeDataString(collectionName)}");
+            urlBuilder.Append($"&limit={limit}");
             
+            if (!string.IsNullOrEmpty(cursor))
+            {
+                // Use cursor for subsequent pages (more efficient)
+                urlBuilder.Append($"&cursor={Uri.EscapeDataString(cursor)}");
+            }
+            else
+            {
+                // Use skip=0 for first page to get initial cursor
+                urlBuilder.Append("&skip=0");
+            }
+            
+            var url = urlBuilder.ToString();
             var response = await _httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
 
@@ -523,6 +541,14 @@ public class StateMigrationJob
                     hasMore = hasMoreElement.ValueKind == JsonValueKind.True;
                 }
                 
+                // Parse nextCursor
+                string? nextCursor = null;
+                if (dataElement.TryGetProperty("nextCursor", out var nextCursorElement) &&
+                    nextCursorElement.ValueKind == JsonValueKind.String)
+                {
+                    nextCursor = nextCursorElement.GetString();
+                }
+                
                 // Parse records
                 if (dataElement.TryGetProperty("records", out var recordsElement) &&
                     recordsElement.ValueKind == JsonValueKind.Array)
@@ -530,19 +556,19 @@ public class StateMigrationJob
                     var records = JsonSerializer.Deserialize<List<ExportedRecord>>(
                         recordsElement.GetRawText(),
                         new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                    return (records, hasMore);
+                    return (records, hasMore, nextCursor);
                 }
                 
-                return (null, hasMore);
+                return (null, hasMore, nextCursor);
             }
             
-            return (null, false);
+            return (null, false, null);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[StateMigration] Error fetching batch: collection={Collection}, skip={Skip}", 
-                collectionName, skip);
-            return (null, false);
+            _logger.LogError(ex, "[StateMigration] Error fetching batch: collection={Collection}, cursor={Cursor}", 
+                collectionName, cursor ?? "null");
+            return (null, false, null);
         }
     }
 
@@ -585,6 +611,10 @@ public class StateMigrationJob
             "AIAgentStatusProxy" => new AIAgentStatusProxyStateConverter(),
             "TwitterAuthGAgent" => new TwitterAuthStateConverter(),
             "TwitterIdentityBindingGAgent" => new TwitterIdentityBindingStateConverter(),
+            // Orleans grain states (converted to agent states)
+            "ShareState" => new ShareStateConverter(),
+            "UserPaymentState" => new UserPaymentStateConverter(),
+            "UserBillingState" => new UserBillingGrainStateConverter(), // Orleans grain state
             _ => null
         };
     }
@@ -616,6 +646,12 @@ public class StateMigrationJob
 
     private string ExtractShortTypeName(string fullTypeName)
     {
+        // Handle Orleans grain state names (e.g., "OrleansgodgptprodShareState" -> "ShareState")
+        if (fullTypeName.StartsWith("Orleansgodgptprod", StringComparison.OrdinalIgnoreCase))
+        {
+            return fullTypeName.Substring("Orleansgodgptprod".Length);
+        }
+        
         var lastDot = fullTypeName.LastIndexOf('.');
         return lastDot >= 0 ? fullTypeName[(lastDot + 1)..] : fullTypeName;
     }
@@ -631,6 +667,10 @@ public class StateMigrationJob
         return shortName switch
         {
             "UserBillingGAgent" => "PaymentIndexGAgent",
+            // Orleans grain states mapped to agent states
+            "ShareState" => "ShareLinkGAgent",
+            "UserPaymentState" => "PaymentRecordGAgent",
+            "UserBillingState" => "PaymentIndexGAgent", // Orleans grain state -> PaymentIndexGAgent
             _ => shortName
         };
     }
@@ -674,7 +714,7 @@ public class StateMigrationJob
                             { "_id", agentId },
                             { "StateData", new BsonBinaryData(stateBytes, BsonBinarySubType.Binary) },
                             { "StateType", stateTypeFullName },
-                            { "Version", 1L },
+                            { "Version", 0L }, // Set to 0 for Event Sourcing agents (no events migrated yet)
                             { "UpdatedAt", DateTime.UtcNow }
                         };
 
