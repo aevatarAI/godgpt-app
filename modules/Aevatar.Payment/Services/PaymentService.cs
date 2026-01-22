@@ -533,15 +533,18 @@ public class PaymentService : IPaymentService
                     }
 
                     // Build payment completed event
+                    // Use PeriodEnd from webhook result (invoice.paid) if available, otherwise fallback to VerificationResult
+                    var periodEnd = result.PeriodEnd ?? result.VerificationResult?.ExpiresDate;
                     var completedEvent = new PaymentCompletedEvent
                     {
                         Context = eventContext,
                         TransactionId = result.TransactionId ?? string.Empty,
-                        PeriodStart = result.VerificationResult?.ExpiresDate != null
+                        InvoiceId = result.TransactionId ?? string.Empty, // For Stripe, invoice ID is same as transaction ID
+                        PeriodStart = periodEnd != null
                             ? Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
                             : null,
-                        PeriodEnd = result.VerificationResult?.ExpiresDate != null
-                            ? Timestamp.FromDateTime(result.VerificationResult.ExpiresDate.Value.ToUniversalTime())
+                        PeriodEnd = periodEnd != null
+                            ? Timestamp.FromDateTime(periodEnd.Value.ToUniversalTime())
                             : null,
                         IsRenewal = isRenewal,
                         CompletedAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
