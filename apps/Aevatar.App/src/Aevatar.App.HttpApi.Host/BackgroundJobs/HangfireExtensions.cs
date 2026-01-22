@@ -32,10 +32,6 @@ public static class HangfireExtensions
         
         var mongoUrlBuilder = new MongoUrlBuilder(connectionString);
         var databaseName = mongoUrlBuilder.DatabaseName ?? "AevatarBusiness";
-        
-        // Configure Hangfire options
-        services.Configure<LumenReminderOptions>(
-            configuration.GetSection(LumenReminderOptions.SectionName));
 
         services.AddHangfire(config =>
         {
@@ -85,34 +81,6 @@ public static class HangfireExtensions
                 DisplayStorageConnectionString = false
             });
             Log.Information("📊 Hangfire Dashboard available at /hangfire");
-        }
-
-        // Register recurring jobs using DI-based IRecurringJobManager
-        using var scope = app.ApplicationServices.CreateScope();
-        var options = scope.ServiceProvider.GetRequiredService<IOptions<LumenReminderOptions>>().Value;
-        var recurringJobManager = scope.ServiceProvider.GetRequiredService<IRecurringJobManager>();
-
-        if (options.IsEnabled && options.EnableDailyAutoGeneration)
-        {
-            recurringJobManager.AddOrUpdate<LumenDailyReminderJob>(
-                "lumen-daily-reminder",
-                job => job.ExecuteAsync(default),
-                options.CronExpression,
-                new RecurringJobOptions
-                {
-                    TimeZone = TimeZoneInfo.Utc,
-                    MisfireHandling = MisfireHandlingMode.Relaxed
-                });
-
-            Log.Information(
-                "⏰ Lumen Daily Reminder Job registered with cron: {Cron}", 
-                options.CronExpression);
-        }
-        else
-        {
-            // Remove job if disabled
-            recurringJobManager.RemoveIfExists("lumen-daily-reminder");
-            Log.Information("⏸️ Lumen Daily Reminder Job is disabled");
         }
 
         return app;
