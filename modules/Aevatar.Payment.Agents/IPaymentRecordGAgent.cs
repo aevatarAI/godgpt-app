@@ -29,7 +29,12 @@ public interface IPaymentRecordGAgent : IGAgent
     // ========== Query ==========
     
     /// <summary>
-    /// Get complete payment record
+    /// Get complete payment record state (Protobuf for RPC compatibility)
+    /// </summary>
+    Task<PaymentRecordStateProto> GetRecordStateAsync();
+    
+    /// <summary>
+    /// Get complete payment record (local use only - not RPC safe)
     /// </summary>
     Task<PaymentRecord> GetPaymentRecordAsync();
     

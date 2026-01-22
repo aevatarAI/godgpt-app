@@ -9,6 +9,7 @@ using Aevatar.Application.Grains.Agents.Invitation;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
 using Aevatar.Application.Grains.Invitation;
 using Aevatar.Application.Grains.UserQuota;
+using Aevatar.Payment.Agents.Protos;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
@@ -430,6 +431,95 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
     public void HandleMarkRewardIssuedEvent(MarkRewardIssuedEvent @event)
     {
         TransitionState(State, @event);
+    }
+
+    /// <summary>
+    /// Handle payment completed event - process invitee subscription rewards
+    /// This agent (inviter's agent) receives event when invitee pays
+    /// </summary>
+    [EventHandler]
+    public async Task HandlePaymentCompleted(PaymentCompletedEvent evt)
+    {
+        Logger.LogInformation(
+            "[InvitationGAgent][HandlePaymentCompleted] === EVENT RECEIVED === " +
+            "AgentId={AgentId}, TransactionId={TransactionId}, PayerUserId={PayerUserId}",
+            Id, evt.TransactionId, evt.Context?.UserId);
+        
+        // Only process events for godgpt business type
+        if (evt.Context?.BusinessType != "godgpt")
+        {
+            Logger.LogDebug(
+                "[InvitationGAgent][HandlePaymentCompleted] Skipping non-godgpt event. BusinessType={BusinessType}",
+                evt.Context?.BusinessType);
+            return;
+        }
+
+        // This agent represents the inviter
+        // The event comes from the invitee's PaymentIndexGAgent
+        // We need to check if the payer (evt.Context.UserId) is in our invitees list
+        var inviteeId = evt.Context.UserId;
+        
+        if (!State.Invitees.ContainsKey(inviteeId))
+        {
+            // This payment is not from our invitee, ignore
+            Logger.LogDebug(
+                "[InvitationGAgent][HandlePaymentCompleted] Payment from {InviteeId} is not from our invitee (we have {InviteeCount} invitees). AgentId={AgentId}",
+                inviteeId, State.Invitees.Count, Id);
+            return;
+        }
+
+        // Extract product information from business metadata
+        var metadataDict = evt.Context.BusinessMetadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value) 
+            ?? new Dictionary<string, string>();
+        var planType = GetPlanTypeFromMetadata(metadataDict);
+        var isUltimate = GetIsUltimateFromMetadata(metadataDict);
+        
+        Logger.LogInformation(
+            "[InvitationGAgent][HandlePaymentCompleted] Processing invitee payment reward. Inviter: {InviterId}, Invitee: {InviteeId}, PlanType: {PlanType}, IsUltimate: {IsUltimate}",
+            Id, inviteeId, planType, isUltimate);
+
+        // Process invitee subscription reward
+        await ProcessInviteeSubscriptionAsync(
+            inviteeId, 
+            (int)planType, 
+            isUltimate, 
+            evt.InvoiceId ?? evt.TransactionId);
+    }
+
+    private PlanType GetPlanTypeFromMetadata(Dictionary<string, string> metadata)
+    {
+        if (metadata == null) return CsPlanType.Month;
+
+        if (metadata.TryGetValue("plan_type", out var planTypeStr) && 
+            int.TryParse(planTypeStr, out var planTypeInt))
+        {
+            return (CsPlanType)planTypeInt;
+        }
+
+        if (metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr) && 
+            int.TryParse(originalPlanTypeStr, out var originalPlanTypeInt))
+        {
+            return (CsPlanType)originalPlanTypeInt;
+        }
+
+        return CsPlanType.Month; // Default to Monthly
+    }
+
+    private bool GetIsUltimateFromMetadata(Dictionary<string, string> metadata)
+    {
+        if (metadata == null) return false;
+
+        if (metadata.TryGetValue("is_ultimate", out var isUltimateStr))
+        {
+            return bool.TryParse(isUltimateStr, out var result) && result;
+        }
+
+        if (metadata.TryGetValue("isUltimate", out var isUltimateStr2))
+        {
+            return bool.TryParse(isUltimateStr2, out var result2) && result2;
+        }
+
+        return false;
     }
 
     #endregion

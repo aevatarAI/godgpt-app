@@ -154,6 +154,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     // ========== Query ==========
 
+    public Task<PaymentRecordStateProto> GetRecordStateAsync()
+    {
+        return Task.FromResult(State);
+    }
+
     public Task<PaymentRecord> GetPaymentRecordAsync()
     {
         return Task.FromResult(FromProto(State));

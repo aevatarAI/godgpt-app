@@ -1,20 +1,29 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Core;
+using Aevatar.Agents.GodGPT.Common;
+using Aevatar.Agents.GodGPT.Protos.FreeTrialCode;
 using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Agents.ChatManager.Common;
+using Aevatar.Application.Grains.Agents.Invitation;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.ChatManager.UserQuota;
+using Aevatar.Application.Grains.Common;
 using Aevatar.Application.Grains.Common.Constants;
 using Aevatar.Application.Grains.Common.Helpers;
 using Aevatar.Application.Grains.Common.Observability;
 using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.Common.Service;
+using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
+using Aevatar.Application.Grains.Invitation;
+using Aevatar.Payment.Agents;
+using Aevatar.Payment.Agents.Protos;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Newtonsoft.Json;
+using static Aevatar.Application.Grains.Common.Helpers.ProtoConversions;
 
 // Alias to avoid conflicts with proto-generated types
 using PlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
@@ -83,6 +92,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
     public IOptionsMonitor<CreditsOptions>? CreditsOptions { get; set; }
     public IOptionsMonitor<RateLimitOptions>? RateLimiterOptions { get; set; }
     public ILocalizationService? LocalizationService { get; set; }
+    
+    // Injected for trial code management (Agent RPC)
+    public IGAgentActorFactory? ActorFactory { get; set; }
 
     // Parameterless constructor required for Orleans activation
     public UserQuotaGAgent() : base()
@@ -838,6 +850,268 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             TransactionId = State.FreeTrialInfo.TransactionId
         });
     }
+
+    #region Payment Event Handlers
+
+    /// <summary>
+    /// Handle payment completed event - update user subscription and quota
+    /// </summary>
+    [EventHandler]
+    public async Task HandlePaymentCompleted(PaymentCompletedEvent evt)
+    {
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCompleted] === EVENT RECEIVED === " +
+            "AgentId={AgentId}, TransactionId={TransactionId}, BusinessType={BusinessType}",
+            Id, evt.TransactionId, evt.Context?.BusinessType);
+        
+        // Only process events for godgpt business type
+        if (evt.Context?.BusinessType != "godgpt")
+        {
+            Logger.LogDebug(
+                "[UserQuotaGAgent][HandlePaymentCompleted] Skipping non-godgpt event. BusinessType={BusinessType}",
+                evt.Context?.BusinessType);
+            return;
+        }
+
+        var userId = Guid.Parse(evt.Context.UserId);
+        if (userId.ToString() != Id)
+        {
+            Logger.LogWarning(
+                "[UserQuotaGAgent][HandlePaymentCompleted] UserId mismatch. Event UserId: {EventUserId}, Agent Id: {AgentId}",
+                evt.Context.UserId, Id);
+            return;
+        }
+
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCompleted] Processing payment for user {UserId}, TransactionId: {TransactionId}, IsRenewal: {IsRenewal}",
+            userId, evt.TransactionId, evt.IsRenewal);
+
+        // Extract product information from business metadata
+        var metadataDict = evt.Context.BusinessMetadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value) 
+            ?? new Dictionary<string, string>();
+        var planType = GetPlanTypeFromMetadata(metadataDict);
+        var isUltimate = GetIsUltimateFromMetadata(metadataDict);
+        var trialDays = GetTrialDaysFromMetadata(metadataDict);
+
+        // Get current subscription
+        var subscriptionInfo = await GetSubscriptionAsync(isUltimate);
+        var subscriptionIds = subscriptionInfo.SubscriptionIds ?? new List<string>();
+        var invoiceIds = subscriptionInfo.InvoiceIds ?? new List<string>();
+
+        // Add new subscription ID and invoice ID
+        if (!string.IsNullOrEmpty(evt.Context.SubscriptionId) && !subscriptionIds.Contains(evt.Context.SubscriptionId))
+        {
+            subscriptionIds.Add(evt.Context.SubscriptionId);
+        }
+
+        if (!string.IsNullOrEmpty(evt.InvoiceId) && !invoiceIds.Contains(evt.InvoiceId))
+        {
+            invoiceIds.Add(evt.InvoiceId);
+        }
+
+        // Calculate subscription end date
+        DateTime periodEnd;
+        if (evt.PeriodEnd != null)
+        {
+            periodEnd = evt.PeriodEnd.ToDateTime();
+        }
+        else
+        {
+            var startDate = evt.PeriodStart?.ToDateTime() ?? DateTime.UtcNow;
+            periodEnd = SubscriptionHelper.GetSubscriptionEndDate(planType, startDate);
+            if (trialDays > 0)
+            {
+                periodEnd = periodEnd.AddDays(trialDays);
+            }
+        }
+
+        // Update subscription
+        // Convert PlanType to QuotaPlanType for comparison
+        var quotaPlanType = planType.ToQuotaPlanType();
+        if (subscriptionInfo.IsActive)
+        {
+            // Existing subscription - update plan type if upgrade, extend end date
+            var currentQuotaPlanType = subscriptionInfo.PlanType.ToQuotaPlanType();
+            if (SubscriptionHelper.GetPlanTypeLogicalOrder(currentQuotaPlanType) <= 
+                SubscriptionHelper.GetPlanTypeLogicalOrder(quotaPlanType))
+            {
+                subscriptionInfo.PlanType = planType;
+            }
+            subscriptionInfo.EndDate = periodEnd;
+        }
+        else
+        {
+            // New subscription
+            subscriptionInfo.IsActive = true;
+            subscriptionInfo.PlanType = planType;
+            subscriptionInfo.StartDate = evt.PeriodStart?.ToDateTime() ?? DateTime.UtcNow;
+            subscriptionInfo.EndDate = periodEnd;
+
+            // Reset rate limits for new subscription
+            if (!evt.IsRenewal)
+            {
+                await ResetRateLimitsAsync("conversation");
+            }
+        }
+
+        subscriptionInfo.Status = PaymentStatus.Completed;
+        subscriptionInfo.SubscriptionIds = subscriptionIds;
+        subscriptionInfo.InvoiceIds = invoiceIds;
+
+        await UpdateSubscriptionAsync(subscriptionInfo, isUltimate);
+
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCompleted] Updated subscription for user {UserId}, PlanType: {PlanType}, IsUltimate: {IsUltimate}, EndDate: {EndDate}",
+            userId, planType, isUltimate, periodEnd);
+
+        // ========== Side Effects: Mark trial code as used ==========
+        // NOTE: Subscription cancellation is handled in HttpApi layer (GodGPTPaymentBusinessService)
+        // because it requires Stripe API which is not available in Silo.
+        
+        var trialCode = GetTrialCodeFromMetadata(metadataDict);
+        if (!string.IsNullOrEmpty(trialCode))
+        {
+            // Fire-and-forget: Don't block the main flow
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await MarkTrialCodeUsedAsync(trialCode, userId, evt.TransactionId);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex,
+                        "[UserQuotaGAgent][HandlePaymentCompleted] Failed to mark trial code {TrialCode} as used",
+                        trialCode);
+                }
+            });
+        }
+    }
+
+    private PlanType GetPlanTypeFromMetadata(Dictionary<string, string> metadata)
+    {
+        if (metadata == null) return PlanType.None;
+
+        if (metadata.TryGetValue("plan_type", out var planTypeStr) && 
+            int.TryParse(planTypeStr, out var planTypeInt))
+        {
+            return (PlanType)planTypeInt;
+        }
+
+        if (metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr) && 
+            int.TryParse(originalPlanTypeStr, out var originalPlanTypeInt))
+        {
+            return (PlanType)originalPlanTypeInt;
+        }
+
+        return PlanType.Month; // Default to Monthly
+    }
+
+    private bool GetIsUltimateFromMetadata(Dictionary<string, string> metadata)
+    {
+        if (metadata == null) return false;
+
+        if (metadata.TryGetValue("is_ultimate", out var isUltimateStr))
+        {
+            return bool.TryParse(isUltimateStr, out var result) && result;
+        }
+
+        if (metadata.TryGetValue("isUltimate", out var isUltimateStr2))
+        {
+            return bool.TryParse(isUltimateStr2, out var result2) && result2;
+        }
+
+        return false;
+    }
+
+    private int GetTrialDaysFromMetadata(Dictionary<string, string> metadata)
+    {
+        if (metadata == null) return 0;
+
+        if (metadata.TryGetValue("trial_days", out var trialDaysStr) && 
+            int.TryParse(trialDaysStr, out var trialDays))
+        {
+            return trialDays;
+        }
+
+        return 0;
+    }
+
+    private string? GetTrialCodeFromMetadata(Dictionary<string, string>? metadata)
+    {
+        if (metadata == null) return null;
+
+        if (metadata.TryGetValue("trial_code", out var trialCode))
+        {
+            return trialCode;
+        }
+
+        if (metadata.TryGetValue("trialCode", out var trialCode2))
+        {
+            return trialCode2;
+        }
+
+        return null;
+    }
+
+    #endregion
+
+    #region Subscription Management
+
+    /// <summary>
+    /// Mark trial code as used when payment is completed
+    /// </summary>
+    private async Task MarkTrialCodeUsedAsync(string trialCode, Guid userId, string transactionId)
+    {
+        try
+        {
+            Logger.LogInformation(
+                "[UserQuotaGAgent][MarkTrialCodeUsedAsync] Marking trial code {TrialCode} as used for user {UserId}",
+                trialCode, userId);
+
+            if (ActorFactory == null)
+            {
+                Logger.LogWarning("[UserQuotaGAgent][MarkTrialCodeUsedAsync] ActorFactory not injected");
+                return;
+            }
+
+            // Parse code info to get batch ID
+            var batchId = InvitationCodeHelper.ParseBatchTimestampFromCode(trialCode);
+            
+            // Mark in FreeTrialCodeFactoryGAgent
+            var factoryAgentId = CommonHelper.GetFreeTrialCodeFactoryGAgentId(batchId);
+            var factoryActor = await ActorFactory.CreateGAgentActorAsync<FreeTrialCodeFactoryGAgent>(factoryAgentId.ToString());
+            var factoryAgent = factoryActor.As<IFreeTrialCodeFactoryGAgent>();
+            
+            await factoryAgent.MarkCodeAsUsedAsync(new MarkCodeUsedRequestProto
+            {
+                Code = trialCode,
+                UserId = userId.ToString()
+            });
+
+            // Mark in InviteCodeGAgent
+            var inviteCodeGuid = CommonHelper.StringToGuid(trialCode);
+            var inviteCodeActor = await ActorFactory.CreateGAgentActorAsync<InviteCodeGAgent>(inviteCodeGuid.ToString());
+            var inviteCodeAgent = inviteCodeActor.As<IInviteCodeGAgent>();
+            await inviteCodeAgent.MarkCodeAsUsedAsync();
+
+            Logger.LogInformation(
+                "[UserQuotaGAgent][MarkTrialCodeUsedAsync] Successfully marked trial code {TrialCode} as used",
+                trialCode);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex,
+                "[UserQuotaGAgent][MarkTrialCodeUsedAsync] Failed to mark trial code {TrialCode} as used",
+                trialCode);
+        }
+    }
+
+    // NOTE: Subscription cancellation logic has been moved to HttpApi layer
+    // (GodGPTPaymentBusinessService) because it requires Stripe API which is
+    // not available in Silo. Agent only handles state management.
+
+    #endregion
 
     #region Helper Methods
     

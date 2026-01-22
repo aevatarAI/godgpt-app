@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using Aevatar.App.Application.Services.Payment;
 using Aevatar.App.HttpApi.Controllers;
 using Aevatar.Payment.Abstractions;
 using Microsoft.AspNetCore.Authorization;
@@ -24,13 +25,16 @@ namespace Aevatar.Controllers;
 public class GodGPTWebhookController : AevatarController
 {
     private readonly IPaymentService _paymentService;
+    private readonly IGodGPTPaymentBusinessService _businessService;
     private readonly ILogger<GodGPTWebhookController> _logger;
 
     public GodGPTWebhookController(
         IPaymentService paymentService,
+        IGodGPTPaymentBusinessService businessService,
         ILogger<GodGPTWebhookController> logger)
     {
         _paymentService = paymentService;
+        _businessService = businessService;
         _logger = logger;
     }
 
@@ -71,6 +75,12 @@ public class GodGPTWebhookController : AevatarController
             if (!result.Success)
             {
                 return Ok(new { success = false, message = result.ErrorMessage ?? "Failed to process notification" });
+            }
+
+            // Process godgpt-specific business logic (cancel old subscriptions)
+            if (result.ShouldProcess && result.UserId.HasValue)
+            {
+                await ProcessGodGPTBusinessLogicAsync(result, PaymentPlatform.GooglePlay);
             }
 
             return Ok(new { success = true });
@@ -115,6 +125,12 @@ public class GodGPTWebhookController : AevatarController
                 return Ok(new { success = false, message = result.ErrorMessage ?? "Failed to process notification" });
             }
 
+            // Process godgpt-specific business logic (cancel old subscriptions)
+            if (result.ShouldProcess && result.UserId.HasValue)
+            {
+                await ProcessGodGPTBusinessLogicAsync(result, PaymentPlatform.AppStore);
+            }
+
             return Ok(new { success = true });
         }
         catch (Exception ex)
@@ -154,6 +170,12 @@ public class GodGPTWebhookController : AevatarController
             _logger.LogInformation("[GodGPTWebhook] Stripe result: Success={Success}, Event={Event}, UserId={UserId}",
                 result.Success, result.EventType, result.UserId);
 
+            // Process godgpt-specific business logic (cancel old subscriptions)
+            if (result.Success && result.ShouldProcess && result.UserId.HasValue)
+            {
+                await ProcessGodGPTBusinessLogicAsync(result, PaymentPlatform.Stripe);
+            }
+
             // Stripe requires 200 OK to acknowledge receipt
             return Ok();
         }
@@ -161,6 +183,46 @@ public class GodGPTWebhookController : AevatarController
         {
             _logger.LogError(ex, "[GodGPTWebhook] Stripe webhook error");
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Process godgpt-specific business logic after successful payment.
+    /// Fire-and-forget pattern: don't block webhook response.
+    /// </summary>
+    private async Task ProcessGodGPTBusinessLogicAsync(WebhookResult result, PaymentPlatform platform)
+    {
+        try
+        {
+            // Get productId from webhook result
+            // - Stripe: PriceId (stored in result.ProductId)
+            // - Apple/Google: ProductId (stored in result.ProductId)
+            var productId = result.ProductId ?? result.VerificationResult?.ProductId;
+
+            _logger.LogInformation(
+                "[GodGPTWebhook] === PROCESSING BUSINESS LOGIC === " +
+                "Platform={Platform}, UserId={UserId}, SubscriptionId={SubscriptionId}, " +
+                "ProductId={ProductId}, IsRenewal={IsRenewal}, EventType={EventType}",
+                platform, result.UserId, result.SubscriptionId, 
+                productId, result.IsRenewal, result.EventType);
+
+            await _businessService.HandlePaymentSuccessAsync(
+                result.UserId!.Value,
+                platform,
+                result.SubscriptionId ?? string.Empty,
+                productId,
+                result.IsRenewal);
+            
+            _logger.LogInformation(
+                "[GodGPTWebhook] === BUSINESS LOGIC COMPLETED === UserId={UserId}",
+                result.UserId);
+        }
+        catch (Exception ex)
+        {
+            // Log but don't fail the webhook
+            _logger.LogError(ex,
+                "[GodGPTWebhook] Business logic processing failed for user {UserId}",
+                result.UserId);
         }
     }
 

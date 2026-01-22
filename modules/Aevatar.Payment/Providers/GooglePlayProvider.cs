@@ -106,14 +106,21 @@ public class GooglePlayProvider : IPaymentProvider
     {
         try
         {
-            // Validate request headers
-            if (!ValidateRevenueCatHeaders(request.Headers))
+            // Validate request headers (skip if WebhookAuthToken is empty for testing)
+            if (!string.IsNullOrEmpty(_options.WebhookAuthToken))
             {
-                return Task.FromResult(new WebhookResult
+                if (!ValidateRevenueCatHeaders(request.Headers))
                 {
-                    Success = false,
-                    ErrorMessage = "Invalid request headers"
-                });
+                    return Task.FromResult(new WebhookResult
+                    {
+                        Success = false,
+                        ErrorMessage = "Invalid request headers"
+                    });
+                }
+            }
+            else
+            {
+                _logger.LogWarning("[GooglePlayProvider] Webhook header validation DISABLED (test mode)");
             }
 
             var webhookEvent = ParseRevenueCatWebhook(request.Payload);
@@ -147,6 +154,10 @@ public class GooglePlayProvider : IPaymentProvider
             }
 
             result.NewStatus = MapRevenueCatEventToStatus(webhookEvent.EventType);
+            result.ProductId = webhookEvent.ProductId; // For product config lookup
+            
+            // Determine if this is a renewal - Google Play uses "RENEWAL" event type
+            result.IsRenewal = webhookEvent.EventType == "RENEWAL";
 
             result.VerificationResult = new VerificationResult
             {
@@ -366,5 +377,6 @@ public class GoogleProductConfig
     public decimal Price { get; set; }
     public string Currency { get; set; } = "USD";
     public PlanType PlanType { get; set; }
+    public bool IsUltimate { get; set; }
 }
 

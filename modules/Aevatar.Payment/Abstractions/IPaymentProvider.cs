@@ -165,6 +165,20 @@ public class WebhookResult
     public string? ErrorMessage { get; set; }
     public VerificationResult? VerificationResult { get; set; }
     public bool ShouldProcess { get; set; } = true;
+    
+    /// <summary>
+    /// Product identifier (Apple/Google: ProductId, Stripe: PriceId)
+    /// Used to determine subscription tier (e.g., IsUltimate)
+    /// </summary>
+    public string? ProductId { get; set; }
+    
+    /// <summary>
+    /// Whether this is a renewal payment (not first-time subscription).
+    /// - Stripe: BillingReason == "subscription_cycle"
+    /// - Apple: EventType == "DID_RENEW"
+    /// - Google: EventType == "RENEWAL"
+    /// </summary>
+    public bool IsRenewal { get; set; }
 }
 
 /// <summary>

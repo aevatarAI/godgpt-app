@@ -1,4 +1,5 @@
-﻿using Aevatar.App.Application.Services;
+using Aevatar.App.Application.Services;
+using Aevatar.App.Application.Services.Payment;
 using Aevatar.App.Application.Contracts.Services;
 using Aevatar.Application.Grains;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,5 +48,11 @@ public class AppApplicationModule : AbpModule
         
         // Register UserQuotaService
         context.Services.AddScoped<IUserQuotaService, UserQuotaService>();
+        
+        // Register PaymentBusinessRegistrationService (registers business agents for payment events)
+        context.Services.AddScoped<PaymentBusinessRegistrationService>();
+        
+        // Register GodGPTPaymentBusinessService (handles Stripe operations in HttpApi layer)
+        context.Services.AddScoped<IGodGPTPaymentBusinessService, GodGPTPaymentBusinessService>();
     }
 }

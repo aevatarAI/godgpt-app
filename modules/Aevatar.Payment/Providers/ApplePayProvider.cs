@@ -199,9 +199,13 @@ public class ApplePayProvider : IPaymentProvider
             }
 
             result.NewStatus = MapAppleEventToStatus(notification.NotificationType, notification.Subtype);
+            
+            // Determine if this is a renewal - Apple uses "DID_RENEW" notification type
+            result.IsRenewal = notification.NotificationType == "DID_RENEW";
 
             if (transactionInfo != null)
             {
+                result.ProductId = transactionInfo.ProductId; // For product config lookup
                 result.VerificationResult = new VerificationResult
                 {
                     IsValid = true,
@@ -676,5 +680,6 @@ public class AppleProductConfig
     public decimal Price { get; set; }
     public string Currency { get; set; } = "USD";
     public PlanType PlanType { get; set; }
+    public bool IsUltimate { get; set; }
 }
 

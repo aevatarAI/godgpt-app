@@ -386,9 +386,9 @@ public class PaymentService : IPaymentService
                 return;
             }
 
-            // Get payment record for event context
-            var record = await recordAgent.GetPaymentRecordAsync();
-            var eventContext = BuildEventContext(record, platform, paymentId);
+            // Get payment record state (Protobuf) for event context
+            var recordState = await recordAgent.GetRecordStateAsync();
+            var eventContext = BuildEventContext(recordState, platform, paymentId);
 
             // Get index agent for event broadcasting (requires UserId)
             AgentModels.IPaymentIndexGAgent? indexAgent = null;
@@ -404,7 +404,7 @@ public class PaymentService : IPaymentService
                 if (result.NewStatus == PaymentStatus.Completed)
                 {
                     var isRenewal = result.VerificationResult?.ExpiresDate != null && 
-                                    record?.Status == AgentModels.PaymentStatus.Completed;
+                                    recordState?.Status == (int)AgentModels.PaymentStatus.Completed;
                     
                     // Process renewal in agent
                     if (result.VerificationResult?.ExpiresDate != null)
@@ -468,7 +468,7 @@ public class PaymentService : IPaymentService
                     {
                         Context = eventContext,
                         OriginalTransactionId = result.TransactionId ?? string.Empty,
-                        RefundAmount = record?.Amount ?? 0,
+                        RefundAmount = recordState?.Amount ?? 0,
                         Reason = "refund",
                         RefundType = "full",
                         RefundedAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
@@ -522,7 +522,7 @@ public class PaymentService : IPaymentService
     }
 
     private static PaymentEventContext BuildEventContext(
-        AgentModels.PaymentRecord? record,
+        AgentModels.Protos.PaymentRecordStateProto? recordState,
         PaymentPlatform platform,
         string paymentId)
     {
@@ -532,23 +532,23 @@ public class PaymentService : IPaymentService
             Platform = (int)platform
         };
 
-        if (record != null)
+        if (recordState != null)
         {
-            context.UserId = record.UserId;
-            context.SubscriptionId = record.SubscriptionId;
-            context.CustomerId = record.CustomerId;
-            context.BusinessType = record.BusinessType;
-            context.BusinessId = record.BusinessId;
-            context.Environment = record.Environment;
-            context.ProductId = record.ProductId;
-            context.ProductName = record.ProductName;
-            context.PaymentMode = (int)record.PaymentMode;
-            context.Amount = record.Amount;
-            context.Currency = record.Currency;
+            context.UserId = recordState.UserId;
+            context.SubscriptionId = recordState.SubscriptionId;
+            context.CustomerId = recordState.CustomerId;
+            context.BusinessType = recordState.BusinessType;
+            context.BusinessId = recordState.BusinessId;
+            context.Environment = recordState.Environment;
+            context.ProductId = recordState.ProductId;
+            context.ProductName = recordState.ProductName;
+            context.PaymentMode = recordState.PaymentMode;
+            context.Amount = recordState.Amount;
+            context.Currency = recordState.Currency;
 
-            if (record.BusinessMetadata != null)
+            if (recordState.BusinessMetadata != null)
             {
-                foreach (var kv in record.BusinessMetadata)
+                foreach (var kv in recordState.BusinessMetadata)
                 {
                     context.BusinessMetadata[kv.Key] = kv.Value;
                 }

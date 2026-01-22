@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
@@ -17,6 +17,7 @@
         <ProjectReference Include="../../src/Aevatar.Agents.Runtime.Orleans/Aevatar.Agents.Runtime.Orleans.csproj" />
         <ProjectReference Include="../Aevatar.Agents.Chat/Aevatar.Agents.Chat.csproj" />
         <ProjectReference Include="../../modules/Aevatar.Payment.Agents/Aevatar.Payment.Agents.csproj" />
+        <ProjectReference Include="../../modules/Aevatar.Payment/Aevatar.Payment.csproj" />
     </ItemGroup>
 
     <!-- NuGet Packages (via CPM) -->

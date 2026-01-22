@@ -346,11 +346,32 @@ public class StripeProvider : IPaymentProvider
     {
         try
         {
-            var stripeEvent = EventUtility.ConstructEvent(
-                request.Payload,
-                request.Signature,
-                _options.WebhookSecret
-            );
+            Event stripeEvent;
+            
+            // Allow bypassing signature verification for testing
+            // Set WebhookSecret to empty or "test" to skip verification
+            if (string.IsNullOrEmpty(_options.WebhookSecret) || _options.WebhookSecret == "test")
+            {
+                _logger.LogWarning("[StripeProvider] Webhook signature verification DISABLED (test mode)");
+                try
+                {
+                    stripeEvent = EventUtility.ParseEvent(request.Payload);
+                }
+                catch (Exception parseEx)
+                {
+                    _logger.LogWarning(parseEx, "[StripeProvider] Failed to parse event with Stripe SDK, attempting JSON fallback");
+                    // Fallback: Parse as raw JSON for testing purposes
+                    return ParseEventFromJson(request.Payload);
+                }
+            }
+            else
+            {
+                stripeEvent = EventUtility.ConstructEvent(
+                    request.Payload,
+                    request.Signature,
+                    _options.WebhookSecret
+                );
+            }
 
             _logger.LogInformation("[StripeProvider] Processing webhook: {EventType}", stripeEvent.Type);
 
@@ -535,20 +556,134 @@ public class StripeProvider : IPaymentProvider
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Parse Stripe event from raw JSON (fallback for test mode when SDK parsing fails)
+    /// </summary>
+    private WebhookResult ParseEventFromJson(string payload)
+    {
+        try
+        {
+            var jsonEvent = System.Text.Json.JsonSerializer.Deserialize<System.Text.Json.JsonElement>(payload);
+            var eventType = jsonEvent.GetProperty("type").GetString();
+            _logger.LogInformation("[StripeProvider] Parsing event from JSON fallback: {EventType}", eventType);
+
+            var result = new WebhookResult
+            {
+                Success = true,
+                EventType = eventType,
+                ShouldProcess = true
+            };
+
+            // Extract data.object
+            if (jsonEvent.TryGetProperty("data", out var data) &&
+                data.TryGetProperty("object", out var obj))
+            {
+                // Extract userId from metadata
+                string? userId = null;
+                if (obj.TryGetProperty("subscription_details", out var subDetails) &&
+                    subDetails.TryGetProperty("metadata", out var subMeta) &&
+                    subMeta.TryGetProperty("userId", out var subUserId))
+                {
+                    userId = subUserId.GetString();
+                }
+                else if (obj.TryGetProperty("metadata", out var meta) &&
+                    meta.TryGetProperty("userId", out var metaUserId))
+                {
+                    userId = metaUserId.GetString();
+                }
+
+                if (!string.IsNullOrEmpty(userId) && Guid.TryParse(userId, out var userGuid))
+                {
+                    result.UserId = userGuid;
+                }
+
+                // Extract subscription ID
+                if (obj.TryGetProperty("subscription", out var subId))
+                {
+                    result.SubscriptionId = subId.GetString();
+                }
+
+                // Extract invoice ID as transaction ID
+                if (obj.TryGetProperty("id", out var invoiceId))
+                {
+                    result.TransactionId = invoiceId.GetString();
+                }
+
+                // Extract priceId from lines
+                if (obj.TryGetProperty("lines", out var lines) &&
+                    lines.TryGetProperty("data", out var linesData) &&
+                    linesData.GetArrayLength() > 0)
+                {
+                    var firstLine = linesData[0];
+                    if (firstLine.TryGetProperty("pricing", out var pricing) &&
+                        pricing.TryGetProperty("price_details", out var priceDetails) &&
+                        priceDetails.TryGetProperty("price", out var priceId))
+                    {
+                        result.ProductId = priceId.GetString();
+                    }
+                }
+
+                // Determine if renewal
+                if (obj.TryGetProperty("billing_reason", out var billingReason))
+                {
+                    result.IsRenewal = billingReason.GetString() == "subscription_cycle";
+                }
+
+                // Set NewStatus for invoice.paid
+                if (eventType == "invoice.paid")
+                {
+                    result.NewStatus = PaymentStatus.Completed;
+                }
+
+                _logger.LogInformation(
+                    "[StripeProvider] JSON fallback parsed: UserId={UserId}, SubscriptionId={SubscriptionId}, ProductId={ProductId}, IsRenewal={IsRenewal}",
+                    result.UserId, result.SubscriptionId, result.ProductId, result.IsRenewal);
+            }
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[StripeProvider] Failed to parse JSON fallback");
+            return new WebhookResult
+            {
+                Success = false,
+                ErrorMessage = $"JSON parse failed: {ex.Message}"
+            };
+        }
+    }
+
     private Task HandleInvoicePaid(Event stripeEvent, WebhookResult result)
     {
         if (stripeEvent.Data.Object is Invoice invoice)
         {
             var subscriptionId = invoice.Parent?.SubscriptionDetails?.Subscription?.Id;
             
+            // Extract priceId from invoice line items
+            // Stripe.net 48.x uses Pricing.PriceDetails.Price for price info (returns string ID)
+            var lineItem = invoice.Lines?.Data?.FirstOrDefault();
+            string? priceId = null;
+            if (lineItem?.Pricing?.Type == "price_details" && !string.IsNullOrEmpty(lineItem.Pricing.PriceDetails?.Price))
+            {
+                priceId = lineItem.Pricing.PriceDetails.Price;
+            }
+            
+            // Determine if this is a renewal based on billing_reason
+            // - subscription_create: First-time subscription
+            // - subscription_cycle: Renewal payment
+            var isRenewal = invoice.BillingReason == "subscription_cycle";
+            
             result.TransactionId = invoice.Id;
             result.SubscriptionId = subscriptionId;
             result.NewStatus = PaymentStatus.Completed;
+            result.ProductId = priceId; // Use priceId for Stripe product lookup
+            result.IsRenewal = isRenewal;
             result.VerificationResult = new VerificationResult
             {
                 IsValid = true,
                 TransactionId = invoice.Id,
                 OriginalTransactionId = subscriptionId,
+                ProductId = priceId, // Also store in VerificationResult
                 Amount = invoice.AmountPaid / 100m,
                 Currency = invoice.Currency?.ToUpper() ?? "USD",
                 PurchaseDate = invoice.Created
