@@ -11,7 +11,6 @@ using System.Linq;
 using System.Reflection;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 
 namespace Aevatar.Agents.GodGPT.Extensions;
 
@@ -40,12 +39,8 @@ public static class GodGPTServiceCollectionExtensions
     {
         AddGodGPTOptionsByConvention(services, configuration);
         
-        // Post processors for complex configuration
-        services.AddSingleton<IPostConfigureOptions<GooglePayOptions>, GooglePayOptionsPostProcessor>();
-        
         // Register services
         services.AddSingleton<ISpeechService, SpeechService>();
-        services.AddSingleton<IGooglePayService, GooglePayService>();
         services.AddSingleton<ILocalizationService, LocalizationService>();
         
         // HttpClient factory

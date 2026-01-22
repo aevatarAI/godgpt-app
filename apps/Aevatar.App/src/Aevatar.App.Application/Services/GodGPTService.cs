@@ -133,7 +133,6 @@ public class GodGPTService : ApplicationService, IGodGPTService
     private readonly IClusterClient _clusterClient;
     private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<GodGPTService> _logger;
-    private readonly IOptionsMonitor<StripeOptions> _stripeOptions;
     private readonly IOptionsMonitor<ManagerOptions> _managerOptions;
     private readonly ILocalizationService _localizationService;
     private readonly IPaymentService _paymentService;
@@ -146,7 +145,6 @@ public class GodGPTService : ApplicationService, IGodGPTService
         IClusterClient clusterClient,
         IGAgentActorFactory actorFactory,
         ILogger<GodGPTService> logger,
-        IOptionsMonitor<StripeOptions> stripeOptions,
         IOptionsMonitor<ManagerOptions> managerOptions,
         ILocalizationService localizationService,
         IPaymentService paymentService,
@@ -158,7 +156,6 @@ public class GodGPTService : ApplicationService, IGodGPTService
         _clusterClient = clusterClient;
         _actorFactory = actorFactory;
         _logger = logger;
-        _stripeOptions = stripeOptions;
         _managerOptions = managerOptions;
         _localizationService = localizationService;
         _paymentService = paymentService;
