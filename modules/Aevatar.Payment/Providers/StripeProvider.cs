@@ -155,6 +155,23 @@ public class StripeProvider : IPaymentProvider
         try
         {
             var sessionService = new SessionService(_client);
+            
+            // Use IsNullOrEmpty to handle both null and empty string from client
+            var successUrl = string.IsNullOrEmpty(request.SuccessUrl) ? _options.SuccessUrl : request.SuccessUrl;
+            var cancelUrl = string.IsNullOrEmpty(request.CancelUrl) ? _options.CancelUrl : request.CancelUrl;
+            
+            // Validate URLs are configured - Stripe requires non-empty URLs
+            if (string.IsNullOrEmpty(successUrl) || string.IsNullOrEmpty(cancelUrl))
+            {
+                _logger.LogError("[StripeProvider] SuccessUrl or CancelUrl is not configured. " +
+                    "SuccessUrl: '{SuccessUrl}', CancelUrl: '{CancelUrl}'", successUrl, cancelUrl);
+                return new SubscriptionResult
+                {
+                    Success = false,
+                    ErrorMessage = "Payment URLs are not properly configured"
+                };
+            }
+            
             var sessionOptions = new SessionCreateOptions
             {
                 Mode = request.Mode ?? "subscription",
@@ -166,8 +183,8 @@ public class StripeProvider : IPaymentProvider
                         Quantity = 1
                     }
                 },
-                SuccessUrl = request.SuccessUrl ?? _options.SuccessUrl,
-                CancelUrl = request.CancelUrl ?? _options.CancelUrl,
+                SuccessUrl = successUrl,
+                CancelUrl = cancelUrl,
                 Metadata = new Dictionary<string, string>
                 {
                     ["user_id"] = request.UserId.ToString()
@@ -179,7 +196,7 @@ public class StripeProvider : IPaymentProvider
             if (request.UiMode == "embedded")
             {
                 sessionOptions.UiMode = "embedded";
-                sessionOptions.ReturnUrl = request.SuccessUrl ?? _options.SuccessUrl;
+                sessionOptions.ReturnUrl = successUrl; // Already validated above
             }
 
             // Attach customer if provided
