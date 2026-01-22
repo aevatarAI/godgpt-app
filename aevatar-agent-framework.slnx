@@ -52,7 +52,8 @@
     <File Path="docs\MASSTRANSIT_INTEGRATION_GUIDE.md" />
   </Folder>
   <Folder Name="/examples/">
-    <Project Path="examples\AIAgentWithToolDemo\AIAgentWithToolDemo.csproj" />
+    <!-- Temporarily disabled due to Microsoft.Extensions.AI version conflict -->
+    <!-- <Project Path="examples\AIAgentWithToolDemo\AIAgentWithToolDemo.csproj" /> -->
     <Project Path="examples\AIEventSourcingDemo\AIEventSourcingDemo.csproj" />
     <Project Path="examples\CreativeSystem\CreativeSystem.csproj" />
     <Project Path="examples\Demo.Agents\Demo.Agents.csproj" />
