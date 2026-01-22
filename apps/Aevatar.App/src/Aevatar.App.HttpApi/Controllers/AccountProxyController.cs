@@ -100,6 +100,7 @@ public class AccountProxyController : AevatarController
     /// <summary>
     /// Send password reset code (backward compatible)
     /// Includes IP location detection for CN-specific reset URLs
+    /// Note: Route order 0 to take precedence over ABP's AccountController
     /// </summary>
     [HttpPost("send-password-reset-code")]
     public async Task<IActionResult> SendPasswordResetCodeAsync([FromBody] JsonElement input)
@@ -164,8 +165,22 @@ public class AccountProxyController : AevatarController
 
             if (response.IsSuccessStatusCode)
             {
-                // Return the response as-is
-                return Content(content, "application/json");
+                // Parse and return as object so AutoResponseWrapper can wrap it
+                // This matches old API format: {code, data, message}
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    return Ok();
+                }
+                
+                try
+                {
+                    var result = JsonSerializer.Deserialize<JsonElement>(content);
+                    return Ok(result);
+                }
+                catch (JsonException)
+                {
+                    return Content(content, "application/json");
+                }
             }
 
             // Log error and return appropriate status
@@ -173,7 +188,23 @@ public class AccountProxyController : AevatarController
                 "[AccountProxy] AuthServer returned {StatusCode} for {Endpoint}: {Content}",
                 (int)response.StatusCode, endpoint, content);
 
-            return StatusCode((int)response.StatusCode, JsonSerializer.Deserialize<object>(content));
+            // Try to deserialize error response, but handle empty/invalid JSON gracefully
+            object? errorResponse = null;
+            if (!string.IsNullOrWhiteSpace(content))
+            {
+                try
+                {
+                    errorResponse = JsonSerializer.Deserialize<object>(content);
+                }
+                catch (JsonException)
+                {
+                    // If content is not valid JSON, return as plain text
+                    _logger.LogWarning("[AccountProxy] Error response is not valid JSON, returning as plain text");
+                    return StatusCode((int)response.StatusCode, content);
+                }
+            }
+
+            return StatusCode((int)response.StatusCode, errorResponse ?? new { error = "Request failed" });
         }
         catch (HttpRequestException ex)
         {

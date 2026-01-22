@@ -1,6 +1,5 @@
-﻿using Localization.Resources.AbpUi;
+using Localization.Resources.AbpUi;
 using Aevatar.App.Localization;
-using Volo.Abp.Account;
 using Volo.Abp.SettingManagement;
 using Volo.Abp.FeatureManagement;
 using Volo.Abp.Identity;
@@ -15,7 +14,8 @@ namespace Aevatar.App;
     typeof(AppApplicationContractsModule),
     typeof(AbpPermissionManagementHttpApiModule),
     typeof(AbpSettingManagementHttpApiModule),
-    typeof(AbpAccountHttpApiModule),
+    // Note: AbpAccountHttpApiModule removed to avoid route conflict with AccountProxyController
+    // Our custom AccountProxyController handles /api/account routes
     typeof(AbpIdentityHttpApiModule),
     typeof(AbpTenantManagementHttpApiModule),
     typeof(AbpFeatureManagementHttpApiModule)

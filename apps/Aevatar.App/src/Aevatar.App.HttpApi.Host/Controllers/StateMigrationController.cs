@@ -11,11 +11,11 @@ using Volo.Abp.AspNetCore.Mvc;
 namespace Aevatar.App.HttpApi.Host.Controllers;
 
 /// <summary>
-/// API controller for triggering State Migration job
+/// API controller for triggering State Migration job asynchronously via Hangfire
 /// </summary>
 [ApiController]
 [Route("api/admin/migration")]
-// [Authorize] // Temporarily disabled for testing
+[Authorize] // Temporarily disabled for testing
 public class StateMigrationController : AbpControllerBase
 {
     private readonly StateMigrationJob _migrationJob;
@@ -33,18 +33,7 @@ public class StateMigrationController : AbpControllerBase
     }
 
     /// <summary>
-    /// Trigger migration job synchronously (for small datasets)
-    /// POST /api/admin/migration/execute
-    /// </summary>
-    [HttpPost("execute")]
-    public async Task<MigrationResult> ExecuteAsync([FromBody] MigrationRequest? request)
-    {
-        var result = await _migrationJob.ExecuteAsync(request?.CollectionTypes);
-        return result;
-    }
-
-    /// <summary>
-    /// Trigger migration job asynchronously (for large datasets)
+    /// Trigger migration job asynchronously via Hangfire
     /// POST /api/admin/migration/execute-async
     /// </summary>
     [HttpPost("execute-async")]
