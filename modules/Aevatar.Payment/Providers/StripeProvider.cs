@@ -263,6 +263,7 @@ public class StripeProvider : IPaymentProvider
                 Success = true,
                 SessionUrl = session.Url,
                 SubscriptionId = session.Id,
+                OrderId = orderId, // Return orderId so PaymentService can use it consistently
                 Status = PaymentStatus.Pending,
                 AdditionalData = new Dictionary<string, object>
                 {
@@ -783,6 +784,13 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is PaymentIntent paymentIntent)
         {
+            // Extract OrderId from metadata for PaymentRecordGAgent lookup
+            result.OrderId = TryGetFromMetadata(paymentIntent.Metadata, "order_id");
+            
+            // PaymentIntent is typically used for one-time payments, not subscriptions
+            // If it's associated with a subscription, the subscriptionId would be in metadata
+            result.SubscriptionId = TryGetFromMetadata(paymentIntent.Metadata, "subscription_id");
+            
             result.TransactionId = paymentIntent.Id;
             result.NewStatus = PaymentStatus.Completed;
             result.VerificationResult = new VerificationResult
@@ -793,6 +801,10 @@ public class StripeProvider : IPaymentProvider
                 Currency = paymentIntent.Currency?.ToUpper() ?? "USD",
                 PurchaseDate = paymentIntent.Created
             };
+            
+            _logger.LogInformation(
+                "[StripeProvider] payment_intent.succeeded: OrderId={OrderId}, TransactionId={TransactionId}, SubscriptionId={SubscriptionId}",
+                result.OrderId, paymentIntent.Id, result.SubscriptionId);
         }
         return Task.CompletedTask;
     }

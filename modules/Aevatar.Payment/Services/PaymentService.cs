@@ -152,7 +152,10 @@ public class PaymentService : IPaymentService
 
         var result = await provider.CreateSubscriptionAsync(request, ct);
 
-        if (result.Success && !string.IsNullOrEmpty(result.SubscriptionId))
+        // Use OrderId instead of SubscriptionId for consistency check
+        // OrderId is guaranteed to exist (provider generates it if not provided)
+        // SubscriptionId at creation time is sessionId, not real subscriptionId yet
+        if (result.Success && !string.IsNullOrEmpty(result.OrderId))
         {
             await RecordPaymentAsync(userId, platform, request, result);
         }
@@ -214,7 +217,9 @@ public class PaymentService : IPaymentService
         var provider = GetProvider(platform);
         var result = await provider.HandleWebhookAsync(request, ct);
 
-        if (result.Success && result.ShouldProcess && !string.IsNullOrEmpty(result.SubscriptionId))
+        // Use OrderId instead of SubscriptionId for consistency check
+        // OrderId is the stable key used for PaymentRecordGAgent lookup
+        if (result.Success && result.ShouldProcess && !string.IsNullOrEmpty(result.OrderId))
         {
             await ProcessWebhookResultAsync(platform, result);
         }
@@ -315,19 +320,25 @@ public class PaymentService : IPaymentService
     {
         try
         {
-            // Use orderId as stable key (matches metadata in Stripe, same as old code)
-            // Priority: order_id from metadata > SubscriptionId (fallback)
-            var orderId = request.Metadata.GetValueOrDefault("order_id") ?? result.SubscriptionId!;
+            // Use OrderId as stable key for PaymentRecordGAgent lookup
+            // Key difference between OrderId and SubscriptionId:
+            // - SubscriptionId: Creation returns sessionId (cs_test_xxx), webhook has real subscriptionId (sub_xxx) - VALUES DIFFERENT!
+            // - OrderId: Created and stored in metadata during creation, extracted from metadata in webhook - VALUES SAME!
+            // OrderId is guaranteed to exist because provider generates it if not provided
+            var orderId = result.OrderId 
+                ?? request.Metadata.GetValueOrDefault("order_id") 
+                ?? throw new InvalidOperationException("OrderId is required to create payment record");
             var paymentId = GetPaymentId(platform, orderId);
             
             // Create payment record agent
             var recordAgent = await GetRecordAgentAsync(paymentId);
-
+            
             await recordAgent.InitializeAsync(new AgentModels.Protos.CreatePaymentRequestProto
             {
                 UserId = userId.ToString(),
                 Platform = (int)ToAgentPlatform(platform),
-                SubscriptionId = result.SubscriptionId ?? string.Empty,
+                ExternalOrderId = orderId, // Store orderId for business logic reference
+                SubscriptionId = result.SubscriptionId ?? string.Empty, // Store subscriptionId (sessionId initially, real sub later)
                 CustomerId = result.CustomerId ?? string.Empty,
                 ProductId = request.ProductId ?? string.Empty,
                 ProductName = request.ProductId ?? string.Empty,
@@ -377,12 +388,15 @@ public class PaymentService : IPaymentService
     {
         try
         {
-            // Use OrderId as stable key for finding PaymentRecordGAgent (same as old code)
-            // OrderId is extracted from metadata and matches the key used when creating the record
+            // Use OrderId as stable key for finding PaymentRecordGAgent
+            // OrderId is extracted from subscription/invoice metadata and matches the key used when creating the record
+            // OrderId is guaranteed to exist because provider generates it if not provided during creation
+            // Unlike SubscriptionId which differs between creation (sessionId) and webhook (real subscriptionId)
             if (string.IsNullOrEmpty(result.OrderId))
             {
                 _logger.LogWarning(
-                    "[PaymentService] OrderId is empty, cannot find payment record. SubscriptionId={SubscriptionId}",
+                    "[PaymentService] OrderId is empty, cannot find payment record. SubscriptionId={SubscriptionId}. " +
+                    "This may indicate metadata was not properly set during subscription creation.",
                     result.SubscriptionId);
                 return;
             }
