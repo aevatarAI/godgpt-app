@@ -64,6 +64,11 @@ message SubscriptionPeriodEndUpdatedEvent {
   google.protobuf.Timestamp new_period_end = 2;
 }
 
+message SubscriptionIdUpdatedEvent {
+  string payment_id = 1;
+  string subscription_id = 2;
+}
+
 message PaymentCountIncrementedEvent {
   int32 new_count = 1;
 }

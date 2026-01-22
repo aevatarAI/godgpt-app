@@ -191,6 +191,10 @@ test_stripe_webhook_invoice_paid() {
               "price_details": {
                 "price": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
               }
+            },
+            "period": {
+              "start": ${timestamp},
+              "end": $((timestamp + 2592000))
             }
           }
         ]
@@ -266,6 +270,10 @@ test_stripe_webhook_renewal() {
               "price_details": {
                 "price": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
               }
+            },
+            "period": {
+              "start": ${timestamp},
+              "end": $((timestamp + 2592000))
             }
           }
         ]
@@ -570,6 +578,212 @@ run_all_webhook_tests() {
     log_info "  - Old subscription cancellation"
 }
 
+# Test expired subscription filtering
+test_expired_subscription() {
+    log_step "Test: Expired subscription should be filtered out..."
+    
+    local timestamp=$(date +%s)
+    local invoice_id="in_expired_${timestamp}"
+    local sub_id="sub_expired_${timestamp}"
+    local order_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
+    local expired_end=$((timestamp - 86400))  # 1 day ago
+    
+    # Send invoice.paid with expired period_end
+    local payload=$(cat <<EOF
+{
+  "id": "evt_expired_${timestamp}",
+  "object": "event",
+  "api_version": "2025-04-30.basil",
+  "created": ${timestamp},
+  "data": {
+    "object": {
+      "id": "${invoice_id}",
+      "object": "invoice",
+      "amount_paid": 2000,
+      "amount_due": 2000,
+      "billing_reason": "subscription_cycle",
+      "currency": "usd",
+      "customer": "cus_test_123",
+      "subscription": "${sub_id}",
+      "status": "paid",
+      "parent": {
+        "subscription_details": {
+          "subscription": {
+            "id": "${sub_id}"
+          },
+          "metadata": {
+            "internal_user_id": "${USER_ID:-00000000-0000-0000-0000-000000000001}",
+            "order_id": "${order_id}",
+            "price_id": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
+          }
+        }
+      },
+      "lines": {
+        "data": [
+          {
+            "id": "il_expired_${timestamp}",
+            "pricing": {
+              "type": "price_details",
+              "price_details": {
+                "price": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
+              }
+            },
+            "period": {
+              "start": $((expired_end - 2592000)),
+              "end": ${expired_end}
+            }
+          }
+        ]
+      }
+    }
+  },
+  "type": "invoice.paid"
+}
+EOF
+)
+
+    log_info "Sending expired subscription webhook..."
+    log_info "Period end: $(date -r $expired_end '+%Y-%m-%d %H:%M:%S') (expired)"
+    
+    local response=$(curl -s -X POST "$BASE_URL/api/webhooks/godgpt-stripe-payment" \
+        -H "Content-Type: application/json" \
+        -d "$payload")
+    
+    log_response "$response"
+    
+    # Verify subscription status
+    log_info "Verifying expired subscription is filtered out..."
+    local status_response=$(api_get "/api/godgpt/payment/has-active-subscription")
+    log_response "$status_response"
+    
+    local has_active=$(echo "$status_response" | jq -r '.data.hasActiveSubscription // false')
+    if [ "$has_active" == "false" ]; then
+        log_info "✅ Expired subscription correctly filtered out"
+    else
+        log_warn "⚠️  Expired subscription NOT filtered (hasActiveSubscription=$has_active)"
+    fi
+}
+
+# Test subscription lifecycle with status verification
+test_subscription_lifecycle() {
+    log_step "Test: Complete subscription lifecycle with status checks..."
+    
+    local timestamp=$(date +%s)
+    local order_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
+    local sub_id="sub_lifecycle_${timestamp}"
+    local session_id="cs_lifecycle_${timestamp}"
+    
+    # Step 1: Create subscription via checkout.session.completed
+    log_info "Step 1: Creating subscription..."
+    local checkout_payload=$(cat <<EOF
+{
+  "id": "evt_lifecycle_checkout_${timestamp}",
+  "object": "event",
+  "created": ${timestamp},
+  "data": {
+    "object": {
+      "id": "${session_id}",
+      "object": "checkout.session",
+      "mode": "subscription",
+      "status": "complete",
+      "customer": "cus_lifecycle_123",
+      "subscription": "${sub_id}",
+      "client_reference_id": "${USER_ID:-00000000-0000-0000-0000-000000000001}",
+      "metadata": {
+        "internal_user_id": "${USER_ID:-00000000-0000-0000-0000-000000000001}",
+        "order_id": "${order_id}",
+        "price_id": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
+      }
+    }
+  },
+  "type": "checkout.session.completed"
+}
+EOF
+)
+    
+    curl -s -X POST "$BASE_URL/api/webhooks/godgpt-stripe-payment" \
+        -H "Content-Type: application/json" \
+        -d "$checkout_payload" > /dev/null
+    
+    log_info "✅ Checkout completed, order_id: $order_id"
+    
+    # Step 2: Verify active subscription
+    log_info "Step 2: Verifying active subscription..."
+    local status1=$(api_get "/api/godgpt/payment/has-active-subscription")
+    local has_active1=$(echo "$status1" | jq -r '.data.hasActiveSubscription // false')
+    log_info "Has active subscription: $has_active1"
+    
+    # Step 3: Simulate renewal with future period_end
+    log_info "Step 3: Simulating renewal..."
+    local future_end=$((timestamp + 2592000))  # +30 days
+    local renewal_payload=$(cat <<EOF
+{
+  "id": "evt_lifecycle_renewal_${timestamp}",
+  "object": "event",
+  "created": ${timestamp},
+  "data": {
+    "object": {
+      "id": "in_lifecycle_${timestamp}",
+      "object": "invoice",
+      "amount_paid": 2000,
+      "billing_reason": "subscription_cycle",
+      "subscription": "${sub_id}",
+      "status": "paid",
+      "parent": {
+        "subscription_details": {
+          "subscription": {
+            "id": "${sub_id}"
+          },
+          "metadata": {
+            "internal_user_id": "${USER_ID:-00000000-0000-0000-0000-000000000001}",
+            "order_id": "${order_id}",
+            "price_id": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
+          }
+        }
+      },
+      "lines": {
+        "data": [
+          {
+            "id": "il_lifecycle_${timestamp}",
+            "pricing": {
+              "type": "price_details",
+              "price_details": {
+                "price": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
+              }
+            },
+            "period": {
+              "start": ${timestamp},
+              "end": ${future_end}
+            }
+          }
+        ]
+      }
+    }
+  },
+  "type": "invoice.paid"
+}
+EOF
+)
+    
+    curl -s -X POST "$BASE_URL/api/webhooks/godgpt-stripe-payment" \
+        -H "Content-Type: application/json" \
+        -d "$renewal_payload" > /dev/null
+    
+    log_info "✅ Renewal processed, period_end: $(date -r $future_end '+%Y-%m-%d')"
+    
+    # Step 4: Verify still active
+    log_info "Step 4: Verifying subscription still active..."
+    local status2=$(api_get "/api/godgpt/payment/has-active-subscription")
+    local has_active2=$(echo "$status2" | jq -r '.data.hasActiveSubscription // false')
+    log_info "Has active subscription: $has_active2"
+    
+    if [ "$has_active2" == "true" ]; then
+        log_info "✅ Subscription lifecycle test PASSED"
+    else
+        log_warn "⚠️  Subscription lifecycle test FAILED (should be active)"
+    fi
+}
+
 # Main function
 main() {
     echo ""
@@ -606,6 +820,12 @@ main() {
             ;;
         "stripe-renewal")
             test_stripe_webhook_renewal
+            ;;
+        "lifecycle")
+            test_subscription_lifecycle
+            ;;
+        "expired")
+            test_expired_subscription
             ;;
         "google")
             test_google_webhook_initial

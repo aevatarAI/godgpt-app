@@ -62,6 +62,11 @@ public interface IPaymentIndexGAgent : IGAgent
     Task UpdateSubscriptionPeriodEndAsync(string paymentId, DateTime periodEnd);
     
     /// <summary>
+    /// Update platform subscription ID (called by webhook when real subscriptionId is available)
+    /// </summary>
+    Task UpdateSubscriptionIdAsync(string paymentId, string subscriptionId);
+    
+    /// <summary>
     /// Remove an active subscription (when cancelled or expired)
     /// </summary>
     Task RemoveActiveSubscriptionAsync(string paymentId);

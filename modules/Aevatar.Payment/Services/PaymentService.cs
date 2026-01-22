@@ -252,14 +252,20 @@ public class PaymentService : IPaymentService
         var response = await indexAgent.GetActiveSubscriptionsAsync();
         var subscriptions = response.Subscriptions;
 
+        // Filter out expired subscriptions (align with old code logic)
+        var now = DateTime.UtcNow;
+        var validSubscriptions = subscriptions
+            .Where(s => s.PeriodEnd != null && s.PeriodEnd.ToDateTime() > now)
+            .ToList();
+
         var status = new UserSubscriptionStatus
         {
-            HasActiveSubscription = subscriptions.Any(),
-            ActiveSubscriptions = subscriptions.Select(ToDto).ToList()
+            HasActiveSubscription = validSubscriptions.Any(),
+            ActiveSubscriptions = validSubscriptions.Select(ToDto).ToList()
         };
 
         // Set primary subscription info from first active
-        var primary = subscriptions.FirstOrDefault();
+        var primary = validSubscriptions.FirstOrDefault();
         if (primary != null)
         {
             status.CurrentPlan = primary.ProductName;
@@ -462,6 +468,13 @@ public class PaymentService : IPaymentService
             // Get payment record state (Protobuf) for event context
             var recordState = await recordAgent.GetRecordStateAsync();
             
+            // Get index agent once for both updates and event broadcasting (requires UserId)
+            AgentModels.IPaymentIndexGAgent? indexAgent = null;
+            if (result.UserId.HasValue)
+            {
+                indexAgent = await GetIndexAgentAsync(result.UserId.Value);
+            }
+            
             // Update SubscriptionId if webhook provides one (real sub_xxx after checkout)
             if (!string.IsNullOrEmpty(result.SubscriptionId) && 
                 recordState.SubscriptionId != result.SubscriptionId)
@@ -470,18 +483,27 @@ public class PaymentService : IPaymentService
                     "[PaymentService] Updating SubscriptionId for {PaymentId} from '{OldId}' to '{NewId}'",
                     paymentId, recordState.SubscriptionId, result.SubscriptionId);
                 await recordAgent.UpdateSubscriptionIdAsync(result.SubscriptionId);
+                
+                // Also update PaymentIndexGAgent for cancellation lookup
+                if (indexAgent != null)
+                {
+                    await indexAgent.UpdateSubscriptionIdAsync(paymentId, result.SubscriptionId);
+                }
+                
                 // Refresh state after update
                 recordState = await recordAgent.GetRecordStateAsync();
             }
             
-            var eventContext = BuildEventContext(recordState, platform, paymentId);
-
-            // Get index agent for event broadcasting (requires UserId)
-            AgentModels.IPaymentIndexGAgent? indexAgent = null;
-            if (result.UserId.HasValue)
+            // Update PeriodEnd if webhook provides one (invoice.paid renewals)
+            if (indexAgent != null && result.PeriodEnd.HasValue)
             {
-                indexAgent = await GetIndexAgentAsync(result.UserId.Value);
+                _logger.LogInformation(
+                    "[PaymentService] Updating PeriodEnd for {PaymentId} to {PeriodEnd}",
+                    paymentId, result.PeriodEnd.Value);
+                await indexAgent.UpdateSubscriptionPeriodEndAsync(paymentId, result.PeriodEnd.Value);
             }
+            
+            var eventContext = BuildEventContext(recordState, platform, paymentId);
 
             if (result.NewStatus.HasValue)
             {
@@ -649,7 +671,32 @@ public class PaymentService : IPaymentService
         try
         {
             var recordAgent = await GetRecordAgentAsync(paymentId);
+            
+            // Get record state to extract UserId for index agent
+            var recordState = await recordAgent.GetRecordStateAsync();
+            
+            // Cancel the payment record
             await recordAgent.CancelAsync(reason);
+            
+            // Remove from PaymentIndexGAgent's active subscriptions
+            if (recordState != null && !string.IsNullOrEmpty(recordState.UserId))
+            {
+                try
+                {
+                    var userId = Guid.Parse(recordState.UserId);
+                    var indexAgent = await GetIndexAgentAsync(userId);
+                    await indexAgent.RemoveActiveSubscriptionAsync(paymentId);
+                    
+                    _logger.LogInformation(
+                        "[PaymentService] Removed subscription {PaymentId} from user {UserId} index",
+                        paymentId, userId);
+                }
+                catch (Exception indexEx)
+                {
+                    _logger.LogError(indexEx,
+                        "[PaymentService] Failed to remove subscription {PaymentId} from index", paymentId);
+                }
+            }
         }
         catch (Exception ex)
         {

@@ -737,11 +737,19 @@ public class StripeProvider : IPaymentProvider
             // - subscription_cycle: Renewal payment
             var isRenewal = invoice.BillingReason == "subscription_cycle";
             
+            // Extract period end from invoice line item
+            DateTime? periodEnd = null;
+            if (lineItem?.Period?.End != null)
+            {
+                periodEnd = lineItem.Period.End;
+            }
+            
             result.TransactionId = invoice.Id;
             result.SubscriptionId = subscriptionId;
             result.NewStatus = PaymentStatus.Completed;
             result.ProductId = priceId; // Use priceId for Stripe product lookup
             result.IsRenewal = isRenewal;
+            result.PeriodEnd = periodEnd;
             result.VerificationResult = new VerificationResult
             {
                 IsValid = true,

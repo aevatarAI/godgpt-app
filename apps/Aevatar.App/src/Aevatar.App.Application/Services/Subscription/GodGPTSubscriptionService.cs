@@ -65,12 +65,18 @@ public class GodGPTSubscriptionService : ApplicationService, IGodGPTSubscription
         var paymentIndexGAgent = paymentIndexActor.As<IPaymentIndexGAgent>();
         var subscriptions = await paymentIndexGAgent.GetActiveSubscriptionsByBusinessAsync("godgpt");
         
+        // Filter out expired subscriptions (align with old code: SubscriptionEndDate > now)
+        var now = DateTime.UtcNow;
+        var validSubscriptions = subscriptions.Subscriptions
+            .Where(s => s.PeriodEnd != null && s.PeriodEnd.ToDateTime() > now)
+            .ToList();
+        
         var result = new ActiveSubscriptionStatusDto
         {
-            HasActiveSubscription = subscriptions.Subscriptions.Count > 0
+            HasActiveSubscription = validSubscriptions.Count > 0
         };
         
-        foreach (var sub in subscriptions.Subscriptions)
+        foreach (var sub in validSubscriptions)
         {
             if (sub.Platform == (int)PaymentPlatform.AppStore)
             {

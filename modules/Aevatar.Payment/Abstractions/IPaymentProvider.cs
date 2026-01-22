@@ -220,6 +220,12 @@ public class WebhookResult
     /// </summary>
     public bool IsRenewal { get; set; }
     
+    /// <summary>
+    /// Subscription period end time (from invoice/subscription data)
+    /// Used to update PaymentIndexGAgent.ActiveSubscriptionProto.PeriodEnd
+    /// </summary>
+    public DateTime? PeriodEnd { get; set; }
+    
     // ========== Verification (Optional) ==========
     
     public VerificationResult? VerificationResult { get; set; }

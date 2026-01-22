@@ -103,6 +103,14 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
                 }
                 break;
                 
+            case SubscriptionIdUpdatedEvent e:
+                var subToUpdate = state.ActiveSubscriptions.FirstOrDefault(s => s.PaymentId == e.PaymentId);
+                if (subToUpdate != null)
+                {
+                    subToUpdate.SubscriptionId = e.SubscriptionId;
+                }
+                break;
+                
             case PaymentCountIncrementedEvent e:
                 state.TotalPaymentCount = e.NewCount;
                 break;
@@ -170,6 +178,21 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
         {
             PaymentId = paymentId,
             NewPeriodEnd = Timestamp.FromDateTime(periodEnd.ToUniversalTime())
+        });
+
+        await ConfirmEventsAsync();
+    }
+
+    public async Task UpdateSubscriptionIdAsync(string paymentId, string subscriptionId)
+    {
+        Logger.LogInformation(
+            "[PaymentIndexGAgent] Updating SubscriptionId for {PaymentId} to {SubscriptionId}",
+            paymentId, subscriptionId);
+
+        RaiseEvent(new SubscriptionIdUpdatedEvent
+        {
+            PaymentId = paymentId,
+            SubscriptionId = subscriptionId
         });
 
         await ConfirmEventsAsync();
