@@ -315,7 +315,10 @@ public class PaymentService : IPaymentService
     {
         try
         {
-            var paymentId = GetPaymentId(platform, result.SubscriptionId!);
+            // Use orderId as stable key (matches metadata in Stripe, same as old code)
+            // Priority: order_id from metadata > SubscriptionId (fallback)
+            var orderId = request.Metadata.GetValueOrDefault("order_id") ?? result.SubscriptionId!;
+            var paymentId = GetPaymentId(platform, orderId);
             
             // Create payment record agent
             var recordAgent = await GetRecordAgentAsync(paymentId);
@@ -374,15 +377,25 @@ public class PaymentService : IPaymentService
     {
         try
         {
-            var paymentId = GetPaymentId(platform, result.SubscriptionId!);
+            // Use OrderId as stable key for finding PaymentRecordGAgent (same as old code)
+            // OrderId is extracted from metadata and matches the key used when creating the record
+            if (string.IsNullOrEmpty(result.OrderId))
+            {
+                _logger.LogWarning(
+                    "[PaymentService] OrderId is empty, cannot find payment record. SubscriptionId={SubscriptionId}",
+                    result.SubscriptionId);
+                return;
+            }
+            
+            var paymentId = GetPaymentId(platform, result.OrderId);
             var recordAgent = await GetRecordAgentAsync(paymentId);
 
             var initialized = await recordAgent.IsInitializedAsync();
             if (!initialized)
             {
                 _logger.LogWarning(
-                    "[PaymentService] Payment record {PaymentId} not found for webhook",
-                    paymentId);
+                    "[PaymentService] Payment record {PaymentId} not found for webhook (OrderId={OrderId}, SubscriptionId={SubscriptionId})",
+                    paymentId, result.OrderId, result.SubscriptionId);
                 return;
             }
 

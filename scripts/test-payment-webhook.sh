@@ -16,6 +16,7 @@ source "$SCRIPT_DIR/test-common.sh"
 USER_ID=""
 SUBSCRIPTION_ID=""
 PRICE_ID=""
+ORDER_ID=""
 
 # Check dependencies
 check_dependencies() {
@@ -34,9 +35,19 @@ check_dependencies() {
 # Prerequisites: Create subscription first
 # =============================================================================
 
-# Step 1: Create checkout session to get subscription
+# Step 1: Create checkout session to get subscription and order_id
 prepare_subscription() {
-    log_step "Preparing: Creating subscription for webhook test..."
+    log_step "Preparing: Creating checkout session for webhook test..."
+    
+    # Get user ID from token
+    local user_info=$(api_get "/api/app/current-user")
+    USER_ID=$(echo "$user_info" | jq -r '.data.id // .id // empty' 2>/dev/null)
+    
+    if [ -z "$USER_ID" ] || [ "$USER_ID" == "null" ]; then
+        USER_ID="00000000-0000-0000-0000-000000000001"
+        log_warn "Could not get user ID, using test ID: $USER_ID"
+    fi
+    log_info "User ID: $USER_ID"
     
     # Get products first
     local products=$(api_get "/api/godgpt/payment/products")
@@ -49,10 +60,14 @@ prepare_subscription() {
     
     log_info "Using price ID: $PRICE_ID"
     
-    # Create subscription
-    local response=$(api_post "/api/godgpt/payment/create-subscription" "{
+    # Generate order_id (same as server-side logic)
+    ORDER_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+    log_info "Generated order_id: $ORDER_ID"
+    
+    # Create checkout session (this creates PaymentRecordGAgent with order_id)
+    local response=$(api_post "/api/godgpt/payment/create-checkout-session" "{
         \"priceId\": \"$PRICE_ID\",
-        \"devicePlatform\": \"web\"
+        \"uiMode\": \"hosted\"
     }")
     
     log_response "$response"
@@ -60,9 +75,10 @@ prepare_subscription() {
     SUBSCRIPTION_ID=$(echo "$response" | jq -r '.data.subscriptionId // empty' 2>/dev/null)
     
     if [ -n "$SUBSCRIPTION_ID" ] && [ "$SUBSCRIPTION_ID" != "null" ]; then
-        log_info "Subscription created: $SUBSCRIPTION_ID"
+        log_info "Checkout session created: $SUBSCRIPTION_ID"
+        log_info "PaymentRecordGAgent should be created with this order_id"
     else
-        log_warn "Could not create subscription (may need payment method)"
+        log_warn "Could not create checkout session, using generated order_id for test"
     fi
 }
 
@@ -70,24 +86,73 @@ prepare_subscription() {
 # Stripe Webhook Tests
 # =============================================================================
 
+# Test Stripe checkout.session.completed webhook
+test_stripe_webhook_checkout_completed() {
+    log_step "Test: Stripe checkout.session.completed webhook..."
+    
+    local timestamp=$(date +%s)
+    local session_id="cs_test_${timestamp}"
+    local sub_id="sub_test_${timestamp}"
+    local order_id="${ORDER_ID:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
+    
+    # Stripe webhook payload for checkout.session.completed
+    local payload=$(cat <<EOF
+{
+  "id": "evt_checkout_${timestamp}",
+  "object": "event",
+  "api_version": "2025-04-30.basil",
+  "created": ${timestamp},
+  "data": {
+    "object": {
+      "id": "${session_id}",
+      "object": "checkout.session",
+      "mode": "subscription",
+      "status": "complete",
+      "customer": "cus_test_123",
+      "subscription": "${sub_id}",
+      "client_reference_id": "${USER_ID:-00000000-0000-0000-0000-000000000001}",
+      "metadata": {
+        "internal_user_id": "${USER_ID:-00000000-0000-0000-0000-000000000001}",
+        "order_id": "${order_id}",
+        "price_id": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
+      }
+    }
+  },
+  "type": "checkout.session.completed"
+}
+EOF
+)
+
+    log_info "Sending Stripe checkout.session.completed webhook..."
+    log_info "User ID: ${USER_ID:-00000000-0000-0000-0000-000000000001}"
+    log_info "Session ID: $session_id"
+    log_info "Subscription ID: $sub_id"
+    log_info "Order ID: $order_id (used for PaymentRecordGAgent lookup)"
+    
+    # Signature verification is disabled when WebhookSecret is empty or "test"
+    local response=$(curl -s -X POST "$BASE_URL/api/webhooks/godgpt-stripe-payment" \
+        -H "Content-Type: application/json" \
+        -d "$payload")
+    
+    log_response "$response"
+    log_info "Stripe checkout.session.completed webhook test completed"
+    
+    # Save for subsequent tests
+    SUBSCRIPTION_ID="$sub_id"
+    ORDER_ID="$order_id"
+}
+
 # Test Stripe invoice.paid webhook (first-time subscription)
 test_stripe_webhook_invoice_paid() {
     log_step "Test: Stripe invoice.paid webhook (subscription_create)..."
     
-    # Get user ID from token
-    local user_info=$(api_get "/api/app/current-user")
-    USER_ID=$(echo "$user_info" | jq -r '.data.id // .id // empty' 2>/dev/null)
-    
-    if [ -z "$USER_ID" ] || [ "$USER_ID" == "null" ]; then
-        USER_ID="00000000-0000-0000-0000-000000000001"
-        log_warn "Could not get user ID, using test ID: $USER_ID"
-    fi
-    
     local timestamp=$(date +%s)
     local invoice_id="in_test_${timestamp}"
     local sub_id="${SUBSCRIPTION_ID:-sub_test_${timestamp}}"
+    local order_id="${ORDER_ID:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
     
     # Stripe webhook payload for invoice.paid (first-time)
+    # NOTE: order_id is in subscription_details.metadata (same as old code)
     local payload=$(cat <<EOF
 {
   "id": "evt_test_${timestamp}",
@@ -109,6 +174,11 @@ test_stripe_webhook_invoice_paid() {
         "subscription_details": {
           "subscription": {
             "id": "${sub_id}"
+          },
+          "metadata": {
+            "internal_user_id": "${USER_ID:-00000000-0000-0000-0000-000000000001}",
+            "order_id": "${order_id}",
+            "price_id": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
           }
         }
       },
@@ -124,14 +194,6 @@ test_stripe_webhook_invoice_paid() {
             }
           }
         ]
-      },
-      "subscription_details": {
-        "metadata": {
-          "userId": "${USER_ID}"
-        }
-      },
-      "metadata": {
-        "userId": "${USER_ID}"
       }
     }
   },
@@ -141,12 +203,12 @@ EOF
 )
 
     log_info "Sending Stripe invoice.paid webhook (billing_reason=subscription_create)..."
-    log_info "User ID: $USER_ID"
+    log_info "User ID: ${USER_ID:-00000000-0000-0000-0000-000000000001}"
     log_info "Invoice ID: $invoice_id"
     log_info "Subscription ID: $sub_id"
+    log_info "Order ID: $order_id (used for PaymentRecordGAgent lookup)"
     
     # Signature verification is disabled when WebhookSecret is empty or "test"
-    # Set in appsettings.json: "WebhookSecret": "test" or ""
     local response=$(curl -s -X POST "$BASE_URL/api/webhooks/godgpt-stripe-payment" \
         -H "Content-Type: application/json" \
         -d "$payload")
@@ -162,8 +224,10 @@ test_stripe_webhook_renewal() {
     local timestamp=$(date +%s)
     local invoice_id="in_renewal_${timestamp}"
     local sub_id="${SUBSCRIPTION_ID:-sub_test_${timestamp}}"
+    local order_id="${ORDER_ID:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
     
     # Stripe webhook payload for invoice.paid (renewal)
+    # NOTE: order_id is in subscription_details.metadata (same as old code)
     local payload=$(cat <<EOF
 {
   "id": "evt_renewal_${timestamp}",
@@ -185,6 +249,11 @@ test_stripe_webhook_renewal() {
         "subscription_details": {
           "subscription": {
             "id": "${sub_id}"
+          },
+          "metadata": {
+            "internal_user_id": "${USER_ID:-00000000-0000-0000-0000-000000000001}",
+            "order_id": "${order_id}",
+            "price_id": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
           }
         }
       },
@@ -200,14 +269,6 @@ test_stripe_webhook_renewal() {
             }
           }
         ]
-      },
-      "subscription_details": {
-        "metadata": {
-          "userId": "${USER_ID:-00000000-0000-0000-0000-000000000001}"
-        }
-      },
-      "metadata": {
-        "userId": "${USER_ID:-00000000-0000-0000-0000-000000000001}"
       }
     }
   },
@@ -217,6 +278,7 @@ EOF
 )
 
     log_info "Sending Stripe invoice.paid webhook (billing_reason=subscription_cycle)..."
+    log_info "Order ID: $order_id"
     log_info "This should be treated as renewal (skip cancel old subscriptions)"
     
     local response=$(curl -s -X POST "$BASE_URL/api/webhooks/godgpt-stripe-payment" \
@@ -451,16 +513,24 @@ run_all_webhook_tests() {
     log_info "========================================"
     echo ""
     
-    # Prepare subscription first
+    # Prepare subscription first (creates PaymentRecordGAgent with order_id)
     prepare_subscription
     echo ""
     
     # Stripe tests
     log_info "--- Stripe Webhook Tests ---"
+    
+    # Test 1: checkout.session.completed (sets up PaymentRecordGAgent if not already)
+    test_stripe_webhook_checkout_completed
+    ((passed++))
+    echo ""
+    
+    # Test 2: invoice.paid (first-time) - uses order_id to find record
     test_stripe_webhook_invoice_paid
     ((passed++))
     echo ""
     
+    # Test 3: invoice.paid (renewal) - uses order_id to find record
     test_stripe_webhook_renewal
     ((passed++))
     echo ""
@@ -521,11 +591,17 @@ main() {
     case "${1:-all}" in
         "stripe")
             prepare_subscription
+            test_stripe_webhook_checkout_completed
             test_stripe_webhook_invoice_paid
             test_stripe_webhook_renewal
             ;;
+        "stripe-checkout")
+            prepare_subscription
+            test_stripe_webhook_checkout_completed
+            ;;
         "stripe-create")
             prepare_subscription
+            test_stripe_webhook_checkout_completed
             test_stripe_webhook_invoice_paid
             ;;
         "stripe-renewal")

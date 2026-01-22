@@ -24,8 +24,17 @@ public class StripeProvider : IPaymentProvider
         _logger = logger;
         _options = options.Value;
         
-        StripeConfiguration.ApiKey = _options.SecretKey;
-        _client = new StripeClient(_options.SecretKey);
+        // Support test mode without API key (only webhook parsing works)
+        if (!string.IsNullOrEmpty(_options.SecretKey))
+        {
+            StripeConfiguration.ApiKey = _options.SecretKey;
+            _client = new StripeClient(_options.SecretKey);
+        }
+        else
+        {
+            _logger.LogWarning("[StripeProvider] SecretKey is empty, running in test mode (webhook-only)");
+            _client = null!;
+        }
     }
 
     // ========== Product Operations ==========
@@ -154,6 +163,17 @@ public class StripeProvider : IPaymentProvider
     {
         try
         {
+            // Check if Stripe client is configured
+            if (_client == null)
+            {
+                _logger.LogError("[StripeProvider] Stripe client not configured (test mode)");
+                return new SubscriptionResult
+                {
+                    Success = false,
+                    ErrorMessage = "Stripe is not configured"
+                };
+            }
+            
             var sessionService = new SessionService(_client);
             
             // Use IsNullOrEmpty to handle both null and empty string from client
@@ -172,6 +192,17 @@ public class StripeProvider : IPaymentProvider
                 };
             }
             
+            // Generate stable order_id for PaymentRecordGAgent lookup
+            var orderId = request.Metadata.GetValueOrDefault("order_id") ?? Guid.NewGuid().ToString();
+            
+            // Common metadata for session, subscription, and invoice
+            var commonMetadata = new Dictionary<string, string>
+            {
+                ["internal_user_id"] = request.UserId.ToString(),
+                ["order_id"] = orderId,
+                ["price_id"] = request.ProductId ?? string.Empty
+            };
+            
             var sessionOptions = new SessionCreateOptions
             {
                 Mode = request.Mode ?? "subscription",
@@ -185,11 +216,13 @@ public class StripeProvider : IPaymentProvider
                 },
                 SuccessUrl = successUrl,
                 CancelUrl = cancelUrl,
-                Metadata = new Dictionary<string, string>
+                Metadata = commonMetadata,
+                ClientReferenceId = request.UserId.ToString(),
+                // Copy metadata to subscription so invoice.paid can access it
+                SubscriptionData = new SessionSubscriptionDataOptions
                 {
-                    ["user_id"] = request.UserId.ToString()
-                },
-                ClientReferenceId = request.UserId.ToString()
+                    Metadata = commonMetadata
+                }
             };
 
             // Support embedded UI mode
@@ -217,16 +250,13 @@ public class StripeProvider : IPaymentProvider
             // Add trial period if provided
             if (request.TrialDays > 0)
             {
-                sessionOptions.SubscriptionData = new SessionSubscriptionDataOptions
-                {
-                    TrialPeriodDays = request.TrialDays
-                };
+                sessionOptions.SubscriptionData.TrialPeriodDays = request.TrialDays;
             }
 
             var session = await sessionService.CreateAsync(sessionOptions, cancellationToken: ct);
 
-            _logger.LogInformation("[StripeProvider] Created checkout session {SessionId} for user {UserId}",
-                session.Id, request.UserId);
+            _logger.LogInformation("[StripeProvider] Created checkout session {SessionId} for user {UserId}, OrderId={OrderId}",
+                session.Id, request.UserId, orderId);
 
             return new SubscriptionResult
             {
@@ -550,8 +580,14 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Session session)
         {
-            result.SubscriptionId = session.SubscriptionId ?? session.Id;
+            // Extract orderId from metadata (stable key for PaymentRecordGAgent)
+            result.OrderId = TryGetFromMetadata(session.Metadata, "order_id");
+            result.SubscriptionId = session.SubscriptionId;
             result.NewStatus = PaymentStatus.Completed;
+            
+            _logger.LogInformation(
+                "[StripeProvider] checkout.session.completed: OrderId={OrderId}, SubscriptionId={SubscriptionId}",
+                result.OrderId, session.SubscriptionId);
         }
         return Task.CompletedTask;
     }
@@ -578,24 +614,37 @@ public class StripeProvider : IPaymentProvider
             if (jsonEvent.TryGetProperty("data", out var data) &&
                 data.TryGetProperty("object", out var obj))
             {
-                // Extract userId from metadata
+                // Extract userId and orderId from metadata (multiple locations)
                 string? userId = null;
+                string? orderId = null;
+                
+                // Try subscription_details.metadata first (for invoice events)
                 if (obj.TryGetProperty("subscription_details", out var subDetails) &&
-                    subDetails.TryGetProperty("metadata", out var subMeta) &&
-                    subMeta.TryGetProperty("userId", out var subUserId))
+                    subDetails.TryGetProperty("metadata", out var subMeta))
                 {
-                    userId = subUserId.GetString();
+                    userId = TryGetJsonString(subMeta, "internal_user_id") ?? TryGetJsonString(subMeta, "userId");
+                    orderId = TryGetJsonString(subMeta, "order_id");
                 }
-                else if (obj.TryGetProperty("metadata", out var meta) &&
-                    meta.TryGetProperty("userId", out var metaUserId))
+                // Also try parent.subscription_details.metadata (Stripe SDK format)
+                else if (obj.TryGetProperty("parent", out var parent) &&
+                    parent.TryGetProperty("subscription_details", out var parentSubDetails) &&
+                    parentSubDetails.TryGetProperty("metadata", out var parentMeta))
                 {
-                    userId = metaUserId.GetString();
+                    userId = TryGetJsonString(parentMeta, "internal_user_id") ?? TryGetJsonString(parentMeta, "userId");
+                    orderId = TryGetJsonString(parentMeta, "order_id");
+                }
+                // Try direct metadata (for checkout.session events)
+                if (obj.TryGetProperty("metadata", out var meta))
+                {
+                    userId ??= TryGetJsonString(meta, "internal_user_id") ?? TryGetJsonString(meta, "userId");
+                    orderId ??= TryGetJsonString(meta, "order_id");
                 }
 
                 if (!string.IsNullOrEmpty(userId) && Guid.TryParse(userId, out var userGuid))
                 {
                     result.UserId = userGuid;
                 }
+                result.OrderId = orderId;
 
                 // Extract subscription ID
                 if (obj.TryGetProperty("subscription", out var subId))
@@ -636,8 +685,8 @@ public class StripeProvider : IPaymentProvider
                 }
 
                 _logger.LogInformation(
-                    "[StripeProvider] JSON fallback parsed: UserId={UserId}, SubscriptionId={SubscriptionId}, ProductId={ProductId}, IsRenewal={IsRenewal}",
-                    result.UserId, result.SubscriptionId, result.ProductId, result.IsRenewal);
+                    "[StripeProvider] JSON fallback parsed: OrderId={OrderId}, UserId={UserId}, SubscriptionId={SubscriptionId}, ProductId={ProductId}, IsRenewal={IsRenewal}",
+                    result.OrderId, result.UserId, result.SubscriptionId, result.ProductId, result.IsRenewal);
             }
 
             return result;
@@ -658,6 +707,10 @@ public class StripeProvider : IPaymentProvider
         if (stripeEvent.Data.Object is Invoice invoice)
         {
             var subscriptionId = invoice.Parent?.SubscriptionDetails?.Subscription?.Id;
+            var subscriptionMetadata = invoice.Parent?.SubscriptionDetails?.Metadata;
+            
+            // Extract orderId from subscription metadata (stable key)
+            result.OrderId = TryGetFromMetadata(subscriptionMetadata, "order_id");
             
             // Extract priceId from invoice line items
             // Stripe.net 48.x uses Pricing.PriceDetails.Price for price info (returns string ID)
@@ -688,6 +741,10 @@ public class StripeProvider : IPaymentProvider
                 Currency = invoice.Currency?.ToUpper() ?? "USD",
                 PurchaseDate = invoice.Created
             };
+            
+            _logger.LogInformation(
+                "[StripeProvider] invoice.paid: OrderId={OrderId}, SubscriptionId={SubscriptionId}, IsRenewal={IsRenewal}",
+                result.OrderId, subscriptionId, isRenewal);
         }
         return Task.CompletedTask;
     }
@@ -696,8 +753,13 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Subscription subscription)
         {
+            result.OrderId = TryGetFromMetadata(subscription.Metadata, "order_id");
             result.SubscriptionId = subscription.Id;
             result.NewStatus = MapStripeStatus(subscription.Status);
+            
+            _logger.LogInformation(
+                "[StripeProvider] subscription.updated: OrderId={OrderId}, SubscriptionId={SubscriptionId}, Status={Status}",
+                result.OrderId, subscription.Id, subscription.Status);
         }
         return Task.CompletedTask;
     }
@@ -706,8 +768,13 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Subscription subscription)
         {
+            result.OrderId = TryGetFromMetadata(subscription.Metadata, "order_id");
             result.SubscriptionId = subscription.Id;
             result.NewStatus = PaymentStatus.Cancelled;
+            
+            _logger.LogInformation(
+                "[StripeProvider] subscription.deleted: OrderId={OrderId}, SubscriptionId={SubscriptionId}",
+                result.OrderId, subscription.Id);
         }
         return Task.CompletedTask;
     }
@@ -740,6 +807,30 @@ public class StripeProvider : IPaymentProvider
             "unpaid" => PaymentStatus.Failed,
             _ => PaymentStatus.Pending
         };
+    }
+    
+    /// <summary>
+    /// Extract value from Stripe metadata dictionary (same as old code)
+    /// </summary>
+    private static string? TryGetFromMetadata(IDictionary<string, string>? metadata, string key)
+    {
+        if (metadata != null && metadata.TryGetValue(key, out var value) && !string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+        return null;
+    }
+    
+    /// <summary>
+    /// Extract string value from JSON element (for JSON fallback parsing)
+    /// </summary>
+    private static string? TryGetJsonString(System.Text.Json.JsonElement element, string key)
+    {
+        if (element.TryGetProperty(key, out var value) && value.ValueKind == System.Text.Json.JsonValueKind.String)
+        {
+            return value.GetString();
+        }
+        return null;
     }
 
     #endregion

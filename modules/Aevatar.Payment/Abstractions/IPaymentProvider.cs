@@ -152,33 +152,68 @@ public class WebhookRequest
 }
 
 /// <summary>
-/// Webhook processing result
+/// Webhook processing result from payment providers
 /// </summary>
 public class WebhookResult
 {
+    // ========== Common Fields ==========
     public bool Success { get; set; }
-    public Guid? UserId { get; set; }
     public string? EventType { get; set; }
-    public string? TransactionId { get; set; }
-    public string? SubscriptionId { get; set; }
-    public PaymentStatus? NewStatus { get; set; }
     public string? ErrorMessage { get; set; }
-    public VerificationResult? VerificationResult { get; set; }
     public bool ShouldProcess { get; set; } = true;
     
+    // ========== Business Lookup Key ==========
+    
     /// <summary>
-    /// Product identifier (Apple/Google: ProductId, Stripe: PriceId)
-    /// Used to determine subscription tier (e.g., IsUltimate)
+    /// User ID extracted from metadata
+    /// </summary>
+    public Guid? UserId { get; set; }
+    
+    /// <summary>
+    /// Business order ID (from metadata). This is the STABLE key for finding 
+    /// PaymentRecordGAgent across all webhook events.
+    /// - Set in checkout session metadata as "order_id"
+    /// - Extracted from subscription/invoice metadata in webhooks
+    /// </summary>
+    public string? OrderId { get; set; }
+    
+    // ========== Platform-Specific IDs ==========
+    
+    /// <summary>
+    /// Platform subscription ID for API operations (cancel, update, etc.)
+    /// - Stripe: sub_xxx
+    /// - Apple: original_transaction_id
+    /// - Google: purchase_token or original_transaction_id
+    /// </summary>
+    public string? SubscriptionId { get; set; }
+    
+    /// <summary>
+    /// Current transaction/invoice ID for logging and tracking
+    /// - Stripe: invoice.Id (in_xxx)
+    /// - Apple: transaction_id
+    /// - Google: transaction_id
+    /// </summary>
+    public string? TransactionId { get; set; }
+    
+    // ========== Payment Status ==========
+    
+    public PaymentStatus? NewStatus { get; set; }
+    
+    /// <summary>
+    /// Product identifier for tier lookup
+    /// - Stripe: price_id
+    /// - Apple/Google: product_id
     /// </summary>
     public string? ProductId { get; set; }
     
     /// <summary>
-    /// Whether this is a renewal payment (not first-time subscription).
-    /// - Stripe: BillingReason == "subscription_cycle"
-    /// - Apple: EventType == "DID_RENEW"
-    /// - Google: EventType == "RENEWAL"
+    /// Whether this is a renewal payment (not first-time subscription)
     /// </summary>
     public bool IsRenewal { get; set; }
+    
+    // ========== Verification (Optional) ==========
+    
+    public VerificationResult? VerificationResult { get; set; }
 }
 
 /// <summary>
