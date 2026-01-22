@@ -707,11 +707,20 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Invoice invoice)
         {
-            var subscriptionId = invoice.Parent?.SubscriptionDetails?.Subscription?.Id;
+            // Try multiple paths to get subscription info (Stripe SDK structure varies)
+            var subscriptionId = invoice.Parent?.SubscriptionDetails?.Subscription?.Id 
+                ?? invoice.Parent?.SubscriptionDetails?.SubscriptionId; // Fallback path
             var subscriptionMetadata = invoice.Parent?.SubscriptionDetails?.Metadata;
             
             // Extract orderId from subscription metadata (stable key)
             result.OrderId = TryGetFromMetadata(subscriptionMetadata, "order_id");
+            
+            // Extract userId from subscription metadata (required for creating payment record)
+            var userIdStr = TryGetFromMetadata(subscriptionMetadata, "internal_user_id");
+            if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse(userIdStr, out var userId))
+            {
+                result.UserId = userId;
+            }
             
             // Extract priceId from invoice line items
             // Stripe.net 48.x uses Pricing.PriceDetails.Price for price info (returns string ID)
