@@ -76,6 +76,11 @@ public interface IPaymentRecordGAgent : IGAgent
     Task UpdatePeriodAsync(DateTime periodStart, DateTime periodEnd);
     
     /// <summary>
+    /// Update platform subscription ID (called by webhook when real subscriptionId is available)
+    /// </summary>
+    Task UpdateSubscriptionIdAsync(string subscriptionId);
+    
+    /// <summary>
     /// Mark payment as completed
     /// </summary>
     Task CompleteAsync();

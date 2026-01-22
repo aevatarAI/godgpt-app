@@ -229,6 +229,24 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         await ConfirmEventsAsync();
     }
 
+    public async Task UpdateSubscriptionIdAsync(string subscriptionId)
+    {
+        if (string.IsNullOrEmpty(subscriptionId))
+        {
+            PaymentLogger.LogWarning("[PaymentRecordGAgent] Attempted to update with empty subscriptionId");
+            return;
+        }
+
+        PaymentLogger.LogInformation(
+            "[PaymentRecordGAgent] Updating subscriptionId from {OldId} to {NewId}",
+            State.SubscriptionId, subscriptionId);
+
+        State.SubscriptionId = subscriptionId;
+        State.LastUpdated = Timestamp.FromDateTime(DateTime.UtcNow);
+        
+        await Task.CompletedTask;
+    }
+
     public async Task CompleteAsync()
     {
         PaymentLogger.LogInformation("[PaymentRecordGAgent] Marking payment as completed");

@@ -262,11 +262,12 @@ public class StripeProvider : IPaymentProvider
             {
                 Success = true,
                 SessionUrl = session.Url,
-                SubscriptionId = session.Id,
+                SubscriptionId = null, // Real subscriptionId (sub_xxx) comes from webhook, not session.Id (cs_test_xxx)
                 OrderId = orderId, // Return orderId so PaymentService can use it consistently
                 Status = PaymentStatus.Pending,
                 AdditionalData = new Dictionary<string, object>
                 {
+                    ["sessionId"] = session.Id, // Store sessionId in AdditionalData for reference
                     ["clientSecret"] = session.ClientSecret ?? string.Empty
                 }
             };

@@ -338,7 +338,7 @@ public class PaymentService : IPaymentService
                 UserId = userId.ToString(),
                 Platform = (int)ToAgentPlatform(platform),
                 ExternalOrderId = orderId, // Store orderId for business logic reference
-                SubscriptionId = result.SubscriptionId ?? string.Empty, // Store subscriptionId (sessionId initially, real sub later)
+                SubscriptionId = string.Empty, // Will be set by webhook when real subscriptionId (sub_xxx) is available
                 CustomerId = result.CustomerId ?? string.Empty,
                 ProductId = request.ProductId ?? string.Empty,
                 ProductName = request.ProductId ?? string.Empty,
@@ -444,6 +444,19 @@ public class PaymentService : IPaymentService
 
             // Get payment record state (Protobuf) for event context
             var recordState = await recordAgent.GetRecordStateAsync();
+            
+            // Update SubscriptionId if webhook provides one (real sub_xxx after checkout)
+            if (!string.IsNullOrEmpty(result.SubscriptionId) && 
+                recordState.SubscriptionId != result.SubscriptionId)
+            {
+                _logger.LogInformation(
+                    "[PaymentService] Updating SubscriptionId for {PaymentId} from '{OldId}' to '{NewId}'",
+                    paymentId, recordState.SubscriptionId, result.SubscriptionId);
+                await recordAgent.UpdateSubscriptionIdAsync(result.SubscriptionId);
+                // Refresh state after update
+                recordState = await recordAgent.GetRecordStateAsync();
+            }
+            
             var eventContext = BuildEventContext(recordState, platform, paymentId);
 
             // Get index agent for event broadcasting (requires UserId)
