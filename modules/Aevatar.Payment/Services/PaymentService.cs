@@ -178,9 +178,25 @@ public class PaymentService : IPaymentService
 
         var result = await provider.CancelSubscriptionAsync(request, ct);
 
+        // Update PaymentRecordGAgent status after Stripe cancellation
         if (result.Success)
         {
-            var paymentId = GetPaymentId(platform, request.SubscriptionId);
+            // If PaymentId not provided, lookup from PaymentIndexGAgent
+            var paymentId = request.PaymentId;
+            if (string.IsNullOrEmpty(paymentId))
+            {
+                var indexAgent = await GetIndexAgentAsync(userId);
+                paymentId = await indexAgent.GetPaymentIdBySubscriptionIdAsync(request.SubscriptionId);
+                
+                if (string.IsNullOrEmpty(paymentId))
+                {
+                    _logger.LogWarning(
+                        "[PaymentService] Could not find PaymentId for SubscriptionId {SubscriptionId}, user {UserId}",
+                        request.SubscriptionId, userId);
+                    return result;
+                }
+            }
+
             await CancelPaymentRecordAsync(paymentId, request.Reason);
         }
 
@@ -367,6 +383,7 @@ public class PaymentService : IPaymentService
                 Amount = (long)((request.Metadata.TryGetValue("amount", out var amt) 
                     ? decimal.Parse(amt) : 0) * 100),
                 Currency = "USD",
+                SubscriptionId = result.SubscriptionId ?? string.Empty, // Store for cancellation lookup
                 PeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(
                     (result.ExpiresAt ?? DateTime.UtcNow.AddMonths(1)).ToUniversalTime()),
                 CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)

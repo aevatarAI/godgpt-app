@@ -83,6 +83,11 @@ public interface IPaymentIndexGAgent : IGAgent
     /// </summary>
     Task<bool> HasActiveSubscriptionAsync(string? businessType = null);
     
+    /// <summary>
+    /// Get PaymentId by platform subscription ID (for cancellation)
+    /// </summary>
+    Task<string?> GetPaymentIdBySubscriptionIdAsync(string subscriptionId);
+    
     // ========== Simple Statistics ==========
     
     /// <summary>

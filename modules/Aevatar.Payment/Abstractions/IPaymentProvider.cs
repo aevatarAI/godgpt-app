@@ -232,6 +232,13 @@ public class CancellationRequest
 {
     public Guid UserId { get; set; }
     public string SubscriptionId { get; set; } = string.Empty;
+    
+    /// <summary>
+    /// Optional: PaymentRecordGAgent ID for direct status update.
+    /// If not provided, PaymentService will rely on webhook to update status.
+    /// </summary>
+    public string? PaymentId { get; set; }
+    
     public string? Reason { get; set; }
     public bool Immediate { get; set; }
 }

@@ -225,6 +225,19 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
         return Task.FromResult(query.Any());
     }
 
+    public Task<string?> GetPaymentIdBySubscriptionIdAsync(string subscriptionId)
+    {
+        if (string.IsNullOrEmpty(subscriptionId))
+        {
+            return Task.FromResult<string?>(null);
+        }
+
+        var subscription = State.ActiveSubscriptions
+            .FirstOrDefault(s => s.SubscriptionId == subscriptionId);
+
+        return Task.FromResult(subscription?.PaymentId);
+    }
+
     // ========== Statistics ==========
 
     public Task<int> GetTotalPaymentCountAsync()

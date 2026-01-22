@@ -39,6 +39,7 @@ message ActiveSubscriptionProto {
   string currency = 7;                // Currency code
   google.protobuf.Timestamp period_end = 8;  // Subscription end time
   google.protobuf.Timestamp created_at = 9;
+  string subscription_id = 10;        // Platform subscription ID (for cancellation lookup)
 }
 
 // =============================================================================

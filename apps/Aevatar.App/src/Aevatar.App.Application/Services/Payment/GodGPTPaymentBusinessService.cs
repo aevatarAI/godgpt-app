@@ -174,7 +174,22 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
             var subPlatform = (PaymentPlatform)sub.Platform;
             var subProductId = sub.BusinessId; // BusinessId stores productId
             var subIsUltimate = GetIsUltimateFromStoredPayment(subPlatform, subProductId);
-            var subscriptionId = ExtractSubscriptionIdFromPaymentId(sub.PaymentId);
+            
+            // Get real SubscriptionId from PaymentRecordGAgent state
+            // PaymentId now uses OrderId as key, so we need to query the agent
+            string? subscriptionId = null;
+            try
+            {
+                var paymentRecordActor = await _actorFactory.CreateGAgentActorAsync<PaymentRecordGAgent>(sub.PaymentId);
+                var paymentRecord = await paymentRecordActor.As<IPaymentRecordGAgent>().GetPaymentRecordAsync();
+                subscriptionId = paymentRecord.SubscriptionId;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[GodGPTPaymentBusinessService] Failed to get SubscriptionId from PaymentRecordGAgent {PaymentId}",
+                    sub.PaymentId);
+            }
 
             _logger.LogInformation(
                 "[GodGPTPaymentBusinessService] Old subscription: PaymentId={PaymentId}, SubId={SubscriptionId}, Platform={Platform}, ProductId={ProductId}, IsUltimate={IsUltimate}",
@@ -227,6 +242,7 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
                     await _paymentService.CancelSubscriptionAsync(userId, subPlatform, new CancellationRequest
                     {
                         SubscriptionId = subscriptionId,
+                        PaymentId = sub.PaymentId, // Provide PaymentId for immediate status update
                         Reason = reason,
                         Immediate = false // Cancel at period end
                     });
@@ -280,19 +296,5 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
     {
         // Reuse the same logic
         return GetIsUltimateFromProductId(platform, productId);
-    }
-
-    private static string? ExtractSubscriptionIdFromPaymentId(string paymentId)
-    {
-        // Payment ID format: payment_{platform}_{subscriptionId}
-        // e.g., "payment_stripe_sub_1234" -> "sub_1234"
-        // SubscriptionId may contain underscores, so we skip first two parts
-        var parts = paymentId.Split('_');
-        if (parts.Length < 3)
-        {
-            return null;
-        }
-        // Skip "payment" and platform name, join the rest
-        return string.Join("_", parts.Skip(2));
     }
 }
