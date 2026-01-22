@@ -407,10 +407,39 @@ public class PaymentService : IPaymentService
             var initialized = await recordAgent.IsInitializedAsync();
             if (!initialized)
             {
-                _logger.LogWarning(
-                    "[PaymentService] Payment record {PaymentId} not found for webhook (OrderId={OrderId}, SubscriptionId={SubscriptionId})",
-                    paymentId, result.OrderId, result.SubscriptionId);
-                return;
+                // Like old code: if payment record not found, create a new one from webhook data
+                // This handles cases where:
+                // 1. Server restarted after checkout session creation but before persistence
+                // 2. User completed payment through direct Stripe link
+                // 3. Old subscriptions created before this code was deployed
+                if (!result.UserId.HasValue)
+                {
+                    _logger.LogWarning(
+                        "[PaymentService] Payment record {PaymentId} not found and UserId is missing, cannot create from webhook " +
+                        "(OrderId={OrderId}, SubscriptionId={SubscriptionId})",
+                        paymentId, result.OrderId, result.SubscriptionId);
+                    return;
+                }
+                
+                _logger.LogInformation(
+                    "[PaymentService] Payment record {PaymentId} not found, creating from webhook data " +
+                    "(OrderId={OrderId}, SubscriptionId={SubscriptionId}, UserId={UserId})",
+                    paymentId, result.OrderId, result.SubscriptionId, result.UserId);
+                
+                // Initialize payment record from webhook data
+                await recordAgent.InitializeAsync(new AgentModels.Protos.CreatePaymentRequestProto
+                {
+                    UserId = result.UserId.Value.ToString(),
+                    Platform = (int)ToAgentPlatform(platform),
+                    ExternalOrderId = result.OrderId,
+                    SubscriptionId = result.SubscriptionId ?? string.Empty,
+                    CustomerId = string.Empty, // Not available in webhook
+                    ProductId = result.ProductId ?? string.Empty,
+                    ProductName = result.ProductId ?? string.Empty,
+                    PaymentMode = (int)AgentModels.PaymentMode.Subscription,
+                    BusinessType = "godgpt",
+                    BusinessId = result.ProductId ?? string.Empty
+                });
             }
 
             // Get payment record state (Protobuf) for event context
