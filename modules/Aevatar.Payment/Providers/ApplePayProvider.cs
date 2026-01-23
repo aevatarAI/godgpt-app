@@ -33,7 +33,7 @@ public class ApplePayProvider : IPaymentProvider
     public Task<List<ProductDto>> GetProductsAsync(CancellationToken ct = default)
     {
         // Apple products are configured in App Store Connect
-        // Return configured products from options
+        // Return configured products from options with originalPlanType metadata
         return Task.FromResult(_options.Products.Select(p => new ProductDto
         {
             ProductId = p.ProductId,
@@ -41,10 +41,28 @@ public class ApplePayProvider : IPaymentProvider
             Description = p.Description,
             Price = p.Price,
             Currency = p.Currency,
-            PlanType = p.PlanType,
-            IsActive = true
+            PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
+            BillingCycle = MapPlanTypeToBillingCycle(p.PlanType),
+            IsActive = true,
+            Metadata = new Dictionary<string, string>
+            {
+                ["originalPlanType"] = p.PlanType.ToString(),
+                ["isUltimate"] = p.IsUltimate.ToString().ToLower()
+            }
         }).ToList());
     }
+    
+    /// <summary>
+    /// Maps legacy PlanType (1=Day, 2=Month, 3=Year, 4=Week) to BillingCycle
+    /// </summary>
+    private static BillingCycle MapPlanTypeToBillingCycle(int planType) => planType switch
+    {
+        1 => BillingCycle.Daily,
+        2 => BillingCycle.Monthly,
+        3 => BillingCycle.Yearly,
+        4 => BillingCycle.Weekly,
+        _ => BillingCycle.Monthly
+    };
 
     public async Task<SubscriptionResult> CreateSubscriptionAsync(
         SubscriptionRequest request, 
@@ -679,7 +697,12 @@ public class AppleProductConfig
     public string Description { get; set; } = string.Empty;
     public decimal Price { get; set; }
     public string Currency { get; set; } = "USD";
-    public PlanType PlanType { get; set; }
+    
+    /// <summary>
+    /// Original plan type value from config (1=Day, 2=Month, 3=Year, 4=Week).
+    /// This matches the legacy GodGPT PlanType enum values.
+    /// </summary>
+    public int PlanType { get; set; }
     public bool IsUltimate { get; set; }
 }
 

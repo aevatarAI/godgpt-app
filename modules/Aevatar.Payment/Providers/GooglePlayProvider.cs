@@ -28,7 +28,7 @@ public class GooglePlayProvider : IPaymentProvider
     public Task<List<ProductDto>> GetProductsAsync(CancellationToken ct = default)
     {
         // Google Play products are configured in Play Console
-        // Return configured products from options
+        // Return configured products from options with originalPlanType metadata
         return Task.FromResult(_options.Products.Select(p => new ProductDto
         {
             ProductId = p.ProductId,
@@ -36,10 +36,28 @@ public class GooglePlayProvider : IPaymentProvider
             Description = p.Description,
             Price = p.Price,
             Currency = p.Currency,
-            PlanType = p.PlanType,
-            IsActive = true
+            PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
+            BillingCycle = MapPlanTypeToBillingCycle(p.PlanType),
+            IsActive = true,
+            Metadata = new Dictionary<string, string>
+            {
+                ["originalPlanType"] = p.PlanType.ToString(),
+                ["isUltimate"] = p.IsUltimate.ToString().ToLower()
+            }
         }).ToList());
     }
+    
+    /// <summary>
+    /// Maps legacy PlanType (1=Day, 2=Month, 3=Year, 4=Week) to BillingCycle
+    /// </summary>
+    private static BillingCycle MapPlanTypeToBillingCycle(int planType) => planType switch
+    {
+        1 => BillingCycle.Daily,
+        2 => BillingCycle.Monthly,
+        3 => BillingCycle.Yearly,
+        4 => BillingCycle.Weekly,
+        _ => BillingCycle.Monthly
+    };
 
     public async Task<SubscriptionResult> CreateSubscriptionAsync(
         SubscriptionRequest request, 
@@ -82,22 +100,186 @@ public class GooglePlayProvider : IPaymentProvider
         };
     }
 
-    public Task<VerificationResult> VerifyTransactionAsync(
+    public async Task<VerificationResult> VerifyTransactionAsync(
         VerificationRequest request, 
         CancellationToken ct = default)
     {
-        // For RevenueCat integration, verification happens via webhook
-        // This method is mainly for manual verification
-        _logger.LogInformation("[GooglePlayProvider] VerifyTransaction called for {TransactionId}",
-            request.TransactionId);
+        _logger.LogInformation("[GooglePlayProvider] VerifyTransaction called for {TransactionId}, UserId: {UserId}",
+            request.TransactionId, request.UserId);
 
-        // Return pending verification - actual verification done via webhook
-        return Task.FromResult(new VerificationResult
+        // Validate RevenueCat configuration
+        if (string.IsNullOrEmpty(_options.RevenueCatApiKey))
         {
-            IsValid = true,
-            TransactionId = request.TransactionId,
-            ErrorMessage = "Google Play transactions are verified via RevenueCat webhook"
-        });
+            _logger.LogWarning("[GooglePlayProvider] RevenueCat API key not configured, falling back to webhook verification");
+            return new VerificationResult
+            {
+                IsValid = true,
+                TransactionId = request.TransactionId,
+                ErrorMessage = "RevenueCat API key not configured - verification via webhook"
+            };
+        }
+
+        if (request.UserId == Guid.Empty)
+        {
+            _logger.LogWarning("[GooglePlayProvider] UserId required for RevenueCat verification");
+            return new VerificationResult
+            {
+                IsValid = false,
+                ErrorMessage = "UserId is required for Google Play verification"
+            };
+        }
+
+        try
+        {
+            // Query RevenueCat subscriber API
+            var requestUrl = $"{_options.RevenueCatBaseUrl}/subscribers/{request.UserId}";
+            
+            _httpClient.DefaultRequestHeaders.Clear();
+            _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_options.RevenueCatApiKey}");
+            _httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
+            
+            var response = await _httpClient.GetAsync(requestUrl, ct);
+            
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorContent = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning("[GooglePlayProvider] RevenueCat API error: {StatusCode}, Content: {Content}",
+                    response.StatusCode, errorContent);
+                return new VerificationResult
+                {
+                    IsValid = false,
+                    ErrorMessage = $"RevenueCat API returned {response.StatusCode}"
+                };
+            }
+            
+            var content = await response.Content.ReadAsStringAsync(ct);
+            var revenueCatData = ParseRevenueCatSubscriber(content, request.TransactionId);
+            
+            if (revenueCatData == null)
+            {
+                _logger.LogWarning("[GooglePlayProvider] Transaction {TransactionId} not found in RevenueCat for user {UserId}",
+                    request.TransactionId, request.UserId);
+                return new VerificationResult
+                {
+                    IsValid = false,
+                    ErrorMessage = "Transaction not found in RevenueCat"
+                };
+            }
+            
+            _logger.LogInformation("[GooglePlayProvider] Transaction verified via RevenueCat: {TransactionId}, ProductId: {ProductId}",
+                request.TransactionId, revenueCatData.ProductId);
+            
+            return new VerificationResult
+            {
+                IsValid = true,
+                TransactionId = request.TransactionId,
+                OriginalTransactionId = revenueCatData.OriginalTransactionId,
+                ProductId = revenueCatData.ProductId,
+                PurchaseDate = revenueCatData.PurchaseDate,
+                ExpiresDate = revenueCatData.ExpiresDate,
+                AutoRenewing = revenueCatData.AutoRenewing,
+                Amount = revenueCatData.Price,
+                Currency = revenueCatData.Currency
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[GooglePlayProvider] Error verifying transaction {TransactionId}", request.TransactionId);
+            return new VerificationResult
+            {
+                IsValid = false,
+                ErrorMessage = ex.Message
+            };
+        }
+    }
+    
+    /// <summary>
+    /// Parse RevenueCat subscriber response and find matching transaction
+    /// </summary>
+    private RevenueCatSubscription? ParseRevenueCatSubscriber(string content, string transactionId)
+    {
+        try
+        {
+            var json = System.Text.Json.JsonDocument.Parse(content);
+            
+            if (!json.RootElement.TryGetProperty("subscriber", out var subscriber) ||
+                !subscriber.TryGetProperty("subscriptions", out var subscriptions))
+            {
+                return null;
+            }
+            
+            foreach (var prop in subscriptions.EnumerateObject())
+            {
+                var subscription = prop.Value;
+                
+                if (!subscription.TryGetProperty("store_transaction_id", out var storeTransactionId))
+                    continue;
+                
+                var txId = storeTransactionId.GetString();
+                if (string.IsNullOrEmpty(txId))
+                    continue;
+                
+                // Match transaction ID (could be exact match or prefix match)
+                if (txId == transactionId || txId.StartsWith(transactionId))
+                {
+                    // Check for valid price (must be > 0 for paid transaction)
+                    decimal? price = null;
+                    string? currency = null;
+                    if (subscription.TryGetProperty("price", out var priceObj))
+                    {
+                        if (priceObj.TryGetProperty("amount", out var amount))
+                            price = (decimal)amount.GetDouble();
+                        if (priceObj.TryGetProperty("currency", out var curr))
+                            currency = curr.GetString();
+                        
+                        // Skip free/trial transactions
+                        if (price <= 0)
+                            continue;
+                    }
+                    
+                    // Build product ID with plan identifier
+                    var productId = prop.Name;
+                    if (subscription.TryGetProperty("product_plan_identifier", out var planId) &&
+                        !string.IsNullOrEmpty(planId.GetString()))
+                    {
+                        productId = $"{prop.Name}:{planId.GetString()}";
+                    }
+                    
+                    return new RevenueCatSubscription
+                    {
+                        ProductId = productId,
+                        OriginalTransactionId = txId,
+                        PurchaseDate = subscription.TryGetProperty("purchase_date", out var purchDate)
+                            ? DateTime.Parse(purchDate.GetString()!)
+                            : DateTime.UtcNow,
+                        ExpiresDate = subscription.TryGetProperty("expires_date", out var expDate) && expDate.ValueKind != System.Text.Json.JsonValueKind.Null
+                            ? DateTime.Parse(expDate.GetString()!)
+                            : null,
+                        AutoRenewing = !subscription.TryGetProperty("unsubscribe_detected_at", out _),
+                        Price = price,
+                        Currency = currency
+                    };
+                }
+            }
+            
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[GooglePlayProvider] Error parsing RevenueCat response");
+            return null;
+        }
+    }
+    
+    private class RevenueCatSubscription
+    {
+        public string ProductId { get; set; } = string.Empty;
+        public string? OriginalTransactionId { get; set; }
+        public DateTime? PurchaseDate { get; set; }
+        public DateTime? ExpiresDate { get; set; }
+        public bool AutoRenewing { get; set; }
+        public decimal? Price { get; set; }
+        public string? Currency { get; set; }
     }
 
     public Task<WebhookResult> HandleWebhookAsync(
@@ -366,6 +548,7 @@ public class GooglePlayOptions
     
     public string WebhookAuthToken { get; set; } = string.Empty;
     public string RevenueCatApiKey { get; set; } = string.Empty;
+    public string RevenueCatBaseUrl { get; set; } = "https://api.revenuecat.com/v1";
     public List<GoogleProductConfig> Products { get; set; } = new();
 }
 
@@ -376,7 +559,12 @@ public class GoogleProductConfig
     public string Description { get; set; } = string.Empty;
     public decimal Price { get; set; }
     public string Currency { get; set; } = "USD";
-    public PlanType PlanType { get; set; }
+    
+    /// <summary>
+    /// Original plan type value from config (1=Day, 2=Month, 3=Year, 4=Week).
+    /// This matches the legacy GodGPT PlanType enum values.
+    /// </summary>
+    public int PlanType { get; set; }
     public bool IsUltimate { get; set; }
 }
 
