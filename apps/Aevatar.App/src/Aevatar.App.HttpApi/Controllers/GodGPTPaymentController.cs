@@ -208,7 +208,7 @@ public class GodGPTPaymentController : AevatarController
                 var oneDayAgo = DateTime.UtcNow.AddDays(-1);
                 
                 var result = queryResult.Items
-                    .Select(item => MapToPaymentSummaryDto(item.Data))
+                    .Select(item => MapToPaymentSummaryDto(item))
                     .Where(dto => 
                     {
                         // Keep all non-Processing records
@@ -253,19 +253,20 @@ public class GodGPTPaymentController : AevatarController
         return fallbackResult;
     }
     
-    private static PaymentSummaryDto MapToPaymentSummaryDto(Dictionary<string, object?> data)
+    private static PaymentSummaryDto MapToPaymentSummaryDto(StateQueryResult item)
     {
         var dto = new PaymentSummaryDto();
+        var data = item.Data;
         
-        // Core identifiers
-        if (data.TryGetValue("paymentId", out var paymentId))
-            dto.PaymentGrainId = Guid.TryParse(paymentId?.ToString(), out var pid) ? pid : Guid.Empty;
+        // Core identifiers - AgentId is the PaymentGrainId
+        dto.PaymentGrainId = Guid.TryParse(item.AgentId, out var pid) ? pid : Guid.Empty;
+        
         if (data.TryGetValue("externalOrderId", out var orderId))
             dto.OrderId = orderId?.ToString();
         if (data.TryGetValue("userId", out var userId))
             dto.UserId = Guid.TryParse(userId?.ToString(), out var uid) ? uid : Guid.Empty;
         
-        // Plan info
+        // Plan info - billingCycle determines membership level
         if (data.TryGetValue("billingCycle", out var billingCycle))
         {
             var cycle = Convert.ToInt32(billingCycle ?? 0);
