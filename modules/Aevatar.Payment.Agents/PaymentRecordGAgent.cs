@@ -231,6 +231,18 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     public async Task CompleteAsync()
     {
+        // Prevent completing a cancelled/expired/refunded payment (race condition protection)
+        var currentStatus = (PaymentStatus)State.Status;
+        if (currentStatus == PaymentStatus.Cancelled || 
+            currentStatus == PaymentStatus.Expired ||
+            currentStatus == PaymentStatus.Refunded)
+        {
+            Logger.LogWarning(
+                "[PaymentRecordGAgent] Cannot complete payment {PaymentId} - already {Status}",
+                State.PaymentId, currentStatus);
+            return;
+        }
+        
         Logger.LogInformation("[PaymentRecordGAgent] Marking payment as completed");
 
         RaiseEvent(new RecordCompletedEvent

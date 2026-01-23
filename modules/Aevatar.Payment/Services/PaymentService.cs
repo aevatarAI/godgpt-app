@@ -968,6 +968,18 @@ public class PaymentService : IPaymentService
                 
                 if (result.NewStatus == PaymentStatus.Completed)
                 {
+                    // Idempotency check: don't complete if already cancelled/expired/refunded
+                    var currentStatus = (PaymentStatus)recordState.Status;
+                    if (currentStatus == PaymentStatus.Cancelled || 
+                        currentStatus == PaymentStatus.Expired ||
+                        currentStatus == PaymentStatus.Refunded)
+                    {
+                        _logger.LogWarning(
+                            "[PaymentService] Payment {PaymentId} is {Status}, skipping Complete from webhook (possible race condition)",
+                            paymentId, currentStatus);
+                        return;
+                    }
+                    
                     var isRenewal = result.VerificationResult?.ExpiresDate != null && 
                                     recordState?.Status == (int)AgentModels.PaymentStatus.Completed;
                     
