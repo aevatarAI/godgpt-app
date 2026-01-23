@@ -295,7 +295,8 @@ public class PaymentService : IPaymentService
                 // We'll filter stale Processing records in C# like old code does
                 var query = new StateQuery
                 {
-                    AgentType = "PaymentRecordGAgent",
+                    // Use full type name to match ES index: aevatar-state-aevatar-payment-agents-paymentrecordgagent
+                    AgentType = "Aevatar.Payment.Agents.PaymentRecordGAgent",
                     // Elasticsearch fields are camelCase
                     // Use .keyword subfield for exact GUID match (text fields are analyzed by default)
                     QueryString = $"userId.keyword:\"{userId}\"",
