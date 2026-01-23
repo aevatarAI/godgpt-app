@@ -338,10 +338,11 @@ public class GodGPTPaymentController : AevatarController
         // If billingCycle not in data (or 0), lookup from product config
         if (planType == 0)
         {
-            // Try priceId first (Stripe), then productId (Apple/Google)
-            if (!string.IsNullOrEmpty(priceIdStr) && productPlanTypes.TryGetValue(priceIdStr, out var pt1))
+            // ES stores Stripe's priceId in productId field, Apple/Google use productId directly
+            // So try productId first (works for all platforms)
+            if (!string.IsNullOrEmpty(productIdStr) && productPlanTypes.TryGetValue(productIdStr, out var pt1))
                 planType = pt1;
-            else if (!string.IsNullOrEmpty(productIdStr) && productPlanTypes.TryGetValue(productIdStr, out var pt2))
+            else if (!string.IsNullOrEmpty(priceIdStr) && productPlanTypes.TryGetValue(priceIdStr, out var pt2))
                 planType = pt2;
         }
         
