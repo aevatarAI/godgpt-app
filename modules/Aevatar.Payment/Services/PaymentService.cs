@@ -381,6 +381,11 @@ public class PaymentService : IPaymentService
                 }
             }
             
+            // Get product config for ProductName and Amount
+            string productName = request.ProductId ?? string.Empty;
+            decimal productAmount = 0;
+            string currency = "USD";
+            
             // Auto-infer plan_type and is_ultimate from product config if not provided
             if (!createRequest.BusinessMetadata.ContainsKey("plan_type") || 
                 !createRequest.BusinessMetadata.ContainsKey("is_ultimate"))
@@ -393,6 +398,11 @@ public class PaymentService : IPaymentService
                     
                     if (product != null)
                     {
+                        // Use product display name instead of ProductId (Price ID)
+                        productName = product.Name ?? product.ProductId;
+                        productAmount = product.Price;
+                        currency = product.Currency ?? "USD";
+                        
                         if (!createRequest.BusinessMetadata.ContainsKey("plan_type"))
                         {
                             // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
@@ -430,6 +440,9 @@ public class PaymentService : IPaymentService
                 }
             }
             
+            // Update ProductName in createRequest
+            createRequest.ProductName = productName;
+            
             await recordAgent.InitializeAsync(createRequest);
 
             // Update index agent
@@ -445,10 +458,9 @@ public class PaymentService : IPaymentService
                 BusinessType = "godgpt",
                 BusinessId = request.ProductId,
                 Platform = (int)ToAgentPlatform(platform),
-                ProductName = request.ProductId,
-                Amount = (long)((request.Metadata.TryGetValue("amount", out var amt) 
-                    ? decimal.Parse(amt) : 0) * 100),
-                Currency = "USD",
+                ProductName = productName, // Use actual product name, not Price ID
+                Amount = (long)(productAmount * 100), // Convert to smallest unit (cents)
+                Currency = currency,
                 SubscriptionId = result.SubscriptionId ?? string.Empty, // Store for cancellation lookup
                 PeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(
                     (result.ExpiresAt ?? DateTime.UtcNow.AddMonths(1)).ToUniversalTime()),
@@ -518,11 +530,16 @@ public class PaymentService : IPaymentService
                     SubscriptionId = result.SubscriptionId ?? string.Empty,
                     CustomerId = string.Empty, // Not available in webhook
                     ProductId = result.ProductId ?? string.Empty,
-                    ProductName = result.ProductId ?? string.Empty,
+                    ProductName = result.ProductId ?? string.Empty, // Will be updated below
                     PaymentMode = (int)AgentModels.PaymentMode.Subscription,
                     BusinessType = "godgpt",
                     BusinessId = result.ProductId ?? string.Empty
                 };
+                
+                // Get product config for ProductName and Amount
+                string productName = result.ProductId ?? string.Empty;
+                decimal productAmount = result.VerificationResult?.Amount ?? 0;
+                string currency = result.VerificationResult?.Currency ?? "USD";
                 
                 // Auto-infer plan_type and is_ultimate from product config (like old code: GetProductConfigAsync)
                 if (!string.IsNullOrEmpty(result.ProductId))
@@ -535,6 +552,15 @@ public class PaymentService : IPaymentService
                         
                         if (product != null)
                         {
+                            // Use product display name instead of ProductId (Price ID)
+                            productName = product.Name ?? product.ProductId;
+                            // Use product price if verification result doesn't have amount
+                            if (productAmount == 0)
+                            {
+                                productAmount = product.Price;
+                            }
+                            currency = product.Currency ?? currency;
+                            
                             // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
                             // This is the correct Common.Constants.PlanType value, not Payment.Abstractions.PlanType
                             if (product.Metadata != null && product.Metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr))
@@ -572,6 +598,11 @@ public class PaymentService : IPaymentService
                     }
                 }
                 
+                // Update ProductName and Amount in createFromWebhook
+                createFromWebhook.ProductName = productName;
+                createFromWebhook.Amount = (long)(productAmount * 100); // Convert to smallest unit (cents)
+                createFromWebhook.Currency = currency;
+                
                 await recordAgent.InitializeAsync(createFromWebhook);
             }
 
@@ -583,6 +614,57 @@ public class PaymentService : IPaymentService
             if (result.UserId.HasValue)
             {
                 indexAgent = await GetIndexAgentAsync(result.UserId.Value);
+                
+                // Add to index agent if payment record was just created and payment is completed
+                if (!initialized && result.NewStatus == PaymentStatus.Completed)
+                {
+                    // Get product info again for index (already fetched above, but need to ensure we have it)
+                    string indexProductName = result.ProductId ?? string.Empty;
+                    decimal indexProductAmount = result.VerificationResult?.Amount ?? 0;
+                    string indexCurrency = result.VerificationResult?.Currency ?? "USD";
+                    
+                    if (!string.IsNullOrEmpty(result.ProductId))
+                    {
+                        try
+                        {
+                            var provider = GetProvider(platform);
+                            var products = await provider.GetProductsAsync();
+                            var product = products.FirstOrDefault(p => p.ProductId == result.ProductId);
+                            if (product != null)
+                            {
+                                indexProductName = product.Name ?? product.ProductId;
+                                if (indexProductAmount == 0)
+                                {
+                                    indexProductAmount = product.Price;
+                                }
+                                indexCurrency = product.Currency ?? indexCurrency;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "[PaymentService] Failed to get product info for index agent");
+                        }
+                    }
+                    
+                    await indexAgent.AddActiveSubscriptionAsync(new AgentModels.Protos.ActiveSubscriptionProto
+                    {
+                        PaymentId = paymentId,
+                        BusinessType = "godgpt",
+                        BusinessId = result.ProductId ?? string.Empty,
+                        Platform = (int)ToAgentPlatform(platform),
+                        ProductName = indexProductName, // Use actual product name, not Price ID
+                        Amount = (long)(indexProductAmount * 100), // Convert to smallest unit (cents)
+                        Currency = indexCurrency,
+                        SubscriptionId = result.SubscriptionId ?? string.Empty,
+                        PeriodEnd = result.PeriodEnd.HasValue
+                            ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
+                            : (result.VerificationResult?.ExpiresDate.HasValue == true
+                                ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.VerificationResult.ExpiresDate.Value.ToUniversalTime())
+                                : Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1))),
+                        CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)
+                    });
+                    await indexAgent.IncrementPaymentCountAsync();
+                }
             }
             
             // Update SubscriptionId if webhook provides one (real sub_xxx after checkout)
