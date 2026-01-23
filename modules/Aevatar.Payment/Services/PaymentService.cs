@@ -627,6 +627,8 @@ public class PaymentService : IPaymentService
                     currency = product.Currency ?? "USD";
                     
                     // Auto-infer plan_type and is_ultimate from product config if not provided
+                    // Also set BillingCycle field using legacy PlanType values (Day=1, Month=2, Year=3, Week=4)
+                    int legacyPlanType = 0;
                     if (!createRequest.BusinessMetadata.ContainsKey("plan_type"))
                     {
                         // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
@@ -634,6 +636,7 @@ public class PaymentService : IPaymentService
                         if (product.Metadata != null && product.Metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr))
                         {
                             createRequest.BusinessMetadata["plan_type"] = originalPlanTypeStr;
+                            int.TryParse(originalPlanTypeStr, out legacyPlanType);
                         }
                         else
                         {
@@ -643,6 +646,16 @@ public class PaymentService : IPaymentService
                                 request.ProductId);
                             createRequest.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
                         }
+                    }
+                    else if (int.TryParse(createRequest.BusinessMetadata["plan_type"], out var pt))
+                    {
+                        legacyPlanType = pt;
+                    }
+                    
+                    // Store BillingCycle as legacy PlanType value for consistent ES querying
+                    if (legacyPlanType > 0)
+                    {
+                        createRequest.BillingCycle = legacyPlanType;
                     }
                     if (!createRequest.BusinessMetadata.ContainsKey("is_ultimate"))
                     {
@@ -807,9 +820,11 @@ public class PaymentService : IPaymentService
                             
                             // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
                             // This is the correct Common.Constants.PlanType value, not Payment.Abstractions.PlanType
+                            int legacyPlanType = 0;
                             if (product.Metadata != null && product.Metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr))
                             {
                                 createFromWebhook.BusinessMetadata["plan_type"] = originalPlanTypeStr;
+                                int.TryParse(originalPlanTypeStr, out legacyPlanType);
                             }
                             else
                             {
@@ -821,6 +836,12 @@ public class PaymentService : IPaymentService
                             }
                             // PlanType.Premium is used to indicate Ultimate tier in config
                             createFromWebhook.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
+                            
+                            // Store BillingCycle as legacy PlanType value for consistent ES querying
+                            if (legacyPlanType > 0)
+                            {
+                                createFromWebhook.BillingCycle = legacyPlanType;
+                            }
                             
                             var inferredPlanType = createFromWebhook.BusinessMetadata.ContainsKey("plan_type")
                                 ? createFromWebhook.BusinessMetadata["plan_type"]
@@ -1007,12 +1028,27 @@ public class PaymentService : IPaymentService
                 else if (result.NewStatus == PaymentStatus.Cancelled || 
                          result.NewStatus == PaymentStatus.Expired)
                 {
-                    // Update agent status (no business event - business layer tracks via period_end)
-                    await recordAgent.UpdateStatusAsync(agentStatus);
+                    // Cancel the payment record (triggers Event Sourcing)
+                    await recordAgent.CancelAsync(result.VerificationResult?.ErrorMessage ?? "Subscription cancelled");
 
+                    // Remove from active subscriptions index
                     if (indexAgent != null)
                     {
                         await indexAgent.RemoveActiveSubscriptionAsync(paymentId);
+                        
+                        // Build and broadcast cancellation event to business layer
+                        var cancelledEvent = new PaymentCancelledEvent
+                        {
+                            Context = eventContext,
+                            Reason = result.VerificationResult?.ErrorMessage ?? "Subscription cancelled",
+                            Immediate = result.NewStatus == PaymentStatus.Cancelled, // Cancelled is immediate, Expired is at period end
+                            EffectiveDate = result.PeriodEnd.HasValue
+                                ? Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
+                                : null,
+                            CancelledAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                        };
+                        
+                        await indexAgent.NotifyPaymentCancelledAsync(cancelledEvent);
                     }
                 }
                 else if (result.NewStatus == PaymentStatus.Refunded)
@@ -1120,13 +1156,13 @@ public class PaymentService : IPaymentService
         {
             var recordAgent = await GetRecordAgentAsync(paymentId);
             
-            // Get record state to extract UserId for index agent
+            // Get record state to extract UserId for index agent and build event context
             var recordState = await recordAgent.GetRecordStateAsync();
             
-            // Cancel the payment record
+            // Cancel the payment record (triggers Event Sourcing)
             await recordAgent.CancelAsync(reason);
             
-            // Remove from PaymentIndexGAgent's active subscriptions
+            // Remove from PaymentIndexGAgent's active subscriptions and notify business layer
             if (recordState != null && !string.IsNullOrEmpty(recordState.UserId))
             {
                 try
@@ -1135,14 +1171,30 @@ public class PaymentService : IPaymentService
                     var indexAgent = await GetIndexAgentAsync(userId);
                     await indexAgent.RemoveActiveSubscriptionAsync(paymentId);
                     
+                    // Build event context for cancellation event
+                    var eventContext = BuildEventContext(recordState, 
+                        ToApiPlatform((AgentModels.PaymentPlatform)recordState.Platform), 
+                        paymentId);
+                    
+                    // Build and broadcast cancellation event to business layer
+                    var cancelledEvent = new PaymentCancelledEvent
+                    {
+                        Context = eventContext,
+                        Reason = reason ?? "User requested cancellation",
+                        Immediate = true, // Active cancellation is immediate
+                        CancelledAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                    };
+                    
+                    await indexAgent.NotifyPaymentCancelledAsync(cancelledEvent);
+                    
                     _logger.LogInformation(
-                        "[PaymentService] Removed subscription {PaymentId} from user {UserId} index",
+                        "[PaymentService] Cancelled subscription {PaymentId} for user {UserId} and notified business layer",
                         paymentId, userId);
                 }
                 catch (Exception indexEx)
                 {
                     _logger.LogError(indexEx,
-                        "[PaymentService] Failed to remove subscription {PaymentId} from index", paymentId);
+                        "[PaymentService] Failed to remove subscription {PaymentId} from index or notify business layer", paymentId);
                 }
             }
         }

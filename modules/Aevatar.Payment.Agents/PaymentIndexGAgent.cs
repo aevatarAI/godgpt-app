@@ -67,6 +67,15 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
         await PublishAsync(evt, EventDirection.Down);
     }
 
+    public async Task NotifyPaymentCancelledAsync(PaymentCancelledEvent evt)
+    {
+        Logger.LogInformation(
+            "[PaymentIndexGAgent] Broadcasting PaymentCancelled to children: user={UserId}, payment={PaymentId}, reason={Reason}",
+            Id, evt.Context?.PaymentId, evt.Reason);
+
+        await PublishAsync(evt, EventDirection.Down);
+    }
+
     // ========== Event Sourcing: TransitionState ==========
 
     protected override void TransitionState(PaymentIndexStateProto state, IMessage evt)

@@ -37,6 +37,7 @@ public class GodGPTPaymentController : AevatarController
     private readonly IPaymentService _paymentService;
     private readonly IStateIndexService? _stateIndexService;
     private readonly Dictionary<string, int> _productPlanTypes; // productId/priceId -> PlanType
+    private readonly Dictionary<string, bool> _productIsUltimate; // productId/priceId -> IsUltimate
 
     public GodGPTPaymentController(
         ILogger<GodGPTPaymentController> logger,
@@ -52,6 +53,12 @@ public class GodGPTPaymentController : AevatarController
         
         // Build unified product -> PlanType lookup from all platforms
         _productPlanTypes = BuildProductPlanTypeLookup(
+            stripeOptions?.Value.Products,
+            appleOptions?.Value.Products,
+            googleOptions?.Value.Products);
+        
+        // Build unified product -> IsUltimate lookup from all platforms
+        _productIsUltimate = BuildProductIsUltimateLookup(
             stripeOptions?.Value.Products,
             appleOptions?.Value.Products,
             googleOptions?.Value.Products);
@@ -91,6 +98,46 @@ public class GodGPTPaymentController : AevatarController
             {
                 if (!string.IsNullOrEmpty(p.ProductId))
                     lookup[p.ProductId] = p.PlanType;
+            }
+        }
+        
+        return lookup;
+    }
+    
+    private static Dictionary<string, bool> BuildProductIsUltimateLookup(
+        List<StripeProductConfig>? stripeProducts,
+        List<AppleProductConfig>? appleProducts,
+        List<GoogleProductConfig>? googleProducts)
+    {
+        var lookup = new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        
+        // Stripe uses PriceId as ProductId
+        if (stripeProducts != null)
+        {
+            foreach (var p in stripeProducts)
+            {
+                if (!string.IsNullOrEmpty(p.PriceId))
+                    lookup[p.PriceId] = p.IsUltimate;
+            }
+        }
+        
+        // Apple uses ProductId
+        if (appleProducts != null)
+        {
+            foreach (var p in appleProducts)
+            {
+                if (!string.IsNullOrEmpty(p.ProductId))
+                    lookup[p.ProductId] = p.IsUltimate;
+            }
+        }
+        
+        // Google uses ProductId
+        if (googleProducts != null)
+        {
+            foreach (var p in googleProducts)
+            {
+                if (!string.IsNullOrEmpty(p.ProductId))
+                    lookup[p.ProductId] = p.IsUltimate;
             }
         }
         
@@ -260,7 +307,7 @@ public class GodGPTPaymentController : AevatarController
                 var oneDayAgo = DateTime.UtcNow.AddDays(-1);
                 
                 var result = queryResult.Items
-                    .Select(item => MapToPaymentSummaryDto(item, _productPlanTypes))
+                    .Select(item => MapToPaymentSummaryDto(item, _productPlanTypes, _productIsUltimate))
                     .Where(dto => 
                     {
                         // Keep all non-Processing records
@@ -307,7 +354,8 @@ public class GodGPTPaymentController : AevatarController
     
     private static PaymentSummaryDto MapToPaymentSummaryDto(
         StateQueryResult item, 
-        Dictionary<string, int> productPlanTypes)
+        Dictionary<string, int> productPlanTypes,
+        Dictionary<string, bool> productIsUltimate)
     {
         var dto = new PaymentSummaryDto();
         var data = item.Data;
@@ -328,14 +376,17 @@ public class GodGPTPaymentController : AevatarController
         if (data.TryGetValue("productId", out var productId))
             productIdStr = productId?.ToString();
         
-        // Plan info - try billingCycle from data first, fallback to config lookup
+        // Plan info - uses legacy PlanType values (Day=1, Month=2, Year=3, Week=4)
+        // Priority: ES billingCycle (now stores legacy values) -> product config fallback
         int planType = 0;
+        
+        // Try ES billingCycle first (stores legacy PlanType values after fix)
         if (data.TryGetValue("billingCycle", out var billingCycle))
         {
             planType = Convert.ToInt32(billingCycle ?? 0);
         }
         
-        // If billingCycle not in data (or 0), lookup from product config
+        // Fallback to product config if billingCycle is 0 (old records or migration data)
         if (planType == 0)
         {
             // ES stores Stripe's priceId in productId field, Apple/Google use productId directly
@@ -347,7 +398,33 @@ public class GodGPTPaymentController : AevatarController
         }
         
         dto.PlanType = planType;
-        dto.MembershipLevel = GetMembershipLevelFromPlanType(planType);
+        
+        // Determine isUltimate from metadata or product config
+        bool isUltimate = false;
+        if (data.TryGetValue("businessMetadata", out var metadata) && metadata != null)
+        {
+            var metaDict = ParseMetadata(metadata);
+            if (metaDict.TryGetValue("is_ultimate", out var isUltimateStr))
+                isUltimate = bool.TryParse(isUltimateStr, out var u) && u;
+            else if (metaDict.TryGetValue("isUltimate", out var isUltimateStr2))
+                isUltimate = bool.TryParse(isUltimateStr2, out var u2) && u2;
+        }
+        
+        // Fallback to product config lookup
+        if (!isUltimate)
+        {
+            if (!string.IsNullOrEmpty(productIdStr) && productIsUltimate.TryGetValue(productIdStr, out var u1))
+                isUltimate = u1;
+            else if (!string.IsNullOrEmpty(priceIdStr) && productIsUltimate.TryGetValue(priceIdStr, out var u2))
+                isUltimate = u2;
+        }
+        
+        // Get membership level: "Premium" or "Ultimate" (matches old MembershipLevel constants)
+        dto.MembershipLevel = GetMembershipLevelFromIsUltimate(isUltimate);
+        
+        // Note: planType indicates billing cycle:
+        // 1 = Day, 2 = Month, 3 = Year, 4 = Week
+        // Weekly subscription is identified by planType == 4
         
         // Amount info
         if (data.TryGetValue("amount", out var amount))
@@ -379,7 +456,7 @@ public class GodGPTPaymentController : AevatarController
             dto.AppStoreEnvironment = env?.ToString();
         
         // Trial info from metadata
-        if (data.TryGetValue("businessMetadata", out var metadata) && metadata != null)
+        if (metadata != null)
         {
             var metaDict = ParseMetadata(metadata);
             if (metaDict.TryGetValue("is_trial", out var isTrial))
@@ -431,18 +508,12 @@ public class GodGPTPaymentController : AevatarController
     }
     
     /// <summary>
-    /// Get membership level from legacy PlanType (1=Day, 2=Month, 3=Year, 4=Week)
+    /// Get membership level from isUltimate flag (matches old MembershipLevel constants)
+    /// Old API returns "Premium" or "Ultimate", not cycle names
     /// </summary>
-    private static string? GetMembershipLevelFromPlanType(int planType)
+    private static string GetMembershipLevelFromIsUltimate(bool isUltimate)
     {
-        return planType switch
-        {
-            1 => "Daily",    // Day
-            2 => "Monthly",  // Month
-            3 => "Yearly",   // Year (Premium)
-            4 => "Weekly",   // Week
-            _ => null
-        };
+        return isUltimate ? "Ultimate" : "Premium";
     }
 
     [HttpPost("customer")]

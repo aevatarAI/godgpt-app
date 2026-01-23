@@ -1041,6 +1041,109 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             }
         });
     }
+
+    /// <summary>
+    /// Handle payment cancelled event - update user subscription status
+    /// </summary>
+    [EventHandler]
+    public async Task HandlePaymentCancelled(PaymentCancelledEvent evt)
+    {
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCancelled] === EVENT RECEIVED === " +
+            "AgentId={AgentId}, PaymentId={PaymentId}, SubscriptionId={SubscriptionId}, BusinessType={BusinessType}, Reason={Reason}",
+            Id, evt.Context?.PaymentId, evt.Context?.SubscriptionId, evt.Context?.BusinessType, evt.Reason);
+        
+        // Only process events for godgpt business type
+        if (evt.Context?.BusinessType != "godgpt")
+        {
+            Logger.LogDebug(
+                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping non-godgpt event. BusinessType={BusinessType}",
+                evt.Context?.BusinessType);
+            return;
+        }
+
+        var userId = Guid.Parse(evt.Context.UserId);
+        // Extract actual user GUID from Agent Id (format: "UserQuotaGAgent:guid")
+        var agentUserId = Id.Contains(':') ? Id.Split(':').Last() : Id;
+        if (userId.ToString() != agentUserId)
+        {
+            Logger.LogWarning(
+                "[UserQuotaGAgent][HandlePaymentCancelled] UserId mismatch. Event UserId: {EventUserId}, Agent UserId: {AgentUserId}",
+                evt.Context.UserId, agentUserId);
+            return;
+        }
+
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCancelled] Processing cancellation for user {UserId}, PaymentId: {PaymentId}, SubscriptionId: {SubscriptionId}, Immediate: {Immediate}",
+            userId, evt.Context.PaymentId, evt.Context.SubscriptionId, evt.Immediate);
+
+        // Determine which subscription to cancel by matching SubscriptionId
+        // First try to match by SubscriptionId, then fallback to business metadata
+        bool? isUltimateToCancel = null;
+        
+        if (!string.IsNullOrEmpty(evt.Context.SubscriptionId))
+        {
+            // Check Premium subscription
+            var premiumSubscription = await GetSubscriptionAsync(false);
+            if (premiumSubscription != null && premiumSubscription.IsActive && 
+                premiumSubscription.SubscriptionIds != null &&
+                premiumSubscription.SubscriptionIds.Contains(evt.Context.SubscriptionId))
+            {
+                isUltimateToCancel = false;
+                Logger.LogInformation(
+                    "[UserQuotaGAgent][HandlePaymentCancelled] Matched Premium subscription by SubscriptionId {SubscriptionId}",
+                    evt.Context.SubscriptionId);
+            }
+            
+            // Check Ultimate subscription
+            if (!isUltimateToCancel.HasValue)
+            {
+                var ultimateSubscription = await GetSubscriptionAsync(true);
+                if (ultimateSubscription != null && ultimateSubscription.IsActive && 
+                    ultimateSubscription.SubscriptionIds != null &&
+                    ultimateSubscription.SubscriptionIds.Contains(evt.Context.SubscriptionId))
+                {
+                    isUltimateToCancel = true;
+                    Logger.LogInformation(
+                        "[UserQuotaGAgent][HandlePaymentCancelled] Matched Ultimate subscription by SubscriptionId {SubscriptionId}",
+                        evt.Context.SubscriptionId);
+                }
+            }
+        }
+        
+        // Fallback to business metadata if SubscriptionId match failed
+        if (!isUltimateToCancel.HasValue)
+        {
+            var metadataDict = evt.Context.BusinessMetadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value) 
+                ?? new Dictionary<string, string>();
+            isUltimateToCancel = GetIsUltimateFromMetadata(metadataDict);
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCancelled] Using business metadata to determine subscription type: IsUltimate={IsUltimate}",
+                isUltimateToCancel.Value);
+        }
+
+        // Cancel the matched subscription
+        var subscription = await GetSubscriptionAsync(isUltimateToCancel.Value);
+        if (subscription != null && subscription.IsActive)
+        {
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCancelled] Cancelling {SubscriptionType} subscription for user {UserId}",
+                isUltimateToCancel.Value ? "Ultimate" : "Premium", userId);
+            
+            RaiseEvent(new CancelSubscriptionEvent { IsUltimate = isUltimateToCancel.Value });
+            await ConfirmEventsAsync();
+            
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCancelled] Successfully cancelled {SubscriptionType} subscription for user {UserId}",
+                isUltimateToCancel.Value ? "Ultimate" : "Premium", userId);
+        }
+        else
+        {
+            Logger.LogWarning(
+                "[UserQuotaGAgent][HandlePaymentCancelled] No active {SubscriptionType} subscription found for user {UserId} to cancel",
+                isUltimateToCancel.Value ? "Ultimate" : "Premium", userId);
+        }
+    }
     
     /// <summary>
     /// Process inviter reward when invitee pays (same as old code ProcessInviteeSubscriptionAsync)

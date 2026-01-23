@@ -111,4 +111,20 @@ message RefundCompletedEvent {
   google.protobuf.Timestamp refunded_at = 7;
 }
 
+/// <summary>
+/// Published when a subscription is cancelled.
+/// Business layer should update user subscription status and revoke access when period ends.
+/// </summary>
+message PaymentCancelledEvent {
+  PaymentEventContext context = 1;
+  
+  // Cancellation details
+  string reason = 2;                      // Cancellation reason (user requested/platform cancelled/etc)
+  bool immediate = 3;                     // Whether cancellation is immediate or at period end
+  optional google.protobuf.Timestamp effective_date = 4;  // When cancellation takes effect
+  
+  // Timestamp
+  google.protobuf.Timestamp cancelled_at = 5;
+}
+
 

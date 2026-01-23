@@ -36,6 +36,11 @@ public interface IPaymentIndexGAgent : IGAgent
     /// </summary>
     Task NotifyRefundCompletedAsync(RefundCompletedEvent evt);
     
+    /// <summary>
+    /// Notify payment cancelled - broadcasts to all registered business agents.
+    /// </summary>
+    Task NotifyPaymentCancelledAsync(PaymentCancelledEvent evt);
+    
     // ========== Platform Customer ID ==========
     
     /// <summary>
