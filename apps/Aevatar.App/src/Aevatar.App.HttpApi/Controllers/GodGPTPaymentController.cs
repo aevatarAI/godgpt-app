@@ -446,6 +446,14 @@ public class GodGPTPaymentController : AevatarController
         if (data.TryGetValue("completedAt", out var completedAt) && completedAt != null)
             dto.CompletedAtRaw = ParseDateTime(completedAt);
         
+        // Subscription period dates - calculate from completedAt + planType (like old code)
+        // Old code: CalculateSubscriptionDurationAsync calculates based on PlanType
+        if (dto.CompletedAtRaw.HasValue && dto.CompletedAtRaw.Value != DateTime.MinValue)
+        {
+            dto.SubscriptionStartDateRaw = dto.CompletedAtRaw.Value;
+            dto.SubscriptionEndDateRaw = CalculateSubscriptionEndDate(planType, dto.CompletedAtRaw.Value);
+        }
+        
         // Subscription details
         if (data.TryGetValue("subscriptionId", out var subId))
             dto.SubscriptionId = subId?.ToString();
@@ -514,6 +522,22 @@ public class GodGPTPaymentController : AevatarController
     private static string GetMembershipLevelFromIsUltimate(bool isUltimate)
     {
         return isUltimate ? "Ultimate" : "Premium";
+    }
+    
+    /// <summary>
+    /// Calculate subscription end date based on PlanType (like old code: GetSubscriptionEndDate)
+    /// Legacy PlanType: Day=1, Month=2, Year=3, Week=4
+    /// </summary>
+    private static DateTime CalculateSubscriptionEndDate(int planType, DateTime startDate)
+    {
+        return planType switch
+        {
+            1 => startDate.AddDays(1),    // Day
+            2 => startDate.AddDays(30),   // Month
+            3 => startDate.AddDays(365),  // Year
+            4 => startDate.AddDays(7),    // Week
+            _ => startDate.AddDays(30)    // Default to Month
+        };
     }
 
     [HttpPost("customer")]
@@ -782,11 +806,21 @@ public class PaymentSummaryDto
     public DateTime CreatedAtRaw { get; set; }
     [System.Text.Json.Serialization.JsonIgnore]
     public DateTime? CompletedAtRaw { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTime? SubscriptionStartDateRaw { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTime? SubscriptionEndDateRaw { get; set; }
     
     // Timestamps - API output (ISO8601 string)
     public string CreatedAt => DateTimeFormatHelper.ToIso8601String(CreatedAtRaw);
     public string? CompletedAt => CompletedAtRaw.HasValue 
         ? DateTimeFormatHelper.ToIso8601String(CompletedAtRaw.Value) 
+        : null;
+    public string? SubscriptionStartDate => SubscriptionStartDateRaw.HasValue
+        ? DateTimeFormatHelper.ToIso8601String(SubscriptionStartDateRaw.Value)
+        : null;
+    public string? SubscriptionEndDate => SubscriptionEndDateRaw.HasValue
+        ? DateTimeFormatHelper.ToIso8601String(SubscriptionEndDateRaw.Value)
         : null;
     
     // Subscription details
