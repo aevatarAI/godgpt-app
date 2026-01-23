@@ -395,7 +395,20 @@ public class PaymentService : IPaymentService
                     {
                         if (!createRequest.BusinessMetadata.ContainsKey("plan_type"))
                         {
-                            createRequest.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
+                            // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
+                            // This is the correct Common.Constants.PlanType value, not Payment.Abstractions.PlanType
+                            if (product.Metadata != null && product.Metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr))
+                            {
+                                createRequest.BusinessMetadata["plan_type"] = originalPlanTypeStr;
+                            }
+                            else
+                            {
+                                // Fallback: use product.PlanType (but this is wrong enum, should be avoided)
+                                _logger.LogWarning(
+                                    "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using fallback",
+                                    request.ProductId);
+                                createRequest.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
+                            }
                         }
                         if (!createRequest.BusinessMetadata.ContainsKey("is_ultimate"))
                         {
@@ -403,9 +416,12 @@ public class PaymentService : IPaymentService
                             createRequest.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
                         }
                         
+                        var inferredPlanType = createRequest.BusinessMetadata.ContainsKey("plan_type") 
+                            ? createRequest.BusinessMetadata["plan_type"] 
+                            : "unknown";
                         _logger.LogInformation(
                             "[PaymentService] Auto-inferred plan_type={PlanType}, is_ultimate={IsUltimate} from product {ProductId}",
-                            product.PlanType, product.PlanType == PlanType.Premium, request.ProductId);
+                            inferredPlanType, product.PlanType == PlanType.Premium, request.ProductId);
                     }
                 }
                 catch (Exception ex)
@@ -519,13 +535,29 @@ public class PaymentService : IPaymentService
                         
                         if (product != null)
                         {
-                            createFromWebhook.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
+                            // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
+                            // This is the correct Common.Constants.PlanType value, not Payment.Abstractions.PlanType
+                            if (product.Metadata != null && product.Metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr))
+                            {
+                                createFromWebhook.BusinessMetadata["plan_type"] = originalPlanTypeStr;
+                            }
+                            else
+                            {
+                                // Fallback: use product.PlanType (but this is wrong enum, should be avoided)
+                                _logger.LogWarning(
+                                    "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using fallback",
+                                    result.ProductId);
+                                createFromWebhook.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
+                            }
                             // PlanType.Premium is used to indicate Ultimate tier in config
                             createFromWebhook.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
                             
+                            var inferredPlanType = createFromWebhook.BusinessMetadata.ContainsKey("plan_type")
+                                ? createFromWebhook.BusinessMetadata["plan_type"]
+                                : "unknown";
                             _logger.LogInformation(
                                 "[PaymentService] Inferred plan_type={PlanType}, is_ultimate={IsUltimate} for webhook record from product {ProductId}",
-                                product.PlanType, product.PlanType == PlanType.Premium, result.ProductId);
+                                inferredPlanType, product.PlanType == PlanType.Premium, result.ProductId);
                         }
                         else
                         {
