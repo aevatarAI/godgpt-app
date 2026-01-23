@@ -16,6 +16,7 @@ using Aevatar.Application.Grains.Common.Service;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Application.Grains.Invitation;
+using Aevatar.Application.Grains.UserInvitation;
 using Aevatar.Payment.Agents;
 using Aevatar.Payment.Agents.Protos;
 using Google.Protobuf;
@@ -874,11 +875,13 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         }
 
         var userId = Guid.Parse(evt.Context.UserId);
-        if (userId.ToString() != Id)
+        // Extract actual user GUID from Agent Id (format: "UserQuotaGAgent:guid")
+        var agentUserId = Id.Contains(':') ? Id.Split(':').Last() : Id;
+        if (userId.ToString() != agentUserId)
         {
             Logger.LogWarning(
-                "[UserQuotaGAgent][HandlePaymentCompleted] UserId mismatch. Event UserId: {EventUserId}, Agent Id: {AgentId}",
-                evt.Context.UserId, Id);
+                "[UserQuotaGAgent][HandlePaymentCompleted] UserId mismatch. Event UserId: {EventUserId}, Agent UserId: {AgentUserId}",
+                evt.Context.UserId, agentUserId);
             return;
         }
 
@@ -964,6 +967,41 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             "[UserQuotaGAgent][HandlePaymentCompleted] Updated subscription for user {UserId}, PlanType: {PlanType}, IsUltimate: {IsUltimate}, EndDate: {EndDate}",
             userId, planType, isUltimate, periodEnd);
 
+        // ========== Payment Analytics (from old code) ==========
+        // Record payment success to OpenTelemetry metrics
+        var purchaseType = evt.IsRenewal ? "renewal" : "new_subscription";
+        var platformStr = evt.Context.Platform switch
+        {
+            1 => "Stripe",
+            2 => "AppStore",
+            3 => "GooglePlay",
+            _ => "Unknown"
+        };
+        PaymentTelemetryMetrics.RecordPaymentSuccess(
+            platformStr,
+            purchaseType,
+            userId.ToString(),
+            evt.Context.ProductId ?? string.Empty,
+            Logger);
+
+        // ========== Ultimate/Premium Sync Logic (from old code) ==========
+        // When purchasing Ultimate, extend Premium subscription time if active
+        // Because Ultimate users also get Premium benefits, the Premium time should be extended
+        if (isUltimate)
+        {
+            var premiumSubscription = await GetSubscriptionAsync(false);
+            if (premiumSubscription.IsActive)
+            {
+                premiumSubscription.StartDate = SubscriptionHelper.GetSubscriptionEndDate(planType, premiumSubscription.StartDate);
+                premiumSubscription.EndDate = SubscriptionHelper.GetSubscriptionEndDate(planType, premiumSubscription.EndDate);
+                await UpdateSubscriptionAsync(premiumSubscription, false);
+                
+                Logger.LogInformation(
+                    "[UserQuotaGAgent][HandlePaymentCompleted] Extended Premium subscription for Ultimate user {UserId}, NewEndDate: {EndDate}",
+                    userId, premiumSubscription.EndDate);
+            }
+        }
+
         // ========== Side Effects: Mark trial code as used ==========
         // NOTE: Subscription cancellation is handled in HttpApi layer (GodGPTPaymentBusinessService)
         // because it requires Stripe API which is not available in Silo.
@@ -985,6 +1023,63 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                         trialCode);
                 }
             });
+        }
+        
+        // ========== Inviter Reward Processing (from old code: ProcessInviteeSubscriptionAsync) ==========
+        // Find inviter and notify them about invitee's payment for reward processing
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ProcessInviterRewardAsync(userId, planType, isUltimate, evt.InvoiceId ?? evt.TransactionId);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex,
+                    "[UserQuotaGAgent][HandlePaymentCompleted] Failed to process inviter reward for user {UserId}",
+                    userId);
+            }
+        });
+    }
+    
+    /// <summary>
+    /// Process inviter reward when invitee pays (same as old code ProcessInviteeSubscriptionAsync)
+    /// </summary>
+    private async Task ProcessInviterRewardAsync(Guid inviteeUserId, PlanType planType, bool isUltimate, string invoiceId)
+    {
+        try
+        {
+            // Get invitee's UserInvitationGAgent to find their inviter
+            var userInvitationActor = await ActorFactory.CreateGAgentActorAsync<UserInvitationGAgent>(inviteeUserId.ToString());
+            var userInvitationAgent = userInvitationActor.As<IUserInvitationGAgent>();
+            var inviterId = await userInvitationAgent.GetInviterAsync();
+            
+            if (inviterId == null || inviterId == Guid.Empty)
+            {
+                Logger.LogDebug(
+                    "[UserQuotaGAgent][ProcessInviterRewardAsync] User {UserId} has no inviter, skipping reward",
+                    inviteeUserId);
+                return;
+            }
+            
+            Logger.LogInformation(
+                "[UserQuotaGAgent][ProcessInviterRewardAsync] Processing inviter reward. Invitee: {InviteeId}, Inviter: {InviterId}, PlanType: {PlanType}, IsUltimate: {IsUltimate}",
+                inviteeUserId, inviterId, planType, isUltimate);
+            
+            // Call inviter's InvitationGAgent to process the reward
+            var inviterActor = await ActorFactory.CreateGAgentActorAsync<InvitationGAgent>(inviterId.Value.ToString());
+            var inviterAgent = inviterActor.As<IInvitationGAgent>();
+            await inviterAgent.ProcessInviteeSubscriptionAsync(inviteeUserId.ToString(), (int)planType, isUltimate, invoiceId);
+            
+            Logger.LogInformation(
+                "[UserQuotaGAgent][ProcessInviterRewardAsync] Successfully processed inviter reward. Inviter: {InviterId}",
+                inviterId);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex,
+                "[UserQuotaGAgent][ProcessInviterRewardAsync] Error processing inviter reward for invitee {InviteeId}",
+                inviteeUserId);
         }
     }
 

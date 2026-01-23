@@ -355,7 +355,7 @@ public class PaymentService : IPaymentService
             // Create payment record agent
             var recordAgent = await GetRecordAgentAsync(paymentId);
             
-            await recordAgent.InitializeAsync(new AgentModels.Protos.CreatePaymentRequestProto
+            var createRequest = new AgentModels.Protos.CreatePaymentRequestProto
             {
                 UserId = userId.ToString(),
                 Platform = (int)ToAgentPlatform(platform),
@@ -370,7 +370,51 @@ public class PaymentService : IPaymentService
                 PeriodEnd = result.ExpiresAt.HasValue 
                     ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.ExpiresAt.Value.ToUniversalTime())
                     : null
-            });
+            };
+            
+            // Copy business metadata (plan_type, is_ultimate, etc.) for event broadcasting
+            if (request.Metadata != null)
+            {
+                foreach (var kv in request.Metadata)
+                {
+                    createRequest.BusinessMetadata[kv.Key] = kv.Value;
+                }
+            }
+            
+            // Auto-infer plan_type and is_ultimate from product config if not provided
+            if (!createRequest.BusinessMetadata.ContainsKey("plan_type") || 
+                !createRequest.BusinessMetadata.ContainsKey("is_ultimate"))
+            {
+                try
+                {
+                    var provider = GetProvider(platform);
+                    var products = await provider.GetProductsAsync();
+                    var product = products.FirstOrDefault(p => p.ProductId == request.ProductId);
+                    
+                    if (product != null)
+                    {
+                        if (!createRequest.BusinessMetadata.ContainsKey("plan_type"))
+                        {
+                            createRequest.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
+                        }
+                        if (!createRequest.BusinessMetadata.ContainsKey("is_ultimate"))
+                        {
+                            // PlanType.Premium is used to indicate Ultimate tier in config
+                            createRequest.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
+                        }
+                        
+                        _logger.LogInformation(
+                            "[PaymentService] Auto-inferred plan_type={PlanType}, is_ultimate={IsUltimate} from product {ProductId}",
+                            product.PlanType, product.PlanType == PlanType.Premium, request.ProductId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PaymentService] Failed to auto-infer plan_type/is_ultimate from product config");
+                }
+            }
+            
+            await recordAgent.InitializeAsync(createRequest);
 
             // Update index agent
             var indexAgent = await GetIndexAgentAsync(userId);
@@ -450,7 +494,7 @@ public class PaymentService : IPaymentService
                     paymentId, result.OrderId, result.SubscriptionId, result.UserId);
                 
                 // Initialize payment record from webhook data
-                await recordAgent.InitializeAsync(new AgentModels.Protos.CreatePaymentRequestProto
+                var createFromWebhook = new AgentModels.Protos.CreatePaymentRequestProto
                 {
                     UserId = result.UserId.Value.ToString(),
                     Platform = (int)ToAgentPlatform(platform),
@@ -462,7 +506,41 @@ public class PaymentService : IPaymentService
                     PaymentMode = (int)AgentModels.PaymentMode.Subscription,
                     BusinessType = "godgpt",
                     BusinessId = result.ProductId ?? string.Empty
-                });
+                };
+                
+                // Auto-infer plan_type and is_ultimate from product config (like old code: GetProductConfigAsync)
+                if (!string.IsNullOrEmpty(result.ProductId))
+                {
+                    try
+                    {
+                        var provider = GetProvider(platform);
+                        var products = await provider.GetProductsAsync();
+                        var product = products.FirstOrDefault(p => p.ProductId == result.ProductId);
+                        
+                        if (product != null)
+                        {
+                            createFromWebhook.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
+                            // PlanType.Premium is used to indicate Ultimate tier in config
+                            createFromWebhook.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
+                            
+                            _logger.LogInformation(
+                                "[PaymentService] Inferred plan_type={PlanType}, is_ultimate={IsUltimate} for webhook record from product {ProductId}",
+                                product.PlanType, product.PlanType == PlanType.Premium, result.ProductId);
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "[PaymentService] Product {ProductId} not found in config, using defaults for webhook record",
+                                result.ProductId);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[PaymentService] Failed to infer plan_type/is_ultimate from product config for webhook record");
+                    }
+                }
+                
+                await recordAgent.InitializeAsync(createFromWebhook);
             }
 
             // Get payment record state (Protobuf) for event context

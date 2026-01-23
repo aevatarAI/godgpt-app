@@ -585,10 +585,14 @@ public class StripeProvider : IPaymentProvider
             // Extract orderId from metadata (stable key for PaymentRecordGAgent)
             result.OrderId = TryGetFromMetadata(session.Metadata, "order_id");
             result.SubscriptionId = session.SubscriptionId;
-            result.NewStatus = PaymentStatus.Completed;
+            // NOTE: Don't set NewStatus = Completed here!
+            // checkout.session.completed only means user completed checkout flow.
+            // invoice.paid is the actual payment success signal and should trigger PaymentCompletedEvent.
+            // Setting Completed here causes duplicate events (one from checkout, one from invoice.paid).
+            result.NewStatus = PaymentStatus.Processing;
             
             _logger.LogInformation(
-                "[StripeProvider] checkout.session.completed: OrderId={OrderId}, SubscriptionId={SubscriptionId}",
+                "[StripeProvider] checkout.session.completed: OrderId={OrderId}, SubscriptionId={SubscriptionId}, Status=Processing (waiting for invoice.paid)",
                 result.OrderId, session.SubscriptionId);
         }
         return Task.CompletedTask;
