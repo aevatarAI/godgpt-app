@@ -1073,30 +1073,6 @@ public class PaymentService : IPaymentService
                         await indexAgent.NotifyPaymentCancelledAsync(cancelledEvent);
                     }
                 }
-                else if (result.NewStatus == PaymentStatus.CancelPending)
-                {
-                    // Subscription marked for cancellation at period end (user set cancel_at_period_end=true)
-                    // Don't cancel immediately, just update status to CancelPending
-                    await recordAgent.UpdateStatusAsync(agentStatus, "Subscription will cancel at period end");
-                    
-                    _logger.LogInformation(
-                        "[PaymentService] Payment {PaymentId} marked as CancelPending, will cancel at {PeriodEnd}",
-                        paymentId, result.PeriodEnd);
-                    
-                    // Optionally notify business layer about pending cancellation
-                    if (indexAgent != null && result.PeriodEnd.HasValue)
-                    {
-                        var cancelPendingEvent = new PaymentCancelledEvent
-                        {
-                            Context = eventContext,
-                            Reason = "Subscription will cancel at period end",
-                            Immediate = false, // Not immediate - will cancel at period end
-                            EffectiveDate = Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime()),
-                            CancelledAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
-                        };
-                        await indexAgent.NotifyPaymentCancelledAsync(cancelPendingEvent);
-                    }
-                }
                 else if (result.NewStatus == PaymentStatus.Refunded)
                 {
                     // Process refund: updates transaction status and main payment status
@@ -1216,8 +1192,11 @@ public class PaymentService : IPaymentService
             // Get record state to extract UserId for index agent and build event context
             var recordState = await recordAgent.GetRecordStateAsync();
             
-            // Cancel the payment record (triggers Event Sourcing)
-            await recordAgent.CancelAsync(reason);
+            // Stage 1: Set status to CancelledInProcessing (7) - matches old code behavior
+            // Final Cancelled (8) will be set when webhook confirms the cancellation
+            await recordAgent.UpdateStatusAsync(
+                AgentModels.PaymentStatus.CancelledInProcessing, 
+                reason ?? "User requested cancellation");
             
             // Remove from PaymentIndexGAgent's active subscriptions and notify business layer
             if (recordState != null && !string.IsNullOrEmpty(recordState.UserId))
