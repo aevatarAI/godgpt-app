@@ -10,10 +10,12 @@ using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.Common.Helpers;
 using Aevatar.GodGPT.Dtos;
 using Aevatar.Payment.Abstractions;
+using Aevatar.Payment.Providers;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Volo.Abp;
 using GrainPlanType = Aevatar.Application.Grains.Common.Constants.PlanType;
 using BillingCycle = Aevatar.Payment.Abstractions.BillingCycle;
@@ -34,15 +36,65 @@ public class GodGPTPaymentController : AevatarController
     private readonly ILogger<GodGPTPaymentController> _logger;
     private readonly IPaymentService _paymentService;
     private readonly IStateIndexService? _stateIndexService;
+    private readonly Dictionary<string, int> _productPlanTypes; // productId/priceId -> PlanType
 
     public GodGPTPaymentController(
         ILogger<GodGPTPaymentController> logger,
         IPaymentService paymentService,
+        IOptions<StripeOptions>? stripeOptions = null,
+        IOptions<ApplePayOptions>? appleOptions = null,
+        IOptions<GooglePlayOptions>? googleOptions = null,
         IStateIndexService? stateIndexService = null)
     {
         _logger = logger;
         _paymentService = paymentService;
         _stateIndexService = stateIndexService;
+        
+        // Build unified product -> PlanType lookup from all platforms
+        _productPlanTypes = BuildProductPlanTypeLookup(
+            stripeOptions?.Value.Products,
+            appleOptions?.Value.Products,
+            googleOptions?.Value.Products);
+    }
+    
+    private static Dictionary<string, int> BuildProductPlanTypeLookup(
+        List<StripeProductConfig>? stripeProducts,
+        List<AppleProductConfig>? appleProducts,
+        List<GoogleProductConfig>? googleProducts)
+    {
+        var lookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        
+        // Stripe uses PriceId as ProductId
+        if (stripeProducts != null)
+        {
+            foreach (var p in stripeProducts)
+            {
+                if (!string.IsNullOrEmpty(p.PriceId))
+                    lookup[p.PriceId] = p.PlanType;
+            }
+        }
+        
+        // Apple uses ProductId
+        if (appleProducts != null)
+        {
+            foreach (var p in appleProducts)
+            {
+                if (!string.IsNullOrEmpty(p.ProductId))
+                    lookup[p.ProductId] = p.PlanType;
+            }
+        }
+        
+        // Google uses ProductId
+        if (googleProducts != null)
+        {
+            foreach (var p in googleProducts)
+            {
+                if (!string.IsNullOrEmpty(p.ProductId))
+                    lookup[p.ProductId] = p.PlanType;
+            }
+        }
+        
+        return lookup;
     }
 
     [HttpGet("keys")]
@@ -208,7 +260,7 @@ public class GodGPTPaymentController : AevatarController
                 var oneDayAgo = DateTime.UtcNow.AddDays(-1);
                 
                 var result = queryResult.Items
-                    .Select(item => MapToPaymentSummaryDto(item))
+                    .Select(item => MapToPaymentSummaryDto(item, _productPlanTypes))
                     .Where(dto => 
                     {
                         // Keep all non-Processing records
@@ -253,7 +305,9 @@ public class GodGPTPaymentController : AevatarController
         return fallbackResult;
     }
     
-    private static PaymentSummaryDto MapToPaymentSummaryDto(StateQueryResult item)
+    private static PaymentSummaryDto MapToPaymentSummaryDto(
+        StateQueryResult item, 
+        Dictionary<string, int> productPlanTypes)
     {
         var dto = new PaymentSummaryDto();
         var data = item.Data;
@@ -266,13 +320,33 @@ public class GodGPTPaymentController : AevatarController
         if (data.TryGetValue("userId", out var userId))
             dto.UserId = Guid.TryParse(userId?.ToString(), out var uid) ? uid : Guid.Empty;
         
-        // Plan info - billingCycle determines membership level
+        // Get priceId/productId for config lookup
+        string? priceIdStr = null;
+        string? productIdStr = null;
+        if (data.TryGetValue("priceId", out var priceId))
+            priceIdStr = priceId?.ToString();
+        if (data.TryGetValue("productId", out var productId))
+            productIdStr = productId?.ToString();
+        
+        // Plan info - try billingCycle from data first, fallback to config lookup
+        int planType = 0;
         if (data.TryGetValue("billingCycle", out var billingCycle))
         {
-            var cycle = Convert.ToInt32(billingCycle ?? 0);
-            dto.PlanType = cycle;
-            dto.MembershipLevel = GetMembershipLevel(cycle);
+            planType = Convert.ToInt32(billingCycle ?? 0);
         }
+        
+        // If billingCycle not in data (or 0), lookup from product config
+        if (planType == 0)
+        {
+            // Try priceId first (Stripe), then productId (Apple/Google)
+            if (!string.IsNullOrEmpty(priceIdStr) && productPlanTypes.TryGetValue(priceIdStr, out var pt1))
+                planType = pt1;
+            else if (!string.IsNullOrEmpty(productIdStr) && productPlanTypes.TryGetValue(productIdStr, out var pt2))
+                planType = pt2;
+        }
+        
+        dto.PlanType = planType;
+        dto.MembershipLevel = GetMembershipLevelFromPlanType(planType);
         
         // Amount info
         if (data.TryGetValue("amount", out var amount))
@@ -297,8 +371,7 @@ public class GodGPTPaymentController : AevatarController
         // Subscription details
         if (data.TryGetValue("subscriptionId", out var subId))
             dto.SubscriptionId = subId?.ToString();
-        if (data.TryGetValue("priceId", out var priceId))
-            dto.PriceId = priceId?.ToString();
+        dto.PriceId = priceIdStr;
         
         // Environment
         if (data.TryGetValue("environment", out var env))
@@ -352,6 +425,21 @@ public class GodGPTPaymentController : AevatarController
             3 => "Quarterly", 
             4 => "Yearly",
             5 => "Premium",
+            _ => null
+        };
+    }
+    
+    /// <summary>
+    /// Get membership level from legacy PlanType (1=Day, 2=Month, 3=Year, 4=Week)
+    /// </summary>
+    private static string? GetMembershipLevelFromPlanType(int planType)
+    {
+        return planType switch
+        {
+            1 => "Daily",    // Day
+            2 => "Monthly",  // Month
+            3 => "Yearly",   // Year (Premium)
+            4 => "Weekly",   // Week
             _ => null
         };
     }
