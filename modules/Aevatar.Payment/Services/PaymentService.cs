@@ -1,7 +1,9 @@
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.CQRS;
 using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Payment.Abstractions;
 using Aevatar.Payment.Agents.Protos;
+using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.Logging;
 using AgentModels = Aevatar.Payment.Agents;
@@ -18,15 +20,18 @@ public class PaymentService : IPaymentService
     private readonly IEnumerable<IPaymentProvider> _providers;
     private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<PaymentService> _logger;
+    private readonly IStateIndexService? _stateIndexService;
 
     public PaymentService(
         IEnumerable<IPaymentProvider> providers,
         IGAgentActorFactory actorFactory,
-        ILogger<PaymentService> logger)
+        ILogger<PaymentService> logger,
+        IStateIndexService? stateIndexService = null)
     {
         _providers = providers;
         _actorFactory = actorFactory;
         _logger = logger;
+        _stateIndexService = stateIndexService;
     }
 
     private IPaymentProvider GetProvider(PaymentPlatform platform)
@@ -281,7 +286,92 @@ public class PaymentService : IPaymentService
     public async Task<List<PaymentHistoryItem>> GetPaymentHistoryAsync(
         Guid userId, int page = 1, int pageSize = 10, CancellationToken ct = default)
     {
-        // Note: In full implementation, this should query from CQRS read model (database)
+        // Use CQRS read model (Elasticsearch) if available, otherwise fallback to active subscriptions
+        if (_stateIndexService != null)
+        {
+            try
+            {
+                // Query all records for the user (don't filter Processing in query)
+                // We'll filter stale Processing records in C# like old code does
+                var query = new StateQuery
+                {
+                    AgentType = "PaymentRecordGAgent",
+                    // Elasticsearch fields are camelCase
+                    // Use .keyword subfield for exact GUID match (text fields are analyzed by default)
+                    QueryString = $"userId.keyword:\"{userId}\"",
+                    PageIndex = 0, // Fetch more records for post-filtering
+                    PageSize = pageSize * 3, // Fetch extra to account for filtered records
+                    SortFields = new List<string> { "createdAt:desc" } // camelCase field name
+                };
+
+                var result = await _stateIndexService.QueryAsync(query, ct);
+                
+                _logger.LogInformation(
+                    "[PaymentService] CQRS query returned {Count} payment records for user {UserId}",
+                    result.Items.Count, userId);
+                
+                // Filter out stale Processing records (like old code)
+                // Old code logic: Remove records where InvoiceDetails is empty AND Status == Processing AND CreatedAt > 1 day ago
+                // In new code: Remove records where Transactions is empty AND Status == Processing AND CreatedAt > 1 day ago
+                var oneDayAgo = DateTime.UtcNow.AddDays(-1);
+                var processingStatus = (int)PaymentStatus.Processing;
+                
+                var filteredItems = result.Items
+                    .Select(item => new { Item = item, State = ParseStateFromData(item.Data) })
+                    .Where(x => 
+                    {
+                        // Keep all non-Processing records
+                        if (x.State == null || x.State.Status != processingStatus)
+                            return true;
+                        
+                        // For Processing records, only keep if:
+                        // - Has transactions (InvoiceDetails equivalent), OR
+                        // - Created within the last 1 day
+                        var hasTransactions = x.State.Transactions != null && x.State.Transactions.Count > 0;
+                        var isRecent = x.State.CreatedAt?.ToDateTime() > oneDayAgo;
+                        return hasTransactions || isRecent;
+                    })
+                    .Skip((page - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+                
+                return filteredItems.Select(x =>
+                {
+                    var state = x.State;
+                    var item = x.Item;
+                    
+                    // Log first item's data keys for debugging
+                    if (filteredItems.IndexOf(x) == 0 && item.Data.Any())
+                    {
+                        var keys = string.Join(", ", item.Data.Keys.Take(10));
+                        _logger.LogDebug(
+                            "[PaymentService] Sample data keys from CQRS: {Keys}",
+                            keys);
+                    }
+                    
+                    return new PaymentHistoryItem
+                    {
+                        PaymentId = state?.PaymentId ?? item.AgentId,
+                        Platform = state != null 
+                            ? ToApiPlatform((AgentModels.PaymentPlatform)state.Platform)
+                            : PaymentPlatform.Stripe, // fallback
+                        ProductName = state?.ProductName ?? string.Empty,
+                        Amount = state != null ? state.Amount / 100m : 0,
+                        Currency = state?.Currency ?? "USD",
+                        Status = state != null ? (PaymentStatus)state.Status : PaymentStatus.Pending,
+                        CreatedAt = state?.CreatedAt?.ToDateTime() ?? DateTime.UtcNow,
+                        CompletedAt = state?.CompletedAt?.ToDateTime()
+                    };
+                }).ToList();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, 
+                    "[PaymentService] Failed to query payment history from CQRS, falling back to active subscriptions");
+            }
+        }
+
+        // Fallback: query active subscriptions only (limited history)
         var indexAgent = await GetIndexAgentAsync(userId);
         var response = await indexAgent.GetActiveSubscriptionsAsync();
 
@@ -299,6 +389,124 @@ public class PaymentService : IPaymentService
                 CreatedAt = s.CreatedAt?.ToDateTime() ?? DateTime.UtcNow
             })
             .ToList();
+    }
+
+    private PaymentRecordStateProto? ParseStateFromData(Dictionary<string, object?> data)
+    {
+        try
+        {
+            // ElasticsearchStateIndexService stores fields in camelCase format
+            // Extract key fields for PaymentHistoryItem mapping
+            var proto = new PaymentRecordStateProto();
+            
+            // Try both camelCase and PascalCase (Protobuf C# properties are PascalCase)
+            // StateDocumentConverter converts to camelCase, but check both for safety
+            
+            // Extract string fields (try camelCase first, then PascalCase)
+            if (data.TryGetValue("paymentId", out var paymentId) && paymentId != null)
+                proto.PaymentId = paymentId.ToString() ?? string.Empty;
+            else if (data.TryGetValue("PaymentId", out paymentId) && paymentId != null)
+                proto.PaymentId = paymentId.ToString() ?? string.Empty;
+                
+            if (data.TryGetValue("userId", out var userId) && userId != null)
+                proto.UserId = userId.ToString() ?? string.Empty;
+            else if (data.TryGetValue("UserId", out userId) && userId != null)
+                proto.UserId = userId.ToString() ?? string.Empty;
+                
+            if (data.TryGetValue("productName", out var productName) && productName != null)
+                proto.ProductName = productName.ToString() ?? string.Empty;
+            else if (data.TryGetValue("ProductName", out productName) && productName != null)
+                proto.ProductName = productName.ToString() ?? string.Empty;
+                
+            if (data.TryGetValue("currency", out var currency) && currency != null)
+                proto.Currency = currency.ToString() ?? "USD";
+            else if (data.TryGetValue("Currency", out currency) && currency != null)
+                proto.Currency = currency.ToString() ?? "USD";
+            
+            // Extract numeric fields (try camelCase first, then PascalCase)
+            if (data.TryGetValue("amount", out var amount) && amount != null)
+            {
+                if (amount is long amt)
+                    proto.Amount = amt;
+                else if (long.TryParse(amount.ToString(), out var parsedAmt))
+                    proto.Amount = parsedAmt;
+            }
+            else if (data.TryGetValue("Amount", out amount) && amount != null)
+            {
+                if (amount is long amt)
+                    proto.Amount = amt;
+                else if (long.TryParse(amount.ToString(), out var parsedAmt))
+                    proto.Amount = parsedAmt;
+            }
+            
+            if (data.TryGetValue("status", out var status) && status != null)
+            {
+                if (status is int st)
+                    proto.Status = st;
+                else if (int.TryParse(status.ToString(), out var parsedSt))
+                    proto.Status = parsedSt;
+            }
+            else if (data.TryGetValue("Status", out status) && status != null)
+            {
+                if (status is int st)
+                    proto.Status = st;
+                else if (int.TryParse(status.ToString(), out var parsedSt))
+                    proto.Status = parsedSt;
+            }
+            
+            if (data.TryGetValue("platform", out var platform) && platform != null)
+            {
+                if (platform is int plat)
+                    proto.Platform = plat;
+                else if (int.TryParse(platform.ToString(), out var parsedPlat))
+                    proto.Platform = parsedPlat;
+            }
+            else if (data.TryGetValue("Platform", out platform) && platform != null)
+            {
+                if (platform is int plat)
+                    proto.Platform = plat;
+                else if (int.TryParse(platform.ToString(), out var parsedPlat))
+                    proto.Platform = parsedPlat;
+            }
+            
+            // Extract timestamp fields (try camelCase first, then PascalCase)
+            if (data.TryGetValue("createdAt", out var createdAt) && createdAt != null)
+            {
+                if (createdAt is DateTime ct)
+                    proto.CreatedAt = Timestamp.FromDateTime(ct.ToUniversalTime());
+                else if (DateTime.TryParse(createdAt.ToString(), out var parsedCt))
+                    proto.CreatedAt = Timestamp.FromDateTime(parsedCt.ToUniversalTime());
+            }
+            else if (data.TryGetValue("CreatedAt", out createdAt) && createdAt != null)
+            {
+                if (createdAt is DateTime ct)
+                    proto.CreatedAt = Timestamp.FromDateTime(ct.ToUniversalTime());
+                else if (DateTime.TryParse(createdAt.ToString(), out var parsedCt))
+                    proto.CreatedAt = Timestamp.FromDateTime(parsedCt.ToUniversalTime());
+            }
+            
+            if (data.TryGetValue("completedAt", out var completedAt) && completedAt != null)
+            {
+                if (completedAt is DateTime cat)
+                    proto.CompletedAt = Timestamp.FromDateTime(cat.ToUniversalTime());
+                else if (DateTime.TryParse(completedAt.ToString(), out var parsedCat))
+                    proto.CompletedAt = Timestamp.FromDateTime(parsedCat.ToUniversalTime());
+            }
+            else if (data.TryGetValue("CompletedAt", out completedAt) && completedAt != null)
+            {
+                if (completedAt is DateTime cat)
+                    proto.CompletedAt = Timestamp.FromDateTime(cat.ToUniversalTime());
+                else if (DateTime.TryParse(completedAt.ToString(), out var parsedCat))
+                    proto.CompletedAt = Timestamp.FromDateTime(parsedCat.ToUniversalTime());
+            }
+            
+            return proto;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[PaymentService] Failed to parse PaymentRecordStateProto from state data");
+            return null;
+        }
     }
 
     // ========== Private Helper Methods ==========
@@ -344,12 +552,30 @@ public class PaymentService : IPaymentService
         {
             // Use OrderId as stable key for PaymentRecordGAgent lookup
             // Key difference between OrderId and SubscriptionId:
-            // - SubscriptionId: Creation returns sessionId (cs_test_xxx), webhook has real subscriptionId (sub_xxx) - VALUES DIFFERENT!
-            // - OrderId: Created and stored in metadata during creation, extracted from metadata in webhook - VALUES SAME!
-            // OrderId is guaranteed to exist because provider generates it if not provided
-            var orderId = result.OrderId 
-                ?? request.Metadata.GetValueOrDefault("order_id") 
-                ?? throw new InvalidOperationException("OrderId is required to create payment record");
+            // - Stripe: OrderId is generated GUID stored in metadata, SubscriptionId differs between session (cs_xxx) and webhook (sub_xxx)
+            // - Apple/Google: OrderId = SubscriptionId = OriginalTransactionId (stable identifier)
+            // Use string.IsNullOrEmpty to handle both null and empty string cases
+            var orderId = !string.IsNullOrEmpty(result.OrderId) 
+                ? result.OrderId 
+                : request.Metadata.GetValueOrDefault("order_id");
+            
+            // For Apple/Google, if OrderId is not available, use SubscriptionId (OriginalTransactionId) as fallback
+            // This matches old code behavior where OrderId = SubscriptionId = OriginalTransactionId
+            if (string.IsNullOrEmpty(orderId))
+            {
+                if (!string.IsNullOrEmpty(result.SubscriptionId))
+                {
+                    orderId = result.SubscriptionId;
+                    _logger.LogInformation(
+                        "[PaymentService] OrderId not found, using SubscriptionId as fallback (Apple/Google pattern): {OrderId}",
+                        orderId);
+                }
+                else
+                {
+                    throw new InvalidOperationException("OrderId is required to create payment record. Neither OrderId nor SubscriptionId is available.");
+                }
+            }
+            
             var paymentId = GetPaymentId(platform, orderId);
             
             // Create payment record agent
@@ -381,67 +607,71 @@ public class PaymentService : IPaymentService
                 }
             }
             
-            // Get product config for ProductName and Amount
+            // Get product config for ProductName, Amount, and Currency (always fetch)
             string productName = request.ProductId ?? string.Empty;
             decimal productAmount = 0;
             string currency = "USD";
             
-            // Auto-infer plan_type and is_ultimate from product config if not provided
-            if (!createRequest.BusinessMetadata.ContainsKey("plan_type") || 
-                !createRequest.BusinessMetadata.ContainsKey("is_ultimate"))
+            try
             {
-                try
+                var provider = GetProvider(platform);
+                var products = await provider.GetProductsAsync();
+                var product = products.FirstOrDefault(p => p.ProductId == request.ProductId);
+                
+                if (product != null)
                 {
-                    var provider = GetProvider(platform);
-                    var products = await provider.GetProductsAsync();
-                    var product = products.FirstOrDefault(p => p.ProductId == request.ProductId);
+                    // Use product display name instead of ProductId (Price ID)
+                    productName = product.Name ?? product.ProductId;
+                    productAmount = product.Price;
+                    currency = product.Currency ?? "USD";
                     
-                    if (product != null)
+                    // Auto-infer plan_type and is_ultimate from product config if not provided
+                    if (!createRequest.BusinessMetadata.ContainsKey("plan_type"))
                     {
-                        // Use product display name instead of ProductId (Price ID)
-                        productName = product.Name ?? product.ProductId;
-                        productAmount = product.Price;
-                        currency = product.Currency ?? "USD";
-                        
-                        if (!createRequest.BusinessMetadata.ContainsKey("plan_type"))
+                        // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
+                        // This is the correct Common.Constants.PlanType value, not Payment.Abstractions.PlanType
+                        if (product.Metadata != null && product.Metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr))
                         {
-                            // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
-                            // This is the correct Common.Constants.PlanType value, not Payment.Abstractions.PlanType
-                            if (product.Metadata != null && product.Metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr))
-                            {
-                                createRequest.BusinessMetadata["plan_type"] = originalPlanTypeStr;
-                            }
-                            else
-                            {
-                                // Fallback: use product.PlanType (but this is wrong enum, should be avoided)
-                                _logger.LogWarning(
-                                    "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using fallback",
-                                    request.ProductId);
-                                createRequest.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
-                            }
+                            createRequest.BusinessMetadata["plan_type"] = originalPlanTypeStr;
                         }
-                        if (!createRequest.BusinessMetadata.ContainsKey("is_ultimate"))
+                        else
                         {
-                            // PlanType.Premium is used to indicate Ultimate tier in config
-                            createRequest.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
+                            // Fallback: use product.PlanType (but this is wrong enum, should be avoided)
+                            _logger.LogWarning(
+                                "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using fallback",
+                                request.ProductId);
+                            createRequest.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
                         }
-                        
-                        var inferredPlanType = createRequest.BusinessMetadata.ContainsKey("plan_type") 
-                            ? createRequest.BusinessMetadata["plan_type"] 
-                            : "unknown";
-                        _logger.LogInformation(
-                            "[PaymentService] Auto-inferred plan_type={PlanType}, is_ultimate={IsUltimate} from product {ProductId}",
-                            inferredPlanType, product.PlanType == PlanType.Premium, request.ProductId);
                     }
+                    if (!createRequest.BusinessMetadata.ContainsKey("is_ultimate"))
+                    {
+                        // PlanType.Premium is used to indicate Ultimate tier in config
+                        createRequest.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
+                    }
+                    
+                    var inferredPlanType = createRequest.BusinessMetadata.ContainsKey("plan_type") 
+                        ? createRequest.BusinessMetadata["plan_type"] 
+                        : "unknown";
+                    _logger.LogInformation(
+                        "[PaymentService] Fetched product config: name={ProductName}, amount={Amount}, currency={Currency}, plan_type={PlanType}, is_ultimate={IsUltimate}",
+                        productName, productAmount, currency, inferredPlanType, product.PlanType == PlanType.Premium);
                 }
-                catch (Exception ex)
+                else
                 {
-                    _logger.LogWarning(ex, "[PaymentService] Failed to auto-infer plan_type/is_ultimate from product config");
+                    _logger.LogWarning(
+                        "[PaymentService] Product not found for ProductId={ProductId}, using defaults",
+                        request.ProductId);
                 }
             }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "[PaymentService] Failed to fetch product config for ProductId={ProductId}", request.ProductId);
+            }
             
-            // Update ProductName in createRequest
+            // Update ProductName, Amount, and Currency in createRequest
             createRequest.ProductName = productName;
+            createRequest.Amount = (long)(productAmount * 100); // Convert to smallest unit (cents)
+            createRequest.Currency = currency;
             
             await recordAgent.InitializeAsync(createRequest);
 
@@ -484,19 +714,32 @@ public class PaymentService : IPaymentService
         try
         {
             // Use OrderId as stable key for finding PaymentRecordGAgent
-            // OrderId is extracted from subscription/invoice metadata and matches the key used when creating the record
-            // OrderId is guaranteed to exist because provider generates it if not provided during creation
-            // Unlike SubscriptionId which differs between creation (sessionId) and webhook (real subscriptionId)
-            if (string.IsNullOrEmpty(result.OrderId))
+            // Key difference between OrderId and SubscriptionId:
+            // - Stripe: OrderId is generated GUID stored in metadata, SubscriptionId differs between session (cs_xxx) and webhook (sub_xxx)
+            // - Apple/Google: OrderId = SubscriptionId = OriginalTransactionId (stable identifier)
+            var orderId = result.OrderId;
+            
+            // For Apple/Google, if OrderId is not available, use SubscriptionId (OriginalTransactionId) as fallback
+            // This matches old code behavior where OrderId = SubscriptionId = OriginalTransactionId
+            if (string.IsNullOrEmpty(orderId))
             {
-                _logger.LogWarning(
-                    "[PaymentService] OrderId is empty, cannot find payment record. SubscriptionId={SubscriptionId}. " +
-                    "This may indicate metadata was not properly set during subscription creation.",
-                    result.SubscriptionId);
-                return;
+                if (!string.IsNullOrEmpty(result.SubscriptionId))
+                {
+                    orderId = result.SubscriptionId;
+                    _logger.LogInformation(
+                        "[PaymentService] OrderId not found, using SubscriptionId as fallback (Apple/Google pattern): {OrderId}",
+                        orderId);
+                }
+                else
+                {
+                    _logger.LogWarning(
+                        "[PaymentService] Both OrderId and SubscriptionId are empty, cannot find payment record. " +
+                        "This may indicate metadata was not properly set during subscription creation.");
+                    return;
+                }
             }
             
-            var paymentId = GetPaymentId(platform, result.OrderId);
+            var paymentId = GetPaymentId(platform, orderId);
             var recordAgent = await GetRecordAgentAsync(paymentId);
 
             var initialized = await recordAgent.IsInitializedAsync();
@@ -519,14 +762,14 @@ public class PaymentService : IPaymentService
                 _logger.LogInformation(
                     "[PaymentService] Payment record {PaymentId} not found, creating from webhook data " +
                     "(OrderId={OrderId}, SubscriptionId={SubscriptionId}, UserId={UserId})",
-                    paymentId, result.OrderId, result.SubscriptionId, result.UserId);
+                    paymentId, orderId, result.SubscriptionId, result.UserId);
                 
                 // Initialize payment record from webhook data
                 var createFromWebhook = new AgentModels.Protos.CreatePaymentRequestProto
                 {
                     UserId = result.UserId.Value.ToString(),
                     Platform = (int)ToAgentPlatform(platform),
-                    ExternalOrderId = result.OrderId,
+                    ExternalOrderId = orderId, // Store orderId for business logic reference
                     SubscriptionId = result.SubscriptionId ?? string.Empty,
                     CustomerId = string.Empty, // Not available in webhook
                     ProductId = result.ProductId ?? string.Empty,
