@@ -13,8 +13,6 @@ namespace Aevatar.Payment.Agents;
 /// </summary>
 public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPaymentRecordGAgent
 {
-    public ILogger<PaymentRecordGAgent> PaymentLogger { get; set; } = NullLogger<PaymentRecordGAgent>.Instance;
-
     public PaymentRecordGAgent() { }
 
     public override Task<string> GetDescriptionAsync()
@@ -91,12 +89,12 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
     {
         if (!string.IsNullOrEmpty(State.PaymentId))
         {
-            PaymentLogger.LogWarning(
+            Logger.LogWarning(
                 "[PaymentRecordGAgent] Agent {Id} already initialized, ignoring", Id);
             return;
         }
 
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Initializing payment {PaymentId} for user {UserId}",
             Id, request.UserId);
 
@@ -159,11 +157,6 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         return Task.FromResult(State);
     }
 
-    public Task<PaymentRecord> GetPaymentRecordAsync()
-    {
-        return Task.FromResult(FromProto(State));
-    }
-
     public Task<PaymentStatus> GetStatusAsync()
     {
         return Task.FromResult((PaymentStatus)State.Status);
@@ -184,22 +177,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             : Task.FromResult<Guid?>(null);
     }
 
-    public Task<List<Transaction>> GetTransactionsAsync()
-    {
-        return Task.FromResult(State.Transactions.Select(FromProto).ToList());
-    }
-
-    public Task<Transaction?> GetTransactionAsync(string transactionId)
-    {
-        var proto = State.Transactions.FirstOrDefault(t => t.TransactionId == transactionId);
-        return Task.FromResult(proto != null ? FromProto(proto) : null);
-    }
-
     // ========== Status Update ==========
 
     public async Task UpdateStatusAsync(PaymentStatus status, string? reason = null)
     {
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Updating status from {OldStatus} to {NewStatus}",
             (PaymentStatus)State.Status, status);
 
@@ -216,7 +198,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     public async Task UpdatePeriodAsync(DateTime periodStart, DateTime periodEnd)
     {
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Updating period to {Start} - {End}",
             periodStart, periodEnd);
 
@@ -233,11 +215,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
     {
         if (string.IsNullOrEmpty(subscriptionId))
         {
-            PaymentLogger.LogWarning("[PaymentRecordGAgent] Attempted to update with empty subscriptionId");
+            Logger.LogWarning("[PaymentRecordGAgent] Attempted to update with empty subscriptionId");
             return;
         }
 
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Updating subscriptionId from {OldId} to {NewId}",
             State.SubscriptionId, subscriptionId);
 
@@ -249,7 +231,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     public async Task CompleteAsync()
     {
-        PaymentLogger.LogInformation("[PaymentRecordGAgent] Marking payment as completed");
+        Logger.LogInformation("[PaymentRecordGAgent] Marking payment as completed");
 
         RaiseEvent(new RecordCompletedEvent
         {
@@ -261,7 +243,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     public async Task CancelAsync(string? reason = null)
     {
-        PaymentLogger.LogInformation("[PaymentRecordGAgent] Cancelling payment: {Reason}", reason);
+        Logger.LogInformation("[PaymentRecordGAgent] Cancelling payment: {Reason}", reason);
 
         RaiseEvent(new RecordStatusChangedEvent
         {
@@ -283,7 +265,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             transaction.TransactionId = Guid.NewGuid().ToString();
         }
 
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Adding transaction {TransactionId} type {Type}",
             transaction.TransactionId, transaction.TransactionType);
 
@@ -298,7 +280,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     public async Task UpdateTransactionStatusAsync(string transactionId, PaymentStatus status)
     {
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Updating transaction {TransactionId} to {Status}",
             transactionId, status);
 
@@ -316,7 +298,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     public async Task ProcessRenewalAsync(RenewalInfo renewal)
     {
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Processing renewal, new period end: {PeriodEnd}",
             renewal.PeriodEnd);
 
@@ -369,11 +351,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
         if (string.IsNullOrEmpty(transactionId))
         {
-            PaymentLogger.LogWarning("[PaymentRecordGAgent] No transaction to refund");
+            Logger.LogWarning("[PaymentRecordGAgent] No transaction to refund");
             return;
         }
 
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Processing refund for transaction {TransactionId}",
             transactionId);
 
@@ -574,11 +556,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         var callbackId = await GetCallbackAgentIdAsync();
         if (callbackId == null)
         {
-            PaymentLogger.LogDebug("[PaymentRecordGAgent] No callback agent configured, skipping notification");
+            Logger.LogDebug("[PaymentRecordGAgent] No callback agent configured, skipping notification");
             return;
         }
 
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Sending PaymentCompleted to callback agent {CallbackAgentId}",
             callbackId);
 
@@ -590,11 +572,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         var callbackId = await GetCallbackAgentIdAsync();
         if (callbackId == null)
         {
-            PaymentLogger.LogDebug("[PaymentRecordGAgent] No callback agent configured, skipping notification");
+            Logger.LogDebug("[PaymentRecordGAgent] No callback agent configured, skipping notification");
             return;
         }
 
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Sending PaymentFailed to callback agent {CallbackAgentId}",
             callbackId);
 
@@ -606,11 +588,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         var callbackId = await GetCallbackAgentIdAsync();
         if (callbackId == null)
         {
-            PaymentLogger.LogDebug("[PaymentRecordGAgent] No callback agent configured, skipping notification");
+            Logger.LogDebug("[PaymentRecordGAgent] No callback agent configured, skipping notification");
             return;
         }
 
-        PaymentLogger.LogInformation(
+        Logger.LogInformation(
             "[PaymentRecordGAgent] Sending RefundCompleted to callback agent {CallbackAgentId}",
             callbackId);
 

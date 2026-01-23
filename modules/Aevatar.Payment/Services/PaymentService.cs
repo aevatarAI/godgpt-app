@@ -1028,6 +1028,16 @@ public class PaymentService : IPaymentService
                 else if (result.NewStatus == PaymentStatus.Cancelled || 
                          result.NewStatus == PaymentStatus.Expired)
                 {
+                    // Idempotency check: skip if already cancelled (e.g., user API cancel + webhook)
+                    var currentStatus = (PaymentStatus)recordState.Status;
+                    if (currentStatus == PaymentStatus.Cancelled || currentStatus == PaymentStatus.Expired)
+                    {
+                        _logger.LogInformation(
+                            "[PaymentService] Payment {PaymentId} already {Status}, skipping duplicate cancellation from webhook",
+                            paymentId, currentStatus);
+                        return;
+                    }
+                    
                     // Cancel the payment record (triggers Event Sourcing)
                     await recordAgent.CancelAsync(result.VerificationResult?.ErrorMessage ?? "Subscription cancelled");
 

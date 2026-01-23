@@ -33,15 +33,15 @@ public class PaymentRecordGAgentTests
         // Act
         await agent.InitializeAsync(request);
         var isInitialized = await agent.IsInitializedAsync();
-        var record = await agent.GetPaymentRecordAsync();
+        var record = await agent.GetRecordStateAsync();
 
         // Assert
         isInitialized.ShouldBeTrue();
         record.UserId.ShouldBe("user_123");
-        record.Platform.ShouldBe(PaymentPlatform.Stripe);
+        record.Platform.ShouldBe((int)PaymentPlatform.Stripe);
         record.BusinessType.ShouldBe("godgpt");
         record.ProductName.ShouldBe("Premium Plan");
-        record.Status.ShouldBe(PaymentStatus.Pending);
+        record.Status.ShouldBe((int)PaymentStatus.Pending);
     }
 
     [Fact(DisplayName = "Should not reinitialize already initialized agent")]
@@ -55,7 +55,7 @@ public class PaymentRecordGAgentTests
         // Act
         await agent.InitializeAsync(request1);
         await agent.InitializeAsync(request2); // Should be ignored
-        var record = await agent.GetPaymentRecordAsync();
+        var record = await agent.GetRecordStateAsync();
 
         // Assert
         record.UserId.ShouldBe("user_123"); // Should remain the first user
@@ -72,11 +72,13 @@ public class PaymentRecordGAgentTests
 
         // Act
         await agent.InitializeAsync(request);
-        var record = await agent.GetPaymentRecordAsync();
+        var record = await agent.GetRecordStateAsync();
 
         // Assert
-        record.BusinessMetadata.ShouldContainKeyAndValue("promo_code", "SUMMER2024");
-        record.BusinessMetadata.ShouldContainKeyAndValue("referral_id", "ref_abc");
+        record.BusinessMetadata.ShouldContainKey("promo_code");
+        record.BusinessMetadata["promo_code"].ShouldBe("SUMMER2024");
+        record.BusinessMetadata.ShouldContainKey("referral_id");
+        record.BusinessMetadata["referral_id"].ShouldBe("ref_abc");
     }
 
     #endregion
@@ -106,7 +108,7 @@ public class PaymentRecordGAgentTests
         // Act
         await agent.CompleteAsync();
         var status = await agent.GetStatusAsync();
-        var record = await agent.GetPaymentRecordAsync();
+        var record = await agent.GetRecordStateAsync();
 
         // Assert
         status.ShouldBe(PaymentStatus.Completed);
@@ -137,7 +139,7 @@ public class PaymentRecordGAgentTests
 
         // Act
         await agent.UpdatePeriodAsync(newStart, newEnd);
-        var record = await agent.GetPaymentRecordAsync();
+        var record = await agent.GetRecordStateAsync();
 
         // Assert
         record.PeriodStart.ShouldNotBeNull();
@@ -157,12 +159,12 @@ public class PaymentRecordGAgentTests
 
         // Act
         var transactionId = await agent.AddTransactionAsync(transaction);
-        var transactions = await agent.GetTransactionsAsync();
+        var record = await agent.GetRecordStateAsync();
 
         // Assert
         transactionId.ShouldNotBeNullOrEmpty();
-        transactions.Count.ShouldBe(1);
-        transactions[0].TransactionType.ShouldBe(TransactionType.Initial);
+        record.Transactions.Count.ShouldBe(1);
+        record.Transactions[0].TransactionType.ShouldBe((int)TransactionType.Initial);
     }
 
     [Fact(DisplayName = "Should update transaction status")]
@@ -175,11 +177,12 @@ public class PaymentRecordGAgentTests
 
         // Act
         await agent.UpdateTransactionStatusAsync(transactionId, PaymentStatus.Completed);
-        var updatedTx = await agent.GetTransactionAsync(transactionId);
+        var record = await agent.GetRecordStateAsync();
+        var updatedTx = record.Transactions.FirstOrDefault(t => t.TransactionId == transactionId);
 
         // Assert
         updatedTx.ShouldNotBeNull();
-        updatedTx.Status.ShouldBe(PaymentStatus.Completed);
+        updatedTx.Status.ShouldBe((int)PaymentStatus.Completed);
     }
 
     [Fact(DisplayName = "Should get specific transaction by ID")]
@@ -193,11 +196,12 @@ public class PaymentRecordGAgentTests
         var id2 = await agent.AddTransactionAsync(tx2);
 
         // Act
-        var foundTx = await agent.GetTransactionAsync(id2);
+        var record = await agent.GetRecordStateAsync();
+        var foundTx = record.Transactions.FirstOrDefault(t => t.TransactionId == id2);
 
         // Assert
         foundTx.ShouldNotBeNull();
-        foundTx.TransactionType.ShouldBe(TransactionType.Renewal);
+        foundTx.TransactionType.ShouldBe((int)TransactionType.Renewal);
     }
 
     #endregion
@@ -221,13 +225,12 @@ public class PaymentRecordGAgentTests
 
         // Act
         await agent.ProcessRenewalAsync(renewal);
-        var transactions = await agent.GetTransactionsAsync();
-        var record = await agent.GetPaymentRecordAsync();
+        var record = await agent.GetRecordStateAsync();
 
         // Assert
-        transactions.Count.ShouldBe(1);
-        transactions[0].TransactionType.ShouldBe(TransactionType.Renewal);
-        transactions[0].Status.ShouldBe(PaymentStatus.Completed);
+        record.Transactions.Count.ShouldBe(1);
+        record.Transactions[0].TransactionType.ShouldBe((int)TransactionType.Renewal);
+        record.Transactions[0].Status.ShouldBe((int)PaymentStatus.Completed);
         record.PeriodEnd.ShouldNotBeNull();
     }
 
@@ -256,11 +259,11 @@ public class PaymentRecordGAgentTests
 
         // Act
         await agent.ProcessRenewalAsync(renewal);
-        var transactions = await agent.GetTransactionsAsync();
+        var record = await agent.GetRecordStateAsync();
 
         // Assert
-        transactions[0].Promotions.Count.ShouldBe(1);
-        transactions[0].Promotions[0].Code.ShouldBe("DISCOUNT20");
+        record.Transactions[0].Promotions.Count.ShouldBe(1);
+        record.Transactions[0].Promotions[0].Code.ShouldBe("DISCOUNT20");
     }
 
     [Fact(DisplayName = "Should handle trial renewal")]
@@ -280,11 +283,11 @@ public class PaymentRecordGAgentTests
 
         // Act
         await agent.ProcessRenewalAsync(renewal);
-        var transactions = await agent.GetTransactionsAsync();
+        var record = await agent.GetRecordStateAsync();
 
         // Assert
-        transactions[0].IsTrial.ShouldBeTrue();
-        transactions[0].TrialCode.ShouldBe("TRIAL7DAYS");
+        record.Transactions[0].IsTrial.ShouldBeTrue();
+        record.Transactions[0].TrialCode.ShouldBe("TRIAL7DAYS");
     }
 
     #endregion

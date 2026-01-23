@@ -181,8 +181,8 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
             try
             {
                 var paymentRecordActor = await _actorFactory.CreateGAgentActorAsync<PaymentRecordGAgent>(sub.PaymentId);
-                var paymentRecord = await paymentRecordActor.As<IPaymentRecordGAgent>().GetPaymentRecordAsync();
-                subscriptionId = paymentRecord.SubscriptionId;
+                var recordState = await paymentRecordActor.As<IPaymentRecordGAgent>().GetRecordStateAsync();
+                subscriptionId = recordState.SubscriptionId;
             }
             catch (Exception ex)
             {

@@ -34,11 +34,6 @@ public interface IPaymentRecordGAgent : IGAgent
     Task<PaymentRecordStateProto> GetRecordStateAsync();
     
     /// <summary>
-    /// Get complete payment record (local use only - not RPC safe)
-    /// </summary>
-    Task<PaymentRecord> GetPaymentRecordAsync();
-    
-    /// <summary>
     /// Get current status
     /// </summary>
     Task<PaymentStatus> GetStatusAsync();
@@ -52,16 +47,6 @@ public interface IPaymentRecordGAgent : IGAgent
     /// Get callback agent ID for point-to-point notification (optional)
     /// </summary>
     Task<Guid?> GetCallbackAgentIdAsync();
-    
-    /// <summary>
-    /// Get all transactions
-    /// </summary>
-    Task<List<Transaction>> GetTransactionsAsync();
-    
-    /// <summary>
-    /// Get specific transaction by ID
-    /// </summary>
-    Task<Transaction?> GetTransactionAsync(string transactionId);
     
     // ========== Status Update ==========
     
