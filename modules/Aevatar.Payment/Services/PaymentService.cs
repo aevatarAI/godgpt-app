@@ -950,6 +950,15 @@ public class PaymentService : IPaymentService
                     var isRenewal = result.VerificationResult?.ExpiresDate != null && 
                                     recordState?.Status == (int)AgentModels.PaymentStatus.Completed;
                     
+                    // CRITICAL: Update record status to Completed
+                    // This triggers Event Sourcing and ES projection
+                    if (!isRenewal)
+                    {
+                        await recordAgent.CompleteAsync();
+                        _logger.LogInformation(
+                            "[PaymentService] Marked payment {PaymentId} as Completed", paymentId);
+                    }
+                    
                     // Process renewal in agent
                     if (result.VerificationResult?.ExpiresDate != null)
                     {
