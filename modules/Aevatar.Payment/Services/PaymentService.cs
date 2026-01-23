@@ -1053,7 +1053,18 @@ public class PaymentService : IPaymentService
                 }
                 else if (result.NewStatus == PaymentStatus.Refunded)
                 {
-                    await recordAgent.UpdateStatusAsync(agentStatus);
+                    // Process refund: updates transaction status and main payment status
+                    // ProcessRefundAsync will set status to Refunded if all transactions refunded, or PartialRefunded otherwise
+                    await recordAgent.ProcessRefundAsync(new AgentModels.RefundInfo
+                    {
+                        TransactionId = result.TransactionId, // If null, refunds latest completed transaction
+                        RefundAmount = recordState?.Amount ?? 0,
+                        Reason = result.VerificationResult?.ErrorMessage ?? "refund"
+                    });
+                    
+                    _logger.LogInformation(
+                        "[PaymentService] Processed refund for payment {PaymentId}, transaction {TransactionId}",
+                        paymentId, result.TransactionId ?? "latest");
 
                     // Build refund completed event
                     var refundEvent = new RefundCompletedEvent
