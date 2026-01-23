@@ -338,6 +338,18 @@ public class GooglePlayProvider : IPaymentProvider
             result.NewStatus = MapRevenueCatEventToStatus(webhookEvent.EventType);
             result.ProductId = webhookEvent.ProductId; // For product config lookup
             
+            // For CANCELLATION events, distinguish between refund (Price < 0) and cancellation (Price = 0/null)
+            // RevenueCat sends negative price for refunds within CANCELLATION event type
+            if (webhookEvent.EventType == "CANCELLATION" && 
+                webhookEvent.Price.HasValue && 
+                webhookEvent.Price.Value < 0)
+            {
+                result.NewStatus = PaymentStatus.Refunded;
+                _logger.LogInformation(
+                    "[GooglePlayProvider] CANCELLATION event with negative price ({Price}) treated as REFUND",
+                    webhookEvent.Price.Value);
+            }
+            
             // Determine if this is a renewal - Google Play uses "RENEWAL" event type
             result.IsRenewal = webhookEvent.EventType == "RENEWAL";
 
