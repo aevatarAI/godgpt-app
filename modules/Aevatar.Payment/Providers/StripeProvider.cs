@@ -778,11 +778,29 @@ public class StripeProvider : IPaymentProvider
         {
             result.OrderId = TryGetFromMetadata(subscription.Metadata, "order_id");
             result.SubscriptionId = subscription.Id;
-            result.NewStatus = MapStripeStatus(subscription.Status);
+            
+            // Check if auto-renewal was cancelled (CancelAtPeriodEnd changed to true)
+            // This mirrors old code's IsAutoRenewalCancelled logic
+            if (subscription.CancelAtPeriodEnd)
+            {
+                result.NewStatus = PaymentStatus.CancelPending; // Pending cancellation at period end
+                // Get period end from subscription items or use EndedAt as fallback
+                var periodEnd = subscription.Items?.Data?.FirstOrDefault()?.CurrentPeriodEnd 
+                    ?? subscription.EndedAt 
+                    ?? DateTime.UtcNow.AddMonths(1);
+                result.PeriodEnd = periodEnd;
+                _logger.LogInformation(
+                    "[StripeProvider] subscription.updated: Subscription {SubscriptionId} marked for cancellation at period end {PeriodEnd}",
+                    subscription.Id, periodEnd);
+            }
+            else
+            {
+                result.NewStatus = MapStripeStatus(subscription.Status);
+            }
             
             _logger.LogInformation(
-                "[StripeProvider] subscription.updated: OrderId={OrderId}, SubscriptionId={SubscriptionId}, Status={Status}",
-                result.OrderId, subscription.Id, subscription.Status);
+                "[StripeProvider] subscription.updated: OrderId={OrderId}, SubscriptionId={SubscriptionId}, Status={Status}, CancelAtPeriodEnd={CancelAtPeriodEnd}",
+                result.OrderId, subscription.Id, subscription.Status, subscription.CancelAtPeriodEnd);
         }
         return Task.CompletedTask;
     }

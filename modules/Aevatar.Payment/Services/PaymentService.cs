@@ -1073,6 +1073,30 @@ public class PaymentService : IPaymentService
                         await indexAgent.NotifyPaymentCancelledAsync(cancelledEvent);
                     }
                 }
+                else if (result.NewStatus == PaymentStatus.CancelPending)
+                {
+                    // Subscription marked for cancellation at period end (user set cancel_at_period_end=true)
+                    // Don't cancel immediately, just update status to CancelPending
+                    await recordAgent.UpdateStatusAsync(agentStatus, "Subscription will cancel at period end");
+                    
+                    _logger.LogInformation(
+                        "[PaymentService] Payment {PaymentId} marked as CancelPending, will cancel at {PeriodEnd}",
+                        paymentId, result.PeriodEnd);
+                    
+                    // Optionally notify business layer about pending cancellation
+                    if (indexAgent != null && result.PeriodEnd.HasValue)
+                    {
+                        var cancelPendingEvent = new PaymentCancelledEvent
+                        {
+                            Context = eventContext,
+                            Reason = "Subscription will cancel at period end",
+                            Immediate = false, // Not immediate - will cancel at period end
+                            EffectiveDate = Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime()),
+                            CancelledAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                        };
+                        await indexAgent.NotifyPaymentCancelledAsync(cancelPendingEvent);
+                    }
+                }
                 else if (result.NewStatus == PaymentStatus.Refunded)
                 {
                     // Process refund: updates transaction status and main payment status
