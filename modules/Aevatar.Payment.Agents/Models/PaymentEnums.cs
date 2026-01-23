@@ -15,18 +15,25 @@ public enum PaymentPlatform
 }
 
 /// <summary>
-/// Payment status
+/// Payment status (aligned with legacy GodGPT PaymentStatus)
 /// </summary>
 public enum PaymentStatus
 {
-    Pending = 0,
-    Processing = 1,
-    Completed = 2,
-    Failed = 3,
-    Refunded = 4,
-    PartialRefunded = 5,
-    Cancelled = 6,
-    Expired = 7
+    None = 0,
+    Pending = 1,
+    Processing = 2,
+    Completed = 3,
+    Failed = 4,
+    RefundedInProcessing = 5,
+    Refunded = 6,
+    CancelledInProcessing = 7,
+    Cancelled = 8,
+    Disputed = 9,
+    CancelPending = 10,
+    Unknown = 11,
+    // Extended statuses (beyond legacy, but compatible)
+    Expired = 12,
+    PartialRefunded = 13
 }
 
 /// <summary>
