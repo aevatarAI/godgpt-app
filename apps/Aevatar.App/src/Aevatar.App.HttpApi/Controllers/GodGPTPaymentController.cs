@@ -3,7 +3,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using System.Text.Json;
 using System.Threading.Tasks;
+using Aevatar.Agents.Abstractions.CQRS;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.Common.Helpers;
 using Aevatar.GodGPT.Dtos;
@@ -31,13 +33,16 @@ public class GodGPTPaymentController : AevatarController
 {
     private readonly ILogger<GodGPTPaymentController> _logger;
     private readonly IPaymentService _paymentService;
+    private readonly IStateIndexService? _stateIndexService;
 
     public GodGPTPaymentController(
         ILogger<GodGPTPaymentController> logger,
-        IPaymentService paymentService)
+        IPaymentService paymentService,
+        IStateIndexService? stateIndexService = null)
     {
         _logger = logger;
         _paymentService = paymentService;
+        _stateIndexService = stateIndexService;
     }
 
     [HttpGet("keys")]
@@ -180,25 +185,174 @@ public class GodGPTPaymentController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
+        var pageIndex = input?.PageIndex ?? 1;
+        var pageSize = input?.PageSize ?? 10;
         
-        var history = await _paymentService.GetPaymentHistoryAsync(
-            currentUserId, 
-            input?.PageIndex ?? 1, 
-            input?.PageSize ?? 10);
-        
-        var result = history.Select(h => new PaymentSummaryDto
+        // Try CQRS query first for full data
+        if (_stateIndexService != null)
         {
-            PaymentId = h.PaymentId,
-            ProductName = h.ProductName,
+            try
+            {
+                var query = new StateQuery
+                {
+                    AgentType = "Aevatar.Payment.Agents.PaymentRecordGAgent",
+                    QueryString = $"userId.keyword:\"{currentUserId}\"",
+                    PageIndex = 0,
+                    PageSize = pageSize * 3, // Fetch extra for filtering
+                    SortFields = new List<string> { "createdAt:desc" }
+                };
+
+                var queryResult = await _stateIndexService.QueryAsync(query);
+                
+                // Filter stale Processing records (like old code)
+                var oneDayAgo = DateTime.UtcNow.AddDays(-1);
+                
+                var result = queryResult.Items
+                    .Select(item => MapToPaymentSummaryDto(item.Data))
+                    .Where(dto => 
+                    {
+                        // Keep all non-Processing records
+                        if (dto.Status != (int)PaymentStatus.Processing)
+                            return true;
+                        // For Processing, keep if recent (< 1 day)
+                        return dto.CreatedAtRaw > oneDayAgo;
+                    })
+                    .Skip((pageIndex - 1) * pageSize)
+                    .Take(pageSize)
+                    .ToList();
+                
+                _logger.LogDebug(
+                    "[GodGPTPaymentController][GetPaymentHistoryAsync] CQRS query returned {Count} records for user {UserId}, duration: {Duration}ms",
+                    result.Count, currentUserId, stopwatch.ElapsedMilliseconds);
+                    
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "[GodGPTPaymentController][GetPaymentHistoryAsync] CQRS query failed, falling back");
+            }
+        }
+        
+        // Fallback to basic PaymentService
+        var history = await _paymentService.GetPaymentHistoryAsync(currentUserId, pageIndex, pageSize);
+        
+        var fallbackResult = history.Select(h => new PaymentSummaryDto
+        {
+            PaymentGrainId = Guid.TryParse(h.PaymentId, out var id) ? id : Guid.Empty,
             Amount = h.Amount,
             Currency = h.Currency,
-            Status = h.Status.ToString(),
-            CreatedAt = DateTimeFormatHelper.ToIso8601String(h.CreatedAt)
+            Status = (int)h.Status,
+            Platform = (int)h.Platform,
+            CreatedAtRaw = h.CreatedAt,
+            CompletedAtRaw = h.CompletedAt
         }).ToList();
         
         _logger.LogDebug("[GodGPTPaymentController][GetPaymentHistoryAsync] userId: {UserId}, duration: {Duration}ms",
             currentUserId, stopwatch.ElapsedMilliseconds);
-        return result;
+        return fallbackResult;
+    }
+    
+    private static PaymentSummaryDto MapToPaymentSummaryDto(Dictionary<string, object?> data)
+    {
+        var dto = new PaymentSummaryDto();
+        
+        // Core identifiers
+        if (data.TryGetValue("paymentId", out var paymentId))
+            dto.PaymentGrainId = Guid.TryParse(paymentId?.ToString(), out var pid) ? pid : Guid.Empty;
+        if (data.TryGetValue("externalOrderId", out var orderId))
+            dto.OrderId = orderId?.ToString();
+        if (data.TryGetValue("userId", out var userId))
+            dto.UserId = Guid.TryParse(userId?.ToString(), out var uid) ? uid : Guid.Empty;
+        
+        // Plan info
+        if (data.TryGetValue("billingCycle", out var billingCycle))
+        {
+            var cycle = Convert.ToInt32(billingCycle ?? 0);
+            dto.PlanType = cycle;
+            dto.MembershipLevel = GetMembershipLevel(cycle);
+        }
+        
+        // Amount info
+        if (data.TryGetValue("amount", out var amount))
+            dto.Amount = Convert.ToInt64(amount ?? 0) / 100m;
+        if (data.TryGetValue("currency", out var currency))
+            dto.Currency = currency?.ToString() ?? "USD";
+        if (data.TryGetValue("netAmount", out var netAmount) && netAmount != null)
+            dto.AmountNetTotal = Convert.ToInt64(netAmount) / 100m;
+        
+        // Status and platform
+        if (data.TryGetValue("status", out var status))
+            dto.Status = Convert.ToInt32(status ?? 0);
+        if (data.TryGetValue("platform", out var platform))
+            dto.Platform = Convert.ToInt32(platform ?? 0);
+        
+        // Timestamps
+        if (data.TryGetValue("createdAt", out var createdAt) && createdAt != null)
+            dto.CreatedAtRaw = ParseDateTime(createdAt);
+        if (data.TryGetValue("completedAt", out var completedAt) && completedAt != null)
+            dto.CompletedAtRaw = ParseDateTime(completedAt);
+        
+        // Subscription details
+        if (data.TryGetValue("subscriptionId", out var subId))
+            dto.SubscriptionId = subId?.ToString();
+        if (data.TryGetValue("priceId", out var priceId))
+            dto.PriceId = priceId?.ToString();
+        
+        // Environment
+        if (data.TryGetValue("environment", out var env))
+            dto.AppStoreEnvironment = env?.ToString();
+        
+        // Trial info from metadata
+        if (data.TryGetValue("businessMetadata", out var metadata) && metadata != null)
+        {
+            var metaDict = ParseMetadata(metadata);
+            if (metaDict.TryGetValue("is_trial", out var isTrial))
+                dto.IsTrial = bool.TryParse(isTrial, out var t) && t;
+            if (metaDict.TryGetValue("trial_code", out var trialCode))
+                dto.TrialCode = trialCode;
+        }
+        
+        // Payment type
+        if (data.TryGetValue("paymentMode", out var paymentMode))
+            dto.PaymentType = Convert.ToInt32(paymentMode ?? 0);
+        
+        return dto;
+    }
+    
+    private static DateTime ParseDateTime(object? value)
+    {
+        if (value == null) return DateTime.MinValue;
+        if (value is DateTime dt) return dt;
+        if (DateTime.TryParse(value.ToString(), out var parsed)) return parsed;
+        return DateTime.MinValue;
+    }
+    
+    private static Dictionary<string, string> ParseMetadata(object? value)
+    {
+        if (value == null) return new Dictionary<string, string>();
+        try
+        {
+            if (value is string jsonStr && !string.IsNullOrEmpty(jsonStr) && jsonStr != "{}")
+                return JsonSerializer.Deserialize<Dictionary<string, string>>(jsonStr) ?? new();
+            if (value is JsonElement elem)
+                return JsonSerializer.Deserialize<Dictionary<string, string>>(elem.GetRawText()) ?? new();
+        }
+        catch { }
+        return new Dictionary<string, string>();
+    }
+    
+    private static string? GetMembershipLevel(int billingCycle)
+    {
+        return billingCycle switch
+        {
+            1 => "Weekly",
+            2 => "Monthly",
+            3 => "Quarterly", 
+            4 => "Yearly",
+            5 => "Premium",
+            _ => null
+        };
     }
 
     [HttpPost("customer")]
@@ -440,14 +594,58 @@ public class StripePaymentKeysDto
     public string PublishableKey { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Payment summary DTO - matches old API response format for backward compatibility
+/// </summary>
 public class PaymentSummaryDto
 {
-    public string PaymentId { get; set; } = string.Empty;
-    public string ProductName { get; set; } = string.Empty;
+    // Core identifiers
+    public Guid PaymentGrainId { get; set; }
+    public string? OrderId { get; set; }
+    public Guid UserId { get; set; }
+    
+    // Plan info
+    public int PlanType { get; set; }
+    
+    // Amount info
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
-    public string Status { get; set; } = string.Empty;
-    public string CreatedAt { get; set; } = string.Empty;
+    public decimal? AmountNetTotal { get; set; }
+    
+    // Status and platform
+    public int Status { get; set; }
+    public int Platform { get; set; }
+    
+    // Timestamps - internal use for filtering
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTime CreatedAtRaw { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public DateTime? CompletedAtRaw { get; set; }
+    
+    // Timestamps - API output (ISO8601 string)
+    public string CreatedAt => DateTimeFormatHelper.ToIso8601String(CreatedAtRaw);
+    public string? CompletedAt => CompletedAtRaw.HasValue 
+        ? DateTimeFormatHelper.ToIso8601String(CompletedAtRaw.Value) 
+        : null;
+    
+    // Subscription details
+    public string? SubscriptionId { get; set; }
+    
+    // Product info
+    public string? PriceId { get; set; }
+    
+    // Environment
+    public string? AppStoreEnvironment { get; set; }
+    
+    // Membership
+    public string? MembershipLevel { get; set; }
+    
+    // Trial info
+    public bool IsTrial { get; set; }
+    public string? TrialCode { get; set; }
+    
+    // Payment type (0 = subscription, 1 = one-time)
+    public int PaymentType { get; set; }
 }
 
 public class AppStoreSubscriptionResponseDto
