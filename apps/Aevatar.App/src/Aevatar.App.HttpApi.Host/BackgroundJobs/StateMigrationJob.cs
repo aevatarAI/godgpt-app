@@ -403,6 +403,22 @@ public class StateMigrationJob
                     // Add to bulk write buffer
                     bulkWriteBuffer.Add((newAgentId, newState, targetAgentTypeName));
                     
+                    // Handle AdditionalPaymentRecords from UserBilling converters
+                    if (converter is UserBillingGrainStateConverter grainConverter)
+                    {
+                        foreach (var (agentId, paymentState) in grainConverter.AdditionalPaymentRecords)
+                        {
+                            bulkWriteBuffer.Add((agentId, paymentState, "PaymentRecordGAgent"));
+                        }
+                    }
+                    else if (converter is UserBillingStateConverter billingConverter)
+                    {
+                        foreach (var (agentId, paymentState) in billingConverter.AdditionalPaymentRecords)
+                        {
+                            bulkWriteBuffer.Add((agentId, paymentState, "PaymentRecordGAgent"));
+                        }
+                    }
+                    
                     // Bulk write when buffer reaches threshold
                     if (bulkWriteBuffer.Count >= bulkWriteSize)
                     {
@@ -636,12 +652,16 @@ public class StateMigrationJob
         if (parts.Length != 2)
             return oldId;
 
-        var guid = parts[1];
+        var guidStr = parts[1];
+        
+        // Normalize GUID to standard format with dashes: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        if (Guid.TryParse(guidStr, out var guid))
+            guidStr = guid.ToString("D");
         
         // Extract short type name
         var shortName = ExtractShortTypeName(typeName);
         
-        return $"{shortName}:{guid}";
+        return $"{shortName}:{guidStr}";
     }
 
     private string ExtractShortTypeName(string fullTypeName)

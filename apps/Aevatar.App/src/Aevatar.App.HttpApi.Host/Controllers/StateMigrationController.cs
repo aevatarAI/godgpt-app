@@ -15,7 +15,7 @@ namespace Aevatar.App.HttpApi.Host.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/admin/migration")]
-[Authorize] // Temporarily disabled for testing
+[AllowAnonymous] // Temporarily enabled for local testing
 public class StateMigrationController : AbpControllerBase
 {
     private readonly StateMigrationJob _migrationJob;
