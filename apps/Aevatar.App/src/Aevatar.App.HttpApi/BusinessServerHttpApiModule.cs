@@ -32,7 +32,7 @@ public class AppHttpApiModule : AbpModule
         Configure<AbpLocalizationOptions>(options =>
         {
             options.Resources
-                .Get<AppResource>()
+                .Get<AevatarResource>()
                 .AddBaseTypes(
                     typeof(AbpUiResource)
                 );

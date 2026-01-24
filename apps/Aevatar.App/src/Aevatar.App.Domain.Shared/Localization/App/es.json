@@ -37,6 +37,16 @@
     "Unspecified": "Sistema",
     "SeeAllUsers": "Ver todos los usuarios",
     "TakePhoto": "Tomar foto",
-    "ChoosePhoto": "Escoge una foto"
+    "ChoosePhoto": "Escoge una foto",
+
+    "Permission:LanguageManagement": "Gestión de Idiomas",
+    "Permission:LanguageManagement.Languages": "Idiomas",
+    "Permission:LanguageManagement.Languages.Create": "Crear Idiomas",
+    "Permission:LanguageManagement.Languages.Edit": "Editar Idiomas",
+    "Permission:LanguageManagement.Languages.Delete": "Eliminar Idiomas",
+    "Permission:LanguageManagement.LanguageTexts": "Textos de Idiomas",
+    "Permission:LanguageManagement.LanguageTexts.Create": "Crear Textos de Idiomas",
+    "Permission:LanguageManagement.LanguageTexts.Edit": "Editar Textos de Idiomas",
+    "Permission:LanguageManagement.LanguageTexts.Restore": "Restaurar Textos de Idiomas"
   }
 }

@@ -1,4 +1,4 @@
-using Aevatar.App.Domain.Shared.Localization;
+using Aevatar.App.Localization;
 using Volo.Abp.AspNetCore.Mvc;
 
 namespace Aevatar.App.HttpApi.Controllers;

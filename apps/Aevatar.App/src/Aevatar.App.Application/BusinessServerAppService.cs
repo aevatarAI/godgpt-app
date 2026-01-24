@@ -9,6 +9,6 @@ public abstract class AppAppService : ApplicationService
 {
     protected AppAppService()
     {
-        LocalizationResource = typeof(AppResource);
+        LocalizationResource = typeof(AevatarResource);
     }
 }

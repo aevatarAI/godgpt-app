@@ -76,7 +76,7 @@ public class AuthServerModule : AbpModule
         context.Services.PreConfigure<AbpMvcDataAnnotationsLocalizationOptions>(options =>
         {
             options.AddAssemblyResource(
-                typeof(AppResource),
+                typeof(AevatarResource),
                 typeof(AuthServerModule).Assembly
             );
         });

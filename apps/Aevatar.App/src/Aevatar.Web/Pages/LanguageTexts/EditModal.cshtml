@@ -1,0 +1,76 @@
+@page
+@using System.Text.Json
+@using Aevatar.App.Localization
+@using Microsoft.AspNetCore.Mvc.Localization
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Modal
+@model Aevatar.Web.Pages.LanguageTexts.EditModalModel
+@inject IHtmlLocalizer<AevatarResource> L
+@{
+    Layout = null;
+}
+
+<form id="EditLanguageTextForm" method="post" asp-page="/LanguageTexts/EditModal">
+    <abp-modal>
+        <abp-modal-header title="Edit Language Text"></abp-modal-header>
+        <abp-modal-body>
+            <input type="hidden" asp-for="LanguageText.ResourceName" />
+            <input type="hidden" asp-for="LanguageText.CultureName" />
+            <input type="hidden" asp-for="LanguageText.Name" />
+            
+            <div class="mb-3">
+                <label class="form-label">@L["Key"]</label>
+                <input type="text" class="form-control" value="@Model.LanguageText.Name" disabled />
+            </div>
+            <div class="mb-3">
+                <label class="form-label">@L["BaseValue"]</label>
+                <input type="text" class="form-control" value="@Model.LanguageText.BaseValue" disabled />
+            </div>
+            @if (Model.CanEdit)
+            {
+                <abp-input asp-for="LanguageText.Value" label="@L["TargetValue"].Value" />
+            }
+            else
+            {
+                <div class="mb-3">
+                    <label class="form-label">@L["TargetValue"]</label>
+                    <input type="text" class="form-control" value="@Model.LanguageText.Value" disabled />
+                </div>
+            }
+        </abp-modal-body>
+        <abp-modal-footer>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@L["Cancel"]</button>
+            @if (Model.CanRestore)
+            {
+                <button type="button" id="BtnRestore" class="btn btn-warning">@L["RestoreToDefault"]</button>
+            }
+            @if (Model.CanEdit)
+            {
+                <button type="submit" class="btn btn-primary">@L["Save"]</button>
+            }
+        </abp-modal-footer>
+    </abp-modal>
+</form>
+
+<script>
+    $(function () {
+        var localizedMessages = {
+            restoreConfirmMessage: @Html.Raw(JsonSerializer.Serialize(L["RestoreConfirmMessage"].Value)),
+            restoreToDefault: @Html.Raw(JsonSerializer.Serialize(L["RestoreToDefault"].Value))
+        };
+
+        $('#BtnRestore').click(function (e) {
+            e.preventDefault();
+            abp.message.confirm(
+                localizedMessages.restoreConfirmMessage,
+                localizedMessages.restoreToDefault
+            ).then(function (confirmed) {
+                if (confirmed) {
+                    var $form = $('#EditLanguageTextForm');
+                    $form.attr('action', $form.attr('action') + '?handler=Restore');
+                    $form.submit();
+                }
+            });
+        });
+    });
+</script>
+

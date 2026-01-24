@@ -20,7 +20,7 @@ public class AuthServerMenuContributor : IMenuContributor
 
     private static Task ConfigureMainMenuAsync(MenuConfigurationContext context)
     {
-        var l = context.GetLocalizer<AppResource>();
+        var l = context.GetLocalizer<AevatarResource>();
 
         //Home
         context.Menu.AddItem(

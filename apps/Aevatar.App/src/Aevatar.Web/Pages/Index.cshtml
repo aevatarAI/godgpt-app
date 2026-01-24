@@ -1,0 +1,22 @@
+@page
+<div class="container">
+    <div class="row mb-4">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body text-center py-5">
+                    <h1 class="display-4 mb-3">Welcome to Aevatar</h1>
+                    <p class="lead text-muted mb-4">AI-Powered Intelligent Assistant Platform</p>
+                    @if (!User.Identity?.IsAuthenticated ?? true)
+                    {
+                        <div class="d-flex justify-content-center gap-3">
+                            <a href="/Account/Login" class="btn btn-outline-primary">
+                                <i class="fas fa-sign-in-alt me-2"></i>Login
+                            </a>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+

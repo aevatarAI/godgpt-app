@@ -1,0 +1,17 @@
+{
+    "culture": "zh-Hant",
+    "texts": {
+      "Menu:Home": "首頁",
+      "Permission:LanguageManagement": "語言管理",
+      "Permission:LanguageManagement.Languages": "語言",
+      "Permission:LanguageManagement.Languages.Create": "建立語言",
+      "Permission:LanguageManagement.Languages.Edit": "編輯語言",
+      "Permission:LanguageManagement.Languages.Delete": "刪除語言",
+      "Permission:LanguageManagement.LanguageTexts": "語言文字",
+      "Permission:LanguageManagement.LanguageTexts.Create": "建立語言文字",
+      "Permission:LanguageManagement.LanguageTexts.Edit": "編輯語言文字",
+      "Permission:LanguageManagement.LanguageTexts.Restore": "恢復語言文字",
+      "Welcome": "歡迎",
+      "LongWelcomeMessage": "歡迎來到此應用程式. 這是一個基於ABP框架的起始專案. 有關更多訊息, 請瀏覽 abp.io."
+    }
+  }

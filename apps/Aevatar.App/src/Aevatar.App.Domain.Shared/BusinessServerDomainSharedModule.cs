@@ -48,7 +48,7 @@ public class AppDomainSharedModule : AbpModule
         Configure<AbpLocalizationOptions>(options =>
         {
             options.Resources
-                .Add<AppResource>("en")
+                .Add<AevatarResource>("en")
                 .AddBaseTypes(
                     typeof(AbpValidationResource),
                     typeof(IdentityResource),
@@ -57,12 +57,12 @@ public class AppDomainSharedModule : AbpModule
                 )
                 .AddVirtualJson("/Localization/App");
 
-            options.DefaultResourceType = typeof(AppResource);
+            options.DefaultResourceType = typeof(AevatarResource);
         });
 
         Configure<AbpExceptionLocalizationOptions>(options =>
         {
-            options.MapCodeNamespace("App", typeof(AppResource));
+            options.MapCodeNamespace("App", typeof(AevatarResource));
         });
     }
 }

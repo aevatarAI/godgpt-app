@@ -1,6 +1,6 @@
 ﻿using Volo.Abp.Localization;
 
-namespace Aevatar.App.Domain.Shared.Localization;
+namespace Aevatar.App.Localization;
 
 [LocalizationResourceName("Aevatar")]
 public class AevatarResource

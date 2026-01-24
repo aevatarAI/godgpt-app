@@ -8,9 +8,9 @@ namespace Aevatar.App.HttpApi.Host;
 [Dependency(ReplaceServices = true)]
 public class AppHttpApiHostBrandingProvider : DefaultBrandingProvider
 {
-    private IStringLocalizer<AppResource> _localizer;
+    private IStringLocalizer<AevatarResource> _localizer;
 
-    public AppHttpApiHostBrandingProvider(IStringLocalizer<AppResource> localizer)
+    public AppHttpApiHostBrandingProvider(IStringLocalizer<AevatarResource> localizer)
     {
         _localizer = localizer;
     }

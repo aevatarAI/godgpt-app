@@ -1,0 +1,8 @@
+{
+    "version": "1.0.0",
+    "name": "aevatar-web",
+    "private": true,
+    "dependencies": {
+      "@abp/aspnetcore.mvc.ui.theme.leptonxlite": "~4.0.0"
+    }
+  }

@@ -11,12 +11,53 @@ public class AppPermissionDefinitionProvider : PermissionDefinitionProvider
     {
         var myGroup = context.AddGroup(AppPermissions.GroupName);
 
-        //Define your own permissions here. Example:
-        //myGroup.AddPermission(AppPermissions.MyPermission1, L("Permission:MyPermission1"));
+        // Language Management permissions
+        DefineLanguageManagementPermissions(context);
+    }
+    
+    private void DefineLanguageManagementPermissions(IPermissionDefinitionContext context)
+    {
+        var languageManagementGroup = context.AddGroup(
+            AppPermissions.LanguageManagement.GroupName,
+            L("Permission:LanguageManagement"));
+        
+        // Languages permissions (LanguageController)
+        var languagesPermission = languageManagementGroup.AddPermission(
+            AppPermissions.LanguageManagement.Languages.Default,
+            L("Permission:LanguageManagement.Languages"));
+        
+        languagesPermission.AddChild(
+            AppPermissions.LanguageManagement.Languages.Create,
+            L("Permission:LanguageManagement.Languages.Create"));
+        
+        languagesPermission.AddChild(
+            AppPermissions.LanguageManagement.Languages.Edit,
+            L("Permission:LanguageManagement.Languages.Edit"));
+        
+        languagesPermission.AddChild(
+            AppPermissions.LanguageManagement.Languages.Delete,
+            L("Permission:LanguageManagement.Languages.Delete"));
+        
+        // LanguageTexts permissions (LanguageTextController)
+        var languageTextsPermission = languageManagementGroup.AddPermission(
+            AppPermissions.LanguageManagement.LanguageTexts.Default,
+            L("Permission:LanguageManagement.LanguageTexts"));
+        
+        languageTextsPermission.AddChild(
+            AppPermissions.LanguageManagement.LanguageTexts.Create,
+            L("Permission:LanguageManagement.LanguageTexts.Create"));
+        
+        languageTextsPermission.AddChild(
+            AppPermissions.LanguageManagement.LanguageTexts.Edit,
+            L("Permission:LanguageManagement.LanguageTexts.Edit"));
+        
+        languageTextsPermission.AddChild(
+            AppPermissions.LanguageManagement.LanguageTexts.Restore,
+            L("Permission:LanguageManagement.LanguageTexts.Restore"));
     }
 
     private static LocalizableString L(string name)
     {
-        return LocalizableString.Create<AppResource>(name);
+        return LocalizableString.Create<AevatarResource>(name);
     }
 }

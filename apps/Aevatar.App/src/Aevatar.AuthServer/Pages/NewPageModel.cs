@@ -7,6 +7,6 @@ public abstract class AuthServerPageModel : AbpPageModel
 {
     protected AuthServerPageModel()
     {
-        LocalizationResourceType = typeof(AppResource);
+        LocalizationResourceType = typeof(AevatarResource);
     }
 }
