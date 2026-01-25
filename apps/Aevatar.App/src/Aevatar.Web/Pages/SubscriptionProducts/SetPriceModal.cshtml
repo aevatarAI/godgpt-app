@@ -1,0 +1,48 @@
+@page
+@using Aevatar.App.Localization
+@using Microsoft.AspNetCore.Mvc.Localization
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Form
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Modal
+@model Aevatar.Web.Pages.SubscriptionProducts.SetPriceModalModel
+@inject IHtmlLocalizer<AevatarResource> L
+@{
+    Layout = null;
+}
+
+<form method="post" asp-page="/SubscriptionProducts/SetPriceModal">
+    <abp-modal>
+        <abp-modal-header title="@L["SetPrice"].Value"></abp-modal-header>
+        <abp-modal-body>
+            <input type="hidden" asp-for="Id" />
+            
+            <div class="mb-3">
+                <label class="form-label">@L["Product"]</label>
+                <input type="text" class="form-control" value="@Model.ProductName" readonly disabled />
+            </div>
+            
+            <div class="mb-3">
+                <label class="form-label">@L["PlatformProductId"]</label>
+                <input type="text" class="form-control" value="@Model.PlatformProductId" readonly disabled />
+            </div>
+            
+            <hr />
+            
+            <abp-select asp-for="Input.Currency" 
+                        asp-items="Model.CurrencyOptions"
+                        label="@L["Currency"].Value" />
+            
+            <abp-input asp-for="Input.Price" 
+                       label="@L["Price"].Value"
+                       type="number"
+                       step="0.01"
+                       min="0.01" />
+            
+            <div class="alert alert-info mt-3">
+                <i class="fas fa-info-circle me-2"></i>
+                @L["SetPriceInfo"]
+            </div>
+        </abp-modal-body>
+        <abp-modal-footer buttons="@(AbpModalButtons.Cancel | AbpModalButtons.Save)"></abp-modal-footer>
+    </abp-modal>
+</form>

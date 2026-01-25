@@ -1,6 +1,7 @@
 using Aevatar.App.Application.Services;
 using Aevatar.App.Application.Services.Payment;
 using Aevatar.App.Application.Contracts.Services;
+using Aevatar.App.Services.Subscription;
 using Aevatar.Application.Grains;
 using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp.PermissionManagement;
@@ -54,5 +55,13 @@ public class AppApplicationModule : AbpModule
         
         // Register GodGPTPaymentBusinessService (handles Stripe operations in HttpApi layer)
         context.Services.AddScoped<IGodGPTPaymentBusinessService, GodGPTPaymentBusinessService>();
+        
+        // Platform Price Sync
+        var configuration = context.Services.GetConfiguration();
+        Configure<PlatformPriceSyncOptions>(configuration.GetSection(PlatformPriceSyncOptions.SectionName));
+        context.Services.AddTransient<IPlatformPriceSyncService, PlatformPriceSyncService>();
+        context.Services.AddTransient<ISubscriptionProductService, SubscriptionProductService>();
+        context.Services.AddTransient<ISubscriptionLabelService, SubscriptionLabelService>();
+        context.Services.AddTransient<ISubscriptionFeatureService, SubscriptionFeatureService>();
     }
 }

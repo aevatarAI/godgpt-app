@@ -226,7 +226,8 @@ public class GodGPTPaymentController : AevatarController
                     ProductId = input.PriceId,
                     CancelUrl = input.CancelUrl,
                     Mode = input.Mode,
-                    UiMode = input.UiMode
+                    UiMode = input.UiMode,
+                    Referral = input.Referral
                 });
 
             _logger.LogDebug("[GodGPTPaymentController][CreateCheckoutSessionAsync] userId: {UserId}, uiMode: {UiMode}, duration: {Duration}ms",

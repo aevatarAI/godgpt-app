@@ -235,40 +235,6 @@ public class InviteCodeGAgent : GAgentBase<InviteCodeState>, IInviteCodeGAgent
         return Task.FromResult(codeInfo);
     }
 
-    #region EventHandlers
-
-    [EventHandler]
-    public void HandleInitializeInviteCodeEvent(InitializeInviteCodeEvent @event)
-    {
-        TransitionState(State, @event);
-    }
-
-    [EventHandler]
-    public void HandleDeactivateInviteCodeEvent(DeactivateInviteCodeEvent @event)
-    {
-        TransitionState(State, @event);
-    }
-
-    [EventHandler]
-    public void HandleIncrementUsageCountEvent(IncrementUsageCountEvent @event)
-    {
-        TransitionState(State, @event);
-    }
-
-    [EventHandler]
-    public void HandleInitializeFreeTrialCodeEvent(InitializeFreeTrialCodeEvent @event)
-    {
-        TransitionState(State, @event);
-    }
-
-    [EventHandler]
-    public void HandleMarkCodeAsUsedEvent(MarkCodeAsUsedEvent @event)
-    {
-        TransitionState(State, @event);
-    }
-
-    #endregion
-
     protected override void TransitionState(InviteCodeState state, IMessage evt)
     {
         switch (evt)

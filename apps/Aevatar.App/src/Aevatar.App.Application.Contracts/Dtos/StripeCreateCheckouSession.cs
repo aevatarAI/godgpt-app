@@ -9,4 +9,5 @@ public class CreateCheckoutSessionInput
     public long Quantity { get; set; }
     public string UiMode { get; set; }
     public string CancelUrl { get; set; } = string.Empty;
+    public string? Referral { get; set; } = null;
 }

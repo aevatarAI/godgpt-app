@@ -2,6 +2,7 @@ using Aevatar.Application.Grains.Common.Options;
 using Aevatar.Application.Grains.Common.Service;
 using Aevatar.Application.Grains.Agents.ChatManager.Options;
 using Aevatar.Application.Grains.Agents.Anonymous.Options;
+using Aevatar.Application.Grains.Subscription.Providers;
 using Aevatar.Application.Grains.UserFeedback.Options;
 using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp.AutoMapper;
@@ -36,6 +37,10 @@ public class GodGPTGAgentModule : AbpModule
         // Register speech services
         context.Services.AddSingleton<ISpeechService, SpeechService>();
         context.Services.AddSingleton<ILocalizationService, LocalizationService>();
+        
+        // Register platform price providers (Strategy Pattern)
+        context.Services.AddSingleton<IPlatformPriceProvider, StripePriceProvider>();
+        context.Services.AddSingleton<IPlatformPriceProviderFactory, PlatformPriceProviderFactory>();
         
         // Register HttpClient factory
         context.Services.AddHttpClient();

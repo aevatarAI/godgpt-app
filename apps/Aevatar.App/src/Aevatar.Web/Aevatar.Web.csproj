@@ -57,6 +57,7 @@
     <ProjectReference Include="..\Aevatar.App.Domain\Aevatar.App.Domain.csproj" />
     <ProjectReference Include="..\Aevatar.App.HttpApi\Aevatar.App.HttpApi.csproj" />
     <ProjectReference Include="..\Aevatar.App.MongoDB\Aevatar.App.MongoDB.csproj" />
+    <ProjectReference Include="..\..\..\..\plugins\Aevatar.Agents.Plugins.MassTransit\Aevatar.Agents.Plugins.MassTransit.csproj" />
     <PackageReference Include="Volo.Abp.Autofac" />
     <PackageReference Include="Volo.Abp.AutoMapper" />
     <PackageReference Include="Volo.Abp.Caching.StackExchangeRedis" />
@@ -81,15 +82,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Reference Include="Aevatar.Agents.Plugins.CQRS">
-      <HintPath>..\..\..\..\plugins\Aevatar.Agents.Plugins.CQRS\bin\Debug\net10.0\Aevatar.Agents.Plugins.CQRS.dll</HintPath>
-    </Reference>
-    <Reference Include="Aevatar.Agents.Plugins.MassTransit">
-      <HintPath>..\..\..\..\plugins\Aevatar.Agents.Plugins.MassTransit\bin\Debug\net10.0\Aevatar.Agents.Plugins.MassTransit.dll</HintPath>
-    </Reference>
-    <Reference Include="Aevatar.Agents.Runtime.Local">
-      <HintPath>..\..\..\..\src\Aevatar.Agents.Runtime.Local\bin\Debug\net10.0\Aevatar.Agents.Runtime.Local.dll</HintPath>
-    </Reference>
+    <ProjectReference Include="..\..\..\..\plugins\Aevatar.Agents.Plugins.CQRS\Aevatar.Agents.Plugins.CQRS.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Runtime.Local\Aevatar.Agents.Runtime.Local.csproj" />
   </ItemGroup>
 
 <!--  <ItemGroup>-->

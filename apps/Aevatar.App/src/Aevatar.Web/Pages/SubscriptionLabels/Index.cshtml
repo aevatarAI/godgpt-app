@@ -1,0 +1,173 @@
+@page
+@using System.Text.Json
+@using Aevatar.App.Localization
+@using Microsoft.AspNetCore.Mvc.Localization
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Blockquote
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Button
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Card
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Grid
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Table
+@using Volo.Abp.AspNetCore.Mvc.UI.Bundling.TagHelpers
+@using Volo.Abp.AspNetCore.Mvc.UI.Layout
+@model Aevatar.Web.Pages.SubscriptionLabels.IndexModel
+@inject IHtmlLocalizer<AevatarResource> L
+@inject IPageLayout PageLayout
+@{
+    PageLayout.Content.Title = L["SubscriptionLabels"].Value;
+    PageLayout.Content.BreadCrumb.Add(L["Menu:SubscriptionManagement"].Value);
+    PageLayout.Content.BreadCrumb.Add(L["SubscriptionLabels"].Value);
+}
+
+<abp-card>
+    <abp-card-header>
+        <abp-row>
+            <abp-column size-md="_6">
+                <abp-card-title>@L["SubscriptionLabels"]</abp-card-title>
+            </abp-column>
+            <abp-column size-md="_6" class="text-end">
+                @if (Model.CanCreate)
+                {
+                    <abp-button id="BtnCreateLabel" 
+                                button-type="Primary" 
+                                icon="fas fa-plus"
+                                text="@L["CreateLabel"].Value">
+                    </abp-button>
+                }
+            </abp-column>
+        </abp-row>
+    </abp-card-header>
+    <abp-card-body>
+        <abp-table striped-rows="true">
+            <thead>
+                <tr>
+                    <th style="width: 100px;">@L["Actions"]</th>
+                    <th>@L["LabelKey"]</th>
+                    <th>@L["DisplayName"]</th>
+                    <th>@L["CreationTime"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var label in Model.Labels)
+                {
+                    <tr>
+                        <td>
+                            @if (Model.CanEdit || Model.CanDelete)
+                            {
+                                <div class="dropdown">
+                                    <button class="btn btn-primary btn-sm dropdown-toggle" 
+                                            type="button" 
+                                            data-bs-toggle="dropdown" 
+                                            aria-expanded="false">
+                                        @L["Actions"]
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        @if (Model.CanEdit)
+                                        {
+                                            <li>
+                                                <a class="dropdown-item btn-edit" href="#" 
+                                                   data-id="@label.Id">
+                                                    <i class="fas fa-edit me-2"></i>@L["Edit"]
+                                                </a>
+                                            </li>
+                                        }
+                                        @if (Model.CanDelete)
+                                        {
+                                            <li><hr class="dropdown-divider"></li>
+                                            <li>
+                                                <a class="dropdown-item btn-delete text-danger" href="#" 
+                                                   data-id="@label.Id"
+                                                   data-name="@label.Name">
+                                                    <i class="fas fa-trash me-2"></i>@L["Delete"]
+                                                </a>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                        </td>
+                        <td>
+                            <code>@label.Key</code>
+                        </td>
+                        <td>
+                            <span class="badge bg-warning text-dark">@label.Name</span>
+                        </td>
+                        <td>
+                            @label.CreatedAt.ToString("yyyy-MM-dd HH:mm")
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </abp-table>
+        
+        @if (!Model.Labels.Any())
+        {
+            <div class="text-center py-5">
+                <i class="fas fa-tags fa-3x text-muted mb-3"></i>
+                <p class="text-muted">@L["NoLabelsFound"]</p>
+                @if (Model.CanCreate)
+                {
+                    <abp-button id="BtnCreateFirstLabel" 
+                                button-type="Primary" 
+                                icon="fas fa-plus"
+                                text="@L["CreateFirstLabel"].Value">
+                    </abp-button>
+                }
+            </div>
+        }
+    </abp-card-body>
+</abp-card>
+
+@section scripts {
+    <script>
+        $(function () {
+            var localizedMessages = {
+                deleteConfirmTitle: @Html.Raw(JsonSerializer.Serialize(L["Delete"].Value)),
+                deleteConfirmMessage: @Html.Raw(JsonSerializer.Serialize(L["DeleteWarningLabel"].Value)),
+                deleteSuccess: @Html.Raw(JsonSerializer.Serialize(L["LabelDeletedSuccessfully"].Value))
+            };
+
+            var createModal = new abp.ModalManager(abp.appPath + 'SubscriptionLabels/CreateModal');
+            var editModal = new abp.ModalManager(abp.appPath + 'SubscriptionLabels/EditModal');
+
+            $('#BtnCreateLabel, #BtnCreateFirstLabel').click(function (e) {
+                e.preventDefault();
+                createModal.open();
+            });
+
+            createModal.onResult(function () {
+                location.reload();
+            });
+
+            $(document).on('click', '.btn-edit', function (e) {
+                e.preventDefault();
+                var id = $(this).data('id');
+                editModal.open({ id: id });
+            });
+
+            editModal.onResult(function () {
+                location.reload();
+            });
+
+            $(document).on('click', '.btn-delete', function (e) {
+                e.preventDefault();
+                var id = $(this).data('id');
+                var name = $(this).data('name');
+
+                abp.message.confirm(
+                    localizedMessages.deleteConfirmMessage,
+                    localizedMessages.deleteConfirmTitle
+                ).then(function (confirmed) {
+                    if (confirmed) {
+                        abp.ajax({
+                            url: abp.appPath + 'api/admin/subscription/labels/' + id,
+                            type: 'DELETE'
+                        }).then(function () {
+                            abp.notify.success(localizedMessages.deleteSuccess);
+                            location.reload();
+                        });
+                    }
+                });
+            });
+        });
+    </script>
+}
