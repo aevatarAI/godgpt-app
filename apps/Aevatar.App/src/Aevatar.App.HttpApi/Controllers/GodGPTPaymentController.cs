@@ -371,10 +371,10 @@ public class GodGPTPaymentController : AevatarController
         // Get priceId/productId for config lookup
         string? priceIdStr = null;
         string? productIdStr = null;
-        if (data.TryGetValue("priceId", out var priceId))
-            priceIdStr = priceId?.ToString();
-        if (data.TryGetValue("productId", out var productId))
-            productIdStr = productId?.ToString();
+        if (data.TryGetValue("priceId", out var priceId) && !string.IsNullOrEmpty(priceId?.ToString()))
+            priceIdStr = priceId.ToString();
+        if (data.TryGetValue("productId", out var productId) && !string.IsNullOrEmpty(productId?.ToString()))
+            productIdStr = productId.ToString();
         
         // Plan info - uses legacy PlanType values (Day=1, Month=2, Year=3, Week=4)
         // Priority: ES billingCycle (now stores legacy values) -> product config fallback

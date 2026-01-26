@@ -27,10 +27,6 @@ namespace Aevatar.App.MongoDB;
 )]
 public class AppMongoDbModule : AbpModule
 {
-    // NOTE: MongoDB GUID serialization (CSharpLegacy) is configured in Program.cs
-    // before any ABP modules are loaded. This ensures compatibility with existing
-    // data stored in UuidLegacy format. Do not add PreConfigureServices here.
-
     public override void ConfigureServices(ServiceConfigurationContext context)
     {
         context.Services.AddMongoDbContext<AppMongoDbContext>(options =>
