@@ -457,7 +457,8 @@ public class GodGPTPaymentController : AevatarController
         // Subscription details
         if (data.TryGetValue("subscriptionId", out var subId))
             dto.SubscriptionId = subId?.ToString();
-        dto.PriceId = priceIdStr;
+        // PriceId: prefer priceId field, fallback to productId (Stripe stores price ID in productId field)
+        dto.PriceId = !string.IsNullOrEmpty(priceIdStr) ? priceIdStr : productIdStr;
         
         // Environment
         if (data.TryGetValue("environment", out var env))
