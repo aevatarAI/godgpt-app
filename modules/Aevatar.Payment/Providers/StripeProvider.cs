@@ -437,6 +437,9 @@ public class StripeProvider : IPaymentProvider
                 case "payment_intent.succeeded":
                     await HandlePaymentIntentSucceeded(stripeEvent, result);
                     break;
+                case "charge.refunded":
+                    await HandleChargeRefunded(stripeEvent, result);
+                    break;
                 default:
                     result.ShouldProcess = false;
                     break;
@@ -573,6 +576,14 @@ public class StripeProvider : IPaymentProvider
         else if (stripeEvent.Data.Object is PaymentIntent paymentIntent)
         {
             userIdStr = paymentIntent.Metadata?.GetValueOrDefault("internal_user_id");
+        }
+        else if (stripeEvent.Data.Object is Charge charge)
+        {
+            // Try Charge metadata first, then PaymentIntent metadata
+            userIdStr = charge.Metadata?.GetValueOrDefault("user_id")
+                ?? charge.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("user_id")
+                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("internal_user_id");
         }
 
         return Guid.TryParse(userIdStr, out var userId) ? userId : null;
@@ -840,6 +851,43 @@ public class StripeProvider : IPaymentProvider
             _logger.LogInformation(
                 "[StripeProvider] payment_intent.succeeded: OrderId={OrderId}, TransactionId={TransactionId}, SubscriptionId={SubscriptionId}",
                 result.OrderId, paymentIntent.Id, result.SubscriptionId);
+        }
+        return Task.CompletedTask;
+    }
+
+    private Task HandleChargeRefunded(Event stripeEvent, WebhookResult result)
+    {
+        if (stripeEvent.Data.Object is Charge charge)
+        {
+            // Try to get metadata from Charge or expanded PaymentIntent
+            var metadata = charge.Metadata;
+            if ((metadata == null || !metadata.Any()) && charge.PaymentIntent != null)
+            {
+                metadata = charge.PaymentIntent.Metadata;
+            }
+            
+            result.OrderId = TryGetFromMetadata(metadata, "order_id");
+            result.TransactionId = charge.Id;
+            result.NewStatus = PaymentStatus.Refunded;
+            result.ShouldProcess = true;
+            
+            // Calculate refund amount (AmountRefunded is in cents)
+            var refundAmount = charge.AmountRefunded / 100m;
+            var originalAmount = charge.Amount / 100m;
+            
+            result.VerificationResult = new VerificationResult
+            {
+                IsValid = true,
+                TransactionId = charge.Id,
+                Amount = refundAmount,
+                Currency = charge.Currency?.ToUpper() ?? "USD",
+                ErrorMessage = charge.Refunded ? "Full refund" : "Partial refund"
+            };
+            
+            _logger.LogInformation(
+                "[StripeProvider] charge.refunded: OrderId={OrderId}, ChargeId={ChargeId}, " +
+                "RefundAmount={RefundAmount}, OriginalAmount={OriginalAmount}, FullRefund={FullRefund}",
+                result.OrderId, charge.Id, refundAmount, originalAmount, charge.Refunded);
         }
         return Task.CompletedTask;
     }

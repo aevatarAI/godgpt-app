@@ -1088,7 +1088,7 @@ public class PaymentService : IPaymentService
                         "[PaymentService] Processed refund for payment {PaymentId}, transaction {TransactionId}",
                         paymentId, result.TransactionId ?? "latest");
 
-                    // Build refund completed event
+                    // Build refund completed event (for Analytics reporting)
                     var refundEvent = new RefundCompletedEvent
                     {
                         Context = eventContext,
@@ -1099,12 +1099,26 @@ public class PaymentService : IPaymentService
                         RefundedAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
                     };
 
+                    // Build cancellation event (for business agents like UserQuotaGAgent)
+                    // Refund should trigger same business logic as cancellation
+                    var cancelledEvent = new PaymentCancelledEvent
+                    {
+                        Context = eventContext,
+                        Reason = "refund",
+                        Immediate = true, // Refunds are immediate
+                        CancelledAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                    };
+
                     if (indexAgent != null)
                     {
                         await indexAgent.RemoveActiveSubscriptionAsync(paymentId);
                         
-                        // Broadcast to business agents via IndexAgent
+                        // Broadcast RefundCompletedEvent for Analytics (GA4 reporting)
                         await indexAgent.NotifyRefundCompletedAsync(refundEvent);
+                        
+                        // Also broadcast PaymentCancelledEvent for business agents (UserQuotaGAgent)
+                        // This ensures consistent handling - refund triggers same logic as cancel
+                        await indexAgent.NotifyPaymentCancelledAsync(cancelledEvent);
                     }
 
                     // Point-to-point callback to order-level agent (if configured)
