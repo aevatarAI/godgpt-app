@@ -991,55 +991,54 @@ public class StripeProvider : IPaymentProvider
                 }
             }
             
-            // If still no metadata, try PaymentIntent -> Invoice -> Subscription path (for subscription mode)
-            // Note: Stripe API 2025-04-30.basil doesn't include invoice in Charge object
-            // Must go through PaymentIntent to find the Invoice
+            // If still no metadata, find Invoice by payment_intent, then get Subscription metadata
+            // This is precise - one payment_intent corresponds to one Invoice
             if ((metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id"))
                 && !string.IsNullOrEmpty(charge.PaymentIntentId))
             {
                 try
                 {
-                    // Fetch PaymentIntent with invoice expansion
-                    var paymentIntentService = new PaymentIntentService(_client);
-                    var expandedPaymentIntent = await paymentIntentService.GetAsync(charge.PaymentIntentId, new PaymentIntentGetOptions
+                    // Search for Invoice with this payment_intent
+                    var invoiceService = new InvoiceService(_client);
+                    var searchResult = await invoiceService.SearchAsync(new InvoiceSearchOptions
                     {
-                        Expand = new List<string> { "invoice.subscription" }
+                        Query = $"payment_intent:'{charge.PaymentIntentId}'",
+                        Expand = new List<string> { "data.subscription" }
                     });
                     
-                    // Get invoice ID from PaymentIntent
-                    var invoiceId = expandedPaymentIntent?.RawJObject?.SelectToken("invoice.id")?.ToString()
-                                 ?? expandedPaymentIntent?.RawJObject?.SelectToken("invoice")?.ToString();
-                    var subscriptionId = expandedPaymentIntent?.RawJObject?.SelectToken("invoice.subscription.id")?.ToString();
-                    
                     _logger.LogInformation(
-                        "[StripeProvider] charge.refunded: PaymentIntent->Invoice->Subscription lookup - " +
-                        "PaymentIntentId={PaymentIntentId}, InvoiceId={InvoiceId}, SubscriptionId={SubscriptionId}",
-                        charge.PaymentIntentId, invoiceId ?? "(null)", subscriptionId ?? "(null)");
+                        "[StripeProvider] charge.refunded: Invoice search by PaymentIntent - " +
+                        "PaymentIntentId={PaymentIntentId}, InvoiceCount={Count}",
+                        charge.PaymentIntentId, searchResult.Data.Count);
                     
-                    // Access invoice.subscription.metadata via RawJObject
-                    var subscriptionMetadata = expandedPaymentIntent?.RawJObject
-                        ?.SelectToken("invoice.subscription.metadata")
-                        ?.ToObject<Dictionary<string, string>>();
-                    
-                    _logger.LogInformation(
-                        "[StripeProvider] charge.refunded: Subscription metadata - " +
-                        "MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}",
-                        subscriptionMetadata?.Count ?? 0,
-                        subscriptionMetadata != null ? string.Join(",", subscriptionMetadata.Keys) : "(null)");
-                    
-                    if (subscriptionMetadata != null && subscriptionMetadata.ContainsKey("order_id"))
+                    if (searchResult.Data.Count > 0)
                     {
-                        metadata = subscriptionMetadata;
-                        metadataSource = $"Subscription(via PaymentIntent->Invoice {invoiceId})";
-                        _logger.LogInformation(
-                            "[StripeProvider] charge.refunded: Using Subscription metadata via PaymentIntent->Invoice {InvoiceId}",
-                            invoiceId);
+                        var invoice = searchResult.Data[0];
+                        // SDK 48.x removed Invoice.Subscription, use RawJObject
+                        var subscriptionId = invoice.RawJObject?.SelectToken("subscription.id")?.ToString()
+                                          ?? invoice.RawJObject?.SelectToken("subscription")?.ToString();
+                        var subscriptionMetadata = invoice.RawJObject
+                            ?.SelectToken("subscription.metadata")
+                            ?.ToObject<Dictionary<string, string>>();
+                        
+                        if (subscriptionMetadata != null && subscriptionMetadata.ContainsKey("order_id"))
+                        {
+                            metadata = subscriptionMetadata;
+                            metadataSource = $"Subscription({subscriptionId} via Invoice {invoice.Id})";
+                            
+                            _logger.LogInformation(
+                                "[StripeProvider] charge.refunded: Found Subscription metadata via Invoice - " +
+                                "InvoiceId={InvoiceId}, SubscriptionId={SubscriptionId}, " +
+                                "MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}",
+                                invoice.Id, subscriptionId,
+                                subscriptionMetadata.Count, string.Join(",", subscriptionMetadata.Keys));
+                        }
                     }
                 }
                 catch (StripeException ex)
                 {
                     _logger.LogWarning(ex,
-                        "[StripeProvider] charge.refunded: Failed to fetch PaymentIntent with Invoice expansion {PaymentIntentId}",
+                        "[StripeProvider] charge.refunded: Failed to search Invoice by PaymentIntent {PaymentIntentId}",
                         charge.PaymentIntentId);
                 }
             }
