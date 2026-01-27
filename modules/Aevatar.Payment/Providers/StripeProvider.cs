@@ -218,7 +218,8 @@ public class StripeProvider : IPaymentProvider
                 CancelUrl = cancelUrl,
                 Metadata = commonMetadata,
                 ClientReferenceId = request.UserId.ToString(),
-                // Copy metadata to subscription so invoice.paid can access it
+                // Copy metadata to subscription so invoice.paid and charge.refunded can access it
+                // charge.refunded uses: Charge -> Invoice -> Subscription.Metadata
                 SubscriptionData = new SessionSubscriptionDataOptions
                 {
                     Metadata = commonMetadata
@@ -859,11 +860,10 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Charge charge)
         {
-            // Try to get metadata from Charge first
+            // Same approach as old code: try Charge metadata first, then PaymentIntent metadata
             var metadata = charge.Metadata;
             
-            // If Charge metadata is empty, fetch PaymentIntent from Stripe API to get metadata
-            // (Same approach as old code: StripeEventProcessingGrain.cs)
+            // If Charge metadata is empty, fetch PaymentIntent from Stripe API
             if ((metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id")) 
                 && !string.IsNullOrEmpty(charge.PaymentIntentId))
             {
@@ -875,7 +875,7 @@ public class StripeProvider : IPaymentProvider
                     {
                         metadata = paymentIntent.Metadata;
                         _logger.LogDebug(
-                            "[StripeProvider] charge.refunded: Fetched metadata from PaymentIntent {PaymentIntentId}",
+                            "[StripeProvider] charge.refunded: Using PaymentIntent metadata {PaymentIntentId}",
                             charge.PaymentIntentId);
                     }
                 }
@@ -887,14 +887,14 @@ public class StripeProvider : IPaymentProvider
                 }
             }
             
-            // Extract all business data from metadata (same as old code: ExtractBusinessDataAsync)
+            // Extract business data from metadata
             result.OrderId = TryGetFromMetadata(metadata, "order_id");
             result.ProductId = TryGetFromMetadata(metadata, "price_id");
             result.TransactionId = charge.Id;
             result.NewStatus = PaymentStatus.Refunded;
             result.ShouldProcess = true;
             
-            // Extract UserId from metadata (for PaymentService to find IndexAgent)
+            // Extract UserId from metadata
             var userIdStr = TryGetFromMetadata(metadata, "internal_user_id") 
                          ?? TryGetFromMetadata(metadata, "user_id");
             if (Guid.TryParse(userIdStr, out var userId))
