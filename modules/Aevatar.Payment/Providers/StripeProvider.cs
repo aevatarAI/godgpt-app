@@ -855,21 +855,50 @@ public class StripeProvider : IPaymentProvider
         return Task.CompletedTask;
     }
 
-    private Task HandleChargeRefunded(Event stripeEvent, WebhookResult result)
+    private async Task HandleChargeRefunded(Event stripeEvent, WebhookResult result)
     {
         if (stripeEvent.Data.Object is Charge charge)
         {
-            // Try to get metadata from Charge or expanded PaymentIntent
+            // Try to get metadata from Charge first
             var metadata = charge.Metadata;
-            if ((metadata == null || !metadata.Any()) && charge.PaymentIntent != null)
+            
+            // If Charge metadata is empty, fetch PaymentIntent from Stripe API to get metadata
+            // (Same approach as old code: StripeEventProcessingGrain.cs)
+            if ((metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id")) 
+                && !string.IsNullOrEmpty(charge.PaymentIntentId))
             {
-                metadata = charge.PaymentIntent.Metadata;
+                try
+                {
+                    var paymentIntentService = new PaymentIntentService(_client);
+                    var paymentIntent = await paymentIntentService.GetAsync(charge.PaymentIntentId);
+                    if (paymentIntent?.Metadata != null && paymentIntent.Metadata.Any())
+                    {
+                        metadata = paymentIntent.Metadata;
+                        _logger.LogDebug(
+                            "[StripeProvider] charge.refunded: Fetched metadata from PaymentIntent {PaymentIntentId}",
+                            charge.PaymentIntentId);
+                    }
+                }
+                catch (StripeException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "[StripeProvider] charge.refunded: Failed to fetch PaymentIntent {PaymentIntentId}",
+                        charge.PaymentIntentId);
+                }
             }
             
             result.OrderId = TryGetFromMetadata(metadata, "order_id");
             result.TransactionId = charge.Id;
             result.NewStatus = PaymentStatus.Refunded;
             result.ShouldProcess = true;
+            
+            // Also extract UserId from metadata (for PaymentService to find IndexAgent)
+            var userIdStr = TryGetFromMetadata(metadata, "internal_user_id") 
+                         ?? TryGetFromMetadata(metadata, "user_id");
+            if (Guid.TryParse(userIdStr, out var userId))
+            {
+                result.UserId = userId;
+            }
             
             // Calculate refund amount (AmountRefunded is in cents)
             var refundAmount = charge.AmountRefunded / 100m;
@@ -885,11 +914,10 @@ public class StripeProvider : IPaymentProvider
             };
             
             _logger.LogInformation(
-                "[StripeProvider] charge.refunded: OrderId={OrderId}, ChargeId={ChargeId}, " +
+                "[StripeProvider] charge.refunded: OrderId={OrderId}, ChargeId={ChargeId}, UserId={UserId}, " +
                 "RefundAmount={RefundAmount}, OriginalAmount={OriginalAmount}, FullRefund={FullRefund}",
-                result.OrderId, charge.Id, refundAmount, originalAmount, charge.Refunded);
+                result.OrderId, charge.Id, result.UserId, refundAmount, originalAmount, charge.Refunded);
         }
-        return Task.CompletedTask;
     }
 
     private static PaymentStatus MapStripeStatus(string stripeStatus)
