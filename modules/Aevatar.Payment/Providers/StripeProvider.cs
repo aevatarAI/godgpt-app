@@ -200,7 +200,8 @@ public class StripeProvider : IPaymentProvider
             {
                 ["internal_user_id"] = request.UserId.ToString(),
                 ["order_id"] = orderId,
-                ["price_id"] = request.ProductId ?? string.Empty
+                ["price_id"] = request.ProductId ?? string.Empty,
+                ["quantity"] = "1"
             };
             
             var sessionOptions = new SessionCreateOptions
