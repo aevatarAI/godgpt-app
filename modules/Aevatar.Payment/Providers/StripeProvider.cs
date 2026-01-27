@@ -1010,13 +1010,29 @@ public class StripeProvider : IPaymentProvider
                     
                     _logger.LogInformation(
                         "[StripeProvider] charge.refunded: Customer Invoice lookup - " +
-                        "CustomerId={CustomerId}, PaymentIntentId={PaymentIntentId}, InvoiceCount={Count}",
+                        "CustomerId={CustomerId}, ChargePaymentIntentId={PaymentIntentId}, InvoiceCount={Count}",
                         charge.CustomerId, charge.PaymentIntentId, invoices.Data.Count);
+                    
+                    // If no invoices found, try without customer filter (debug)
+                    if (invoices.Data.Count == 0)
+                    {
+                        _logger.LogWarning(
+                            "[StripeProvider] charge.refunded: No invoices found for customer {CustomerId}",
+                            charge.CustomerId);
+                    }
                     
                     // Find invoice matching this payment_intent
                     foreach (var inv in invoices.Data)
                     {
                         var invPaymentIntentId = inv.RawJObject?.SelectToken("payment_intent")?.ToString();
+                        var invSubscriptionId = inv.RawJObject?.SelectToken("subscription")?.ToString();
+                        
+                        _logger.LogInformation(
+                            "[StripeProvider] charge.refunded: Checking Invoice - " +
+                            "InvoiceId={InvoiceId}, InvPaymentIntentId={InvPaymentIntentId}, " +
+                            "ChargePaymentIntentId={ChargePaymentIntentId}, Match={Match}, SubscriptionId={SubscriptionId}",
+                            inv.Id, invPaymentIntentId ?? "(null)", charge.PaymentIntentId,
+                            invPaymentIntentId == charge.PaymentIntentId, invSubscriptionId ?? "(null)");
                         
                         if (invPaymentIntentId == charge.PaymentIntentId)
                         {
