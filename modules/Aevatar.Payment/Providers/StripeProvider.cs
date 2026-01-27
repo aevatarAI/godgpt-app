@@ -887,12 +887,14 @@ public class StripeProvider : IPaymentProvider
                 }
             }
             
+            // Extract all business data from metadata (same as old code: ExtractBusinessDataAsync)
             result.OrderId = TryGetFromMetadata(metadata, "order_id");
+            result.ProductId = TryGetFromMetadata(metadata, "price_id");
             result.TransactionId = charge.Id;
             result.NewStatus = PaymentStatus.Refunded;
             result.ShouldProcess = true;
             
-            // Also extract UserId from metadata (for PaymentService to find IndexAgent)
+            // Extract UserId from metadata (for PaymentService to find IndexAgent)
             var userIdStr = TryGetFromMetadata(metadata, "internal_user_id") 
                          ?? TryGetFromMetadata(metadata, "user_id");
             if (Guid.TryParse(userIdStr, out var userId))
@@ -915,8 +917,8 @@ public class StripeProvider : IPaymentProvider
             
             _logger.LogInformation(
                 "[StripeProvider] charge.refunded: OrderId={OrderId}, ChargeId={ChargeId}, UserId={UserId}, " +
-                "RefundAmount={RefundAmount}, OriginalAmount={OriginalAmount}, FullRefund={FullRefund}",
-                result.OrderId, charge.Id, result.UserId, refundAmount, originalAmount, charge.Refunded);
+                "ProductId={ProductId}, RefundAmount={RefundAmount}, OriginalAmount={OriginalAmount}, FullRefund={FullRefund}",
+                result.OrderId, charge.Id, result.UserId, result.ProductId, refundAmount, originalAmount, charge.Refunded);
         }
     }
 
