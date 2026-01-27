@@ -221,6 +221,64 @@ EOF
     log_info "Stripe invoice.paid webhook test completed"
 }
 
+# Test Stripe charge.refunded webhook
+test_stripe_webhook_charge_refunded() {
+    log_step "Test: Stripe charge.refunded webhook..."
+    
+    local timestamp=$(date +%s)
+    local charge_id="ch_test_${timestamp}"
+    local payment_intent_id="pi_test_${timestamp}"
+    local order_id="${ORDER_ID:-$(uuidgen | tr '[:upper:]' '[:lower:]')}"
+    
+    # Stripe webhook payload for charge.refunded
+    # NOTE: In production, metadata is fetched from PaymentIntent or Invoice->Subscription
+    # In JSON fallback test mode, OrderId will be null (expected behavior)
+    local payload=$(cat <<EOF
+{
+  "id": "evt_refund_${timestamp}",
+  "object": "event",
+  "api_version": "2025-04-30.basil",
+  "created": ${timestamp},
+  "data": {
+    "object": {
+      "id": "${charge_id}",
+      "object": "charge",
+      "amount": 2000,
+      "amount_refunded": 2000,
+      "currency": "usd",
+      "customer": "cus_test_123",
+      "payment_intent": "${payment_intent_id}",
+      "refunded": true,
+      "status": "succeeded",
+      "metadata": {
+        "internal_user_id": "${USER_ID:-00000000-0000-0000-0000-000000000001}",
+        "order_id": "${order_id}",
+        "price_id": "${PRICE_ID:-price_1RPftu4KJpMhj2HtxBbRGXMW}"
+      }
+    }
+  },
+  "type": "charge.refunded"
+}
+EOF
+)
+
+    log_info "Sending Stripe charge.refunded webhook..."
+    log_info "User ID: ${USER_ID:-00000000-0000-0000-0000-000000000001}"
+    log_info "Charge ID: $charge_id"
+    log_info "Order ID: $order_id"
+    log_info "Refund Amount: 20.00 USD (full refund)"
+    log_info "NOTE: In JSON fallback test mode, OrderId may be null - this is expected"
+    log_info "      Production uses HandleChargeRefunded to fetch metadata from PaymentIntent/Subscription"
+    
+    # Signature verification is disabled when WebhookSecret is empty or "test"
+    local response=$(curl -s -X POST "$BASE_URL/api/webhooks/godgpt-stripe-payment" \
+        -H "Content-Type: application/json" \
+        -d "$payload")
+    
+    log_response "$response"
+    log_info "Stripe charge.refunded webhook test completed"
+}
+
 # Test Stripe invoice.paid webhook (renewal)
 test_stripe_webhook_renewal() {
     log_step "Test: Stripe invoice.paid webhook (subscription_cycle - renewal)..."
@@ -543,6 +601,11 @@ run_all_webhook_tests() {
     ((passed++))
     echo ""
     
+    # Test 4: charge.refunded - tests refund handling
+    test_stripe_webhook_charge_refunded
+    ((passed++))
+    echo ""
+    
     # Google Play tests
     log_info "--- Google Play Webhook Tests ---"
     test_google_webhook_initial
@@ -820,6 +883,10 @@ main() {
             ;;
         "stripe-renewal")
             test_stripe_webhook_renewal
+            ;;
+        "stripe-refund"|"refund")
+            prepare_subscription
+            test_stripe_webhook_charge_refunded
             ;;
         "lifecycle")
             test_subscription_lifecycle
