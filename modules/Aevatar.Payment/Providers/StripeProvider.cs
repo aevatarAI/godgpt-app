@@ -860,11 +860,13 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Charge charge)
         {
-            // Try to get metadata from Charge first
+            // Try multiple sources for metadata:
+            // 1. Charge.Metadata (rarely populated)
+            // 2. PaymentIntent.Metadata (for payment mode)
+            // 3. Charge -> Invoice -> Subscription.Metadata (for subscription mode)
             var metadata = charge.Metadata;
             
-            // If Charge metadata is empty, fetch PaymentIntent from Stripe API to get metadata
-            // (Same approach as old code: StripeEventProcessingGrain.cs)
+            // If Charge metadata is empty, try PaymentIntent first
             if ((metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id")) 
                 && !string.IsNullOrEmpty(charge.PaymentIntentId))
             {
@@ -872,11 +874,11 @@ public class StripeProvider : IPaymentProvider
                 {
                     var paymentIntentService = new PaymentIntentService(_client);
                     var paymentIntent = await paymentIntentService.GetAsync(charge.PaymentIntentId);
-                    if (paymentIntent?.Metadata != null && paymentIntent.Metadata.Any())
+                    if (paymentIntent?.Metadata != null && paymentIntent.Metadata.ContainsKey("order_id"))
                     {
                         metadata = paymentIntent.Metadata;
                         _logger.LogDebug(
-                            "[StripeProvider] charge.refunded: Fetched metadata from PaymentIntent {PaymentIntentId}",
+                            "[StripeProvider] charge.refunded: Using PaymentIntent metadata {PaymentIntentId}",
                             charge.PaymentIntentId);
                     }
                 }
@@ -885,6 +887,40 @@ public class StripeProvider : IPaymentProvider
                     _logger.LogWarning(ex,
                         "[StripeProvider] charge.refunded: Failed to fetch PaymentIntent {PaymentIntentId}",
                         charge.PaymentIntentId);
+                }
+            }
+            
+            // If still no metadata, try Invoice -> Subscription path (for subscription mode)
+            // Note: Stripe SDK 48.x removed Charge.Invoice property, use RawJObject to access expanded data
+            if ((metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id")))
+            {
+                try
+                {
+                    var chargeService = new ChargeService(_client);
+                    var expandedCharge = await chargeService.GetAsync(charge.Id, new ChargeGetOptions
+                    {
+                        Expand = new List<string> { "invoice.subscription" }
+                    });
+                    
+                    // Access invoice.subscription.metadata via RawJObject (SDK 48.x breaking change workaround)
+                    var subscriptionMetadata = expandedCharge?.RawJObject
+                        ?.SelectToken("invoice.subscription.metadata")
+                        ?.ToObject<Dictionary<string, string>>();
+                    
+                    if (subscriptionMetadata != null && subscriptionMetadata.ContainsKey("order_id"))
+                    {
+                        metadata = subscriptionMetadata;
+                        var invoiceId = expandedCharge?.RawJObject?.SelectToken("invoice.id")?.ToString();
+                        _logger.LogDebug(
+                            "[StripeProvider] charge.refunded: Using Subscription metadata via Invoice {InvoiceId}",
+                            invoiceId);
+                    }
+                }
+                catch (StripeException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "[StripeProvider] charge.refunded: Failed to fetch Charge with Invoice expansion {ChargeId}",
+                        charge.Id);
                 }
             }
             
