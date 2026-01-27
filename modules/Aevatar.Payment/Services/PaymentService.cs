@@ -531,7 +531,12 @@ public class PaymentService : IPaymentService
         return actor.As<AgentModels.IPaymentRecordGAgent>();
     }
 
-    private static string GetPaymentId(PaymentPlatform platform, string subscriptionId)
+    /// <summary>
+    /// Generate stable paymentId using OrderId (not SubscriptionId).
+    /// - Stripe: OrderId is a GUID stored in metadata, stable across all webhook events
+    /// - Apple/Google: OrderId = OriginalTransactionId, also stable
+    /// </summary>
+    private static string GetPaymentId(PaymentPlatform platform, string orderId)
     {
         var platformName = platform switch
         {
@@ -540,7 +545,7 @@ public class PaymentService : IPaymentService
             PaymentPlatform.GooglePlay => "googleplay",
             _ => "unknown"
         };
-        return $"payment_{platformName}_{subscriptionId}";
+        return $"payment_{platformName}_{orderId}";
     }
 
     private async Task RecordPaymentAsync(
@@ -1039,7 +1044,7 @@ public class PaymentService : IPaymentService
                     }
 
                     // Point-to-point callback to order-level agent (if configured)
-                    await recordAgent.NotifyCallbackAgentAsync(completedEvent);
+                    await recordAgent.NotifyPaymentCompletedToCallbackAsync(completedEvent);
                 }
                 else if (result.NewStatus == PaymentStatus.Cancelled || 
                          result.NewStatus == PaymentStatus.Expired)
@@ -1126,7 +1131,7 @@ public class PaymentService : IPaymentService
                     }
 
                     // Point-to-point callback to order-level agent (if configured)
-                    await recordAgent.NotifyCallbackAgentAsync(refundEvent);
+                    await recordAgent.NotifyRefundCompletedToCallbackAsync(refundEvent);
                 }
                 else if (result.NewStatus == PaymentStatus.Failed)
                 {
@@ -1148,7 +1153,7 @@ public class PaymentService : IPaymentService
                     }
 
                     // Point-to-point callback to order-level agent (if configured)
-                    await recordAgent.NotifyCallbackAgentAsync(failedEvent);
+                    await recordAgent.NotifyPaymentFailedToCallbackAsync(failedEvent);
                 }
                 else
                 {
@@ -1159,8 +1164,9 @@ public class PaymentService : IPaymentService
         catch (Exception ex)
         {
             _logger.LogError(ex, 
-                "[PaymentService] Failed to process webhook for subscription {SubscriptionId}",
-                result.SubscriptionId);
+                "[PaymentService] Failed to process webhook: OrderId={OrderId}, SubscriptionId={SubscriptionId}, " +
+                "UserId={UserId}, Status={Status}, TransactionId={TransactionId}",
+                result.OrderId, result.SubscriptionId, result.UserId, result.NewStatus, result.TransactionId);
         }
     }
 

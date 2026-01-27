@@ -562,8 +562,9 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
     }
 
     // ========== Callback Notification (Point-to-Point) ==========
+    // Note: Using different method names instead of overloads to avoid RPC proxy confusion
 
-    public async Task NotifyCallbackAgentAsync(PaymentCompletedEvent evt)
+    public async Task NotifyPaymentCompletedToCallbackAsync(PaymentCompletedEvent evt)
     {
         var callbackId = await GetCallbackAgentIdAsync();
         if (callbackId == null)
@@ -579,7 +580,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         await SendToAsync(callbackId.Value.ToString(), evt);
     }
 
-    public async Task NotifyCallbackAgentAsync(PaymentFailedEvent evt)
+    public async Task NotifyPaymentFailedToCallbackAsync(PaymentFailedEvent evt)
     {
         var callbackId = await GetCallbackAgentIdAsync();
         if (callbackId == null)
@@ -595,7 +596,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         await SendToAsync(callbackId.Value.ToString(), evt);
     }
 
-    public async Task NotifyCallbackAgentAsync(RefundCompletedEvent evt)
+    public async Task NotifyRefundCompletedToCallbackAsync(RefundCompletedEvent evt)
     {
         var callbackId = await GetCallbackAgentIdAsync();
         if (callbackId == null)

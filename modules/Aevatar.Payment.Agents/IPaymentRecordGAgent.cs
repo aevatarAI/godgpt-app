@@ -109,22 +109,23 @@ public interface IPaymentRecordGAgent : IGAgent
     Task ProcessPartialRefundAsync(string transactionId, long refundAmount, string reason);
     
     // ========== Callback Notification ==========
+    // Note: Using different method names instead of overloads to avoid RPC proxy confusion
     
     /// <summary>
     /// Notify callback agent about payment completion (if configured).
     /// This uses point-to-point SendTo for direct delivery.
     /// </summary>
-    Task NotifyCallbackAgentAsync(Protos.PaymentCompletedEvent evt);
+    Task NotifyPaymentCompletedToCallbackAsync(Protos.PaymentCompletedEvent evt);
     
     /// <summary>
     /// Notify callback agent about payment failure (if configured).
     /// </summary>
-    Task NotifyCallbackAgentAsync(Protos.PaymentFailedEvent evt);
+    Task NotifyPaymentFailedToCallbackAsync(Protos.PaymentFailedEvent evt);
     
     /// <summary>
     /// Notify callback agent about refund completion (if configured).
     /// </summary>
-    Task NotifyCallbackAgentAsync(Protos.RefundCompletedEvent evt);
+    Task NotifyRefundCompletedToCallbackAsync(Protos.RefundCompletedEvent evt);
 }
 
 // Note: RenewalInfo and RefundInfo are now defined as Protobuf messages
