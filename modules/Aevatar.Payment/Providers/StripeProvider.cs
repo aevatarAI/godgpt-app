@@ -218,9 +218,14 @@ public class StripeProvider : IPaymentProvider
                 CancelUrl = cancelUrl,
                 Metadata = commonMetadata,
                 ClientReferenceId = request.UserId.ToString(),
-                // Copy metadata to subscription so invoice.paid and charge.refunded can access it
-                // charge.refunded uses: Charge -> Invoice -> Subscription.Metadata
+                // Copy metadata to subscription for invoice.paid, subscription.updated events
                 SubscriptionData = new SessionSubscriptionDataOptions
+                {
+                    Metadata = commonMetadata
+                },
+                // Copy metadata to PaymentIntent for charge.refunded event
+                // This ensures first payment's PaymentIntent has metadata for refund lookup
+                PaymentIntentData = new SessionPaymentIntentDataOptions
                 {
                     Metadata = commonMetadata
                 }
