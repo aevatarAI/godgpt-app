@@ -219,18 +219,26 @@ public class StripeProvider : IPaymentProvider
                 CancelUrl = cancelUrl,
                 Metadata = commonMetadata,
                 ClientReferenceId = request.UserId.ToString(),
-                // Copy metadata to subscription for invoice.paid, subscription.updated events
-                SubscriptionData = new SessionSubscriptionDataOptions
-                {
-                    Metadata = commonMetadata
-                },
-                // Copy metadata to PaymentIntent for charge.refunded event
-                // This ensures first payment's PaymentIntent has metadata for refund lookup
-                PaymentIntentData = new SessionPaymentIntentDataOptions
-                {
-                    Metadata = commonMetadata
-                }
             };
+            
+            // Set mode-specific options (SubscriptionData and PaymentIntentData are mutually exclusive)
+            var mode = request.Mode ?? "subscription";
+            if (mode == "subscription")
+            {
+                // Copy metadata to subscription for invoice.paid, subscription.updated events
+                sessionOptions.SubscriptionData = new SessionSubscriptionDataOptions
+                {
+                    Metadata = commonMetadata
+                };
+            }
+            else
+            {
+                // Copy metadata to PaymentIntent for charge.refunded event (payment mode only)
+                sessionOptions.PaymentIntentData = new SessionPaymentIntentDataOptions
+                {
+                    Metadata = commonMetadata
+                };
+            }
 
             // Support embedded UI mode
             if (request.UiMode == "embedded")
