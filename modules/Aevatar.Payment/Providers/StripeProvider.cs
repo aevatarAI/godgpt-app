@@ -895,8 +895,26 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Charge charge)
         {
-            // Same approach as old code: try Charge metadata first, then PaymentIntent metadata
+            // ========== DIAGNOSTIC LOGGING ==========
+            // Log all charge details for debugging metadata retrieval issues
+            // Note: SDK 48.x removed Charge.InvoiceId property, use RawJObject
+            var chargeInvoiceId = charge.RawJObject?.SelectToken("invoice")?.ToString();
+            _logger.LogInformation(
+                "[StripeProvider] charge.refunded: === DIAGNOSTIC START === " +
+                "ChargeId={ChargeId}, PaymentIntentId={PaymentIntentId}, InvoiceId={InvoiceId}, " +
+                "ChargeMetadataCount={ChargeMetadataCount}, ChargeMetadataKeys={ChargeMetadataKeys}",
+                charge.Id, 
+                charge.PaymentIntentId ?? "(null)",
+                chargeInvoiceId ?? "(null)",
+                charge.Metadata?.Count ?? 0,
+                charge.Metadata != null ? string.Join(",", charge.Metadata.Keys) : "(null)");
+            
+            // Try multiple sources for metadata (same as old code):
+            // 1. Charge.Metadata (rarely populated)
+            // 2. PaymentIntent.Metadata (for payment mode)
+            // 3. Charge -> Invoice -> Subscription.Metadata (for subscription mode)
             var metadata = charge.Metadata;
+            string metadataSource = "Charge";
             
             // If Charge metadata is empty, fetch PaymentIntent from Stripe API
             if ((metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id")) 
@@ -906,9 +924,18 @@ public class StripeProvider : IPaymentProvider
                 {
                     var paymentIntentService = new PaymentIntentService(_client);
                     var paymentIntent = await paymentIntentService.GetAsync(charge.PaymentIntentId);
-                    if (paymentIntent?.Metadata != null && paymentIntent.Metadata.Any())
+                    
+                    _logger.LogInformation(
+                        "[StripeProvider] charge.refunded: PaymentIntent lookup - " +
+                        "PaymentIntentId={PaymentIntentId}, MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}",
+                        charge.PaymentIntentId,
+                        paymentIntent?.Metadata?.Count ?? 0,
+                        paymentIntent?.Metadata != null ? string.Join(",", paymentIntent.Metadata.Keys) : "(null)");
+                    
+                    if (paymentIntent?.Metadata != null && paymentIntent.Metadata.ContainsKey("order_id"))
                     {
                         metadata = paymentIntent.Metadata;
+                        metadataSource = "PaymentIntent";
                         _logger.LogDebug(
                             "[StripeProvider] charge.refunded: Using PaymentIntent metadata {PaymentIntentId}",
                             charge.PaymentIntentId);
@@ -921,6 +948,62 @@ public class StripeProvider : IPaymentProvider
                         charge.PaymentIntentId);
                 }
             }
+            
+            // If still no metadata, try Invoice -> Subscription path (for subscription mode)
+            // Note: Stripe SDK 48.x removed Charge.Invoice property, use RawJObject to access expanded data
+            if (metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id"))
+            {
+                try
+                {
+                    var chargeService = new ChargeService(_client);
+                    var expandedCharge = await chargeService.GetAsync(charge.Id, new ChargeGetOptions
+                    {
+                        Expand = new List<string> { "invoice.subscription" }
+                    });
+                    
+                    // Log Invoice and Subscription details
+                    var invoiceId = expandedCharge?.RawJObject?.SelectToken("invoice.id")?.ToString();
+                    var subscriptionId = expandedCharge?.RawJObject?.SelectToken("invoice.subscription.id")?.ToString();
+                    
+                    _logger.LogInformation(
+                        "[StripeProvider] charge.refunded: Invoice->Subscription lookup - " +
+                        "ChargeId={ChargeId}, InvoiceId={InvoiceId}, SubscriptionId={SubscriptionId}",
+                        charge.Id, invoiceId ?? "(null)", subscriptionId ?? "(null)");
+                    
+                    // Access invoice.subscription.metadata via RawJObject (SDK 48.x breaking change workaround)
+                    var subscriptionMetadata = expandedCharge?.RawJObject
+                        ?.SelectToken("invoice.subscription.metadata")
+                        ?.ToObject<Dictionary<string, string>>();
+                    
+                    _logger.LogInformation(
+                        "[StripeProvider] charge.refunded: Subscription metadata - " +
+                        "MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}",
+                        subscriptionMetadata?.Count ?? 0,
+                        subscriptionMetadata != null ? string.Join(",", subscriptionMetadata.Keys) : "(null)");
+                    
+                    if (subscriptionMetadata != null && subscriptionMetadata.ContainsKey("order_id"))
+                    {
+                        metadata = subscriptionMetadata;
+                        metadataSource = $"Subscription(via Invoice {invoiceId})";
+                        _logger.LogDebug(
+                            "[StripeProvider] charge.refunded: Using Subscription metadata via Invoice {InvoiceId}",
+                            invoiceId);
+                    }
+                }
+                catch (StripeException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "[StripeProvider] charge.refunded: Failed to fetch Charge with Invoice expansion {ChargeId}",
+                        charge.Id);
+                }
+            }
+            
+            _logger.LogInformation(
+                "[StripeProvider] charge.refunded: === DIAGNOSTIC END === MetadataSource={MetadataSource}, " +
+                "FinalOrderId={OrderId}, FinalUserId={UserId}",
+                metadataSource,
+                TryGetFromMetadata(metadata, "order_id") ?? "(null)",
+                TryGetFromMetadata(metadata, "internal_user_id") ?? TryGetFromMetadata(metadata, "user_id") ?? "(null)");
             
             // Extract business data from metadata
             result.OrderId = TryGetFromMetadata(metadata, "order_id");
