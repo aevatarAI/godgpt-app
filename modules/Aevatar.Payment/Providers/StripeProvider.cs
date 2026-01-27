@@ -219,26 +219,12 @@ public class StripeProvider : IPaymentProvider
                 CancelUrl = cancelUrl,
                 Metadata = commonMetadata,
                 ClientReferenceId = request.UserId.ToString(),
+                // Copy metadata to subscription so invoice.paid can access it
+                SubscriptionData = new SessionSubscriptionDataOptions
+                {
+                    Metadata = commonMetadata
+                }
             };
-            
-            // Set mode-specific options (SubscriptionData and PaymentIntentData are mutually exclusive)
-            var mode = request.Mode ?? "subscription";
-            if (mode == "subscription")
-            {
-                // Copy metadata to subscription for invoice.paid, subscription.updated events
-                sessionOptions.SubscriptionData = new SessionSubscriptionDataOptions
-                {
-                    Metadata = commonMetadata
-                };
-            }
-            else
-            {
-                // Copy metadata to PaymentIntent for charge.refunded event (payment mode only)
-                sessionOptions.PaymentIntentData = new SessionPaymentIntentDataOptions
-                {
-                    Metadata = commonMetadata
-                };
-            }
 
             // Support embedded UI mode
             if (request.UiMode == "embedded")
@@ -874,10 +860,11 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Charge charge)
         {
-            // Same approach as old code: try Charge metadata first, then PaymentIntent metadata
+            // Try to get metadata from Charge first
             var metadata = charge.Metadata;
             
-            // If Charge metadata is empty, fetch PaymentIntent from Stripe API
+            // If Charge metadata is empty, fetch PaymentIntent from Stripe API to get metadata
+            // (Same approach as old code: StripeEventProcessingGrain.cs)
             if ((metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id")) 
                 && !string.IsNullOrEmpty(charge.PaymentIntentId))
             {
@@ -889,7 +876,7 @@ public class StripeProvider : IPaymentProvider
                     {
                         metadata = paymentIntent.Metadata;
                         _logger.LogDebug(
-                            "[StripeProvider] charge.refunded: Using PaymentIntent metadata {PaymentIntentId}",
+                            "[StripeProvider] charge.refunded: Fetched metadata from PaymentIntent {PaymentIntentId}",
                             charge.PaymentIntentId);
                     }
                 }
@@ -901,14 +888,14 @@ public class StripeProvider : IPaymentProvider
                 }
             }
             
-            // Extract business data from metadata
+            // Extract all business data from metadata (same as old code: ExtractBusinessDataAsync)
             result.OrderId = TryGetFromMetadata(metadata, "order_id");
             result.ProductId = TryGetFromMetadata(metadata, "price_id");
             result.TransactionId = charge.Id;
             result.NewStatus = PaymentStatus.Refunded;
             result.ShouldProcess = true;
             
-            // Extract UserId from metadata
+            // Extract UserId from metadata (for PaymentService to find IndexAgent)
             var userIdStr = TryGetFromMetadata(metadata, "internal_user_id") 
                          ?? TryGetFromMetadata(metadata, "user_id");
             if (Guid.TryParse(userIdStr, out var userId))
