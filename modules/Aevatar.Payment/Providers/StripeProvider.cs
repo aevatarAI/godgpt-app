@@ -991,55 +991,64 @@ public class StripeProvider : IPaymentProvider
                 }
             }
             
-            // If still no metadata, find Invoice by payment_intent, then get Subscription metadata
-            // This is precise - one payment_intent corresponds to one Invoice
+            // If still no metadata, use PaymentIntent to find the exact Invoice->Subscription
+            // This ensures we get the correct subscription even if customer has multiple
             if ((metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id"))
+                && !string.IsNullOrEmpty(charge.CustomerId) 
                 && !string.IsNullOrEmpty(charge.PaymentIntentId))
             {
                 try
                 {
-                    // Search for Invoice with this payment_intent
+                    // Find Invoice by customer + match payment_intent
                     var invoiceService = new InvoiceService(_client);
-                    var searchResult = await invoiceService.SearchAsync(new InvoiceSearchOptions
+                    var invoices = await invoiceService.ListAsync(new InvoiceListOptions
                     {
-                        Query = $"payment_intent:'{charge.PaymentIntentId}'",
+                        Customer = charge.CustomerId,
+                        Limit = 20,
                         Expand = new List<string> { "data.subscription" }
                     });
                     
                     _logger.LogInformation(
-                        "[StripeProvider] charge.refunded: Invoice search by PaymentIntent - " +
-                        "PaymentIntentId={PaymentIntentId}, InvoiceCount={Count}",
-                        charge.PaymentIntentId, searchResult.Data.Count);
+                        "[StripeProvider] charge.refunded: Customer Invoice lookup - " +
+                        "CustomerId={CustomerId}, PaymentIntentId={PaymentIntentId}, InvoiceCount={Count}",
+                        charge.CustomerId, charge.PaymentIntentId, invoices.Data.Count);
                     
-                    if (searchResult.Data.Count > 0)
+                    // Find invoice matching this payment_intent
+                    foreach (var inv in invoices.Data)
                     {
-                        var invoice = searchResult.Data[0];
-                        // SDK 48.x removed Invoice.Subscription, use RawJObject
-                        var subscriptionId = invoice.RawJObject?.SelectToken("subscription.id")?.ToString()
-                                          ?? invoice.RawJObject?.SelectToken("subscription")?.ToString();
-                        var subscriptionMetadata = invoice.RawJObject
-                            ?.SelectToken("subscription.metadata")
-                            ?.ToObject<Dictionary<string, string>>();
+                        var invPaymentIntentId = inv.RawJObject?.SelectToken("payment_intent")?.ToString();
                         
-                        if (subscriptionMetadata != null && subscriptionMetadata.ContainsKey("order_id"))
+                        if (invPaymentIntentId == charge.PaymentIntentId)
                         {
-                            metadata = subscriptionMetadata;
-                            metadataSource = $"Subscription({subscriptionId} via Invoice {invoice.Id})";
+                            // Found matching invoice, get subscription metadata
+                            var subscriptionId = inv.RawJObject?.SelectToken("subscription.id")?.ToString()
+                                              ?? inv.RawJObject?.SelectToken("subscription")?.ToString();
+                            var subscriptionMetadata = inv.RawJObject
+                                ?.SelectToken("subscription.metadata")
+                                ?.ToObject<Dictionary<string, string>>();
                             
                             _logger.LogInformation(
-                                "[StripeProvider] charge.refunded: Found Subscription metadata via Invoice - " +
+                                "[StripeProvider] charge.refunded: Found matching Invoice - " +
                                 "InvoiceId={InvoiceId}, SubscriptionId={SubscriptionId}, " +
                                 "MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}",
-                                invoice.Id, subscriptionId,
-                                subscriptionMetadata.Count, string.Join(",", subscriptionMetadata.Keys));
+                                inv.Id, subscriptionId ?? "(null)",
+                                subscriptionMetadata?.Count ?? 0,
+                                subscriptionMetadata != null ? string.Join(",", subscriptionMetadata.Keys) : "(null)");
+                            
+                            if (subscriptionMetadata != null && subscriptionMetadata.ContainsKey("order_id"))
+                            {
+                                metadata = subscriptionMetadata;
+                                metadataSource = $"Subscription({subscriptionId} via Invoice {inv.Id})";
+                            }
+                            break;
                         }
                     }
                 }
                 catch (StripeException ex)
                 {
                     _logger.LogWarning(ex,
-                        "[StripeProvider] charge.refunded: Failed to search Invoice by PaymentIntent {PaymentIntentId}",
-                        charge.PaymentIntentId);
+                        "[StripeProvider] charge.refunded: Failed to lookup Customer invoices {CustomerId}",
+                        charge.CustomerId);
                 }
             }
             
