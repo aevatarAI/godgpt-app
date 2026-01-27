@@ -265,10 +265,27 @@ public class StripeProvider : IPaymentProvider
                 sessionOptions.SubscriptionData.TrialPeriodDays = request.TrialDays;
             }
 
+            // Log metadata setup for debugging
+            var subDataMetaKeys = sessionOptions.SubscriptionData?.Metadata != null 
+                ? string.Join(",", sessionOptions.SubscriptionData.Metadata.Keys) 
+                : "(null)";
+            var subDataMetaValues = sessionOptions.SubscriptionData?.Metadata != null 
+                ? string.Join(",", sessionOptions.SubscriptionData.Metadata.Values) 
+                : "(null)";
+            _logger.LogInformation(
+                "[StripeProvider] Creating checkout session: Mode={Mode}, OrderId={OrderId}, " +
+                "HasSubscriptionData={HasSubscriptionData}, " +
+                "SubscriptionData.Metadata.Keys={SubDataMetaKeys}, " +
+                "SubscriptionData.Metadata.Values={SubDataMetaValues}",
+                mode, orderId,
+                sessionOptions.SubscriptionData != null,
+                subDataMetaKeys,
+                subDataMetaValues);
+            
             var session = await sessionService.CreateAsync(sessionOptions, cancellationToken: ct);
 
-            _logger.LogInformation("[StripeProvider] Created checkout session {SessionId} for user {UserId}, OrderId={OrderId}",
-                session.Id, request.UserId, orderId);
+            _logger.LogInformation("[StripeProvider] Created checkout session {SessionId} for user {UserId}, OrderId={OrderId}, PaymentIntentId={PaymentIntentId}",
+                session.Id, request.UserId, orderId, session.PaymentIntentId ?? "(null)");
 
             return new SubscriptionResult
             {
@@ -764,6 +781,15 @@ public class StripeProvider : IPaymentProvider
                 ?? invoice.Parent?.SubscriptionDetails?.SubscriptionId; // Fallback path
             var subscriptionMetadata = invoice.Parent?.SubscriptionDetails?.Metadata;
             
+            // Debug: Log subscription metadata from invoice
+            _logger.LogInformation(
+                "[StripeProvider] invoice.paid: METADATA DEBUG - InvoiceId={InvoiceId}, SubscriptionId={SubscriptionId}, " +
+                "MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}",
+                invoice.Id,
+                subscriptionId ?? "(null)",
+                subscriptionMetadata?.Count ?? 0,
+                subscriptionMetadata != null ? string.Join(",", subscriptionMetadata.Keys) : "(null)");
+            
             // Extract orderId from subscription metadata (stable key)
             result.OrderId = TryGetFromMetadata(subscriptionMetadata, "order_id");
             
@@ -823,8 +849,24 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Subscription subscription)
         {
+            // Debug: Log all subscription metadata
+            _logger.LogInformation(
+                "[StripeProvider] subscription.updated: METADATA DEBUG - SubscriptionId={SubscriptionId}, " +
+                "MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}, MetadataValues={MetadataValues}",
+                subscription.Id,
+                subscription.Metadata?.Count ?? 0,
+                subscription.Metadata != null ? string.Join(",", subscription.Metadata.Keys) : "(null)",
+                subscription.Metadata != null ? string.Join(",", subscription.Metadata.Values) : "(null)");
+            
             result.OrderId = TryGetFromMetadata(subscription.Metadata, "order_id");
             result.SubscriptionId = subscription.Id;
+            
+            // Also extract UserId from subscription metadata
+            var userIdStr = TryGetFromMetadata(subscription.Metadata, "internal_user_id");
+            if (Guid.TryParse(userIdStr, out var userId))
+            {
+                result.UserId = userId;
+            }
             
             // Match old code logic: if subscription is canceled OR auto-renewal was cancelled
             // (CancelAtPeriodEnd=true), set status to Cancelled directly
@@ -841,8 +883,8 @@ public class StripeProvider : IPaymentProvider
             }
             
             _logger.LogInformation(
-                "[StripeProvider] subscription.updated: OrderId={OrderId}, SubscriptionId={SubscriptionId}, Status={Status}, CancelAtPeriodEnd={CancelAtPeriodEnd}",
-                result.OrderId, subscription.Id, subscription.Status, subscription.CancelAtPeriodEnd);
+                "[StripeProvider] subscription.updated: OrderId={OrderId}, UserId={UserId}, SubscriptionId={SubscriptionId}, Status={Status}, CancelAtPeriodEnd={CancelAtPeriodEnd}",
+                result.OrderId, result.UserId, subscription.Id, subscription.Status, subscription.CancelAtPeriodEnd);
         }
         return Task.CompletedTask;
     }
@@ -961,8 +1003,15 @@ public class StripeProvider : IPaymentProvider
                         Expand = new List<string> { "invoice.subscription" }
                     });
                     
+                    // Debug: Log raw invoice field to understand structure
+                    var invoiceRaw = expandedCharge?.RawJObject?.SelectToken("invoice")?.ToString();
+                    _logger.LogInformation(
+                        "[StripeProvider] charge.refunded: RAW invoice field = {InvoiceRaw}",
+                        invoiceRaw?.Length > 200 ? invoiceRaw.Substring(0, 200) + "..." : invoiceRaw ?? "(null)");
+                    
                     // Log Invoice and Subscription details
-                    var invoiceId = expandedCharge?.RawJObject?.SelectToken("invoice.id")?.ToString();
+                    var invoiceId = expandedCharge?.RawJObject?.SelectToken("invoice.id")?.ToString() 
+                                 ?? expandedCharge?.RawJObject?.SelectToken("invoice")?.ToString(); // invoice might be just ID string
                     var subscriptionId = expandedCharge?.RawJObject?.SelectToken("invoice.subscription.id")?.ToString();
                     
                     _logger.LogInformation(
