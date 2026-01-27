@@ -308,11 +308,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     // ========== Renewal Processing ==========
 
-    public async Task ProcessRenewalAsync(RenewalInfo renewal)
+    public async Task ProcessRenewalAsync(RenewalInfoProto renewal)
     {
         Logger.LogInformation(
             "[PaymentRecordGAgent] Processing renewal, new period end: {PeriodEnd}",
-            renewal.PeriodEnd);
+            renewal.PeriodEnd.ToDateTime());
 
         var transaction = new TransactionProto
         {
@@ -323,8 +323,8 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             Status = (int)PaymentStatus.Completed,
             Amount = renewal.Amount,
             Currency = renewal.Currency,
-            PeriodStart = Timestamp.FromDateTime(renewal.PeriodStart.ToUniversalTime()),
-            PeriodEnd = Timestamp.FromDateTime(renewal.PeriodEnd.ToUniversalTime()),
+            PeriodStart = renewal.PeriodStart,
+            PeriodEnd = renewal.PeriodEnd,
             CreatedAt = Timestamp.FromDateTime(DateTime.UtcNow),
             CompletedAt = Timestamp.FromDateTime(DateTime.UtcNow),
             IsTrial = renewal.IsTrial,
@@ -333,13 +333,13 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
         foreach (var promo in renewal.Promotions)
         {
-            transaction.Promotions.Add(ToProto(promo));
+            transaction.Promotions.Add(promo);
         }
 
         RaiseEvent(new RenewalProcessedEvent
         {
             RenewalTransaction = transaction,
-            NewPeriodEnd = Timestamp.FromDateTime(renewal.PeriodEnd.ToUniversalTime())
+            NewPeriodEnd = renewal.PeriodEnd
         });
 
         await ConfirmEventsAsync();
@@ -347,7 +347,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     // ========== Refund Processing ==========
 
-    public async Task ProcessRefundAsync(RefundInfo refund)
+    public async Task ProcessRefundAsync(RefundInfoProto refund)
     {
         var transactionId = refund.TransactionId;
         
@@ -384,7 +384,7 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     public Task ProcessPartialRefundAsync(string transactionId, long refundAmount, string reason)
     {
-        return ProcessRefundAsync(new RefundInfo
+        return ProcessRefundAsync(new RefundInfoProto
         {
             TransactionId = transactionId,
             RefundAmount = refundAmount,

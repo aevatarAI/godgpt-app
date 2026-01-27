@@ -155,3 +155,26 @@ message RefundProcessedEvent {
   google.protobuf.Timestamp refunded_at = 4;
 }
 
+// =============================================================================
+// Request Types for RPC Methods
+// =============================================================================
+
+message RefundInfoProto {
+  optional string transaction_id = 1;    // Transaction ID to refund (if specific)
+  int64 refund_amount = 2;               // Refund amount in smallest unit
+  string reason = 3;                     // Refund reason
+  optional string external_refund_id = 4; // Platform refund ID
+}
+
+message RenewalInfoProto {
+  optional string external_transaction_id = 1;  // Platform transaction ID
+  optional string invoice_id = 2;                // Invoice ID
+  google.protobuf.Timestamp period_start = 3;    // New period start
+  google.protobuf.Timestamp period_end = 4;      // New period end
+  int64 amount = 5;                              // Amount in smallest unit
+  string currency = 6;                            // Currency code
+  repeated PromotionProto promotions = 7;         // Applied promotions
+  bool is_trial = 8;                              // Is trial period
+  optional string trial_code = 9;                 // Trial code
+}
+

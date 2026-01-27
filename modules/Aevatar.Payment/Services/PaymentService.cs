@@ -995,12 +995,16 @@ public class PaymentService : IPaymentService
                     // Process renewal in agent
                     if (result.VerificationResult?.ExpiresDate != null)
                     {
-                        await recordAgent.ProcessRenewalAsync(new AgentModels.RenewalInfo
+                        // Convert amount to smallest unit (cents) for Protobuf
+                        var renewalAmount = (long)((result.VerificationResult.Amount ?? 0) * 100);
+                        
+                        await recordAgent.ProcessRenewalAsync(new RenewalInfoProto
                         {
-                            ExternalTransactionId = result.TransactionId,
-                            PeriodStart = DateTime.UtcNow,
-                            PeriodEnd = result.VerificationResult.ExpiresDate.Value,
-                            Amount = 0
+                            ExternalTransactionId = result.TransactionId ?? string.Empty,
+                            PeriodStart = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime()),
+                            PeriodEnd = Timestamp.FromDateTime(result.VerificationResult.ExpiresDate.Value.ToUniversalTime()),
+                            Amount = renewalAmount,
+                            Currency = result.VerificationResult.Currency ?? "USD"
                         });
 
                         if (indexAgent != null)
@@ -1077,9 +1081,9 @@ public class PaymentService : IPaymentService
                 {
                     // Process refund: updates transaction status and main payment status
                     // ProcessRefundAsync will set status to Refunded if all transactions refunded, or PartialRefunded otherwise
-                    await recordAgent.ProcessRefundAsync(new AgentModels.RefundInfo
+                    await recordAgent.ProcessRefundAsync(new RefundInfoProto
                     {
-                        TransactionId = result.TransactionId, // If null, refunds latest completed transaction
+                        TransactionId = result.TransactionId ?? string.Empty, // If empty, refunds latest completed transaction
                         RefundAmount = recordState?.Amount ?? 0,
                         Reason = result.VerificationResult?.ErrorMessage ?? "refund"
                     });
