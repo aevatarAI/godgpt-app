@@ -52,7 +52,7 @@ public class GooglePlayProvider : IPaymentProvider
                 ProductId = p.ProductId,
                 Name = p.Name,
                 Description = p.Description,
-                Price = p.Price,
+                Price = p.Amount,
                 Currency = p.Currency,
                 PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
                 BillingCycle = billingCycle,
@@ -61,7 +61,7 @@ public class GooglePlayProvider : IPaymentProvider
                 {
                     ["originalPlanType"] = p.PlanType.ToString(),
                     ["isUltimate"] = p.IsUltimate.ToString().ToLower(),
-                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Price, billingCycle)
+                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, billingCycle)
                 }
             };
         }).ToList());
@@ -618,7 +618,7 @@ public class GoogleProductConfig
     public string ProductId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public decimal Price { get; set; }
+    public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
     
     /// <summary>

@@ -977,6 +977,41 @@ public class PaymentService : IPaymentService
             
             var eventContext = BuildEventContext(recordState, platform, paymentId);
             
+            // Override BusinessMetadata with latest ProductId info (like old code: HandleDidRenewAsync)
+            // This ensures plan_type and is_ultimate are always from the current webhook's ProductId,
+            // not from the stored record (which may have outdated values after plan upgrade/downgrade)
+            if (!string.IsNullOrEmpty(result.ProductId))
+            {
+                try
+                {
+                    var provider = GetProvider(platform);
+                    var products = await provider.GetProductsAsync();
+                    var product = products.FirstOrDefault(p => p.ProductId == result.ProductId);
+                    
+                    if (product != null)
+                    {
+                        // Get originalPlanType from product metadata (correct Common.Constants.PlanType value)
+                        if (product.Metadata != null && product.Metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr))
+                        {
+                            eventContext.BusinessMetadata["plan_type"] = originalPlanTypeStr;
+                        }
+                        eventContext.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
+                        
+                        // Also update ProductId in context to ensure consistency
+                        eventContext.ProductId = result.ProductId;
+                        
+                        _logger.LogDebug(
+                            "[PaymentService] Refreshed BusinessMetadata from ProductId={ProductId}: plan_type={PlanType}, is_ultimate={IsUltimate}",
+                            result.ProductId, eventContext.BusinessMetadata.GetValueOrDefault("plan_type"), 
+                            eventContext.BusinessMetadata.GetValueOrDefault("is_ultimate"));
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[PaymentService] Failed to refresh BusinessMetadata from ProductId");
+                }
+            }
+            
             _logger.LogInformation(
                 "[PaymentService] ProcessWebhook: PaymentId={PaymentId}, UserId={UserId}, NewStatus={NewStatus}, HasIndexAgent={HasIndexAgent}",
                 paymentId, result.UserId, result.NewStatus, indexAgent != null);

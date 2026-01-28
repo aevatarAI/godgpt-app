@@ -590,11 +590,14 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
     private PlanType DeterminePlanTypeFromProductId(string productId)
     {
-        if (productId.Contains("monthly") || productId.Contains("month"))
+        var lowerProductId = productId.ToLowerInvariant();
+        if (lowerProductId.Contains("weekly") || lowerProductId.Contains("week"))
+            return PlanType.Week;
+        if (lowerProductId.Contains("monthly") || lowerProductId.Contains("month"))
             return PlanType.Month;
-        if (productId.Contains("yearly") || productId.Contains("year"))
+        if (lowerProductId.Contains("yearly") || lowerProductId.Contains("year") || lowerProductId.Contains("annual"))
             return PlanType.Year;
-        if (productId.Contains("daily") || productId.Contains("day"))
+        if (lowerProductId.Contains("daily") || lowerProductId.Contains("day"))
             return PlanType.Day;
         return PlanType.Month;
     }
@@ -892,6 +895,13 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         // Extract product information from business metadata
         var metadataDict = evt.Context.BusinessMetadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value) 
             ?? new Dictionary<string, string>();
+        
+        // Debug: log raw metadata to trace plan_type mapping issues
+        var rawPlanType = metadataDict.TryGetValue("plan_type", out var pt) ? pt : "not_found";
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCompleted] Raw metadata: plan_type={RawPlanType}, MetadataKeys={Keys}",
+            rawPlanType, string.Join(",", metadataDict.Keys));
+        
         var planType = GetPlanTypeFromMetadata(metadataDict);
         var isUltimate = GetIsUltimateFromMetadata(metadataDict);
         var trialDays = GetTrialDaysFromMetadata(metadataDict);
@@ -1254,16 +1264,18 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
     private PlanType GetPlanTypeFromMetadata(Dictionary<string, string> metadata)
     {
-        if (metadata == null) return PlanType.None;
+        if (metadata == null) return PlanType.Month;
 
         if (metadata.TryGetValue("plan_type", out var planTypeStr) && 
-            int.TryParse(planTypeStr, out var planTypeInt))
+            int.TryParse(planTypeStr, out var planTypeInt) &&
+            planTypeInt > 0 && planTypeInt <= 4)
         {
             return (PlanType)planTypeInt;
         }
 
         if (metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr) && 
-            int.TryParse(originalPlanTypeStr, out var originalPlanTypeInt))
+            int.TryParse(originalPlanTypeStr, out var originalPlanTypeInt) &&
+            originalPlanTypeInt > 0 && originalPlanTypeInt <= 4)
         {
             return (PlanType)originalPlanTypeInt;
         }

@@ -42,7 +42,7 @@ public class ApplePayProvider : IPaymentProvider
                 ProductId = p.ProductId,
                 Name = p.Name,
                 Description = p.Description,
-                Price = p.Price,
+                Price = p.Amount,
                 Currency = p.Currency,
                 PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
                 BillingCycle = billingCycle,
@@ -51,7 +51,7 @@ public class ApplePayProvider : IPaymentProvider
                 {
                     ["originalPlanType"] = p.PlanType.ToString(),
                     ["isUltimate"] = p.IsUltimate.ToString().ToLower(),
-                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Price, billingCycle)
+                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, billingCycle)
                 }
             };
         }).ToList());
@@ -257,6 +257,7 @@ public class ApplePayProvider : IPaymentProvider
             if (transactionInfo != null)
             {
                 result.ProductId = transactionInfo.ProductId; // For product config lookup
+                result.PeriodEnd = transactionInfo.ExpiresDate; // Set PeriodEnd for PaymentService
                 result.VerificationResult = new VerificationResult
                 {
                     IsValid = true,
@@ -644,29 +645,65 @@ public class ApplePayProvider : IPaymentProvider
     {
         return type switch
         {
+            // Subscription lifecycle events
             "SUBSCRIBED" => true,
             "DID_RENEW" => true,
-            "DID_CHANGE_RENEWAL_STATUS" when subtype == "AUTO_RENEW_DISABLED" => true,
+            "DID_CHANGE_RENEWAL_STATUS" => true, // Both AUTO_RENEW_ENABLED and AUTO_RENEW_DISABLED
+            "DID_CHANGE_RENEWAL_PREF" => true,   // UPGRADE/DOWNGRADE
             "EXPIRED" => true,
             "GRACE_PERIOD_EXPIRED" => true,
+            
+            // Refund events
             "REVOKE" => true,
-            "DID_CHANGE_RENEWAL_PREF" => true,
             "REFUND" => true,
+            "REFUND_REVERSED" => true,           // Reinstate subscription after refund reversal
+            
+            // Offer events
+            "OFFER_REDEEMED" => true,            // May trigger upgrade
+            
+            // Skip events that don't need processing
+            // TEST, DID_FAIL_TO_RENEW, RENEWAL_EXTENDED, PRICE_INCREASE, etc.
             _ => false
         };
     }
 
-    private static PaymentStatus MapAppleEventToStatus(string type, string? subtype)
+    private static PaymentStatus? MapAppleEventToStatus(string type, string? subtype)
     {
         return type switch
         {
+            // Subscription active/renewed
             "SUBSCRIBED" => PaymentStatus.Completed,
             "DID_RENEW" => PaymentStatus.Completed,
+            
+            // Subscription ended
             "EXPIRED" => PaymentStatus.Expired,
             "GRACE_PERIOD_EXPIRED" => PaymentStatus.Expired,
+            
+            // Refund/revoke
             "REVOKE" => PaymentStatus.Refunded,
             "REFUND" => PaymentStatus.Refunded,
+            
+            // Refund reversed - reinstate subscription (same as old code)
+            "REFUND_REVERSED" => PaymentStatus.Completed,
+            
+            // Auto-renewal status change
             "DID_CHANGE_RENEWAL_STATUS" when subtype == "AUTO_RENEW_DISABLED" => PaymentStatus.Cancelled,
+            "DID_CHANGE_RENEWAL_STATUS" => null, // AUTO_RENEW_ENABLED - no status change, just log
+            
+            // Renewal preference change (plan upgrade/downgrade)
+            "DID_CHANGE_RENEWAL_PREF" when subtype == "UPGRADE" => PaymentStatus.Completed,
+            "DID_CHANGE_RENEWAL_PREF" => null, // DOWNGRADE - effective at next renewal
+            
+            // Offer redeemed
+            "OFFER_REDEEMED" when subtype == "UPGRADE" => PaymentStatus.Completed,
+            "OFFER_REDEEMED" => null, // Other offer types - no immediate status change
+            
+            // Events that don't change status
+            "DID_FAIL_TO_RENEW" => null, // In grace period or billing retry
+            "RENEWAL_EXTENDED" => null, // Just extends date, doesn't change status
+            "PRICE_INCREASE" => null, // Pending customer consent
+            "TEST" => null, // Test notification
+            
             _ => PaymentStatus.Pending
         };
     }
@@ -760,7 +797,7 @@ public class AppleProductConfig
     public string ProductId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public decimal Price { get; set; }
+    public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
     
     /// <summary>
