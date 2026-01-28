@@ -76,8 +76,8 @@ public class ApplePayProvider : IPaymentProvider
         CancellationToken ct = default)
     {
         _logger.LogInformation(
-            "[ApplePayProvider] CreateSubscription START - UserId: {UserId}, TransactionId: {TransactionId}, ProductId: {ProductId}, IsSandbox: {IsSandbox}",
-            request.UserId, request.TransactionId, request.ProductId, request.IsSandbox);
+            "[ApplePayProvider] CreateSubscription - UserId={UserId}, TxId={TxId}, IsSandbox={IsSandbox}",
+            request.UserId, request.TransactionId, request.IsSandbox);
         
         // Apple subscriptions are created via the app
         // Server-side just needs to verify the transaction
@@ -91,8 +91,6 @@ public class ApplePayProvider : IPaymentProvider
             };
         }
 
-        _logger.LogDebug("[ApplePayProvider] CreateSubscription - Calling VerifyTransactionAsync");
-        
         var verification = await VerifyTransactionAsync(new VerificationRequest
         {
             UserId = request.UserId,
@@ -100,15 +98,9 @@ public class ApplePayProvider : IPaymentProvider
             IsSandbox = request.IsSandbox
         }, ct);
 
-        _logger.LogInformation(
-            "[ApplePayProvider] CreateSubscription - Verification result: IsValid={IsValid}, ProductId={ProductId}, OriginalTxId={OriginalTxId}, Error={Error}",
-            verification.IsValid, verification.ProductId, verification.OriginalTransactionId, verification.ErrorMessage);
-
         if (!verification.IsValid)
         {
-            _logger.LogWarning(
-                "[ApplePayProvider] CreateSubscription FAILED - Verification failed: {Error}",
-                verification.ErrorMessage);
+            _logger.LogWarning("[ApplePayProvider] CreateSubscription FAILED: {Error}", verification.ErrorMessage);
             return new SubscriptionResult
             {
                 Success = false,
@@ -117,13 +109,14 @@ public class ApplePayProvider : IPaymentProvider
         }
 
         _logger.LogInformation(
-            "[ApplePayProvider] CreateSubscription SUCCESS - SubscriptionId: {SubscriptionId}, ExpiresAt: {ExpiresAt}",
-            verification.OriginalTransactionId, verification.ExpiresDate);
+            "[ApplePayProvider] CreateSubscription SUCCESS - UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
+            request.UserId, verification.OriginalTransactionId, verification.ProductId);
         
         return new SubscriptionResult
         {
             Success = true,
             SubscriptionId = verification.OriginalTransactionId,
+            OrderId = verification.OriginalTransactionId, // Required for RecordPaymentAsync
             ExpiresAt = verification.ExpiresDate,
             Status = PaymentStatus.Completed
         };
@@ -134,41 +127,29 @@ public class ApplePayProvider : IPaymentProvider
         CancellationToken ct = default)
     {
         _logger.LogInformation(
-            "[ApplePayProvider] VerifyTransaction START - TransactionId: {TransactionId}, UserId: {UserId}, IsSandbox: {IsSandbox}",
+            "[ApplePayProvider] VerifyTransaction - TxId={TxId}, UserId={UserId}, IsSandbox={IsSandbox}",
             request.TransactionId, request.UserId, request.IsSandbox);
         
         try
         {
-            var environment = request.IsSandbox ? "sandbox" : "production";
             var baseUrl = request.IsSandbox 
                 ? "https://api.storekit-sandbox.itunes.apple.com"
                 : "https://api.storekit.itunes.apple.com";
 
-            _logger.LogDebug("[ApplePayProvider] VerifyTransaction - Environment: {Env}, BaseUrl: {BaseUrl}",
-                environment, baseUrl);
-
-            _logger.LogDebug("[ApplePayProvider] VerifyTransaction - Generating App Store token...");
             var token = GenerateAppStoreToken();
-            _logger.LogDebug("[ApplePayProvider] VerifyTransaction - Token generated (length: {Length})", token?.Length ?? 0);
             
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
-            var requestUrl = $"{baseUrl}/inApps/v1/transactions/{request.TransactionId}";
-            _logger.LogDebug("[ApplePayProvider] VerifyTransaction - Calling Apple API: {Url}", requestUrl);
-
-            var response = await _httpClient.GetAsync(requestUrl, ct);
-
-            _logger.LogInformation(
-                "[ApplePayProvider] VerifyTransaction - Apple API response: StatusCode={StatusCode}, ReasonPhrase={ReasonPhrase}",
-                response.StatusCode, response.ReasonPhrase);
+            var response = await _httpClient.GetAsync(
+                $"{baseUrl}/inApps/v1/transactions/{request.TransactionId}", ct);
 
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync(ct);
                 _logger.LogWarning(
-                    "[ApplePayProvider] VerifyTransaction FAILED - Apple API error: {StatusCode}, Content: {Content}",
-                    response.StatusCode, errorContent);
+                    "[ApplePayProvider] VerifyTransaction FAILED - TxId={TxId}, StatusCode={StatusCode}, Error={Error}",
+                    request.TransactionId, response.StatusCode, errorContent);
                 return new VerificationResult
                 {
                     IsValid = false,
@@ -177,15 +158,11 @@ public class ApplePayProvider : IPaymentProvider
             }
 
             var content = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogDebug("[ApplePayProvider] VerifyTransaction - Response content length: {Length}", content?.Length ?? 0);
-            
-            _logger.LogDebug("[ApplePayProvider] VerifyTransaction - Parsing signed transaction...");
             var transactionInfo = ParseSignedTransaction(content);
-            
+
             _logger.LogInformation(
-                "[ApplePayProvider] VerifyTransaction SUCCESS - TxId: {TxId}, OriginalTxId: {OriginalTxId}, ProductId: {ProductId}, ExpiresDate: {ExpiresDate}, AutoRenewing: {AutoRenewing}",
-                transactionInfo.TransactionId, transactionInfo.OriginalTransactionId, 
-                transactionInfo.ProductId, transactionInfo.ExpiresDate, transactionInfo.AutoRenewing);
+                "[ApplePayProvider] VerifyTransaction SUCCESS - TxId={TxId}, OrderId={OrderId}, ProductId={ProductId}, ExpiresDate={ExpiresDate}",
+                transactionInfo.TransactionId, transactionInfo.OriginalTransactionId, transactionInfo.ProductId, transactionInfo.ExpiresDate);
 
             return new VerificationResult
             {
@@ -200,8 +177,7 @@ public class ApplePayProvider : IPaymentProvider
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[ApplePayProvider] VerifyTransaction EXCEPTION for {TransactionId}: {Message}", 
-                request.TransactionId, ex.Message);
+            _logger.LogError(ex, "[ApplePayProvider] VerifyTransaction EXCEPTION - TxId={TxId}", request.TransactionId);
             return new VerificationResult
             {
                 IsValid = false,
@@ -232,13 +208,9 @@ public class ApplePayProvider : IPaymentProvider
                         ErrorMessage = "Invalid JWT signature"
                     };
                 }
-                _logger.LogInformation("[ApplePayProvider] JWT signature verification successful");
             }
             
             var notification = ParseNotification(request.Payload);
-            
-            _logger.LogInformation("[ApplePayProvider] Processing notification: {Type} {Subtype}",
-                notification.NotificationType, notification.Subtype);
 
             if (!IsAllowedNotificationType(notification.NotificationType, notification.Subtype))
             {
@@ -251,12 +223,16 @@ public class ApplePayProvider : IPaymentProvider
             }
 
             var transactionInfo = notification.TransactionInfo;
+            // OrderId = OriginalTransactionId (required for ProcessWebhookResultAsync)
+            var orderId = transactionInfo?.OriginalTransactionId;
+            
             var result = new WebhookResult
             {
                 Success = true,
                 EventType = notification.NotificationType,
                 TransactionId = transactionInfo?.TransactionId,
                 SubscriptionId = transactionInfo?.OriginalTransactionId,
+                OrderId = orderId,
                 ShouldProcess = true
             };
 
@@ -266,6 +242,15 @@ public class ApplePayProvider : IPaymentProvider
             {
                 result.UserId = userId;
             }
+            else
+            {
+                _logger.LogWarning("[ApplePayProvider] Webhook missing UserId - AppAccountToken={Token}", 
+                    transactionInfo?.AppAccountToken);
+            }
+            
+            _logger.LogInformation(
+                "[ApplePayProvider] Webhook: Type={Type}, UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
+                notification.NotificationType, result.UserId, orderId, transactionInfo?.ProductId);
 
             result.NewStatus = MapAppleEventToStatus(notification.NotificationType, notification.Subtype);
             

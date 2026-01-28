@@ -80,38 +80,27 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
         bool isRenewal)
     {
         _logger.LogInformation(
-            "[GodGPTPaymentBusinessService] === PAYMENT SUCCESS CALLBACK START === " +
-            "UserId={UserId}, Platform={Platform}, SubscriptionId={SubscriptionId}, ProductId={ProductId}, IsRenewal={IsRenewal}",
-            userId, platform, newSubscriptionId, productId, isRenewal);
+            "[GodGPTPaymentBusinessService] HandlePaymentSuccess - UserId={UserId}, Platform={Platform}, ProductId={ProductId}, IsRenewal={IsRenewal}",
+            userId, platform, productId, isRenewal);
         
         // Ensure business agents are linked to PaymentIndexGAgent
-        // This enables them to receive PaymentCompletedEvent via event broadcasting
         try
         {
             await _registrationService.RegisterBusinessAgentsForUserAsync(userId);
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex,
-                "[GodGPTPaymentBusinessService] Failed to register business agents for user {UserId}, continuing anyway",
-                userId);
+            _logger.LogWarning(ex, "[GodGPTPaymentBusinessService] Failed to register business agents for {UserId}", userId);
         }
         
         // Renewals don't need to cancel old subscriptions
         if (isRenewal)
         {
-            _logger.LogInformation(
-                "[GodGPTPaymentBusinessService] Skipping renewal - no need to cancel old subscriptions. UserId={UserId}",
-                userId);
             return;
         }
 
         // Determine isUltimate from product configuration
         var isUltimate = GetIsUltimateFromProductId(platform, productId);
-
-        _logger.LogInformation(
-            "[GodGPTPaymentBusinessService] Product lookup result: ProductId={ProductId}, IsUltimate={IsUltimate}",
-            productId, isUltimate);
 
         try
         {
@@ -119,14 +108,8 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
         }
         catch (Exception ex)
         {
-            // Log but don't fail - this is a side effect
-            // Manual intervention may be needed if this fails
-            _logger.LogError(ex,
-                "[GodGPTPaymentBusinessService] Failed to cancel old subscriptions for user {UserId}",
-                userId);
+            _logger.LogError(ex, "[GodGPTPaymentBusinessService] Failed to cancel old subscriptions for {UserId}", userId);
         }
-        
-        _logger.LogInformation("[GodGPTPaymentBusinessService] === PAYMENT SUCCESS CALLBACK END === UserId={UserId}", userId);
     }
 
     /// <summary>

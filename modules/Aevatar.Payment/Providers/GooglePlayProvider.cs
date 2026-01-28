@@ -86,22 +86,20 @@ public class GooglePlayProvider : IPaymentProvider
         CancellationToken ct = default)
     {
         _logger.LogInformation(
-            "[GooglePlayProvider] CreateSubscription START - UserId: {UserId}, TransactionId: {TransactionId}, ProductId: {ProductId}, IsSandbox: {IsSandbox}, HasReceiptData: {HasReceipt}",
-            request.UserId, request.TransactionId, request.ProductId, request.IsSandbox, !string.IsNullOrEmpty(request.ReceiptData));
+            "[GooglePlayProvider] CreateSubscription - UserId={UserId}, TxId={TxId}, IsSandbox={IsSandbox}",
+            request.UserId, request.TransactionId, request.IsSandbox);
         
         // Google Play subscriptions are created via the app
         // Server-side just needs to verify the transaction
         if (string.IsNullOrEmpty(request.TransactionId) && string.IsNullOrEmpty(request.ReceiptData))
         {
-            _logger.LogWarning("[GooglePlayProvider] CreateSubscription FAILED - TransactionId and ReceiptData are both empty");
+            _logger.LogWarning("[GooglePlayProvider] CreateSubscription FAILED - TxId and ReceiptData empty");
             return new SubscriptionResult
             {
                 Success = false,
                 ErrorMessage = "TransactionId or PurchaseToken is required for Google Play verification"
             };
         }
-
-        _logger.LogDebug("[GooglePlayProvider] CreateSubscription - Calling VerifyTransactionAsync");
 
         var verification = await VerifyTransactionAsync(new VerificationRequest
         {
@@ -111,15 +109,9 @@ public class GooglePlayProvider : IPaymentProvider
             IsSandbox = request.IsSandbox
         }, ct);
 
-        _logger.LogInformation(
-            "[GooglePlayProvider] CreateSubscription - Verification result: IsValid={IsValid}, ProductId={ProductId}, OriginalTxId={OriginalTxId}, Error={Error}",
-            verification.IsValid, verification.ProductId, verification.OriginalTransactionId, verification.ErrorMessage);
-
         if (!verification.IsValid)
         {
-            _logger.LogWarning(
-                "[GooglePlayProvider] CreateSubscription FAILED - Verification failed: {Error}",
-                verification.ErrorMessage);
+            _logger.LogWarning("[GooglePlayProvider] CreateSubscription FAILED: {Error}", verification.ErrorMessage);
             return new SubscriptionResult
             {
                 Success = false,
@@ -129,13 +121,14 @@ public class GooglePlayProvider : IPaymentProvider
 
         var subscriptionId = verification.OriginalTransactionId ?? verification.TransactionId;
         _logger.LogInformation(
-            "[GooglePlayProvider] CreateSubscription SUCCESS - SubscriptionId: {SubscriptionId}, ExpiresAt: {ExpiresAt}",
-            subscriptionId, verification.ExpiresDate);
-
+            "[GooglePlayProvider] CreateSubscription SUCCESS - UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
+            request.UserId, subscriptionId, verification.ProductId);
+        
         return new SubscriptionResult
         {
             Success = true,
             SubscriptionId = subscriptionId,
+            OrderId = subscriptionId, // Required for RecordPaymentAsync
             ExpiresAt = verification.ExpiresDate,
             Status = PaymentStatus.Completed
         };
@@ -146,16 +139,13 @@ public class GooglePlayProvider : IPaymentProvider
         CancellationToken ct = default)
     {
         _logger.LogInformation(
-            "[GooglePlayProvider] VerifyTransaction START - TransactionId: {TransactionId}, UserId: {UserId}, IsSandbox: {IsSandbox}, HasPurchaseToken: {HasToken}",
-            request.TransactionId, request.UserId, request.IsSandbox, !string.IsNullOrEmpty(request.PurchaseToken));
+            "[GooglePlayProvider] VerifyTransaction - TxId={TxId}, UserId={UserId}",
+            request.TransactionId, request.UserId);
 
         // Validate RevenueCat configuration
         if (string.IsNullOrEmpty(_options.RevenueCatApiKey))
         {
-            _logger.LogWarning(
-                "[GooglePlayProvider] VerifyTransaction - RevenueCatApiKey is empty or not configured in {SectionName} section. " +
-                "Falling back to webhook verification. To enable RevenueCat API verification, set {SectionName}:RevenueCatApiKey in appsettings.json",
-                GooglePlayOptions.SectionName, GooglePlayOptions.SectionName);
+            _logger.LogWarning("[GooglePlayProvider] RevenueCatApiKey not configured - using webhook verification");
             return new VerificationResult
             {
                 IsValid = true,
@@ -164,11 +154,9 @@ public class GooglePlayProvider : IPaymentProvider
             };
         }
 
-        _logger.LogDebug("[GooglePlayProvider] VerifyTransaction - RevenueCat API key is configured");
-
         if (request.UserId == Guid.Empty)
         {
-            _logger.LogWarning("[GooglePlayProvider] VerifyTransaction FAILED - UserId is empty (required for RevenueCat)");
+            _logger.LogWarning("[GooglePlayProvider] VerifyTransaction FAILED - UserId empty");
             return new VerificationResult
             {
                 IsValid = false,
@@ -178,9 +166,7 @@ public class GooglePlayProvider : IPaymentProvider
 
         try
         {
-            // Query RevenueCat subscriber API
             var requestUrl = $"{_options.RevenueCatBaseUrl}/subscribers/{request.UserId}";
-            _logger.LogDebug("[GooglePlayProvider] VerifyTransaction - Calling RevenueCat API: {Url}", requestUrl);
             
             _httpClient.DefaultRequestHeaders.Clear();
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {_options.RevenueCatApiKey}");
@@ -188,15 +174,11 @@ public class GooglePlayProvider : IPaymentProvider
             
             var response = await _httpClient.GetAsync(requestUrl, ct);
             
-            _logger.LogInformation(
-                "[GooglePlayProvider] VerifyTransaction - RevenueCat API response: StatusCode={StatusCode}",
-                response.StatusCode);
-            
             if (!response.IsSuccessStatusCode)
             {
                 var errorContent = await response.Content.ReadAsStringAsync(ct);
                 _logger.LogWarning(
-                    "[GooglePlayProvider] VerifyTransaction FAILED - RevenueCat API error: {StatusCode}, Content: {Content}",
+                    "[GooglePlayProvider] VerifyTransaction FAILED - StatusCode={StatusCode}, Error={Error}",
                     response.StatusCode, errorContent);
                 return new VerificationResult
                 {
@@ -206,15 +188,12 @@ public class GooglePlayProvider : IPaymentProvider
             }
             
             var content = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogDebug("[GooglePlayProvider] VerifyTransaction - Response content length: {Length}", content?.Length ?? 0);
-            
-            _logger.LogDebug("[GooglePlayProvider] VerifyTransaction - Parsing RevenueCat subscriber data for TransactionId: {TransactionId}", request.TransactionId);
             var revenueCatData = ParseRevenueCatSubscriber(content, request.TransactionId);
             
             if (revenueCatData == null)
             {
                 _logger.LogWarning(
-                    "[GooglePlayProvider] VerifyTransaction FAILED - Transaction {TransactionId} not found in RevenueCat for user {UserId}",
+                    "[GooglePlayProvider] VerifyTransaction FAILED - TxId={TxId} not found for UserId={UserId}",
                     request.TransactionId, request.UserId);
                 return new VerificationResult
                 {
@@ -223,11 +202,11 @@ public class GooglePlayProvider : IPaymentProvider
                 };
             }
             
+            var orderId = revenueCatData.OriginalTransactionId ?? request.TransactionId;
             _logger.LogInformation(
-                "[GooglePlayProvider] VerifyTransaction SUCCESS - TxId: {TransactionId}, ProductId: {ProductId}, OriginalTxId: {OriginalTxId}, ExpiresDate: {ExpiresDate}, Price: {Price} {Currency}",
-                request.TransactionId, revenueCatData.ProductId, revenueCatData.OriginalTransactionId, 
-                revenueCatData.ExpiresDate, revenueCatData.Price, revenueCatData.Currency);
-            
+                "[GooglePlayProvider] VerifyTransaction SUCCESS - TxId={TxId}, OrderId={OrderId}, ProductId={ProductId}, ExpiresDate={ExpiresDate}",
+                request.TransactionId, orderId, revenueCatData.ProductId, revenueCatData.ExpiresDate);
+
             return new VerificationResult
             {
                 IsValid = true,
@@ -243,8 +222,7 @@ public class GooglePlayProvider : IPaymentProvider
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[GooglePlayProvider] VerifyTransaction EXCEPTION for {TransactionId}: {Message}", 
-                request.TransactionId, ex.Message);
+            _logger.LogError(ex, "[GooglePlayProvider] VerifyTransaction EXCEPTION - TxId={TxId}", request.TransactionId);
             return new VerificationResult
             {
                 IsValid = false,
@@ -366,9 +344,8 @@ public class GooglePlayProvider : IPaymentProvider
             }
 
             var webhookEvent = ParseRevenueCatWebhook(request.Payload);
-            
-            _logger.LogInformation("[GooglePlayProvider] Processing RevenueCat event: {Type}, User: {UserId}",
-                webhookEvent.EventType, webhookEvent.AppUserId);
+            // OrderId = OriginalTransactionId (required for ProcessWebhookResultAsync)
+            var orderId = webhookEvent.OriginalTransactionId ?? webhookEvent.TransactionId;
 
             if (!IsKeyBusinessEvent(webhookEvent))
             {
@@ -386,6 +363,7 @@ public class GooglePlayProvider : IPaymentProvider
                 EventType = webhookEvent.EventType,
                 TransactionId = webhookEvent.TransactionId,
                 SubscriptionId = webhookEvent.OriginalTransactionId ?? webhookEvent.TransactionId,
+                OrderId = orderId,
                 ShouldProcess = true
             };
 
@@ -394,6 +372,14 @@ public class GooglePlayProvider : IPaymentProvider
             {
                 result.UserId = userId;
             }
+            else
+            {
+                _logger.LogWarning("[GooglePlayProvider] Webhook missing UserId - AppUserId={AppUserId}", webhookEvent.AppUserId);
+            }
+            
+            _logger.LogInformation(
+                "[GooglePlayProvider] Webhook: Type={Type}, UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
+                webhookEvent.EventType, result.UserId, orderId, webhookEvent.ProductId);
 
             result.NewStatus = MapRevenueCatEventToStatus(webhookEvent.EventType);
             result.ProductId = webhookEvent.ProductId; // For product config lookup

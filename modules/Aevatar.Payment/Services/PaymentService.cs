@@ -233,16 +233,22 @@ public class PaymentService : IPaymentService
         WebhookRequest request,
         CancellationToken ct = default)
     {
-        _logger.LogInformation("[PaymentService] Handling webhook for {Platform}", platform);
-
         var provider = GetProvider(platform);
         var result = await provider.HandleWebhookAsync(request, ct);
+
+        _logger.LogInformation(
+            "[PaymentService] Webhook: Platform={Platform}, OrderId={OrderId}, UserId={UserId}, EventType={EventType}, ShouldProcess={ShouldProcess}",
+            platform, result.OrderId, result.UserId, result.EventType, result.ShouldProcess);
 
         // Use OrderId instead of SubscriptionId for consistency check
         // OrderId is the stable key used for PaymentRecordGAgent lookup
         if (result.Success && result.ShouldProcess && !string.IsNullOrEmpty(result.OrderId))
         {
             await ProcessWebhookResultAsync(platform, result);
+        }
+        else if (result.Success && result.ShouldProcess && string.IsNullOrEmpty(result.OrderId))
+        {
+            _logger.LogWarning("[PaymentService] Webhook skipped - OrderId is empty! SubscriptionId={SubscriptionId}", result.SubscriptionId);
         }
 
         return result;
@@ -966,6 +972,10 @@ public class PaymentService : IPaymentService
             }
             
             var eventContext = BuildEventContext(recordState, platform, paymentId);
+            
+            _logger.LogInformation(
+                "[PaymentService] ProcessWebhook: PaymentId={PaymentId}, UserId={UserId}, NewStatus={NewStatus}, HasIndexAgent={HasIndexAgent}",
+                paymentId, result.UserId, result.NewStatus, indexAgent != null);
 
             if (result.NewStatus.HasValue)
             {
