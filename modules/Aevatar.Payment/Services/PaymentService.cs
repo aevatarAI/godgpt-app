@@ -987,16 +987,23 @@ public class PaymentService : IPaymentService
                 
                 if (result.NewStatus == PaymentStatus.Completed)
                 {
-                    // Idempotency check: don't complete if already cancelled/expired/refunded
+                    // Idempotency check: only block if refunded (user got money back)
+                    // Allow re-activation from Cancelled/Expired for Apple/Google resubscription scenarios
                     var currentStatus = (PaymentStatus)recordState.Status;
-                    if (currentStatus == PaymentStatus.Cancelled || 
-                        currentStatus == PaymentStatus.Expired ||
-                        currentStatus == PaymentStatus.Refunded)
+                    if (currentStatus == PaymentStatus.Refunded)
                     {
                         _logger.LogWarning(
-                            "[PaymentService] Payment {PaymentId} is {Status}, skipping Complete from webhook (possible race condition)",
-                            paymentId, currentStatus);
+                            "[PaymentService] Payment {PaymentId} is Refunded, skipping Complete from webhook (user got refund)",
+                            paymentId);
                         return;
+                    }
+                    
+                    // Log reactivation for monitoring
+                    if (currentStatus == PaymentStatus.Cancelled || currentStatus == PaymentStatus.Expired)
+                    {
+                        _logger.LogInformation(
+                            "[PaymentService] Payment {PaymentId} reactivating from {Status} (Apple/Google resubscription)",
+                            paymentId, currentStatus);
                     }
                     
                     var isRenewal = result.VerificationResult?.ExpiresDate != null && 
