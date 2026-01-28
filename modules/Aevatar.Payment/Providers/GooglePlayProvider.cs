@@ -21,8 +21,23 @@ public class GooglePlayProvider : IPaymentProvider
         IHttpClientFactory httpClientFactory)
     {
         _logger = logger;
-        _options = options.Value;
+        _options = options?.Value ?? throw new InvalidOperationException(
+            $"GooglePlayOptions not configured. Ensure '{GooglePlayOptions.SectionName}' section exists in appsettings.json");
         _httpClient = httpClientFactory.CreateClient("GooglePlay");
+        
+        // Log configuration status (similar to StripeProvider)
+        _logger.LogDebug(
+            "[GooglePlayProvider] Configuration loaded: RevenueCatApiKey={HasKey}, Products={ProductCount}",
+            !string.IsNullOrEmpty(_options.RevenueCatApiKey),
+            _options.Products?.Count ?? 0);
+        
+        if (string.IsNullOrEmpty(_options.RevenueCatApiKey))
+        {
+            _logger.LogInformation(
+                "[GooglePlayProvider] RevenueCatApiKey is empty. RevenueCat API verification will be disabled. " +
+                "Set {SectionName}:RevenueCatApiKey in appsettings.json to enable API verification.", 
+                GooglePlayOptions.SectionName);
+        }
     }
 
     public Task<List<ProductDto>> GetProductsAsync(CancellationToken ct = default)
@@ -117,7 +132,10 @@ public class GooglePlayProvider : IPaymentProvider
         // Validate RevenueCat configuration
         if (string.IsNullOrEmpty(_options.RevenueCatApiKey))
         {
-            _logger.LogWarning("[GooglePlayProvider] RevenueCat API key not configured, falling back to webhook verification");
+            _logger.LogWarning(
+                "[GooglePlayProvider] RevenueCatApiKey is empty or not configured in {SectionName} section. " +
+                "Falling back to webhook verification. To enable RevenueCat API verification, set {SectionName}:RevenueCatApiKey in appsettings.json",
+                GooglePlayOptions.SectionName, GooglePlayOptions.SectionName);
             return new VerificationResult
             {
                 IsValid = true,
@@ -563,7 +581,7 @@ public class GooglePlayProvider : IPaymentProvider
 /// </summary>
 public class GooglePlayOptions
 {
-    public const string SectionName = "GooglePlay";
+    public const string SectionName = "GooglePay";
     
     public string WebhookAuthToken { get; set; } = string.Empty;
     public string RevenueCatApiKey { get; set; } = string.Empty;
