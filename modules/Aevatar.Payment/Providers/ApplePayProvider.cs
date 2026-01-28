@@ -248,10 +248,6 @@ public class ApplePayProvider : IPaymentProvider
                     transactionInfo?.AppAccountToken);
             }
             
-            _logger.LogInformation(
-                "[ApplePayProvider] Webhook: Type={Type}, UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
-                notification.NotificationType, result.UserId, orderId, transactionInfo?.ProductId);
-
             result.NewStatus = MapAppleEventToStatus(notification.NotificationType, notification.Subtype);
             
             // Determine if this is a renewal - Apple uses "DID_RENEW" notification type
@@ -268,8 +264,26 @@ public class ApplePayProvider : IPaymentProvider
                     ProductId = transactionInfo.ProductId,
                     PurchaseDate = transactionInfo.PurchaseDate,
                     ExpiresDate = transactionInfo.ExpiresDate,
-                    AutoRenewing = transactionInfo.AutoRenewing
+                    AutoRenewing = transactionInfo.AutoRenewing,
+                    Amount = transactionInfo.Price,
+                    Currency = transactionInfo.Currency
                 };
+            }
+
+            // Enhanced logging for refund events
+            if (notification.NotificationType is "REFUND" or "REVOKE")
+            {
+                _logger.LogInformation(
+                    "[ApplePayProvider] REFUND Webhook: Type={Type}, UserId={UserId}, OrderId={OrderId}, " +
+                    "ProductId={ProductId}, RevocationDate={RevocationDate}, RevocationReason={RevocationReason}",
+                    notification.NotificationType, result.UserId, orderId, 
+                    transactionInfo?.ProductId, transactionInfo?.RevocationDate, transactionInfo?.RevocationReason);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "[ApplePayProvider] Webhook: Type={Type}, UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
+                    notification.NotificationType, result.UserId, orderId, transactionInfo?.ProductId);
             }
 
             return result;
@@ -589,9 +603,18 @@ public class ApplePayProvider : IPaymentProvider
                 ExpiresDate = txRoot.TryGetProperty("expiresDate", out var exp)
                     ? DateTimeOffset.FromUnixTimeMilliseconds(exp.GetInt64()).DateTime
                     : null,
-                AutoRenewing = !txRoot.TryGetProperty("revocationDate", out _),
+                AutoRenewing = !txRoot.TryGetProperty("revocationDate", out var revDate),
                 AppAccountToken = txRoot.TryGetProperty("appAccountToken", out var token)
                     ? token.GetString()
+                    : null,
+                // Refund-related fields
+                Price = txRoot.TryGetProperty("price", out var price) ? price.GetInt64() / 1000m : null,
+                Currency = txRoot.TryGetProperty("currency", out var currency) ? currency.GetString() : null,
+                RevocationDate = revDate.ValueKind != JsonValueKind.Undefined
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(revDate.GetInt64()).DateTime
+                    : null,
+                RevocationReason = txRoot.TryGetProperty("revocationReason", out var revReason)
+                    ? revReason.GetInt32().ToString()
                     : null
             };
         }
@@ -686,6 +709,11 @@ public class ApplePayProvider : IPaymentProvider
         public DateTime? ExpiresDate { get; set; }
         public bool AutoRenewing { get; set; }
         public string? AppAccountToken { get; set; }
+        // Refund-related fields
+        public decimal? Price { get; set; }
+        public string? Currency { get; set; }
+        public DateTime? RevocationDate { get; set; }
+        public string? RevocationReason { get; set; }
     }
 
     private class AppleNotification

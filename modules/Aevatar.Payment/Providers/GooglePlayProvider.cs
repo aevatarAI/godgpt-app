@@ -392,8 +392,10 @@ public class GooglePlayProvider : IPaymentProvider
             {
                 result.NewStatus = PaymentStatus.Refunded;
                 _logger.LogInformation(
-                    "[GooglePlayProvider] CANCELLATION event with negative price ({Price}) treated as REFUND",
-                    webhookEvent.Price.Value);
+                    "[GooglePlayProvider] REFUND Webhook: UserId={UserId}, OrderId={OrderId}, " +
+                    "ProductId={ProductId}, RefundAmount={RefundAmount}, CancelReason={CancelReason}",
+                    result.UserId, orderId, webhookEvent.ProductId, 
+                    webhookEvent.Price.Value, webhookEvent.CancelReason);
             }
             
             // Determine if this is a renewal - Google Play uses "RENEWAL" event type
