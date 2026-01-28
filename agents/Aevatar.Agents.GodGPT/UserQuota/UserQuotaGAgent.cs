@@ -901,12 +901,28 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         var subscriptionIds = subscriptionInfo.SubscriptionIds ?? new List<string>();
         var invoiceIds = subscriptionInfo.InvoiceIds ?? new List<string>();
 
-        // Add new subscription ID and invoice ID
-        if (!string.IsNullOrEmpty(evt.Context.SubscriptionId) && !subscriptionIds.Contains(evt.Context.SubscriptionId))
+        // Handle subscription IDs based on subscription state
+        // New subscription: replace mode (clear old IDs) - same as old code
+        // Renewal: accumulate mode (keep existing IDs)
+        if (!subscriptionInfo.IsActive)
         {
-            subscriptionIds.Add(evt.Context.SubscriptionId);
+            // New subscription: clear and add new (replace mode)
+            subscriptionIds.Clear();
+            if (!string.IsNullOrEmpty(evt.Context.SubscriptionId))
+            {
+                subscriptionIds.Add(evt.Context.SubscriptionId);
+            }
+        }
+        else
+        {
+            // Renewal: accumulate mode (add if not exists)
+            if (!string.IsNullOrEmpty(evt.Context.SubscriptionId) && !subscriptionIds.Contains(evt.Context.SubscriptionId))
+            {
+                subscriptionIds.Add(evt.Context.SubscriptionId);
+            }
         }
 
+        // Add invoice ID (always accumulate)
         if (!string.IsNullOrEmpty(evt.InvoiceId) && !invoiceIds.Contains(evt.InvoiceId))
         {
             invoiceIds.Add(evt.InvoiceId);
@@ -1134,11 +1150,25 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         
         // Skip if SubscriptionId not in list (already processed or user has newer subscription)
         var subId = evt.Context.SubscriptionId;
-        if (!string.IsNullOrEmpty(subId) && !subscription.SubscriptionIds.Contains(subId))
+        if (!string.IsNullOrEmpty(subId))
         {
+            // If SubscriptionId provided, check if it's in the list
+            if (!subscription.SubscriptionIds.Contains(subId))
+            {
+                Logger.LogInformation(
+                    "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - SubscriptionId {SubscriptionId} not in list for user {UserId}",
+                    subId, userId);
+                return;
+            }
+        }
+        else
+        {
+            // If SubscriptionId is empty (old data), skip to prevent incorrect cancellation
+            // Old cancellation events may arrive late and shouldn't cancel subscriptions without proper ID matching
+            // This ensures compatibility with old data that lacks SubscriptionId field
             Logger.LogInformation(
-                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - SubscriptionId {SubscriptionId} not in list for user {UserId}",
-                subId, userId);
+                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - Empty SubscriptionId (old data format) for user {UserId}, current subscription count: {Count}",
+                userId, subscription.SubscriptionIds.Count);
             return;
         }
         
@@ -1399,9 +1429,13 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                         sub.SubscriptionIds.Remove(cancelSubscription.SubscriptionId);
                     }
                     
-                    sub.IsActive = false;
-                    sub.PlanType = QuotaPlanType.None;
-                    sub.Status = QuotaPaymentStatus.None;
+                    // Only cancel membership if list is empty (no other active subscriptions)
+                    if (sub.SubscriptionIds.Count == 0)
+                    {
+                        sub.IsActive = false;
+                        sub.PlanType = QuotaPlanType.None;
+                        sub.Status = QuotaPaymentStatus.None;
+                    }
                 }
                 break;
 
