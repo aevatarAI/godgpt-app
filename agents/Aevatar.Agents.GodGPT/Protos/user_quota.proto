@@ -148,6 +148,7 @@ message UpdateSubscriptionEvent {
 
 message CancelSubscriptionEvent {
     bool is_ultimate = 1;
+    optional string subscription_id = 2;  // If provided, remove from list; cancel only if list becomes empty
 }
 
 message UpdateCreditsEvent {

@@ -1124,25 +1124,30 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
         // Cancel the matched subscription
         var subscription = await GetSubscriptionAsync(isUltimateToCancel.Value);
-        if (subscription != null && subscription.IsActive)
+        if (subscription == null || !subscription.IsActive)
         {
             Logger.LogInformation(
-                "[UserQuotaGAgent][HandlePaymentCancelled] Cancelling {SubscriptionType} subscription for user {UserId}",
-                isUltimateToCancel.Value ? "Ultimate" : "Premium", userId);
-            
-            RaiseEvent(new CancelSubscriptionEvent { IsUltimate = isUltimateToCancel.Value });
-            await ConfirmEventsAsync();
-            
-            Logger.LogInformation(
-                "[UserQuotaGAgent][HandlePaymentCancelled] Successfully cancelled {SubscriptionType} subscription for user {UserId}",
-                isUltimateToCancel.Value ? "Ultimate" : "Premium", userId);
+                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - subscription inactive for user {UserId}",
+                userId);
+            return;
         }
-        else
+        
+        // Skip if SubscriptionId not in list (already processed or user has newer subscription)
+        var subId = evt.Context.SubscriptionId;
+        if (!string.IsNullOrEmpty(subId) && !subscription.SubscriptionIds.Contains(subId))
         {
-            Logger.LogWarning(
-                "[UserQuotaGAgent][HandlePaymentCancelled] No active {SubscriptionType} subscription found for user {UserId} to cancel",
-                isUltimateToCancel.Value ? "Ultimate" : "Premium", userId);
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - SubscriptionId {SubscriptionId} not in list for user {UserId}",
+                subId, userId);
+            return;
         }
+        
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCancelled] Cancelling {SubscriptionType} subscription for user {UserId}, SubscriptionId={SubscriptionId}",
+            isUltimateToCancel.Value ? "Ultimate" : "Premium", userId, subId ?? "(none)");
+        
+        RaiseEvent(new CancelSubscriptionEvent { IsUltimate = isUltimateToCancel.Value, SubscriptionId = subId ?? string.Empty });
+        await ConfirmEventsAsync();
     }
     
     /// <summary>
@@ -1388,6 +1393,12 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 var sub = cancelSubscription.IsUltimate ? state.UltimateSubscription : state.Subscription;
                 if (sub != null)
                 {
+                    // Remove SubscriptionId from list
+                    if (!string.IsNullOrEmpty(cancelSubscription.SubscriptionId))
+                    {
+                        sub.SubscriptionIds.Remove(cancelSubscription.SubscriptionId);
+                    }
+                    
                     sub.IsActive = false;
                     sub.PlanType = QuotaPlanType.None;
                     sub.Status = QuotaPaymentStatus.None;
