@@ -284,8 +284,8 @@ public class ApplePayProvider : IPaymentProvider
             else
             {
                 _logger.LogInformation(
-                    "[ApplePayProvider] Webhook: Type={Type}, UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
-                    notification.NotificationType, result.UserId, orderId, transactionInfo?.ProductId);
+                    "[ApplePayProvider] Webhook: Type={Type}, Subtype={Subtype}, UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
+                    notification.NotificationType, notification.Subtype ?? "(none)", result.UserId, orderId, transactionInfo?.ProductId);
             }
 
             return result;

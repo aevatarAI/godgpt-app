@@ -1000,7 +1000,7 @@ public class PaymentService : IPaymentService
                         // Also update ProductId in context to ensure consistency
                         eventContext.ProductId = result.ProductId;
                         
-                        _logger.LogDebug(
+                        _logger.LogInformation(
                             "[PaymentService] Refreshed BusinessMetadata from ProductId={ProductId}: plan_type={PlanType}, is_ultimate={IsUltimate}",
                             result.ProductId, eventContext.BusinessMetadata.GetValueOrDefault("plan_type"), 
                             eventContext.BusinessMetadata.GetValueOrDefault("is_ultimate"));
