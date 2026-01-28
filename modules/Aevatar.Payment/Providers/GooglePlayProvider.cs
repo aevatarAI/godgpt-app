@@ -129,6 +129,7 @@ public class GooglePlayProvider : IPaymentProvider
             Success = true,
             SubscriptionId = subscriptionId,
             OrderId = subscriptionId, // Required for RecordPaymentAsync
+            ProductId = verification.ProductId, // Required for RecordPaymentAsync product lookup
             ExpiresAt = verification.ExpiresDate,
             Status = PaymentStatus.Completed
         };

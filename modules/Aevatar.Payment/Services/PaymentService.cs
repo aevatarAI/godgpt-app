@@ -593,6 +593,10 @@ public class PaymentService : IPaymentService
             // Create payment record agent
             var recordAgent = await GetRecordAgentAsync(paymentId);
             
+            // Use result.ProductId (from verification) if available, fallback to request.ProductId
+            // This ensures we get the correct ProductId even if client didn't provide it
+            var productId = !string.IsNullOrEmpty(result.ProductId) ? result.ProductId : request.ProductId ?? string.Empty;
+            
             var createRequest = new AgentModels.Protos.CreatePaymentRequestProto
             {
                 UserId = userId.ToString(),
@@ -600,11 +604,11 @@ public class PaymentService : IPaymentService
                 ExternalOrderId = orderId, // Store orderId for business logic reference
                 SubscriptionId = string.Empty, // Will be set by webhook when real subscriptionId (sub_xxx) is available
                 CustomerId = result.CustomerId ?? string.Empty,
-                ProductId = request.ProductId ?? string.Empty,
-                ProductName = request.ProductId ?? string.Empty,
+                ProductId = productId,
+                ProductName = productId,
                 PaymentMode = (int)AgentModels.PaymentMode.Subscription,
                 BusinessType = "godgpt",
-                BusinessId = request.ProductId ?? string.Empty,
+                BusinessId = productId,
                 PeriodEnd = result.ExpiresAt.HasValue 
                     ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.ExpiresAt.Value.ToUniversalTime())
                     : null
@@ -620,7 +624,7 @@ public class PaymentService : IPaymentService
             }
             
             // Get product config for ProductName, Amount, and Currency (always fetch)
-            string productName = request.ProductId ?? string.Empty;
+            string productName = productId;
             decimal productAmount = 0;
             string currency = "USD";
             
@@ -628,7 +632,7 @@ public class PaymentService : IPaymentService
             {
                 var provider = GetProvider(platform);
                 var products = await provider.GetProductsAsync();
-                var product = products.FirstOrDefault(p => p.ProductId == request.ProductId);
+                var product = products.FirstOrDefault(p => p.ProductId == productId);
                 
                 if (product != null)
                 {

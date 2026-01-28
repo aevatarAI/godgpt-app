@@ -117,6 +117,7 @@ public class ApplePayProvider : IPaymentProvider
             Success = true,
             SubscriptionId = verification.OriginalTransactionId,
             OrderId = verification.OriginalTransactionId, // Required for RecordPaymentAsync
+            ProductId = verification.ProductId, // Required for RecordPaymentAsync product lookup
             ExpiresAt = verification.ExpiresDate,
             Status = PaymentStatus.Completed
         };
