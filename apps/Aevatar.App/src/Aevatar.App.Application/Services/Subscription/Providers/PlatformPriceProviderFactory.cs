@@ -1,6 +1,9 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using PaymentPlatform = Aevatar.Agents.GodGPT.Protos.InviteCode.PaymentPlatform;
 
-namespace Aevatar.Application.Grains.Subscription.Providers;
+namespace Aevatar.App.Services.Subscription.Providers;
 
 /// <summary>
 /// Factory for getting platform-specific price providers.

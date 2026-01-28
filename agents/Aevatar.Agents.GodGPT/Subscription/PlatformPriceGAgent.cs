@@ -1,6 +1,5 @@
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Core;
-using Aevatar.Application.Grains.Subscription.Providers;
 using Aevatar.Agents.GodGPT.Protos.Subscription;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -20,126 +19,70 @@ public class PlatformPriceGAgent :
 {
     private readonly ILogger<PlatformPriceGAgent> _logger;
     private readonly IGAgentActorFactory _actorFactory;
-    private readonly IPlatformPriceProviderFactory _providerFactory;
 
     public PlatformPriceGAgent(
         ILogger<PlatformPriceGAgent> logger,
-        IPlatformPriceProviderFactory providerFactory, IGAgentActorFactory actorFactory)
+        IGAgentActorFactory actorFactory)
     {
         _logger = logger;
-        _providerFactory = providerFactory;
         _actorFactory = actorFactory;
     }
 
     #region Platform Price Sync Operations
 
-    public async Task SyncAllPricesAsync()
+    /// <summary>
+    /// Syncs prices for a single product: updates/adds from platform, deletes those not on platform.
+    /// </summary>
+    /// <returns>Number of price operations performed.</returns>
+    public async Task<int> SyncProductPricesFromPlatformAsync(
+        string productId,
+        PaymentPlatform platform,
+        PlatformPriceInfoList platformPriceList)
     {
-        _logger.LogInformation("Starting full platform price sync");
+        var operationCount = 0;
+
+        State.ProductPrices.TryGetValue(productId, out var localPriceList);
+        var localPlatformPrices = (localPriceList?.Prices ?? Enumerable.Empty<PlatformPrice>())
+            .Where(p => p.Platform == platform)
+            .ToList();
         
-        try
+        var platformPriceIds = platformPriceList.Prices.Select(p => p.PriceId).ToHashSet();
+
+        foreach (var localPrice in localPlatformPrices)
         {
-            var productGAgent = await GetProductGAgentAsync();
-            // Get all listed products
-            var productsResponse = await productGAgent.GetAllProductsAsync();
-            var allProducts = productsResponse.Products.ToList();
-            
-            if (!allProducts.Any())
+            if (!string.IsNullOrEmpty(localPrice.PlatformPriceId) &&
+                !platformPriceIds.Contains(localPrice.PlatformPriceId))
             {
-                _logger.LogWarning("No products found for sync");
-                await MarkSyncCompleted();
-                return;
+                _logger.LogDebug("Deleting price not found on platform: {PriceId}", 
+                    localPrice.PlatformPriceId);
+                await DeletePriceByPlatformIdAsync(localPrice.PlatformPriceId);
+                operationCount++;
             }
-            
-            _logger.LogInformation("Found {Count} products to sync", allProducts.Count);
-
-            var syncedCount = 0;
-            var platforms = allProducts.Select(p => p.Platform).Distinct().ToList();
-            
-            foreach (var platform in platforms)
-            {
-                if (!_providerFactory.HasProvider(platform)) continue;
-                
-                var products = allProducts.Where(p => p.Platform == platform).ToList();
-                var allPlatformPrices = await _providerFactory.GetProvider(platform).GetAllPricesAsync();
-                
-                foreach (var product in products)
-                {
-                    try
-                    {
-                        var platformPrices = allPlatformPrices
-                            .Where(p => p.PlatformProductId == product.PlatformProductId)
-                            .ToList();
-                        
-                        syncedCount += await SyncProductPricesFromPlatformAsync(
-                            product.Id, platform, platformPrices);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex,
-                            "Error syncing prices for product {ProductId} ({Platform})",
-                            product.Id, platform);
-                    }
-                }
-            }
-
-            await MarkSyncCompleted();
-
-            _logger.LogInformation(
-                "Platform price sync completed. Synced {Synced}/{Total} products",
-                syncedCount, allProducts.Count);
         }
-        catch (Exception ex)
+
+        foreach (var platformPrice in platformPriceList.Prices)
         {
-            _logger.LogError(ex, "Error during full platform price sync");
-            throw;
+            await SetPriceAsync(productId, new SetPriceDto
+            {
+                Platform = platform,
+                PlatformPriceId = platformPrice.PriceId,
+                Price = platformPrice.Price,
+                Currency = platformPrice.Currency
+            });
+            operationCount++;
         }
+
+        return operationCount;
     }
 
-    public async Task SyncProductPricesAsync(string productId)
+    public async Task MarkSyncCompletedAsync()
     {
-        _logger.LogInformation("Syncing prices for product: {ProductId}", productId);
-
-        try
+        RaiseEvent(new PlatformPriceSyncCompletedEvent
         {
-            var productGAgent = await GetProductGAgentAsync();
-            // Find our internal product by product ID
-            var product = await productGAgent.GetProductAsync(productId);
-            
-            if (product == null)
-            {
-                _logger.LogWarning(
-                    "No internal product found for product: {ProductId}", 
-                    productId);
-                return;
-            }
-            var provider = _providerFactory.HasProvider(product.Platform);
-            if (!provider)
-            {
-                _logger.LogWarning(
-                    "Platform {Platform} not supported for syncing prices", 
-                    productId);
-                return;
-            }
-
-            // Fetch prices via provider
-            var prices = await _providerFactory.GetProvider(product.Platform).GetPricesAsync(product.PlatformProductId);
-            
-            _logger.LogDebug(
-                "Found {Count} active prices for product {ProductId}", 
-                prices.Count, productId);
-            
-            await SyncProductPricesFromPlatformAsync(productId, product.Platform, prices);
-
-            _logger.LogInformation(
-                "Platform product price sync completed: {ProductId}", productId);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, 
-                "Error syncing platform product prices: {ProductId}", productId);
-            throw;
-        }
+            SyncedAt = Timestamp.FromDateTime(DateTime.UtcNow)
+        });
+        
+        await ConfirmEventsAsync();
     }
 
     #endregion
@@ -271,7 +214,10 @@ public class PlatformPriceGAgent :
                     state.ProductPrices[priceSet.ProductId] = new PlatformPriceList();
                 
                 var priceList = state.ProductPrices[priceSet.ProductId];
-                var existing = GetPrice(priceSet.ProductId, priceSet.PlatformPriceId, priceSet.Platform, priceSet.Currency);
+                
+                var existing = string.IsNullOrWhiteSpace(priceSet.PlatformPriceId)
+                    ? priceList.Prices.FirstOrDefault(p => p.Platform == priceSet.Platform && p.Currency == priceSet.Currency)
+                    : priceList.Prices.FirstOrDefault(p => p.PlatformPriceId == priceSet.PlatformPriceId);
                 
                 if (existing != null)
                 {
@@ -329,61 +275,6 @@ public class PlatformPriceGAgent :
     {
         var actor = await _actorFactory.CreateGAgentActorAsync<SubscriptionProductGAgent>(SubscriptionGAgentKeys.ProductGAgentKey);
         return actor.As<ISubscriptionProductGAgent>();
-    }
-
-    /// <summary>
-    /// Syncs prices for a single product: updates/adds from platform, deletes those not on platform.
-    /// </summary>
-    /// <returns>Number of price operations performed.</returns>
-    private async Task<int> SyncProductPricesFromPlatformAsync(
-        string productId,
-        PaymentPlatform platform,
-        List<PlatformPriceInfo> platformPrices)
-    {
-        var operationCount = 0;
-
-        State.ProductPrices.TryGetValue(productId, out var localPriceList);
-        var localPlatformPrices = (localPriceList?.Prices ?? Enumerable.Empty<PlatformPrice>())
-            .Where(p => p.Platform == platform)
-            .ToList();
-        
-        var platformPriceIds = platformPrices.Select(p => p.PriceId).ToHashSet();
-
-        foreach (var localPrice in localPlatformPrices)
-        {
-            if (!string.IsNullOrEmpty(localPrice.PlatformPriceId) &&
-                !platformPriceIds.Contains(localPrice.PlatformPriceId))
-            {
-                _logger.LogDebug("Deleting price not found on platform: {PriceId}", 
-                    localPrice.PlatformPriceId);
-                await DeletePriceByPlatformIdAsync(localPrice.PlatformPriceId);
-                operationCount++;
-            }
-        }
-
-        foreach (var platformPrice in platformPrices)
-        {
-            await SetPriceAsync(productId, new SetPriceDto
-            {
-                Platform = platform,
-                PlatformPriceId = platformPrice.PriceId,
-                Price = (double)platformPrice.Price,
-                Currency = platformPrice.Currency
-            });
-            operationCount++;
-        }
-
-        return operationCount;
-    }
-
-    private async Task MarkSyncCompleted()
-    {
-        RaiseEvent(new PlatformPriceSyncCompletedEvent
-        {
-            SyncedAt = Timestamp.FromDateTime(DateTime.UtcNow)
-        });
-        
-        await ConfirmEventsAsync();
     }
 
     #endregion

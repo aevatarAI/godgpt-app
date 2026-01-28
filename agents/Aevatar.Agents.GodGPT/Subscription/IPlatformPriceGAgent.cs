@@ -1,4 +1,3 @@
-using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.GodGPT.Protos.Subscription;
 using Orleans.Concurrency;
 using PaymentPlatform = Aevatar.Agents.GodGPT.Protos.InviteCode.PaymentPlatform;
@@ -11,9 +10,13 @@ namespace Aevatar.Application.Grains.Subscription;
 /// </summary>
 public interface IPlatformPriceGAgent : IGAgent
 {
-    // Sync all product prices
-    Task SyncAllPricesAsync();
-    Task SyncProductPricesAsync(string productId);
+    // Sync prices
+    Task<int> SyncProductPricesFromPlatformAsync(
+        string productId,
+        PaymentPlatform platform,
+        PlatformPriceInfoList platformPriceList);
+    
+    Task MarkSyncCompletedAsync();
     
     // General price management (admin manual configuration for Apple/Google prices)
     Task<PlatformPrice> SetPriceAsync(string productId, SetPriceDto dto);

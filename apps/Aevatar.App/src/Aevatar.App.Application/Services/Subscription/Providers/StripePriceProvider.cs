@@ -1,12 +1,14 @@
-using Aevatar.Application.Grains.Common.Options;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+using Aevatar.Agents.GodGPT.Protos.Subscription;
 using Aevatar.Payment.Providers;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Stripe;
-
 using PaymentPlatform = Aevatar.Agents.GodGPT.Protos.InviteCode.PaymentPlatform;
 
-namespace Aevatar.Application.Grains.Subscription.Providers;
+namespace Aevatar.App.Services.Subscription.Providers;
 
 /// <summary>
 /// Stripe implementation of IPlatformPriceProvider.
@@ -27,7 +29,7 @@ public class StripePriceProvider : IPlatformPriceProvider
         _logger = logger;
     }
 
-    public async Task<List<PlatformPriceInfo>> GetAllPricesAsync()
+    public async Task<PlatformPriceInfoList> GetAllPricesAsync()
     {
         _logger.LogDebug("[StripePriceProvider] Fetching all prices");
 
@@ -40,16 +42,17 @@ public class StripePriceProvider : IPlatformPriceProvider
             };
             
             var allPrices = await FetchAllPricesWithPaginationAsync(options);
-            var result = allPrices
+            var platformPriceInfos = allPrices
                 .Where(p => p.BillingScheme == "per_unit")
                 .Select(ConvertToInfo)
                 .ToList();
 
             _logger.LogDebug(
                 "[StripePriceProvider] Found {Count} prices",
-                result.Count);
-
-            return result;
+                platformPriceInfos.Count);
+            var platformPriceInfoList = new PlatformPriceInfoList();
+            platformPriceInfoList.Prices.AddRange(platformPriceInfos);
+            return platformPriceInfoList;
         }
         catch (StripeException ex)
         {
@@ -58,7 +61,7 @@ public class StripePriceProvider : IPlatformPriceProvider
         }
     }
 
-    public async Task<List<PlatformPriceInfo>> GetPricesAsync(string platformProductId)
+    public async Task<PlatformPriceInfoList> GetPricesAsync(string platformProductId)
     {
         _logger.LogDebug("[StripePriceProvider] Fetching prices for product: {ProductId}", platformProductId);
 
@@ -73,16 +76,17 @@ public class StripePriceProvider : IPlatformPriceProvider
 
             var allPrices = await FetchAllPricesWithPaginationAsync(options);
 
-            var result = allPrices
+            var platformPriceInfos = allPrices
                 .Where(p => p.BillingScheme == "per_unit")
                 .Select(ConvertToInfo)
                 .ToList();
-
+            
             _logger.LogDebug(
                 "[StripePriceProvider] Found {Count} prices for product {ProductId}",
-                result.Count, platformProductId);
-
-            return result;
+                platformPriceInfos.Count, platformProductId);
+            var platformPriceInfoList = new PlatformPriceInfoList();
+            platformPriceInfoList.Prices.AddRange(platformPriceInfos);
+            return platformPriceInfoList;
         }
         catch (StripeException ex)
         {
@@ -166,7 +170,7 @@ public class StripePriceProvider : IPlatformPriceProvider
         {
             PriceId = stripePrice.Id,
             PlatformProductId = stripePrice.ProductId ?? string.Empty,
-            Price = amount,
+            Price = (double)amount,
             Currency = stripePrice.Currency.ToUpperInvariant()
         };
     }

@@ -1,6 +1,9 @@
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using Aevatar.Agents.GodGPT.Protos.Subscription;
 using PaymentPlatform = Aevatar.Agents.GodGPT.Protos.InviteCode.PaymentPlatform;
 
-namespace Aevatar.Application.Grains.Subscription.Providers;
+namespace Aevatar.App.Services.Subscription.Providers;
 
 /// <summary>
 /// Strategy interface for fetching prices from payment platforms.
@@ -18,7 +21,7 @@ public interface IPlatformPriceProvider
     /// </summary>
     /// <param name="platformProductId">Platform-specific product ID</param>
     /// <returns>List of prices for the product</returns>
-    Task<List<PlatformPriceInfo>> GetPricesAsync(string platformProductId);
+    Task<PlatformPriceInfoList> GetPricesAsync(string platformProductId);
     
     /// <summary>
     /// Get a specific price by its platform ID.
@@ -31,5 +34,5 @@ public interface IPlatformPriceProvider
     /// Get all prices from the platform.
     /// </summary>
     /// <returns>List of prices</returns>
-    Task<List<PlatformPriceInfo>> GetAllPricesAsync();
+    Task<PlatformPriceInfoList> GetAllPricesAsync();
 }
