@@ -34,35 +34,42 @@ public class ApplePayProvider : IPaymentProvider
     {
         // Apple products are configured in App Store Connect
         // Return configured products from options with originalPlanType metadata
-        return Task.FromResult(_options.Products.Select(p => new ProductDto
+        return Task.FromResult(_options.Products.Select(p => 
         {
-            ProductId = p.ProductId,
-            Name = p.Name,
-            Description = p.Description,
-            Price = p.Price,
-            Currency = p.Currency,
-            PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
-            BillingCycle = MapPlanTypeToBillingCycle(p.PlanType),
-            IsActive = true,
-            Metadata = new Dictionary<string, string>
+            var billingCycle = p.GetBillingCycle();
+            return new ProductDto
             {
-                ["originalPlanType"] = p.PlanType.ToString(),
-                ["isUltimate"] = p.IsUltimate.ToString().ToLower()
-            }
+                ProductId = p.ProductId,
+                Name = p.Name,
+                Description = p.Description,
+                Price = p.Price,
+                Currency = p.Currency,
+                PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
+                BillingCycle = billingCycle,
+                IsActive = true,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["originalPlanType"] = p.PlanType.ToString(),
+                    ["isUltimate"] = p.IsUltimate.ToString().ToLower(),
+                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Price, billingCycle)
+                }
+            };
         }).ToList());
     }
-    
-    /// <summary>
-    /// Maps legacy PlanType (1=Day, 2=Month, 3=Year, 4=Week) to BillingCycle
-    /// </summary>
-    private static BillingCycle MapPlanTypeToBillingCycle(int planType) => planType switch
+
+    private static string CalculateDailyAvgPrice(decimal amount, BillingCycle cycle)
     {
-        1 => BillingCycle.Daily,
-        2 => BillingCycle.Monthly,
-        3 => BillingCycle.Yearly,
-        4 => BillingCycle.Weekly,
-        _ => BillingCycle.Monthly
-    };
+        var days = cycle switch
+        {
+            BillingCycle.Daily => 1,
+            BillingCycle.Weekly => 7,
+            BillingCycle.Monthly => 30,
+            BillingCycle.Quarterly => 90,
+            BillingCycle.Yearly => 365,
+            _ => 30
+        };
+        return Math.Round(amount / days, 2).ToString("F2");
+    }
 
     public async Task<SubscriptionResult> CreateSubscriptionAsync(
         SubscriptionRequest request, 
@@ -704,5 +711,19 @@ public class AppleProductConfig
     /// </summary>
     public int PlanType { get; set; }
     public bool IsUltimate { get; set; }
+    
+    /// <summary>
+    /// Maps the legacy PlanType value to BillingCycle for internal calculations.
+    /// Legacy PlanType: 1=Day, 2=Month, 3=Year, 4=Week
+    /// BillingCycle: 1=Daily, 2=Weekly, 3=Monthly, 4=Quarterly, 5=Yearly
+    /// </summary>
+    public BillingCycle GetBillingCycle() => PlanType switch
+    {
+        1 => BillingCycle.Daily,    // Day -> Daily
+        2 => BillingCycle.Monthly,  // Month -> Monthly
+        3 => BillingCycle.Yearly,   // Year -> Yearly
+        4 => BillingCycle.Weekly,   // Week -> Weekly
+        _ => BillingCycle.Monthly   // Default to Monthly
+    };
 }
 

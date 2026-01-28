@@ -65,7 +65,7 @@ public class StripeProvider : IPaymentProvider
                     IsActive = true,
                     Metadata = new Dictionary<string, string>
                     {
-                        ["isUltimate"] = p.IsUltimate.ToString(),
+                        ["isUltimate"] = p.IsUltimate.ToString().ToLower(),
                         ["mode"] = p.Mode,
                         ["originalPlanType"] = p.PlanType.ToString(),
                         ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, billingCycle)
