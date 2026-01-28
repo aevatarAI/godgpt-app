@@ -1084,6 +1084,33 @@ public class PaymentService : IPaymentService
                 }
                 else if (result.NewStatus == PaymentStatus.Refunded)
                 {
+                    // Idempotency check: skip if already refunded (prevent duplicate webhook processing)
+                    var currentStatus = (PaymentStatus)recordState.Status;
+                    if (currentStatus == PaymentStatus.Refunded || currentStatus == PaymentStatus.PartialRefunded)
+                    {
+                        // Check if this specific transaction was already refunded
+                        var transactionId = result.TransactionId ?? string.Empty;
+                        if (!string.IsNullOrEmpty(transactionId))
+                        {
+                            var txn = recordState.Transactions?.FirstOrDefault(t => t.TransactionId == transactionId);
+                            if (txn != null && txn.Status == (int)PaymentStatus.Refunded)
+                            {
+                                _logger.LogInformation(
+                                    "[PaymentService] Payment {PaymentId} transaction {TransactionId} already refunded, skipping duplicate refund webhook",
+                                    paymentId, transactionId);
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            // No specific transaction ID, check overall status
+                            _logger.LogInformation(
+                                "[PaymentService] Payment {PaymentId} already {Status}, skipping duplicate refund webhook",
+                                paymentId, currentStatus);
+                            return;
+                        }
+                    }
+                    
                     // Process refund: updates transaction status and main payment status
                     // ProcessRefundAsync will set status to Refunded if all transactions refunded, or PartialRefunded otherwise
                     await recordAgent.ProcessRefundAsync(new RefundInfoProto
