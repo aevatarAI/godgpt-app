@@ -14,6 +14,9 @@ using Orleans.Streams.Kafka.Config;
 using Serilog;
 using Serilog.Events;
 using Orleans.Serialization;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Serializers;
 using MongoDB.Driver;
 using Orleans.Providers.MongoDB.Configuration;
 using OpenTelemetry.Metrics;
@@ -27,6 +30,7 @@ public class Program
     public async static Task<int> Main(string[] args)
     {
         ConfigureLogger();
+        ConfigureMongoGuidSerialization();
 
         try
         {
@@ -139,6 +143,23 @@ public class Program
             Log.Information("   ClusterId: {ClusterId}", orleansOptions.ClusterId);
             Log.Information("   ServiceId: {ServiceId}", orleansOptions.ServiceId);
         });
+    }
+
+    /// <summary>
+    /// Configure MongoDB GUID serialization for ABP data compatibility.
+    /// Must be called before any MongoDB operations.
+    /// </summary>
+    private static void ConfigureMongoGuidSerialization()
+    {
+        try
+        {
+            BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.CSharpLegacy));
+            Log.Information("✅ MongoDB GUID serialization configured: CSharpLegacy");
+        }
+        catch (BsonSerializationException ex)
+        {
+            Log.Warning(ex, "MongoDB GUID serializer already registered, continuing...");
+        }
     }
 
     /// <summary>

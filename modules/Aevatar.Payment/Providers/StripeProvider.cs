@@ -65,7 +65,7 @@ public class StripeProvider : IPaymentProvider
                     IsActive = true,
                     Metadata = new Dictionary<string, string>
                     {
-                        ["isUltimate"] = p.IsUltimate.ToString(),
+                        ["isUltimate"] = p.IsUltimate.ToString().ToLower(),
                         ["mode"] = p.Mode,
                         ["originalPlanType"] = p.PlanType.ToString(),
                         ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, billingCycle)
@@ -200,12 +200,14 @@ public class StripeProvider : IPaymentProvider
             {
                 ["internal_user_id"] = request.UserId.ToString(),
                 ["order_id"] = orderId,
-                ["price_id"] = request.ProductId ?? string.Empty
+                ["price_id"] = request.ProductId ?? string.Empty,
+                ["quantity"] = "1"
             };
             
+            var mode = request.Mode ?? "subscription";
             var sessionOptions = new SessionCreateOptions
             {
-                Mode = request.Mode ?? "subscription",
+                Mode = mode,
                 LineItems = new List<SessionLineItemOptions>
                 {
                     new()
@@ -218,11 +220,21 @@ public class StripeProvider : IPaymentProvider
                 CancelUrl = cancelUrl,
                 Metadata = commonMetadata,
                 ClientReferenceId = request.UserId.ToString(),
-                // Copy metadata to subscription so invoice.paid can access it
-                SubscriptionData = new SessionSubscriptionDataOptions
-                {
-                    Metadata = commonMetadata
-                }
+                // Match old code logic: conditionally set metadata carrier based on mode
+                // Stripe API doesn't allow PaymentIntentData in subscription mode
+                PaymentIntentData = mode == "payment"
+                    ? new SessionPaymentIntentDataOptions
+                    {
+                        SetupFutureUsage = "off_session",
+                        Metadata = commonMetadata
+                    }
+                    : null,
+                SubscriptionData = mode == "subscription"
+                    ? new SessionSubscriptionDataOptions
+                    {
+                        Metadata = commonMetadata
+                    }
+                    : null
             };
 
             // Support embedded UI mode
@@ -253,10 +265,27 @@ public class StripeProvider : IPaymentProvider
                 sessionOptions.SubscriptionData.TrialPeriodDays = request.TrialDays;
             }
 
+            // Log metadata setup for debugging
+            var subDataMetaKeys = sessionOptions.SubscriptionData?.Metadata != null 
+                ? string.Join(",", sessionOptions.SubscriptionData.Metadata.Keys) 
+                : "(null)";
+            var subDataMetaValues = sessionOptions.SubscriptionData?.Metadata != null 
+                ? string.Join(",", sessionOptions.SubscriptionData.Metadata.Values) 
+                : "(null)";
+            _logger.LogInformation(
+                "[StripeProvider] Creating checkout session: Mode={Mode}, OrderId={OrderId}, " +
+                "HasSubscriptionData={HasSubscriptionData}, " +
+                "SubscriptionData.Metadata.Keys={SubDataMetaKeys}, " +
+                "SubscriptionData.Metadata.Values={SubDataMetaValues}",
+                mode, orderId,
+                sessionOptions.SubscriptionData != null,
+                subDataMetaKeys,
+                subDataMetaValues);
+            
             var session = await sessionService.CreateAsync(sessionOptions, cancellationToken: ct);
 
-            _logger.LogInformation("[StripeProvider] Created checkout session {SessionId} for user {UserId}, OrderId={OrderId}",
-                session.Id, request.UserId, orderId);
+            _logger.LogInformation("[StripeProvider] Created checkout session {SessionId} for user {UserId}, OrderId={OrderId}, PaymentIntentId={PaymentIntentId}",
+                session.Id, request.UserId, orderId, session.PaymentIntentId ?? "(null)");
 
             return new SubscriptionResult
             {
@@ -437,6 +466,9 @@ public class StripeProvider : IPaymentProvider
                 case "payment_intent.succeeded":
                     await HandlePaymentIntentSucceeded(stripeEvent, result);
                     break;
+                case "charge.refunded":
+                    await HandleChargeRefunded(stripeEvent, result);
+                    break;
                 default:
                     result.ShouldProcess = false;
                     break;
@@ -574,6 +606,14 @@ public class StripeProvider : IPaymentProvider
         {
             userIdStr = paymentIntent.Metadata?.GetValueOrDefault("internal_user_id");
         }
+        else if (stripeEvent.Data.Object is Charge charge)
+        {
+            // Try Charge metadata first, then PaymentIntent metadata
+            userIdStr = charge.Metadata?.GetValueOrDefault("user_id")
+                ?? charge.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("user_id")
+                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("internal_user_id");
+        }
 
         return Guid.TryParse(userIdStr, out var userId) ? userId : null;
     }
@@ -684,10 +724,34 @@ public class StripeProvider : IPaymentProvider
                     result.IsRenewal = billingReason.GetString() == "subscription_cycle";
                 }
 
-                // Set NewStatus for invoice.paid
+                // Set NewStatus based on event type
                 if (eventType == "invoice.paid")
                 {
                     result.NewStatus = PaymentStatus.Completed;
+                }
+                else if (eventType == "charge.refunded")
+                {
+                    // For charge.refunded in JSON fallback mode:
+                    // charge.metadata is usually empty, and we can't call Stripe API in test mode
+                    // In production, HandleChargeRefunded fetches metadata from PaymentIntent or Invoice->Subscription
+                    result.NewStatus = PaymentStatus.Refunded;
+                    
+                    // Extract charge-specific fields
+                    if (obj.TryGetProperty("amount_refunded", out var amountRefunded))
+                    {
+                        result.VerificationResult = new VerificationResult
+                        {
+                            IsValid = true,
+                            Amount = amountRefunded.GetInt64() / 100m,
+                            TransactionId = result.TransactionId
+                        };
+                    }
+                    
+                    _logger.LogWarning(
+                        "[StripeProvider] charge.refunded in JSON fallback mode: OrderId/UserId may be null. " +
+                        "In production (with signature verification), HandleChargeRefunded fetches metadata from PaymentIntent or Subscription. " +
+                        "ChargeId={ChargeId}, RefundAmount={RefundAmount}",
+                        result.TransactionId, result.VerificationResult?.Amount);
                 }
 
                 _logger.LogInformation(
@@ -716,6 +780,15 @@ public class StripeProvider : IPaymentProvider
             var subscriptionId = invoice.Parent?.SubscriptionDetails?.Subscription?.Id 
                 ?? invoice.Parent?.SubscriptionDetails?.SubscriptionId; // Fallback path
             var subscriptionMetadata = invoice.Parent?.SubscriptionDetails?.Metadata;
+            
+            // Debug: Log subscription metadata from invoice
+            _logger.LogInformation(
+                "[StripeProvider] invoice.paid: METADATA DEBUG - InvoiceId={InvoiceId}, SubscriptionId={SubscriptionId}, " +
+                "MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}",
+                invoice.Id,
+                subscriptionId ?? "(null)",
+                subscriptionMetadata?.Count ?? 0,
+                subscriptionMetadata != null ? string.Join(",", subscriptionMetadata.Keys) : "(null)");
             
             // Extract orderId from subscription metadata (stable key)
             result.OrderId = TryGetFromMetadata(subscriptionMetadata, "order_id");
@@ -776,8 +849,24 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Subscription subscription)
         {
+            // Debug: Log all subscription metadata
+            _logger.LogInformation(
+                "[StripeProvider] subscription.updated: METADATA DEBUG - SubscriptionId={SubscriptionId}, " +
+                "MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}, MetadataValues={MetadataValues}",
+                subscription.Id,
+                subscription.Metadata?.Count ?? 0,
+                subscription.Metadata != null ? string.Join(",", subscription.Metadata.Keys) : "(null)",
+                subscription.Metadata != null ? string.Join(",", subscription.Metadata.Values) : "(null)");
+            
             result.OrderId = TryGetFromMetadata(subscription.Metadata, "order_id");
             result.SubscriptionId = subscription.Id;
+            
+            // Also extract UserId from subscription metadata
+            var userIdStr = TryGetFromMetadata(subscription.Metadata, "internal_user_id");
+            if (Guid.TryParse(userIdStr, out var userId))
+            {
+                result.UserId = userId;
+            }
             
             // Match old code logic: if subscription is canceled OR auto-renewal was cancelled
             // (CancelAtPeriodEnd=true), set status to Cancelled directly
@@ -794,8 +883,8 @@ public class StripeProvider : IPaymentProvider
             }
             
             _logger.LogInformation(
-                "[StripeProvider] subscription.updated: OrderId={OrderId}, SubscriptionId={SubscriptionId}, Status={Status}, CancelAtPeriodEnd={CancelAtPeriodEnd}",
-                result.OrderId, subscription.Id, subscription.Status, subscription.CancelAtPeriodEnd);
+                "[StripeProvider] subscription.updated: OrderId={OrderId}, UserId={UserId}, SubscriptionId={SubscriptionId}, Status={Status}, CancelAtPeriodEnd={CancelAtPeriodEnd}",
+                result.OrderId, result.UserId, subscription.Id, subscription.Status, subscription.CancelAtPeriodEnd);
         }
         return Task.CompletedTask;
     }
@@ -842,6 +931,157 @@ public class StripeProvider : IPaymentProvider
                 result.OrderId, paymentIntent.Id, result.SubscriptionId);
         }
         return Task.CompletedTask;
+    }
+
+    private async Task HandleChargeRefunded(Event stripeEvent, WebhookResult result)
+    {
+        if (stripeEvent.Data.Object is Charge charge)
+        {
+            // ========== DIAGNOSTIC LOGGING ==========
+            // Log all charge details for debugging metadata retrieval issues
+            // Note: SDK 48.x removed Charge.InvoiceId property, use RawJObject
+            var chargeInvoiceId = charge.RawJObject?.SelectToken("invoice")?.ToString();
+            _logger.LogInformation(
+                "[StripeProvider] charge.refunded: === DIAGNOSTIC START === " +
+                "ChargeId={ChargeId}, PaymentIntentId={PaymentIntentId}, InvoiceId={InvoiceId}, " +
+                "ChargeMetadataCount={ChargeMetadataCount}, ChargeMetadataKeys={ChargeMetadataKeys}",
+                charge.Id, 
+                charge.PaymentIntentId ?? "(null)",
+                chargeInvoiceId ?? "(null)",
+                charge.Metadata?.Count ?? 0,
+                charge.Metadata != null ? string.Join(",", charge.Metadata.Keys) : "(null)");
+            
+            // Try multiple sources for metadata (same as old code):
+            // 1. Charge.Metadata (rarely populated)
+            // 2. PaymentIntent.Metadata (for payment mode)
+            // 3. Charge -> Invoice -> Subscription.Metadata (for subscription mode)
+            var metadata = charge.Metadata;
+            string metadataSource = "Charge";
+            
+            // If Charge metadata is empty, fetch PaymentIntent from Stripe API
+            if ((metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id")) 
+                && !string.IsNullOrEmpty(charge.PaymentIntentId))
+            {
+                try
+                {
+                    var paymentIntentService = new PaymentIntentService(_client);
+                    var paymentIntent = await paymentIntentService.GetAsync(charge.PaymentIntentId);
+                    
+                    _logger.LogInformation(
+                        "[StripeProvider] charge.refunded: PaymentIntent lookup - " +
+                        "PaymentIntentId={PaymentIntentId}, MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}",
+                        charge.PaymentIntentId,
+                        paymentIntent?.Metadata?.Count ?? 0,
+                        paymentIntent?.Metadata != null ? string.Join(",", paymentIntent.Metadata.Keys) : "(null)");
+                    
+                    if (paymentIntent?.Metadata != null && paymentIntent.Metadata.ContainsKey("order_id"))
+                    {
+                        metadata = paymentIntent.Metadata;
+                        metadataSource = "PaymentIntent";
+                        _logger.LogDebug(
+                            "[StripeProvider] charge.refunded: Using PaymentIntent metadata {PaymentIntentId}",
+                            charge.PaymentIntentId);
+                    }
+                }
+                catch (StripeException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "[StripeProvider] charge.refunded: Failed to fetch PaymentIntent {PaymentIntentId}",
+                        charge.PaymentIntentId);
+                }
+            }
+            
+            // If still no metadata, get Subscription directly from Customer
+            // Same approach as subscription.updated - Subscription.Metadata is the source of truth
+            // Invoice path doesn't work in API 2025-04-30.basil (invoice.payment_intent/subscription are null)
+            if ((metadata == null || !metadata.Any() || !metadata.ContainsKey("order_id"))
+                && !string.IsNullOrEmpty(charge.CustomerId))
+            {
+                try
+                {
+                    var subscriptionService = new SubscriptionService(_client);
+                    var subscriptions = await subscriptionService.ListAsync(new SubscriptionListOptions
+                    {
+                        Customer = charge.CustomerId,
+                        Limit = 10,
+                        Status = "all" // Include canceled subscriptions
+                    });
+                    
+                    _logger.LogInformation(
+                        "[StripeProvider] charge.refunded: Customer Subscription lookup - " +
+                        "CustomerId={CustomerId}, SubscriptionCount={Count}",
+                        charge.CustomerId, subscriptions.Data.Count);
+                    
+                    // Find subscription with order_id metadata
+                    foreach (var sub in subscriptions.Data)
+                    {
+                        _logger.LogInformation(
+                            "[StripeProvider] charge.refunded: Checking Subscription - " +
+                            "SubscriptionId={SubscriptionId}, Status={Status}, " +
+                            "MetadataCount={MetadataCount}, MetadataKeys={MetadataKeys}",
+                            sub.Id, sub.Status,
+                            sub.Metadata?.Count ?? 0,
+                            sub.Metadata != null ? string.Join(",", sub.Metadata.Keys) : "(null)");
+                        
+                        if (sub.Metadata != null && sub.Metadata.ContainsKey("order_id"))
+                        {
+                            metadata = sub.Metadata;
+                            metadataSource = $"Subscription({sub.Id})";
+                            _logger.LogInformation(
+                                "[StripeProvider] charge.refunded: Found metadata from Subscription {SubscriptionId}",
+                                sub.Id);
+                            break;
+                        }
+                    }
+                }
+                catch (StripeException ex)
+                {
+                    _logger.LogWarning(ex,
+                        "[StripeProvider] charge.refunded: Failed to lookup Customer subscriptions {CustomerId}",
+                        charge.CustomerId);
+                }
+            }
+            
+            _logger.LogInformation(
+                "[StripeProvider] charge.refunded: === DIAGNOSTIC END === MetadataSource={MetadataSource}, " +
+                "FinalOrderId={OrderId}, FinalUserId={UserId}",
+                metadataSource,
+                TryGetFromMetadata(metadata, "order_id") ?? "(null)",
+                TryGetFromMetadata(metadata, "internal_user_id") ?? TryGetFromMetadata(metadata, "user_id") ?? "(null)");
+            
+            // Extract business data from metadata
+            result.OrderId = TryGetFromMetadata(metadata, "order_id");
+            result.ProductId = TryGetFromMetadata(metadata, "price_id");
+            result.TransactionId = charge.Id;
+            result.NewStatus = PaymentStatus.Refunded;
+            result.ShouldProcess = true;
+            
+            // Extract UserId from metadata
+            var userIdStr = TryGetFromMetadata(metadata, "internal_user_id") 
+                         ?? TryGetFromMetadata(metadata, "user_id");
+            if (Guid.TryParse(userIdStr, out var userId))
+            {
+                result.UserId = userId;
+            }
+            
+            // Calculate refund amount (AmountRefunded is in cents)
+            var refundAmount = charge.AmountRefunded / 100m;
+            var originalAmount = charge.Amount / 100m;
+            
+            result.VerificationResult = new VerificationResult
+            {
+                IsValid = true,
+                TransactionId = charge.Id,
+                Amount = refundAmount,
+                Currency = charge.Currency?.ToUpper() ?? "USD",
+                ErrorMessage = charge.Refunded ? "Full refund" : "Partial refund"
+            };
+            
+            _logger.LogInformation(
+                "[StripeProvider] charge.refunded: OrderId={OrderId}, ChargeId={ChargeId}, UserId={UserId}, " +
+                "ProductId={ProductId}, RefundAmount={RefundAmount}, OriginalAmount={OriginalAmount}, FullRefund={FullRefund}",
+                result.OrderId, charge.Id, result.UserId, result.ProductId, refundAmount, originalAmount, charge.Refunded);
+        }
     }
 
     private static PaymentStatus MapStripeStatus(string stripeStatus)

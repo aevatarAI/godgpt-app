@@ -136,6 +136,12 @@ public class SubscriptionResult
     /// </summary>
     public string? OrderId { get; set; }
     
+    /// <summary>
+    /// Product ID from verification (Apple/Google) or request (Stripe).
+    /// Used for product config lookup in RecordPaymentAsync.
+    /// </summary>
+    public string? ProductId { get; set; }
+    
     public Dictionary<string, object> AdditionalData { get; set; } = new();
 }
 

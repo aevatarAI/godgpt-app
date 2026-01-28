@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
@@ -9,6 +9,9 @@ using Serilog.Events;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Serializers;
 
 namespace Aevatar.AuthServer;
 
@@ -21,6 +24,11 @@ public class Program
         try
         {
             Log.Information("Starting Aevatar.AuthServer.");
+            
+            // Configure MongoDB GUID serialization BEFORE any ABP modules are loaded
+            // This must happen before ABP MongoDB modules initialize
+            ConfigureMongoGuidSerialization();
+            
             var builder = WebApplication.CreateBuilder(args);
             
             // Configure OpenTelemetry
@@ -58,6 +66,26 @@ public class Program
             .MinimumLevel.Override("Microsoft.EntityFrameworkCore", LogEventLevel.Warning)
             .Enrich.FromLogContext()
             .CreateLogger();
+    }
+
+    /// <summary>
+    /// Configure MongoDB GUID serialization to use Legacy format for backward compatibility.
+    /// This must be called BEFORE any ABP modules are loaded to ensure it takes effect.
+    /// </summary>
+    private static void ConfigureMongoGuidSerialization()
+    {
+        try
+        {
+            // Register GUID serializer with Legacy format BEFORE ABP modules load
+            // This ensures compatibility with existing data stored in UuidLegacy format
+            BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.CSharpLegacy));
+            Log.Information("✅ MongoDB GUID serialization configured: CSharpLegacy");
+        }
+        catch (BsonSerializationException ex)
+        {
+            // Already registered, log warning but continue
+            Log.Warning(ex, "MongoDB GUID serializer already registered, continuing...");
+        }
     }
 
     /// <summary>

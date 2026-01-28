@@ -64,10 +64,30 @@ stop_service() {
 cleanup_dotnet() {
     log_info "Cleaning up any remaining dotnet processes..."
     
+    # Kill Aspire AppHost first (this should cascade to children)
+    pkill -f "Aevatar.AppHost" 2>/dev/null || true
+    sleep 1
+    
     # Find and kill dotnet processes related to our projects
-    pkill -f "Aevatar.Silo" 2>/dev/null || true
-    pkill -f "Aevatar.AuthServer" 2>/dev/null || true
-    pkill -f "Aevatar.App.HttpApi.Host" 2>/dev/null || true
+    # Use full path matching to avoid killing IDE processes
+    pkill -f "godgpt-app.*Aevatar.Silo" 2>/dev/null || true
+    pkill -f "godgpt-app.*Aevatar.AuthServer" 2>/dev/null || true
+    pkill -f "godgpt-app.*Aevatar.App.HttpApi.Host" 2>/dev/null || true
+    
+    # Kill Aspire-related processes
+    pkill -f "Aspire.Dashboard.dll" 2>/dev/null || true
+    pkill -f "aspire-dashboard" 2>/dev/null || true
+    
+    # Kill any dcp (Distributed Control Plane) processes started by Aspire
+    pkill -f "start-apiserver.*aspire" 2>/dev/null || true
+    
+    sleep 1
+    
+    # Force kill if any remain (use -9)
+    pkill -9 -f "godgpt-app.*Aevatar.Silo" 2>/dev/null || true
+    pkill -9 -f "godgpt-app.*Aevatar.AuthServer" 2>/dev/null || true
+    pkill -9 -f "godgpt-app.*Aevatar.App.HttpApi.Host" 2>/dev/null || true
+    pkill -9 -f "godgpt-app.*Aevatar.AppHost" 2>/dev/null || true
     
     sleep 1
 }

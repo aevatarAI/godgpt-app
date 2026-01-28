@@ -233,16 +233,22 @@ public class PaymentService : IPaymentService
         WebhookRequest request,
         CancellationToken ct = default)
     {
-        _logger.LogInformation("[PaymentService] Handling webhook for {Platform}", platform);
-
         var provider = GetProvider(platform);
         var result = await provider.HandleWebhookAsync(request, ct);
+
+        _logger.LogInformation(
+            "[PaymentService] Webhook: Platform={Platform}, OrderId={OrderId}, UserId={UserId}, EventType={EventType}, ShouldProcess={ShouldProcess}",
+            platform, result.OrderId, result.UserId, result.EventType, result.ShouldProcess);
 
         // Use OrderId instead of SubscriptionId for consistency check
         // OrderId is the stable key used for PaymentRecordGAgent lookup
         if (result.Success && result.ShouldProcess && !string.IsNullOrEmpty(result.OrderId))
         {
             await ProcessWebhookResultAsync(platform, result);
+        }
+        else if (result.Success && result.ShouldProcess && string.IsNullOrEmpty(result.OrderId))
+        {
+            _logger.LogWarning("[PaymentService] Webhook skipped - OrderId is empty! SubscriptionId={SubscriptionId}", result.SubscriptionId);
         }
 
         return result;
@@ -531,7 +537,12 @@ public class PaymentService : IPaymentService
         return actor.As<AgentModels.IPaymentRecordGAgent>();
     }
 
-    private static string GetPaymentId(PaymentPlatform platform, string subscriptionId)
+    /// <summary>
+    /// Generate stable paymentId using OrderId (not SubscriptionId).
+    /// - Stripe: OrderId is a GUID stored in metadata, stable across all webhook events
+    /// - Apple/Google: OrderId = OriginalTransactionId, also stable
+    /// </summary>
+    private static string GetPaymentId(PaymentPlatform platform, string orderId)
     {
         var platformName = platform switch
         {
@@ -540,7 +551,7 @@ public class PaymentService : IPaymentService
             PaymentPlatform.GooglePlay => "googleplay",
             _ => "unknown"
         };
-        return $"payment_{platformName}_{subscriptionId}";
+        return $"payment_{platformName}_{orderId}";
     }
 
     private async Task RecordPaymentAsync(
@@ -582,6 +593,10 @@ public class PaymentService : IPaymentService
             // Create payment record agent
             var recordAgent = await GetRecordAgentAsync(paymentId);
             
+            // Use result.ProductId (from verification) if available, fallback to request.ProductId
+            // This ensures we get the correct ProductId even if client didn't provide it
+            var productId = !string.IsNullOrEmpty(result.ProductId) ? result.ProductId : request.ProductId ?? string.Empty;
+            
             var createRequest = new AgentModels.Protos.CreatePaymentRequestProto
             {
                 UserId = userId.ToString(),
@@ -589,11 +604,11 @@ public class PaymentService : IPaymentService
                 ExternalOrderId = orderId, // Store orderId for business logic reference
                 SubscriptionId = string.Empty, // Will be set by webhook when real subscriptionId (sub_xxx) is available
                 CustomerId = result.CustomerId ?? string.Empty,
-                ProductId = request.ProductId ?? string.Empty,
-                ProductName = request.ProductId ?? string.Empty,
+                ProductId = productId,
+                ProductName = productId,
                 PaymentMode = (int)AgentModels.PaymentMode.Subscription,
                 BusinessType = "godgpt",
-                BusinessId = request.ProductId ?? string.Empty,
+                BusinessId = productId,
                 PeriodEnd = result.ExpiresAt.HasValue 
                     ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.ExpiresAt.Value.ToUniversalTime())
                     : null
@@ -609,7 +624,7 @@ public class PaymentService : IPaymentService
             }
             
             // Get product config for ProductName, Amount, and Currency (always fetch)
-            string productName = request.ProductId ?? string.Empty;
+            string productName = productId;
             decimal productAmount = 0;
             string currency = "USD";
             
@@ -617,7 +632,7 @@ public class PaymentService : IPaymentService
             {
                 var provider = GetProvider(platform);
                 var products = await provider.GetProductsAsync();
-                var product = products.FirstOrDefault(p => p.ProductId == request.ProductId);
+                var product = products.FirstOrDefault(p => p.ProductId == productId);
                 
                 if (product != null)
                 {
@@ -961,6 +976,10 @@ public class PaymentService : IPaymentService
             }
             
             var eventContext = BuildEventContext(recordState, platform, paymentId);
+            
+            _logger.LogInformation(
+                "[PaymentService] ProcessWebhook: PaymentId={PaymentId}, UserId={UserId}, NewStatus={NewStatus}, HasIndexAgent={HasIndexAgent}",
+                paymentId, result.UserId, result.NewStatus, indexAgent != null);
 
             if (result.NewStatus.HasValue)
             {
@@ -995,12 +1014,16 @@ public class PaymentService : IPaymentService
                     // Process renewal in agent
                     if (result.VerificationResult?.ExpiresDate != null)
                     {
-                        await recordAgent.ProcessRenewalAsync(new AgentModels.RenewalInfo
+                        // Convert amount to smallest unit (cents) for Protobuf
+                        var renewalAmount = (long)((result.VerificationResult.Amount ?? 0) * 100);
+                        
+                        await recordAgent.ProcessRenewalAsync(new RenewalInfoProto
                         {
-                            ExternalTransactionId = result.TransactionId,
-                            PeriodStart = DateTime.UtcNow,
-                            PeriodEnd = result.VerificationResult.ExpiresDate.Value,
-                            Amount = 0
+                            ExternalTransactionId = result.TransactionId ?? string.Empty,
+                            PeriodStart = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime()),
+                            PeriodEnd = Timestamp.FromDateTime(result.VerificationResult.ExpiresDate.Value.ToUniversalTime()),
+                            Amount = renewalAmount,
+                            Currency = result.VerificationResult.Currency ?? "USD"
                         });
 
                         if (indexAgent != null)
@@ -1035,17 +1058,21 @@ public class PaymentService : IPaymentService
                     }
 
                     // Point-to-point callback to order-level agent (if configured)
-                    await recordAgent.NotifyCallbackAgentAsync(completedEvent);
+                    await recordAgent.NotifyPaymentCompletedToCallbackAsync(completedEvent);
                 }
                 else if (result.NewStatus == PaymentStatus.Cancelled || 
                          result.NewStatus == PaymentStatus.Expired)
                 {
-                    // Idempotency check: skip if already cancelled (e.g., user API cancel + webhook)
+                    // Idempotency check: skip if already cancelled or refunded
+                    // Refunded orders should not be cancelled again (refund already processed cancellation logic)
                     var currentStatus = (PaymentStatus)recordState.Status;
-                    if (currentStatus == PaymentStatus.Cancelled || currentStatus == PaymentStatus.Expired)
+                    if (currentStatus == PaymentStatus.Cancelled || 
+                        currentStatus == PaymentStatus.Expired ||
+                        currentStatus == PaymentStatus.Refunded ||
+                        currentStatus == PaymentStatus.PartialRefunded)
                     {
                         _logger.LogInformation(
-                            "[PaymentService] Payment {PaymentId} already {Status}, skipping duplicate cancellation from webhook",
+                            "[PaymentService] Payment {PaymentId} already {Status}, skipping cancellation webhook (refund already processed cancellation)",
                             paymentId, currentStatus);
                         return;
                     }
@@ -1075,11 +1102,38 @@ public class PaymentService : IPaymentService
                 }
                 else if (result.NewStatus == PaymentStatus.Refunded)
                 {
+                    // Idempotency check: skip if already refunded (prevent duplicate webhook processing)
+                    var currentStatus = (PaymentStatus)recordState.Status;
+                    if (currentStatus == PaymentStatus.Refunded || currentStatus == PaymentStatus.PartialRefunded)
+                    {
+                        // Check if this specific transaction was already refunded
+                        var transactionId = result.TransactionId ?? string.Empty;
+                        if (!string.IsNullOrEmpty(transactionId))
+                        {
+                            var txn = recordState.Transactions?.FirstOrDefault(t => t.TransactionId == transactionId);
+                            if (txn != null && txn.Status == (int)PaymentStatus.Refunded)
+                            {
+                                _logger.LogInformation(
+                                    "[PaymentService] Payment {PaymentId} transaction {TransactionId} already refunded, skipping duplicate refund webhook",
+                                    paymentId, transactionId);
+                                return;
+                            }
+                        }
+                        else
+                        {
+                            // No specific transaction ID, check overall status
+                            _logger.LogInformation(
+                                "[PaymentService] Payment {PaymentId} already {Status}, skipping duplicate refund webhook",
+                                paymentId, currentStatus);
+                            return;
+                        }
+                    }
+                    
                     // Process refund: updates transaction status and main payment status
                     // ProcessRefundAsync will set status to Refunded if all transactions refunded, or PartialRefunded otherwise
-                    await recordAgent.ProcessRefundAsync(new AgentModels.RefundInfo
+                    await recordAgent.ProcessRefundAsync(new RefundInfoProto
                     {
-                        TransactionId = result.TransactionId, // If null, refunds latest completed transaction
+                        TransactionId = result.TransactionId ?? string.Empty, // If empty, refunds latest completed transaction
                         RefundAmount = recordState?.Amount ?? 0,
                         Reason = result.VerificationResult?.ErrorMessage ?? "refund"
                     });
@@ -1088,7 +1142,7 @@ public class PaymentService : IPaymentService
                         "[PaymentService] Processed refund for payment {PaymentId}, transaction {TransactionId}",
                         paymentId, result.TransactionId ?? "latest");
 
-                    // Build refund completed event
+                    // Build refund completed event (for Analytics reporting)
                     var refundEvent = new RefundCompletedEvent
                     {
                         Context = eventContext,
@@ -1099,16 +1153,30 @@ public class PaymentService : IPaymentService
                         RefundedAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
                     };
 
+                    // Build cancellation event (for business agents like UserQuotaGAgent)
+                    // Refund should trigger same business logic as cancellation
+                    var cancelledEvent = new PaymentCancelledEvent
+                    {
+                        Context = eventContext,
+                        Reason = "refund",
+                        Immediate = true, // Refunds are immediate
+                        CancelledAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                    };
+
                     if (indexAgent != null)
                     {
                         await indexAgent.RemoveActiveSubscriptionAsync(paymentId);
                         
-                        // Broadcast to business agents via IndexAgent
+                        // Broadcast RefundCompletedEvent for Analytics (GA4 reporting)
                         await indexAgent.NotifyRefundCompletedAsync(refundEvent);
+                        
+                        // Also broadcast PaymentCancelledEvent for business agents (UserQuotaGAgent)
+                        // This ensures consistent handling - refund triggers same logic as cancel
+                        await indexAgent.NotifyPaymentCancelledAsync(cancelledEvent);
                     }
 
                     // Point-to-point callback to order-level agent (if configured)
-                    await recordAgent.NotifyCallbackAgentAsync(refundEvent);
+                    await recordAgent.NotifyRefundCompletedToCallbackAsync(refundEvent);
                 }
                 else if (result.NewStatus == PaymentStatus.Failed)
                 {
@@ -1130,7 +1198,7 @@ public class PaymentService : IPaymentService
                     }
 
                     // Point-to-point callback to order-level agent (if configured)
-                    await recordAgent.NotifyCallbackAgentAsync(failedEvent);
+                    await recordAgent.NotifyPaymentFailedToCallbackAsync(failedEvent);
                 }
                 else
                 {
@@ -1141,8 +1209,9 @@ public class PaymentService : IPaymentService
         catch (Exception ex)
         {
             _logger.LogError(ex, 
-                "[PaymentService] Failed to process webhook for subscription {SubscriptionId}",
-                result.SubscriptionId);
+                "[PaymentService] Failed to process webhook: OrderId={OrderId}, SubscriptionId={SubscriptionId}, " +
+                "UserId={UserId}, Status={Status}, TransactionId={TransactionId}",
+                result.OrderId, result.SubscriptionId, result.UserId, result.NewStatus, result.TransactionId);
         }
     }
 

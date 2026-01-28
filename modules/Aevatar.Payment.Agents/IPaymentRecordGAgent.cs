@@ -91,15 +91,17 @@ public interface IPaymentRecordGAgent : IGAgent
     
     /// <summary>
     /// Process subscription renewal
+    /// Uses Protobuf type for RPC compatibility.
     /// </summary>
-    Task ProcessRenewalAsync(RenewalInfo renewal);
+    Task ProcessRenewalAsync(Protos.RenewalInfoProto renewal);
     
     // ========== Refund Processing ==========
     
     /// <summary>
     /// Process full refund
+    /// Uses Protobuf type for RPC compatibility.
     /// </summary>
-    Task ProcessRefundAsync(RefundInfo refund);
+    Task ProcessRefundAsync(Protos.RefundInfoProto refund);
     
     /// <summary>
     /// Process partial refund for a specific transaction
@@ -107,72 +109,26 @@ public interface IPaymentRecordGAgent : IGAgent
     Task ProcessPartialRefundAsync(string transactionId, long refundAmount, string reason);
     
     // ========== Callback Notification ==========
+    // Note: Using different method names instead of overloads to avoid RPC proxy confusion
     
     /// <summary>
     /// Notify callback agent about payment completion (if configured).
     /// This uses point-to-point SendTo for direct delivery.
     /// </summary>
-    Task NotifyCallbackAgentAsync(Protos.PaymentCompletedEvent evt);
+    Task NotifyPaymentCompletedToCallbackAsync(Protos.PaymentCompletedEvent evt);
     
     /// <summary>
     /// Notify callback agent about payment failure (if configured).
     /// </summary>
-    Task NotifyCallbackAgentAsync(Protos.PaymentFailedEvent evt);
+    Task NotifyPaymentFailedToCallbackAsync(Protos.PaymentFailedEvent evt);
     
     /// <summary>
     /// Notify callback agent about refund completion (if configured).
     /// </summary>
-    Task NotifyCallbackAgentAsync(Protos.RefundCompletedEvent evt);
+    Task NotifyRefundCompletedToCallbackAsync(Protos.RefundCompletedEvent evt);
 }
 
-/// <summary>
-/// Renewal information
-/// </summary>
-public class RenewalInfo
-{
-    /// <summary>Platform transaction ID</summary>
-    public string? ExternalTransactionId { get; set; }
-    
-    /// <summary>Invoice ID</summary>
-    public string? InvoiceId { get; set; }
-    
-    /// <summary>New period start</summary>
-    public DateTime PeriodStart { get; set; }
-    
-    /// <summary>New period end</summary>
-    public DateTime PeriodEnd { get; set; }
-    
-    /// <summary>Amount in smallest unit</summary>
-    public long Amount { get; set; }
-    
-    /// <summary>Currency code</summary>
-    public string Currency { get; set; } = "USD";
-    
-    /// <summary>Applied promotions</summary>
-    public List<Promotion> Promotions { get; set; } = new();
-    
-    /// <summary>Is trial period</summary>
-    public bool IsTrial { get; set; }
-    
-    /// <summary>Trial code</summary>
-    public string? TrialCode { get; set; }
-}
-
-/// <summary>
-/// Refund information
-/// </summary>
-public class RefundInfo
-{
-    /// <summary>Transaction ID to refund (if specific)</summary>
-    public string? TransactionId { get; set; }
-    
-    /// <summary>Refund amount in smallest unit</summary>
-    public long RefundAmount { get; set; }
-    
-    /// <summary>Refund reason</summary>
-    public string Reason { get; set; } = string.Empty;
-    
-    /// <summary>Platform refund ID</summary>
-    public string? ExternalRefundId { get; set; }
-}
+// Note: RenewalInfo and RefundInfo are now defined as Protobuf messages
+// (RenewalInfoProto and RefundInfoProto) in payment_record.proto
+// Use Protos.RenewalInfoProto and Protos.RefundInfoProto instead
 

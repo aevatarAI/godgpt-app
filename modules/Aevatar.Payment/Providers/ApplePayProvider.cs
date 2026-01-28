@@ -34,44 +34,56 @@ public class ApplePayProvider : IPaymentProvider
     {
         // Apple products are configured in App Store Connect
         // Return configured products from options with originalPlanType metadata
-        return Task.FromResult(_options.Products.Select(p => new ProductDto
+        return Task.FromResult(_options.Products.Select(p => 
         {
-            ProductId = p.ProductId,
-            Name = p.Name,
-            Description = p.Description,
-            Price = p.Price,
-            Currency = p.Currency,
-            PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
-            BillingCycle = MapPlanTypeToBillingCycle(p.PlanType),
-            IsActive = true,
-            Metadata = new Dictionary<string, string>
+            var billingCycle = p.GetBillingCycle();
+            return new ProductDto
             {
-                ["originalPlanType"] = p.PlanType.ToString(),
-                ["isUltimate"] = p.IsUltimate.ToString().ToLower()
-            }
+                ProductId = p.ProductId,
+                Name = p.Name,
+                Description = p.Description,
+                Price = p.Price,
+                Currency = p.Currency,
+                PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
+                BillingCycle = billingCycle,
+                IsActive = true,
+                Metadata = new Dictionary<string, string>
+                {
+                    ["originalPlanType"] = p.PlanType.ToString(),
+                    ["isUltimate"] = p.IsUltimate.ToString().ToLower(),
+                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Price, billingCycle)
+                }
+            };
         }).ToList());
     }
-    
-    /// <summary>
-    /// Maps legacy PlanType (1=Day, 2=Month, 3=Year, 4=Week) to BillingCycle
-    /// </summary>
-    private static BillingCycle MapPlanTypeToBillingCycle(int planType) => planType switch
+
+    private static string CalculateDailyAvgPrice(decimal amount, BillingCycle cycle)
     {
-        1 => BillingCycle.Daily,
-        2 => BillingCycle.Monthly,
-        3 => BillingCycle.Yearly,
-        4 => BillingCycle.Weekly,
-        _ => BillingCycle.Monthly
-    };
+        var days = cycle switch
+        {
+            BillingCycle.Daily => 1,
+            BillingCycle.Weekly => 7,
+            BillingCycle.Monthly => 30,
+            BillingCycle.Quarterly => 90,
+            BillingCycle.Yearly => 365,
+            _ => 30
+        };
+        return Math.Round(amount / days, 2).ToString("F2");
+    }
 
     public async Task<SubscriptionResult> CreateSubscriptionAsync(
         SubscriptionRequest request, 
         CancellationToken ct = default)
     {
+        _logger.LogInformation(
+            "[ApplePayProvider] CreateSubscription - UserId={UserId}, TxId={TxId}, IsSandbox={IsSandbox}",
+            request.UserId, request.TransactionId, request.IsSandbox);
+        
         // Apple subscriptions are created via the app
         // Server-side just needs to verify the transaction
         if (string.IsNullOrEmpty(request.TransactionId))
         {
+            _logger.LogWarning("[ApplePayProvider] CreateSubscription FAILED - TransactionId is empty");
             return new SubscriptionResult
             {
                 Success = false,
@@ -88,6 +100,7 @@ public class ApplePayProvider : IPaymentProvider
 
         if (!verification.IsValid)
         {
+            _logger.LogWarning("[ApplePayProvider] CreateSubscription FAILED: {Error}", verification.ErrorMessage);
             return new SubscriptionResult
             {
                 Success = false,
@@ -95,10 +108,16 @@ public class ApplePayProvider : IPaymentProvider
             };
         }
 
+        _logger.LogInformation(
+            "[ApplePayProvider] CreateSubscription SUCCESS - UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
+            request.UserId, verification.OriginalTransactionId, verification.ProductId);
+        
         return new SubscriptionResult
         {
             Success = true,
             SubscriptionId = verification.OriginalTransactionId,
+            OrderId = verification.OriginalTransactionId, // Required for RecordPaymentAsync
+            ProductId = verification.ProductId, // Required for RecordPaymentAsync product lookup
             ExpiresAt = verification.ExpiresDate,
             Status = PaymentStatus.Completed
         };
@@ -108,9 +127,12 @@ public class ApplePayProvider : IPaymentProvider
         VerificationRequest request, 
         CancellationToken ct = default)
     {
+        _logger.LogInformation(
+            "[ApplePayProvider] VerifyTransaction - TxId={TxId}, UserId={UserId}, IsSandbox={IsSandbox}",
+            request.TransactionId, request.UserId, request.IsSandbox);
+        
         try
         {
-            var environment = request.IsSandbox ? "sandbox" : "production";
             var baseUrl = request.IsSandbox 
                 ? "https://api.storekit-sandbox.itunes.apple.com"
                 : "https://api.storekit.itunes.apple.com";
@@ -121,11 +143,14 @@ public class ApplePayProvider : IPaymentProvider
             _httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {token}");
 
             var response = await _httpClient.GetAsync(
-                $"{baseUrl}/inApps/v1/transactions/{request.TransactionId}",
-                ct);
+                $"{baseUrl}/inApps/v1/transactions/{request.TransactionId}", ct);
 
             if (!response.IsSuccessStatusCode)
             {
+                var errorContent = await response.Content.ReadAsStringAsync(ct);
+                _logger.LogWarning(
+                    "[ApplePayProvider] VerifyTransaction FAILED - TxId={TxId}, StatusCode={StatusCode}, Error={Error}",
+                    request.TransactionId, response.StatusCode, errorContent);
                 return new VerificationResult
                 {
                     IsValid = false,
@@ -135,6 +160,10 @@ public class ApplePayProvider : IPaymentProvider
 
             var content = await response.Content.ReadAsStringAsync(ct);
             var transactionInfo = ParseSignedTransaction(content);
+
+            _logger.LogInformation(
+                "[ApplePayProvider] VerifyTransaction SUCCESS - TxId={TxId}, OrderId={OrderId}, ProductId={ProductId}, ExpiresDate={ExpiresDate}",
+                transactionInfo.TransactionId, transactionInfo.OriginalTransactionId, transactionInfo.ProductId, transactionInfo.ExpiresDate);
 
             return new VerificationResult
             {
@@ -149,8 +178,7 @@ public class ApplePayProvider : IPaymentProvider
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "[ApplePayProvider] Verification failed for {TransactionId}", 
-                request.TransactionId);
+            _logger.LogError(ex, "[ApplePayProvider] VerifyTransaction EXCEPTION - TxId={TxId}", request.TransactionId);
             return new VerificationResult
             {
                 IsValid = false,
@@ -181,13 +209,9 @@ public class ApplePayProvider : IPaymentProvider
                         ErrorMessage = "Invalid JWT signature"
                     };
                 }
-                _logger.LogInformation("[ApplePayProvider] JWT signature verification successful");
             }
             
             var notification = ParseNotification(request.Payload);
-            
-            _logger.LogInformation("[ApplePayProvider] Processing notification: {Type} {Subtype}",
-                notification.NotificationType, notification.Subtype);
 
             if (!IsAllowedNotificationType(notification.NotificationType, notification.Subtype))
             {
@@ -200,12 +224,16 @@ public class ApplePayProvider : IPaymentProvider
             }
 
             var transactionInfo = notification.TransactionInfo;
+            // OrderId = OriginalTransactionId (required for ProcessWebhookResultAsync)
+            var orderId = transactionInfo?.OriginalTransactionId;
+            
             var result = new WebhookResult
             {
                 Success = true,
                 EventType = notification.NotificationType,
                 TransactionId = transactionInfo?.TransactionId,
                 SubscriptionId = transactionInfo?.OriginalTransactionId,
+                OrderId = orderId,
                 ShouldProcess = true
             };
 
@@ -215,7 +243,12 @@ public class ApplePayProvider : IPaymentProvider
             {
                 result.UserId = userId;
             }
-
+            else
+            {
+                _logger.LogWarning("[ApplePayProvider] Webhook missing UserId - AppAccountToken={Token}", 
+                    transactionInfo?.AppAccountToken);
+            }
+            
             result.NewStatus = MapAppleEventToStatus(notification.NotificationType, notification.Subtype);
             
             // Determine if this is a renewal - Apple uses "DID_RENEW" notification type
@@ -232,8 +265,26 @@ public class ApplePayProvider : IPaymentProvider
                     ProductId = transactionInfo.ProductId,
                     PurchaseDate = transactionInfo.PurchaseDate,
                     ExpiresDate = transactionInfo.ExpiresDate,
-                    AutoRenewing = transactionInfo.AutoRenewing
+                    AutoRenewing = transactionInfo.AutoRenewing,
+                    Amount = transactionInfo.Price,
+                    Currency = transactionInfo.Currency
                 };
+            }
+
+            // Enhanced logging for refund events
+            if (notification.NotificationType is "REFUND" or "REVOKE")
+            {
+                _logger.LogInformation(
+                    "[ApplePayProvider] REFUND Webhook: Type={Type}, UserId={UserId}, OrderId={OrderId}, " +
+                    "ProductId={ProductId}, RevocationDate={RevocationDate}, RevocationReason={RevocationReason}",
+                    notification.NotificationType, result.UserId, orderId, 
+                    transactionInfo?.ProductId, transactionInfo?.RevocationDate, transactionInfo?.RevocationReason);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "[ApplePayProvider] Webhook: Type={Type}, UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
+                    notification.NotificationType, result.UserId, orderId, transactionInfo?.ProductId);
             }
 
             return result;
@@ -553,9 +604,18 @@ public class ApplePayProvider : IPaymentProvider
                 ExpiresDate = txRoot.TryGetProperty("expiresDate", out var exp)
                     ? DateTimeOffset.FromUnixTimeMilliseconds(exp.GetInt64()).DateTime
                     : null,
-                AutoRenewing = !txRoot.TryGetProperty("revocationDate", out _),
+                AutoRenewing = !txRoot.TryGetProperty("revocationDate", out var revDate),
                 AppAccountToken = txRoot.TryGetProperty("appAccountToken", out var token)
                     ? token.GetString()
+                    : null,
+                // Refund-related fields
+                Price = txRoot.TryGetProperty("price", out var price) ? price.GetInt64() / 1000m : null,
+                Currency = txRoot.TryGetProperty("currency", out var currency) ? currency.GetString() : null,
+                RevocationDate = revDate.ValueKind != JsonValueKind.Undefined
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(revDate.GetInt64()).DateTime
+                    : null,
+                RevocationReason = txRoot.TryGetProperty("revocationReason", out var revReason)
+                    ? revReason.GetInt32().ToString()
                     : null
             };
         }
@@ -650,6 +710,11 @@ public class ApplePayProvider : IPaymentProvider
         public DateTime? ExpiresDate { get; set; }
         public bool AutoRenewing { get; set; }
         public string? AppAccountToken { get; set; }
+        // Refund-related fields
+        public decimal? Price { get; set; }
+        public string? Currency { get; set; }
+        public DateTime? RevocationDate { get; set; }
+        public string? RevocationReason { get; set; }
     }
 
     private class AppleNotification
@@ -704,5 +769,19 @@ public class AppleProductConfig
     /// </summary>
     public int PlanType { get; set; }
     public bool IsUltimate { get; set; }
+    
+    /// <summary>
+    /// Maps the legacy PlanType value to BillingCycle for internal calculations.
+    /// Legacy PlanType: 1=Day, 2=Month, 3=Year, 4=Week
+    /// BillingCycle: 1=Daily, 2=Weekly, 3=Monthly, 4=Quarterly, 5=Yearly
+    /// </summary>
+    public BillingCycle GetBillingCycle() => PlanType switch
+    {
+        1 => BillingCycle.Daily,    // Day -> Daily
+        2 => BillingCycle.Monthly,  // Month -> Monthly
+        3 => BillingCycle.Yearly,   // Year -> Yearly
+        4 => BillingCycle.Weekly,   // Week -> Weekly
+        _ => BillingCycle.Monthly   // Default to Monthly
+    };
 }
 
