@@ -257,6 +257,7 @@ public class ApplePayProvider : IPaymentProvider
             if (transactionInfo != null)
             {
                 result.ProductId = transactionInfo.ProductId; // For product config lookup
+                result.PeriodEnd = transactionInfo.ExpiresDate; // Set PeriodEnd for PaymentService
                 result.VerificationResult = new VerificationResult
                 {
                     IsValid = true,
