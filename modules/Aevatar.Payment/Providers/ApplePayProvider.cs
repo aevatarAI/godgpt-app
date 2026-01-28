@@ -688,7 +688,7 @@ public class ApplePayProvider : IPaymentProvider
             
             // Auto-renewal status change
             "DID_CHANGE_RENEWAL_STATUS" when subtype == "AUTO_RENEW_DISABLED" => PaymentStatus.Cancelled,
-            "DID_CHANGE_RENEWAL_STATUS" => null, // AUTO_RENEW_ENABLED - no status change, just log
+            "DID_CHANGE_RENEWAL_STATUS" when subtype == "AUTO_RENEW_ENABLED" => PaymentStatus.Completed, // Restore from cancelled
             
             // Renewal preference change (plan upgrade/downgrade)
             "DID_CHANGE_RENEWAL_PREF" when subtype == "UPGRADE" => PaymentStatus.Completed,
