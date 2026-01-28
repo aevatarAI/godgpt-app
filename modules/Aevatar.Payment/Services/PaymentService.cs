@@ -1049,12 +1049,16 @@ public class PaymentService : IPaymentService
                 else if (result.NewStatus == PaymentStatus.Cancelled || 
                          result.NewStatus == PaymentStatus.Expired)
                 {
-                    // Idempotency check: skip if already cancelled (e.g., user API cancel + webhook)
+                    // Idempotency check: skip if already cancelled or refunded
+                    // Refunded orders should not be cancelled again (refund already processed cancellation logic)
                     var currentStatus = (PaymentStatus)recordState.Status;
-                    if (currentStatus == PaymentStatus.Cancelled || currentStatus == PaymentStatus.Expired)
+                    if (currentStatus == PaymentStatus.Cancelled || 
+                        currentStatus == PaymentStatus.Expired ||
+                        currentStatus == PaymentStatus.Refunded ||
+                        currentStatus == PaymentStatus.PartialRefunded)
                     {
                         _logger.LogInformation(
-                            "[PaymentService] Payment {PaymentId} already {Status}, skipping duplicate cancellation from webhook",
+                            "[PaymentService] Payment {PaymentId} already {Status}, skipping cancellation webhook (refund already processed cancellation)",
                             paymentId, currentStatus);
                         return;
                     }
