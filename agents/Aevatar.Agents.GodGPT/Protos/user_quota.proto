@@ -149,6 +149,8 @@ message UpdateSubscriptionEvent {
 message CancelSubscriptionEvent {
     bool is_ultimate = 1;
     optional string subscription_id = 2;  // If provided, remove from list; cancel only if list becomes empty
+    optional string reason = 3;           // "refund" / "user_cancelled" / etc
+    optional int32 rollback_days = 4;     // Days to rollback EndDate (for refunds)
 }
 
 message UpdateCreditsEvent {

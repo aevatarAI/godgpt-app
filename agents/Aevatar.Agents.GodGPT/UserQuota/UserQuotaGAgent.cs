@@ -1148,35 +1148,66 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             return;
         }
         
-        // Skip if SubscriptionId not in list (already processed or user has newer subscription)
+        // Check if this is a refund
+        var isRefund = evt.Reason == "refund";
         var subId = evt.Context.SubscriptionId;
+        var subscriptionInList = !string.IsNullOrEmpty(subId) && subscription.SubscriptionIds.Contains(subId);
+        
+        // Calculate rollback days for refunds
+        int rollbackDays = 0;
+        if (isRefund)
+        {
+            var metadataDict = evt.Context.BusinessMetadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value) 
+                ?? new Dictionary<string, string>();
+            var planType = GetPlanTypeFromMetadata(metadataDict);
+            var quotaPlanType = (QuotaPlanType)(int)planType;
+            rollbackDays = SubscriptionHelper.GetDaysForPlanType(quotaPlanType);
+            
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCancelled] Refund detected - PlanType={PlanType}, RollbackDays={RollbackDays}",
+                planType, rollbackDays);
+        }
+        
+        // Skip if SubscriptionId not in list (already processed or user has newer subscription)
+        // Exception: For refunds, still need to rollback EndDate even if SubscriptionId was already removed by Cancel
         if (!string.IsNullOrEmpty(subId))
         {
-            // If SubscriptionId provided, check if it's in the list
-            if (!subscription.SubscriptionIds.Contains(subId))
+            if (!subscriptionInList && !isRefund)
             {
+                // Normal cancel: skip if already processed
                 Logger.LogInformation(
                     "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - SubscriptionId {SubscriptionId} not in list for user {UserId}",
                     subId, userId);
                 return;
             }
+            else if (!subscriptionInList && isRefund)
+            {
+                // Refund after Cancel: need to rollback EndDate
+                Logger.LogInformation(
+                    "[UserQuotaGAgent][HandlePaymentCancelled] Refund after Cancel - SubscriptionId {SubscriptionId} already removed, but still rollback EndDate by {RollbackDays} days",
+                    subId, rollbackDays);
+            }
         }
         else
         {
             // If SubscriptionId is empty (old data), skip to prevent incorrect cancellation
-            // Old cancellation events may arrive late and shouldn't cancel subscriptions without proper ID matching
-            // This ensures compatibility with old data that lacks SubscriptionId field
             Logger.LogInformation(
-                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - Empty SubscriptionId (old data format) for user {UserId}, current subscription count: {Count}",
-                userId, subscription.SubscriptionIds.Count);
+                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - Empty SubscriptionId (old data format) for user {UserId}",
+                userId);
             return;
         }
         
         Logger.LogInformation(
-            "[UserQuotaGAgent][HandlePaymentCancelled] Cancelling {SubscriptionType} subscription for user {UserId}, SubscriptionId={SubscriptionId}",
-            isUltimateToCancel.Value ? "Ultimate" : "Premium", userId, subId ?? "(none)");
+            "[UserQuotaGAgent][HandlePaymentCancelled] Cancelling {SubscriptionType} subscription for user {UserId}, SubscriptionId={SubscriptionId}, IsRefund={IsRefund}, RollbackDays={RollbackDays}",
+            isUltimateToCancel.Value ? "Ultimate" : "Premium", userId, subId ?? "(none)", isRefund, rollbackDays);
         
-        RaiseEvent(new CancelSubscriptionEvent { IsUltimate = isUltimateToCancel.Value, SubscriptionId = subId ?? string.Empty });
+        RaiseEvent(new CancelSubscriptionEvent 
+        { 
+            IsUltimate = isUltimateToCancel.Value, 
+            SubscriptionId = subId ?? string.Empty,
+            Reason = evt.Reason,
+            RollbackDays = rollbackDays
+        });
         await ConfirmEventsAsync();
     }
     
@@ -1423,6 +1454,14 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 var sub = cancelSubscription.IsUltimate ? state.UltimateSubscription : state.Subscription;
                 if (sub != null)
                 {
+                    // Refund: rollback EndDate by specified days
+                    if (cancelSubscription.RollbackDays > 0 && sub.EndDate != null)
+                    {
+                        var currentEndDate = sub.EndDate.ToDateTime();
+                        var newEndDate = currentEndDate.AddDays(-cancelSubscription.RollbackDays);
+                        sub.EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(newEndDate, DateTimeKind.Utc));
+                    }
+                    
                     // Remove SubscriptionId from list
                     if (!string.IsNullOrEmpty(cancelSubscription.SubscriptionId))
                     {
