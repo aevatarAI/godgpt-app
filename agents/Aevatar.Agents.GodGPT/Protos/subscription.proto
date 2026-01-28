@@ -339,3 +339,23 @@ message SubscriptionFeatureList {
 message SubscriptionLabelList {
     repeated SubscriptionLabel labels = 1;
 }
+
+message PlatformPriceInfo {
+    // Platform-specific price ID (e.g., Stripe price_xxx, Apple product_xxx)
+    string price_id = 1;
+    
+    // Platform-specific product ID that this price belongs to
+    string platform_product_id = 2;
+    
+    // Actual price amount (already converted from platform units)
+    // For Stripe: converted from cents to dollars
+    double price = 3;
+    
+    // ISO 4217 currency code (uppercase, e.g., "USD", "JPY")
+    string currency = 4;
+}
+
+// Wrapper for list of platform price info (for RPC compatibility)
+message PlatformPriceInfoList {
+    repeated PlatformPriceInfo prices = 1;
+}
