@@ -1151,19 +1151,31 @@ public class PaymentService : IPaymentService
                     {
                         await indexAgent.RemoveActiveSubscriptionAsync(paymentId);
                         
-                        // Build and broadcast cancellation event to business layer
-                        var cancelledEvent = new PaymentCancelledEvent
+                        // Only send PaymentCancelledEvent for GRACE_PERIOD_EXPIRED
+                        // EXPIRED/Cancel: user membership expires naturally through EndDate check
+                        // GRACE_PERIOD_EXPIRED: user failed to pay during grace period, need immediate revocation
+                        if (result.EventType == "GRACE_PERIOD_EXPIRED")
                         {
-                            Context = eventContext,
-                            Reason = result.VerificationResult?.ErrorMessage ?? "Subscription cancelled",
-                            Immediate = result.NewStatus == PaymentStatus.Cancelled, // Cancelled is immediate, Expired is at period end
-                            EffectiveDate = result.PeriodEnd.HasValue
-                                ? Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
-                                : null,
-                            CancelledAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
-                        };
-                        
-                        await indexAgent.NotifyPaymentCancelledAsync(cancelledEvent);
+                            var cancelledEvent = new PaymentCancelledEvent
+                            {
+                                Context = eventContext,
+                                Reason = "grace_period_expired",
+                                Immediate = true, // Grace period expired = immediate revocation
+                                CancelledAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                            };
+                            
+                            await indexAgent.NotifyPaymentCancelledAsync(cancelledEvent);
+                            
+                            _logger.LogInformation(
+                                "[PaymentService] GRACE_PERIOD_EXPIRED - Notified business layer for payment {PaymentId}",
+                                paymentId);
+                        }
+                        else
+                        {
+                            _logger.LogInformation(
+                                "[PaymentService] {EventType} - Only updated PaymentRecord, no business notification (user membership expires via EndDate). PaymentId={PaymentId}",
+                                result.EventType, paymentId);
+                        }
                     }
                 }
                 else if (result.NewStatus == PaymentStatus.Refunded)
