@@ -53,12 +53,12 @@ jobs:
 
       # Install frontend deps
       - name: Install NPM dependencies
-        working-directory: src/Aevatar.Web
+        working-directory: apps/Aevatar.App/src/Aevatar.Web
         run: npm install
 
       # Install ABP client-side libs
       - name: Install ABP libs
-        working-directory: src/Aevatar.Web
+        working-directory: apps/Aevatar.App/src/Aevatar.Web
         run: abp install-libs
 
       # Cache NuGet packages to speed up builds
