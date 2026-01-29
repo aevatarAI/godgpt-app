@@ -40,7 +40,9 @@ public partial class ChatGAgentManager
     
     private async Task<IPaymentRecordGAgent> GetPaymentRecordAgentAsync(string paymentId)
     {
-        var actor = await _actorFactory.CreateGAgentActorAsync<PaymentRecordGAgent>(paymentId);
+        // Convert paymentId to stable Agent ID (same logic as PaymentService)
+        var agentId = PaymentIdHelper.ToAgentIdString(paymentId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<PaymentRecordGAgent>(agentId);
         return actor.As<IPaymentRecordGAgent>();
     }
     

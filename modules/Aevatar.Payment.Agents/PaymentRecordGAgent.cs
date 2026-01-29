@@ -114,13 +114,18 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             return;
         }
 
+        // Use business paymentId if provided, otherwise fallback to Agent ID
+        var paymentId = !string.IsNullOrEmpty(request.PaymentId) 
+            ? request.PaymentId 
+            : Id.ToString();
+            
         Logger.LogInformation(
             "[PaymentRecordGAgent] Initializing payment {PaymentId} for user {UserId}",
-            Id, request.UserId);
+            paymentId, request.UserId);
 
         var record = new PaymentRecordStateProto
         {
-            PaymentId = Id.ToString(),
+            PaymentId = paymentId,
             UserId = request.UserId,
             ExternalOrderId = request.ExternalOrderId ?? string.Empty,
             SubscriptionId = request.SubscriptionId ?? string.Empty,
