@@ -990,8 +990,15 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         await UpdateSubscriptionAsync(subscriptionInfo, isUltimate);
 
         Logger.LogInformation(
-            "[UserQuotaGAgent][HandlePaymentCompleted] Updated subscription for user {UserId}, PlanType: {PlanType}, IsUltimate: {IsUltimate}, EndDate: {EndDate}",
-            userId, planType, isUltimate, periodEnd);
+            "[UserQuotaGAgent][HandlePaymentCompleted] Updated subscription for user {UserId}, PlanType: {PlanType}, IsUltimate: {IsUltimate}, IsActive: {IsActive}, StartDate: {StartDate}, EndDate: {EndDate}, SubscriptionIds: [{SubscriptionIds}]",
+            userId, planType, isUltimate, subscriptionInfo.IsActive, subscriptionInfo.StartDate, periodEnd, string.Join(", ", subscriptionIds));
+
+        // Verify subscription was saved correctly
+        var verifySubscription = await GetSubscriptionAsync(isUltimate);
+        var isSubscribed = await IsSubscribedAsync(isUltimate);
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCompleted] Verification - IsSubscribed: {IsSubscribed}, VerifyIsActive: {VerifyIsActive}, VerifyStartDate: {VerifyStartDate}, VerifyEndDate: {VerifyEndDate}",
+            isSubscribed, verifySubscription.IsActive, verifySubscription.StartDate, verifySubscription.EndDate);
 
         // ========== Payment Analytics (from old code) ==========
         // Record payment success to OpenTelemetry metrics
