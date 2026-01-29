@@ -279,6 +279,19 @@ public class GodGPTPaymentController : AevatarController
         };
     }
 
+    [HttpGet("list-test")]
+    [AllowAnonymous]
+    public async Task<List<PaymentSummaryDto>> GetPaymentHistoryTestAsync([FromQuery] GetPaymentHistoryInput input)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        // Test userId from inserted data
+        var currentUserId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var pageIndex = input?.PageIndex ?? 1;
+        var pageSize = input?.PageSize ?? 10;
+        
+        return await GetPaymentHistoryInternalAsync(currentUserId, pageIndex, pageSize, stopwatch);
+    }
+
     [HttpGet("list")]
     public async Task<List<PaymentSummaryDto>> GetPaymentHistoryAsync([FromQuery] GetPaymentHistoryInput input)
     {
@@ -287,17 +300,29 @@ public class GodGPTPaymentController : AevatarController
         var pageIndex = input?.PageIndex ?? 1;
         var pageSize = input?.PageSize ?? 10;
         
+        return await GetPaymentHistoryInternalAsync(currentUserId, pageIndex, pageSize, stopwatch);
+    }
+    
+    private async Task<List<PaymentSummaryDto>> GetPaymentHistoryInternalAsync(
+        Guid currentUserId, 
+        int pageIndex, 
+        int pageSize, 
+        Stopwatch stopwatch)
+    {
+        
         // Try CQRS query first for full data
         if (_stateIndexService != null)
         {
             try
             {
+                // Fetch more records to account for transaction expansion
+                // Each payment record might expand to multiple transaction records
                 var query = new StateQuery
                 {
                     AgentType = "Aevatar.Payment.Agents.PaymentRecordGAgent",
                     QueryString = $"userId.keyword:\"{currentUserId}\"",
                     PageIndex = 0,
-                    PageSize = pageSize * 3, // Fetch extra for filtering
+                    PageSize = pageSize * 10, // Fetch more to account for transaction expansion
                     SortFields = new List<string> { "createdAt:desc" }
                 };
 
@@ -310,7 +335,7 @@ public class GodGPTPaymentController : AevatarController
                 var expandedItems = new List<PaymentSummaryDto>();
                 foreach (var item in queryResult.Items)
                 {
-                    var transactions = ParseTransactionsFromData(item.Data);
+                    var transactions = ParseTransactionsFromData(item.Data, _logger);
                     
                     // Like old code: if no transactions or only 1, return record-level data
                     if (transactions == null || transactions.Count <= 1)
@@ -342,8 +367,8 @@ public class GodGPTPaymentController : AevatarController
                     .ToList();
                 
                 _logger.LogDebug(
-                    "[GodGPTPaymentController][GetPaymentHistoryAsync] CQRS query returned {Count} records for user {UserId}, duration: {Duration}ms",
-                    result.Count, currentUserId, stopwatch.ElapsedMilliseconds);
+                    "[GodGPTPaymentController][GetPaymentHistoryAsync] CQRS query: fetched {Fetched} records, expanded to {Expanded} items, filtered to {Result} records for user {UserId}, duration: {Duration}ms",
+                    queryResult.Items.Count, expandedItems.Count, result.Count, currentUserId, stopwatch.ElapsedMilliseconds);
                     
                 return result;
             }
@@ -373,25 +398,77 @@ public class GodGPTPaymentController : AevatarController
         return fallbackResult;
     }
     
+    
     /// <summary>
-    /// Parse transactions array from ES data (stored as JSON string)
+    /// Parse transactions array from ES data.
+    /// StateDocumentConverter serializes repeated fields as JSON strings,
+    /// and ElasticsearchStateIndexService.ConvertJsonElement now auto-deserializes them.
+    /// So transactions should already be a List or Dictionary.
     /// </summary>
-    private static List<Dictionary<string, object>>? ParseTransactionsFromData(Dictionary<string, object?> data)
+    private static List<Dictionary<string, object>>? ParseTransactionsFromData(
+        Dictionary<string, object?> data, 
+        ILogger<GodGPTPaymentController>? logger = null)
     {
         try
         {
             if (!data.TryGetValue("transactions", out var transactionsObj) || transactionsObj == null)
                 return null;
             
-            var transactionsJson = transactionsObj.ToString();
-            if (string.IsNullOrEmpty(transactionsJson) || transactionsJson == "[]")
-                return null;
+            // Case 1: Already a List<Dictionary<string, object>> (after auto-deserialization)
+            if (transactionsObj is List<object> list)
+            {
+                var result = new List<Dictionary<string, object>>();
+                foreach (var item in list)
+                {
+                    if (item is Dictionary<string, object> dict)
+                        result.Add(dict);
+                    else if (item is Dictionary<string, object?> dictNullable)
+                        result.Add(dictNullable.ToDictionary(kvp => kvp.Key, kvp => kvp.Value ?? (object)string.Empty));
+                }
+                if (result.Count > 0)
+                {
+                    logger?.LogDebug(
+                        "[GodGPTPaymentController][ParseTransactionsFromData] Found {Count} transactions (already deserialized)",
+                        result.Count);
+                    return result;
+                }
+            }
             
-            var transactions = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(transactionsJson);
-            return transactions?.Count > 0 ? transactions : null;
+            // Case 2: Still a string (fallback for old data or if auto-deserialization didn't work)
+            if (transactionsObj is string transactionsJson)
+            {
+                if (string.IsNullOrEmpty(transactionsJson) || transactionsJson == "[]")
+                    return null;
+                
+                // Handle escaped JSON string
+                if (transactionsJson.StartsWith("\"") && transactionsJson.EndsWith("\"") && transactionsJson.Length > 2)
+                {
+                    var unescapedJson = JsonSerializer.Deserialize<string>(transactionsJson);
+                    if (!string.IsNullOrEmpty(unescapedJson))
+                        transactionsJson = unescapedJson;
+                }
+                else if (transactionsJson.StartsWith("\"\"\"") && transactionsJson.EndsWith("\"\"\"") && transactionsJson.Length > 6)
+                {
+                    transactionsJson = transactionsJson.Substring(3, transactionsJson.Length - 6);
+                }
+                
+                var transactions = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(transactionsJson);
+                if (transactions != null && transactions.Count > 0)
+                {
+                    logger?.LogDebug(
+                        "[GodGPTPaymentController][ParseTransactionsFromData] Successfully parsed {Count} transactions from JSON string",
+                        transactions.Count);
+                    return transactions;
+                }
+            }
+            
+            return null;
         }
-        catch
+        catch (Exception ex)
         {
+            logger?.LogWarning(ex,
+                "[GodGPTPaymentController][ParseTransactionsFromData] Failed to parse transactions. Type: {Type}",
+                data.TryGetValue("transactions", out var tx) ? tx?.GetType().Name : "null");
             return null;
         }
     }
@@ -410,13 +487,13 @@ public class GodGPTPaymentController : AevatarController
         
         // Override with transaction-level data
         if (tx.TryGetValue("amount", out var amount))
-            dto.Amount = Convert.ToInt64(amount ?? 0) / 100m;
+            dto.Amount = ConvertToInt64(amount) / 100m;
         if (tx.TryGetValue("currency", out var currency) && currency != null)
             dto.Currency = currency.ToString() ?? "USD";
         if (tx.TryGetValue("netAmount", out var netAmount) && netAmount != null)
-            dto.AmountNetTotal = Convert.ToInt64(netAmount) / 100m;
+            dto.AmountNetTotal = ConvertToInt64(netAmount) / 100m;
         if (tx.TryGetValue("status", out var status))
-            dto.Status = Convert.ToInt32(status ?? 0);
+            dto.Status = ConvertToInt32(status);
         
         // Transaction timestamps
         if (tx.TryGetValue("createdAt", out var createdAt) && createdAt != null)
@@ -432,11 +509,80 @@ public class GodGPTPaymentController : AevatarController
         
         // Trial info from transaction
         if (tx.TryGetValue("isTrial", out var isTrial))
-            dto.IsTrial = Convert.ToBoolean(isTrial ?? false);
+        {
+            if (isTrial is JsonElement isTrialElem && isTrialElem.ValueKind == JsonValueKind.True)
+                dto.IsTrial = true;
+            else if (isTrial is JsonElement isTrialElem2 && isTrialElem2.ValueKind == JsonValueKind.False)
+                dto.IsTrial = false;
+            else
+                dto.IsTrial = Convert.ToBoolean(isTrial ?? false);
+        }
         if (tx.TryGetValue("trialCode", out var trialCode) && trialCode != null)
             dto.TrialCode = trialCode.ToString();
         
         return dto;
+    }
+    
+    /// <summary>
+    /// Safely convert object to Int64 (handles JsonElement, string, and numeric types)
+    /// </summary>
+    private static long ConvertToInt64(object? value)
+    {
+        if (value == null) return 0;
+        
+        if (value is JsonElement elem)
+        {
+            if (elem.ValueKind == JsonValueKind.Number)
+                return elem.GetInt64();
+            if (elem.ValueKind == JsonValueKind.String && long.TryParse(elem.GetString(), out var parsed))
+                return parsed;
+            return 0;
+        }
+        
+        if (value is long l) return l;
+        if (value is int i) return i;
+        if (value is string str && long.TryParse(str, out var parsedStr))
+            return parsedStr;
+        
+        try
+        {
+            return Convert.ToInt64(value);
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+    
+    /// <summary>
+    /// Safely convert object to Int32 (handles JsonElement, string, and numeric types)
+    /// </summary>
+    private static int ConvertToInt32(object? value)
+    {
+        if (value == null) return 0;
+        
+        if (value is JsonElement elem)
+        {
+            if (elem.ValueKind == JsonValueKind.Number)
+                return elem.GetInt32();
+            if (elem.ValueKind == JsonValueKind.String && int.TryParse(elem.GetString(), out var parsed))
+                return parsed;
+            return 0;
+        }
+        
+        if (value is int i) return i;
+        if (value is long l) return (int)l;
+        if (value is string str && int.TryParse(str, out var parsedStr))
+            return parsedStr;
+        
+        try
+        {
+            return Convert.ToInt32(value);
+        }
+        catch
+        {
+            return 0;
+        }
     }
     
     /// <summary>
