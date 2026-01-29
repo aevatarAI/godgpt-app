@@ -325,9 +325,9 @@ public partial class ChatGAgentManager
         {
             var paymentIndexGAgent = await GetPaymentIndexAgentAsync(AgentId.ExtractRawId(Id));
             
-            // Get active subscriptions and clear their PaymentRecords
-            var activeSubscriptions = await paymentIndexGAgent.GetActiveSubscriptionsAsync();
-            foreach (var subscription in activeSubscriptions.Subscriptions)
+            // Get ALL subscriptions (including expired) and clear their PaymentRecords
+            var allSubscriptions = await paymentIndexGAgent.GetAllSubscriptionsAsync();
+            foreach (var subscription in allSubscriptions.Subscriptions)
             {
                 try
                 {
