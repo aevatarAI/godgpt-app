@@ -306,8 +306,28 @@ public class GodGPTPaymentController : AevatarController
                 // Filter stale Processing records (like old code)
                 var oneDayAgo = DateTime.UtcNow.AddDays(-1);
                 
-                var result = queryResult.Items
-                    .Select(item => MapToPaymentSummaryDto(item, _productPlanTypes, _productIsUltimate))
+                // Expand transactions like old code's InvoiceDetails expansion
+                var expandedItems = new List<PaymentSummaryDto>();
+                foreach (var item in queryResult.Items)
+                {
+                    var transactions = ParseTransactionsFromData(item.Data);
+                    
+                    // Like old code: if no transactions or only 1, return record-level data
+                    if (transactions == null || transactions.Count <= 1)
+                    {
+                        expandedItems.Add(MapToPaymentSummaryDto(item, _productPlanTypes, _productIsUltimate));
+                    }
+                    else
+                    {
+                        // Expand each transaction as a separate history item (like old code's InvoiceDetails)
+                        foreach (var tx in transactions)
+                        {
+                            expandedItems.Add(MapTransactionToPaymentSummaryDto(item, tx, _productPlanTypes, _productIsUltimate));
+                        }
+                    }
+                }
+                
+                var result = expandedItems
                     .Where(dto => 
                     {
                         // Keep all non-Processing records
@@ -316,6 +336,7 @@ public class GodGPTPaymentController : AevatarController
                         // For Processing, keep if recent (< 1 day)
                         return dto.CreatedAtRaw > oneDayAgo;
                     })
+                    .OrderByDescending(dto => dto.CreatedAtRaw)
                     .Skip((pageIndex - 1) * pageSize)
                     .Take(pageSize)
                     .ToList();
@@ -350,6 +371,103 @@ public class GodGPTPaymentController : AevatarController
         _logger.LogDebug("[GodGPTPaymentController][GetPaymentHistoryAsync] userId: {UserId}, duration: {Duration}ms",
             currentUserId, stopwatch.ElapsedMilliseconds);
         return fallbackResult;
+    }
+    
+    /// <summary>
+    /// Parse transactions array from ES data (stored as JSON string)
+    /// </summary>
+    private static List<Dictionary<string, object>>? ParseTransactionsFromData(Dictionary<string, object?> data)
+    {
+        try
+        {
+            if (!data.TryGetValue("transactions", out var transactionsObj) || transactionsObj == null)
+                return null;
+            
+            var transactionsJson = transactionsObj.ToString();
+            if (string.IsNullOrEmpty(transactionsJson) || transactionsJson == "[]")
+                return null;
+            
+            var transactions = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(transactionsJson);
+            return transactions?.Count > 0 ? transactions : null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+    
+    /// <summary>
+    /// Map a single transaction to PaymentSummaryDto (like old code's InvoiceDetails expansion)
+    /// </summary>
+    private static PaymentSummaryDto MapTransactionToPaymentSummaryDto(
+        StateQueryResult item,
+        Dictionary<string, object> tx,
+        Dictionary<string, int> productPlanTypes,
+        Dictionary<string, bool> productIsUltimate)
+    {
+        // Start with base record data
+        var dto = MapToPaymentSummaryDto(item, productPlanTypes, productIsUltimate);
+        
+        // Override with transaction-level data
+        if (tx.TryGetValue("amount", out var amount))
+            dto.Amount = Convert.ToInt64(amount ?? 0) / 100m;
+        if (tx.TryGetValue("currency", out var currency) && currency != null)
+            dto.Currency = currency.ToString() ?? "USD";
+        if (tx.TryGetValue("netAmount", out var netAmount) && netAmount != null)
+            dto.AmountNetTotal = Convert.ToInt64(netAmount) / 100m;
+        if (tx.TryGetValue("status", out var status))
+            dto.Status = Convert.ToInt32(status ?? 0);
+        
+        // Transaction timestamps
+        if (tx.TryGetValue("createdAt", out var createdAt) && createdAt != null)
+            dto.CreatedAtRaw = ParseTimestampFromTransaction(createdAt);
+        if (tx.TryGetValue("completedAt", out var completedAt) && completedAt != null)
+            dto.CompletedAtRaw = ParseTimestampFromTransaction(completedAt);
+        
+        // Transaction period dates
+        if (tx.TryGetValue("periodStart", out var periodStart) && periodStart != null)
+            dto.SubscriptionStartDateRaw = ParseTimestampFromTransaction(periodStart);
+        if (tx.TryGetValue("periodEnd", out var periodEnd) && periodEnd != null)
+            dto.SubscriptionEndDateRaw = ParseTimestampFromTransaction(periodEnd);
+        
+        // Trial info from transaction
+        if (tx.TryGetValue("isTrial", out var isTrial))
+            dto.IsTrial = Convert.ToBoolean(isTrial ?? false);
+        if (tx.TryGetValue("trialCode", out var trialCode) && trialCode != null)
+            dto.TrialCode = trialCode.ToString();
+        
+        return dto;
+    }
+    
+    /// <summary>
+    /// Parse timestamp from transaction data (supports both Protobuf format and ISO string)
+    /// </summary>
+    private static DateTime ParseTimestampFromTransaction(object? value)
+    {
+        if (value == null) return DateTime.MinValue;
+        
+        // Format 1: Protobuf Timestamp object { "seconds": 123, "nanos": 456 }
+        if (value is JsonElement elem && elem.ValueKind == JsonValueKind.Object)
+        {
+            if (elem.TryGetProperty("seconds", out var seconds))
+            {
+                var dt = DateTimeOffset.FromUnixTimeSeconds(seconds.GetInt64()).UtcDateTime;
+                return dt;
+            }
+        }
+        
+        // Format 2: ISO date string or Dictionary with seconds
+        if (value is Dictionary<string, object> dict && dict.TryGetValue("seconds", out var sec))
+        {
+            var dt = DateTimeOffset.FromUnixTimeSeconds(Convert.ToInt64(sec)).UtcDateTime;
+            return dt;
+        }
+        
+        // Format 3: Direct ISO string
+        if (DateTime.TryParse(value.ToString(), out var parsed))
+            return parsed;
+        
+        return DateTime.MinValue;
     }
     
     private static PaymentSummaryDto MapToPaymentSummaryDto(
