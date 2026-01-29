@@ -571,6 +571,14 @@ public class GodGPTPaymentController : AevatarController
         if (elem.TryGetProperty("trialCode", out var trialCode))
             tx.TrialCode = trialCode.GetString() ?? "";
         
+        // Product info per transaction (new fields)
+        if (elem.TryGetProperty("productId", out var prodId))
+            tx.ProductId = prodId.GetString() ?? "";
+        if (elem.TryGetProperty("planType", out var planType))
+            tx.PlanType = planType.GetInt32();
+        if (elem.TryGetProperty("membershipLevel", out var memLevel))
+            tx.MembershipLevel = memLevel.GetString() ?? "";
+        
         // Parse Timestamp fields (System.Text.Json format: {"seconds":xxx,"nanos":xxx})
         if (elem.TryGetProperty("periodStart", out var ps))
             tx.PeriodStart = ParseTimestampFromJsonElement(ps);
@@ -648,6 +656,19 @@ public class GodGPTPaymentController : AevatarController
         dto.IsTrial = tx.IsTrial;
         if (!string.IsNullOrEmpty(tx.TrialCode))
             dto.TrialCode = tx.TrialCode;
+        
+        // Product info per transaction (new fields - matches old InvoiceDetail.PriceId/PlanType)
+        if (!string.IsNullOrEmpty(tx.ProductId))
+            dto.PriceId = tx.ProductId;
+        if (tx.PlanType != 0)
+        {
+            dto.PlanType = tx.PlanType;
+            // Recalculate subscription end date with transaction's plan type
+            if (dto.CompletedAtRaw.HasValue && dto.CompletedAtRaw.Value != DateTime.MinValue)
+                dto.SubscriptionEndDateRaw = CalculateSubscriptionEndDate(tx.PlanType, dto.CompletedAtRaw.Value);
+        }
+        if (!string.IsNullOrEmpty(tx.MembershipLevel))
+            dto.MembershipLevel = tx.MembershipLevel;
         
         return dto;
     }

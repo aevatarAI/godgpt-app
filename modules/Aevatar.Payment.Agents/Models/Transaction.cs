@@ -69,5 +69,16 @@ public class Transaction
     
     /// <summary>Additional metadata</summary>
     public Dictionary<string, string> Metadata { get; set; } = new();
+    
+    // ========== Product Info (per transaction, matches old InvoiceDetail) ==========
+    
+    /// <summary>Product ID for this transaction (PriceId in old code)</summary>
+    public string? ProductId { get; set; }
+    
+    /// <summary>PlanType enum for this transaction</summary>
+    public int PlanType { get; set; }
+    
+    /// <summary>Membership level (Premium/Ultimate)</summary>
+    public string? MembershipLevel { get; set; }
 }
 

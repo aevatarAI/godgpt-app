@@ -73,6 +73,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             case RenewalProcessedEvent e:
                 state.Transactions.Add(e.RenewalTransaction);
                 state.PeriodEnd = e.NewPeriodEnd;
+                // Update main record's product info (matches old code: existingSubscription.PlanType = appleProduct.PlanType)
+                if (!string.IsNullOrEmpty(e.NewProductId))
+                    state.ProductId = e.NewProductId;
+                if (e.NewBillingCycle != 0)
+                    state.BillingCycle = e.NewBillingCycle;
                 break;
                 
             case RefundProcessedEvent e:
@@ -375,7 +380,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             CreatedAt = Timestamp.FromDateTime(DateTime.UtcNow),
             CompletedAt = Timestamp.FromDateTime(DateTime.UtcNow),
             IsTrial = renewal.IsTrial,
-            TrialCode = renewal.TrialCode ?? string.Empty
+            TrialCode = renewal.TrialCode ?? string.Empty,
+            // Product info per transaction (matches old InvoiceDetail.PriceId/PlanType)
+            ProductId = renewal.ProductId ?? string.Empty,
+            PlanType = renewal.PlanType,
+            MembershipLevel = renewal.MembershipLevel ?? string.Empty
         };
 
         foreach (var promo in renewal.Promotions)
@@ -386,7 +395,10 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         RaiseEvent(new RenewalProcessedEvent
         {
             RenewalTransaction = transaction,
-            NewPeriodEnd = renewal.PeriodEnd
+            NewPeriodEnd = renewal.PeriodEnd,
+            // Update main record's product info (matches old code: existingSubscription.PlanType = appleProduct.PlanType)
+            NewProductId = renewal.ProductId ?? string.Empty,
+            NewBillingCycle = renewal.PlanType
         });
 
         await ConfirmEventsAsync();
@@ -542,7 +554,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             Promotions = proto.Promotions.Select(FromProto).ToList(),
             IsTrial = proto.IsTrial,
             TrialCode = proto.TrialCode,
-            Metadata = proto.Metadata.ToDictionary(kv => kv.Key, kv => kv.Value)
+            Metadata = proto.Metadata.ToDictionary(kv => kv.Key, kv => kv.Value),
+            // Product info per transaction
+            ProductId = proto.ProductId,
+            PlanType = proto.PlanType,
+            MembershipLevel = proto.MembershipLevel
         };
     }
 
@@ -574,7 +590,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             Currency = txn.Currency,
             IsTrial = txn.IsTrial,
             TrialCode = txn.TrialCode ?? string.Empty,
-            CreatedAt = Timestamp.FromDateTime(txn.CreatedAt.ToUniversalTime())
+            CreatedAt = Timestamp.FromDateTime(txn.CreatedAt.ToUniversalTime()),
+            // Product info per transaction
+            ProductId = txn.ProductId ?? string.Empty,
+            PlanType = txn.PlanType,
+            MembershipLevel = txn.MembershipLevel ?? string.Empty
         };
 
         if (txn.NetAmount.HasValue)

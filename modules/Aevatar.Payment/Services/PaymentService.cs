@@ -1091,18 +1091,51 @@ public class PaymentService : IPaymentService
                             ? Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
                             : Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1).ToUniversalTime()); // Fallback
                         
+                        // Get product info for this transaction (matches old InvoiceDetail.PriceId/PlanType)
+                        var renewalProductId = result.ProductId ?? string.Empty;
+                        var renewalPlanType = 0;
+                        var renewalMembershipLevel = "Premium";
+                        
+                        if (!string.IsNullOrEmpty(result.ProductId))
+                        {
+                            try
+                            {
+                                var provider = GetProvider(platform);
+                                var products = await provider.GetProductsAsync();
+                                var product = products.FirstOrDefault(p => p.ProductId == result.ProductId);
+                                if (product != null)
+                                {
+                                    // Get originalPlanType from metadata (correct Common.Constants.PlanType value)
+                                    if (product.Metadata?.TryGetValue("originalPlanType", out var ptStr) == true &&
+                                        int.TryParse(ptStr, out var pt))
+                                    {
+                                        renewalPlanType = pt;
+                                    }
+                                    renewalMembershipLevel = product.PlanType == PlanType.Premium ? "Ultimate" : "Premium";
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "[PaymentService] Failed to get product info for renewal transaction");
+                            }
+                        }
+                        
                         await recordAgent.ProcessRenewalAsync(new RenewalInfoProto
                         {
                             ExternalTransactionId = result.TransactionId,
                             PeriodStart = renewalPeriodStart,
                             PeriodEnd = renewalPeriodEnd,
                             Amount = renewalAmount,
-                            Currency = result.VerificationResult?.Currency ?? "USD"
+                            Currency = result.VerificationResult?.Currency ?? "USD",
+                            // Product info per transaction (matches old InvoiceDetail)
+                            ProductId = renewalProductId,
+                            PlanType = renewalPlanType,
+                            MembershipLevel = renewalMembershipLevel
                         });
                         
                         _logger.LogInformation(
-                            "[PaymentService] Added renewal transaction for {PaymentId}: Platform={Platform}, TransactionId={TransactionId}, Amount={Amount}, PeriodEnd={PeriodEnd}",
-                            paymentId, platform, result.TransactionId, renewalAmount, result.PeriodEnd);
+                            "[PaymentService] Added renewal transaction for {PaymentId}: Platform={Platform}, TransactionId={TransactionId}, Amount={Amount}, ProductId={ProductId}, PlanType={PlanType}",
+                            paymentId, platform, result.TransactionId, renewalAmount, renewalProductId, renewalPlanType);
 
                         // Update PeriodEnd in index for all platforms (now calculated correctly by each Provider)
                         if (indexAgent != null && result.PeriodEnd != null)

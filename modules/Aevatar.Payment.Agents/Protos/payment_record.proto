@@ -93,6 +93,11 @@ message TransactionProto {
   
   // ========== Metadata ==========
   map<string, string> metadata = 17;
+  
+  // ========== Product Info (per transaction, matches old InvoiceDetail) ==========
+  string product_id = 18;             // Product ID for this transaction (PriceId in old code)
+  int32 plan_type = 19;               // PlanType enum for this transaction
+  string membership_level = 20;       // Membership level (Premium/Ultimate)
 }
 
 // =============================================================================
@@ -146,6 +151,10 @@ message TransactionStatusChangedEvent {
 message RenewalProcessedEvent {
   TransactionProto renewal_transaction = 1;
   google.protobuf.Timestamp new_period_end = 2;
+  
+  // Main record product info update (matches old code: existingSubscription.PlanType = appleProduct.PlanType)
+  string new_product_id = 3;         // Update main record's ProductId
+  int32 new_billing_cycle = 4;       // Update main record's BillingCycle (PlanType enum)
 }
 
 message RefundProcessedEvent {
@@ -180,5 +189,10 @@ message RenewalInfoProto {
   repeated PromotionProto promotions = 7;         // Applied promotions
   bool is_trial = 8;                              // Is trial period
   optional string trial_code = 9;                 // Trial code
+  
+  // ========== Product Info (per transaction, matches old InvoiceDetail) ==========
+  string product_id = 10;                         // Product ID for this renewal
+  int32 plan_type = 11;                           // PlanType enum
+  string membership_level = 12;                   // Membership level (Premium/Ultimate)
 }
 
