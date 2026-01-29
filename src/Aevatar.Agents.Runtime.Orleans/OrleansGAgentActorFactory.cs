@@ -95,14 +95,14 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
         // Check cache first - fast path without RPC
         if (_actorCache.TryGetValue(cacheKey, out var cachedActor))
         {
-            _logger.LogInformation("[ActorCache] ✅ HIT factoryId={FactoryId}, cacheKey={CacheKey}, cacheSize={CacheSize}", 
-                _factoryInstanceId, cacheKey, _actorCache.Count);
+            _logger.LogDebug("[ActorCache] HIT cacheKey={CacheKey}, cacheSize={CacheSize}", 
+                cacheKey, _actorCache.Count);
             return cachedActor;
         }
 
-        _logger.LogInformation(
-            "[ActorCache] ❌ MISS factoryId={FactoryId}, cacheKey={CacheKey}, cacheSize={CacheSize} - Creating new Actor proxy for {AgentType}",
-            _factoryInstanceId, cacheKey, _actorCache.Count, agentType.Name);
+        _logger.LogDebug(
+            "[ActorCache] MISS cacheKey={CacheKey}, cacheSize={CacheSize} - Creating new Actor proxy for {AgentType}",
+            cacheKey, _actorCache.Count, agentType.Name);
 
         // Create lightweight actor proxy (Agent will be created in Grain/Silo)
         var contextPropagator = _serviceProvider.GetService<AgentContextPropagator>();
@@ -121,10 +121,7 @@ public class OrleansGAgentActorFactory : IGAgentActorFactory
         await actor.ActivateAsync(ct);
         
         // Cache the actor proxy
-        var added = _actorCache.TryAdd(cacheKey, actor);
-
-        _logger.LogInformation("[ActorCache] ✅ ADDED factoryId={FactoryId}, cacheKey={CacheKey}, added={Added}, newCacheSize={CacheSize}", 
-            _factoryInstanceId, cacheKey, added, _actorCache.Count);
+        _actorCache.TryAdd(cacheKey, actor);
 
         return actor;
     }
