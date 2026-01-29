@@ -320,10 +320,44 @@ public partial class ChatGAgentManager
         var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
         await userQuotaGAgent.ClearAllAsync();
 
-        // TODO: [USER_BILLING_DISABLED] UserBillingGAgent not implemented
-        // var userBillingActor = await _actorFactory.CreateGAgentActorAsync<UserBillingGAgent>(Id);
-        // var userBillingGAgent = (IUserBillingGAgent)userBillingActor.GetAgent();
-        // await userBillingGAgent.ClearAllAsync();
+        // Clear payment data (replaces UserBillingGAgent)
+        try
+        {
+            var paymentIndexGAgent = await GetPaymentIndexAgentAsync(AgentId.ExtractRawId(Id));
+            
+            // Get active subscriptions and clear their PaymentRecords
+            var activeSubscriptions = await paymentIndexGAgent.GetActiveSubscriptionsAsync();
+            foreach (var subscription in activeSubscriptions.Subscriptions)
+            {
+                try
+                {
+                    var paymentRecordGAgent = await GetPaymentRecordAgentAsync(subscription.PaymentId);
+                    await paymentRecordGAgent.ClearAsync();
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "[ChatGAgentManager][ClearAllAsync] PaymentRecordGAgent ClearAsync error paymentId: {PaymentId}", subscription.PaymentId);
+                }
+            }
+            
+            // Clear the index itself
+            await paymentIndexGAgent.ClearAllAsync();
+        }
+        catch (Exception e)
+        {
+            Logger.LogError(e, "[ChatGAgentManager][ClearAllAsync] PaymentIndexGAgent ClearAllAsync error userId: {UserId}", Id);
+        }
+
+        // Clear invitation data
+        try
+        {
+            var invitationGAgent = await GetInvitationAgentAsync(AgentId.ExtractRawId(Id));
+            await invitationGAgent.ClearAllAsync();
+        }
+        catch (Exception e)
+        {
+            Logger.LogError(e, "[ChatGAgentManager][ClearAllAsync] InvitationGAgent ClearAllAsync error userId: {UserId}", Id);
+        }
 
         var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(Id);
         await userInfoCollectionGAgent.ClearAllAsync();

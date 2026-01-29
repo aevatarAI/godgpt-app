@@ -155,6 +155,10 @@ message RefundProcessedEvent {
   google.protobuf.Timestamp refunded_at = 4;
 }
 
+message RecordClearedEvent {
+  google.protobuf.Timestamp cleared_at = 1;
+}
+
 // =============================================================================
 // Request Types for RPC Methods
 // =============================================================================

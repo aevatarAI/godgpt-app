@@ -78,6 +78,26 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
                     state.Status = (int)PaymentStatus.PartialRefunded;
                 }
                 break;
+            
+            case RecordClearedEvent:
+                // Clear all data
+                state.PaymentId = string.Empty;
+                state.UserId = string.Empty;
+                state.ExternalOrderId = string.Empty;
+                state.SubscriptionId = string.Empty;
+                state.BusinessType = string.Empty;
+                state.BusinessId = string.Empty;
+                state.ProductId = string.Empty;
+                state.PriceId = string.Empty;
+                state.ProductName = string.Empty;
+                state.CustomerId = string.Empty;
+                state.Status = (int)PaymentStatus.None;
+                state.Amount = 0;
+                state.NetAmount = 0;
+                state.Currency = string.Empty;
+                state.Transactions.Clear();
+                state.BusinessMetadata.Clear();
+                break;
         }
         
         state.LastUpdated = Timestamp.FromDateTime(DateTime.UtcNow);
@@ -399,6 +419,20 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             RefundAmount = refundAmount,
             Reason = reason
         });
+    }
+
+    // ========== Management ==========
+
+    public async Task ClearAsync()
+    {
+        Logger.LogWarning("[PaymentRecordGAgent] Clearing all data for payment {PaymentId}", Id);
+
+        RaiseEvent(new RecordClearedEvent
+        {
+            ClearedAt = Timestamp.FromDateTime(DateTime.UtcNow)
+        });
+
+        await ConfirmEventsAsync();
     }
 
     // ========== Proto Conversions ==========
