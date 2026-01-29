@@ -358,13 +358,13 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         await ConfirmEventsAsync();
     }
 
-    // ========== Renewal Processing ==========
+    // ========== Transaction Processing ==========
 
     public async Task ProcessRenewalAsync(RenewalInfoProto renewal)
     {
         Logger.LogInformation(
-            "[PaymentRecordGAgent] Processing renewal, new period end: {PeriodEnd}",
-            renewal.PeriodEnd.ToDateTime());
+            "[PaymentRecordGAgent] Processing transaction, period end: {PeriodEnd}",
+            renewal.PeriodEnd?.ToDateTime());
 
         var transaction = new TransactionProto
         {

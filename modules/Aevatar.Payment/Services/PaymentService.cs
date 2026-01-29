@@ -651,11 +651,12 @@ public class PaymentService : IPaymentService
                         }
                         else
                         {
-                            // Fallback: use product.PlanType (but this is wrong enum, should be avoided)
+                            // Fallback: convert BillingCycle to legacy PlanType (Day=1, Month=2, Year=3, Week=4)
+                            legacyPlanType = BillingCycleToLegacyPlanType(product.BillingCycle);
                             _logger.LogWarning(
-                                "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using fallback",
-                                request.ProductId);
-                            createRequest.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
+                                "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using BillingCycle fallback: {LegacyPlanType}",
+                                request.ProductId, legacyPlanType);
+                            createRequest.BusinessMetadata["plan_type"] = legacyPlanType.ToString();
                         }
                     }
                     else if (int.TryParse(createRequest.BusinessMetadata["plan_type"], out var pt))
@@ -840,11 +841,12 @@ public class PaymentService : IPaymentService
                             }
                             else
                             {
-                                // Fallback: use product.PlanType (but this is wrong enum, should be avoided)
+                                // Fallback: convert BillingCycle to legacy PlanType (Day=1, Month=2, Year=3, Week=4)
+                                legacyPlanType = BillingCycleToLegacyPlanType(product.BillingCycle);
                                 _logger.LogWarning(
-                                    "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using fallback",
-                                    result.ProductId);
-                                createFromWebhook.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
+                                    "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using BillingCycle fallback: {LegacyPlanType}",
+                                    result.ProductId, legacyPlanType);
+                                createFromWebhook.BusinessMetadata["plan_type"] = legacyPlanType.ToString();
                             }
                             // PlanType.Premium is used to indicate Ultimate tier in config
                             createFromWebhook.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
@@ -1063,7 +1065,7 @@ public class PaymentService : IPaymentService
                         "RecordStatus={RecordStatus}, FinalIsRenewal={FinalIsRenewal}, EventType={EventType}, TransactionId={TransactionId}",
                         paymentId, result.IsRenewal, recordState?.Status, isRenewal, result.EventType, result.TransactionId);
                     
-                    // CRITICAL: Update record status to Completed
+                    // CRITICAL: Update record status to Completed (only for first purchase)
                     // This triggers Event Sourcing and ES projection
                     if (!isRenewal)
                     {
@@ -1072,12 +1074,13 @@ public class PaymentService : IPaymentService
                             "[PaymentService] Marked payment {PaymentId} as Completed", paymentId);
                     }
                     
-                    // Process renewal/upgrade in agent - add transaction record for ALL platforms
-                    // Old code (UserBillingGAgent.HandleDidRenewAsync) added InvoiceDetail for:
+                    // Add transaction record for BOTH first purchase and renewal
+                    // Old code (UserBillingGAgent) added InvoiceDetail for:
+                    // - First purchase (SUBSCRIBED/INITIAL_PURCHASE)
                     // - DID_RENEW (renewal)
                     // - DID_CHANGE_RENEWAL_PREF + UPGRADE (weekly to monthly upgrade)
                     // New code must maintain this behavior for consistency
-                    if (isRenewal && !string.IsNullOrEmpty(result.TransactionId))
+                    if (!string.IsNullOrEmpty(result.TransactionId))
                     {
                         // Convert amount to smallest unit (cents) for Protobuf
                         var renewalAmount = (long)((result.VerificationResult?.Amount ?? 0) * 100);
@@ -1134,8 +1137,8 @@ public class PaymentService : IPaymentService
                         });
                         
                         _logger.LogInformation(
-                            "[PaymentService] Added renewal transaction for {PaymentId}: Platform={Platform}, TransactionId={TransactionId}, Amount={Amount}, ProductId={ProductId}, PlanType={PlanType}",
-                            paymentId, platform, result.TransactionId, renewalAmount, renewalProductId, renewalPlanType);
+                            "[PaymentService] Added transaction for {PaymentId}: Platform={Platform}, TransactionId={TransactionId}, Amount={Amount}, ProductId={ProductId}",
+                            paymentId, platform, result.TransactionId, renewalAmount, renewalProductId);
 
                         // Update PeriodEnd in index for all platforms (now calculated correctly by each Provider)
                         if (indexAgent != null && result.PeriodEnd != null)
@@ -1478,6 +1481,22 @@ public class PaymentService : IPaymentService
             Currency = sub.Currency,
             PeriodEnd = sub.PeriodEnd?.ToDateTime() ?? DateTime.MaxValue,
             CreatedAt = sub.CreatedAt?.ToDateTime() ?? DateTime.UtcNow
+        };
+    }
+    
+    /// <summary>
+    /// Convert BillingCycle enum to legacy PlanType value (Day=1, Month=2, Year=3, Week=4)
+    /// </summary>
+    private static int BillingCycleToLegacyPlanType(BillingCycle cycle)
+    {
+        return cycle switch
+        {
+            BillingCycle.Daily => 1,     // Day
+            BillingCycle.Monthly => 2,   // Month
+            BillingCycle.Yearly => 3,    // Year
+            BillingCycle.Weekly => 4,    // Week
+            BillingCycle.Quarterly => 2, // Treat as Month (fallback)
+            _ => 2                        // Default to Month
         };
     }
 }
