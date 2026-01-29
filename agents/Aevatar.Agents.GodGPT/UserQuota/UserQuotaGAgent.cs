@@ -66,9 +66,6 @@ public interface IUserQuotaGAgent : Aevatar.Agents.Abstractions.IGAgent
     Task<bool> InitializeCreditsAsync();
     Task<CreditsInfoProto> GetCreditsAsync();
     Task<bool> IsSubscribedAsync(bool ultimate = false);
-    Task<SubscriptionInfoDto> GetSubscriptionAsync(bool ultimate = false);
-    Task<SubscriptionInfoDto> GetAndSetSubscriptionAsync(bool ultimate = false);
-    Task UpdateSubscriptionAsync(SubscriptionInfoDto subscriptionInfoDto, bool ultimate = false);
     
     // RPC-compatible Protobuf methods
     Task<SubscriptionInfoProto> GetSubscriptionProtoAsync(bool ultimate = false);
@@ -195,8 +192,14 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 StartDate = startDate,
                 EndDate = endDate,
                 SubscriptionIds = subscriptionInfo.SubscriptionIds.ToList(),
-                InvoiceIds = subscriptionInfo.InvoiceIds.ToList()
+                InvoiceIds = subscriptionInfo.InvoiceIds.ToList(),
+                PlatformProductId = !string.IsNullOrWhiteSpace(subscriptionInfo!.PlatformProductId) ? subscriptionInfo.PlatformProductId : null
             };
+
+            if (subscriptionInfo.HasPlatform)
+            {
+                subscriptionDto.Platform = subscriptionInfo.Platform;
+            }  
 
             RaiseEvent(new UpdateSubscriptionEvent
             {
@@ -249,7 +252,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             StartDate = subscriptionInfo?.StartDate?.ToDateTime() ?? DateTime.MinValue,
             EndDate = subscriptionInfo?.EndDate?.ToDateTime() ?? DateTime.MinValue,
             SubscriptionIds = subscriptionInfo?.SubscriptionIds.ToList() ?? new List<string>(),
-            InvoiceIds = subscriptionInfo?.InvoiceIds.ToList() ?? new List<string>()
+            InvoiceIds = subscriptionInfo?.InvoiceIds.ToList() ?? new List<string>(),
+            PlatformProductId = !string.IsNullOrWhiteSpace(subscriptionInfo!.PlatformProductId) ? subscriptionInfo.PlatformProductId : null,
+            Platform = subscriptionInfo.HasPlatform ? subscriptionInfo.Platform : null
         };
     }
     
@@ -560,7 +565,11 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             EndDate = expiresDate,
             Status = PaymentStatus.Completed,
             SubscriptionIds = State.Subscription?.SubscriptionIds.ToList() ?? new List<string>(),
-            InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>()
+            InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>(),
+            PlatformProductId = !string.IsNullOrWhiteSpace(State.Subscription?.PlatformProductId)
+                ? State.Subscription?.PlatformProductId
+                : null,
+            Platform = State.Subscription != null && State.Subscription.HasPlatform ? State.Subscription.Platform : null
         };
 
         RaiseEvent(new UpdateSubscriptionEvent { SubscriptionInfo = MapToProtoSubscriptionFromDto(subscriptionDto), IsUltimate = false });
@@ -580,7 +589,11 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             StartDate = State.Subscription?.StartDate?.ToDateTime() ?? DateTime.MinValue,
             EndDate = State.Subscription?.EndDate?.ToDateTime() ?? DateTime.MinValue,
             SubscriptionIds = State.Subscription?.SubscriptionIds.ToList() ?? new List<string>(),
-            InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>()
+            InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>(),
+            PlatformProductId = !string.IsNullOrWhiteSpace(State.Subscription?.PlatformProductId)
+                ? State.Subscription?.PlatformProductId
+                : null,
+            Platform = State.Subscription != null && State.Subscription.HasPlatform ? State.Subscription.Platform : null
         };
 
         RaiseEvent(new UpdateSubscriptionEvent { SubscriptionInfo = MapToProtoSubscriptionFromDto(subscriptionDto), IsUltimate = false });
@@ -976,6 +989,11 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         subscriptionInfo.Status = PaymentStatus.Completed;
         subscriptionInfo.SubscriptionIds = subscriptionIds;
         subscriptionInfo.InvoiceIds = invoiceIds;
+        if (!string.IsNullOrWhiteSpace(evt.Context.ProductId))
+        {
+            subscriptionInfo.PlatformProductId = evt.Context.ProductId;
+        }
+        subscriptionInfo.Platform = evt.Context.Platform;
 
         await UpdateSubscriptionAsync(subscriptionInfo, isUltimate);
 
@@ -1388,8 +1406,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             PlanType = (QuotaPlanType)(int)sub.PlanType,
             Status = (QuotaPaymentStatus)(int)sub.Status,
             StartDate = Timestamp.FromDateTime(DateTime.SpecifyKind(sub.StartDate, DateTimeKind.Utc)),
-            EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(sub.EndDate, DateTimeKind.Utc))
+            EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(sub.EndDate, DateTimeKind.Utc)),
         };
+        if (!string.IsNullOrWhiteSpace(sub.PlatformProductId)) result.PlatformProductId = sub.PlatformProductId;
+        if (sub.Platform.HasValue) result.Platform = sub.Platform.Value;
         if (sub.SubscriptionIds != null) result.SubscriptionIds.AddRange(sub.SubscriptionIds);
         if (sub.InvoiceIds != null) result.InvoiceIds.AddRange(sub.InvoiceIds);
         return result;
@@ -1448,6 +1468,16 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 subscription.SubscriptionIds.AddRange(updateSubscription.SubscriptionInfo.SubscriptionIds);
                 subscription.InvoiceIds.Clear();
                 subscription.InvoiceIds.AddRange(updateSubscription.SubscriptionInfo.InvoiceIds);
+                if (!string.IsNullOrWhiteSpace(updateSubscription.SubscriptionInfo.PlatformProductId))
+                {
+                    subscription.PlatformProductId = updateSubscription.SubscriptionInfo.PlatformProductId;
+                }
+
+                if (updateSubscription.SubscriptionInfo.HasPlatform)
+                {
+                    subscription.Platform = updateSubscription.SubscriptionInfo.Platform;
+                }
+                
                 break;
 
             case CancelSubscriptionEvent cancelSubscription:

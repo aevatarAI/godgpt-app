@@ -57,7 +57,10 @@
     <ProjectReference Include="..\Aevatar.App.Domain\Aevatar.App.Domain.csproj" />
     <ProjectReference Include="..\Aevatar.App.HttpApi\Aevatar.App.HttpApi.csproj" />
     <ProjectReference Include="..\Aevatar.App.MongoDB\Aevatar.App.MongoDB.csproj" />
+    <ProjectReference Include="..\..\..\..\plugins\Aevatar.Agents.Plugins.CQRS\Aevatar.Agents.Plugins.CQRS.csproj" />
     <ProjectReference Include="..\..\..\..\plugins\Aevatar.Agents.Plugins.MassTransit\Aevatar.Agents.Plugins.MassTransit.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Runtime.Local\Aevatar.Agents.Runtime.Local.csproj" />
+    <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Runtime.Orleans\Aevatar.Agents.Runtime.Orleans.csproj" />
     <PackageReference Include="Volo.Abp.Autofac" />
     <PackageReference Include="Volo.Abp.AutoMapper" />
     <PackageReference Include="Volo.Abp.Caching.StackExchangeRedis" />
@@ -79,11 +82,6 @@
     <_ContentIncludedByDefault Remove="Pages\SubscriptionProducts\EditModal.cshtml" />
     <_ContentIncludedByDefault Remove="Pages\SubscriptionProducts\Index.cshtml" />
     <_ContentIncludedByDefault Remove="Pages\SubscriptionProducts\SetPriceModal.cshtml" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\..\plugins\Aevatar.Agents.Plugins.CQRS\Aevatar.Agents.Plugins.CQRS.csproj" />
-    <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Runtime.Local\Aevatar.Agents.Runtime.Local.csproj" />
   </ItemGroup>
 
 <!--  <ItemGroup>-->
