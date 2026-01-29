@@ -286,9 +286,14 @@ public class ApplePayProvider : IPaymentProvider
             
             result.NewStatus = MapAppleEventToStatus(notification.NotificationType, notification.Subtype);
             
-            // Determine if this is a renewal or upgrade - both should add transaction record
-            // Old code (UserBillingGAgent.HandleDidRenewAsync) treated UPGRADE same as DID_RENEW
+            // Determine if this is a renewal/upgrade/resubscribe - all should add transaction record
+            // Old code (UserBillingGAgent.HandleDidRenewAsync) was called for:
+            // - SUBSCRIBED (both INITIAL_BUY and RESUBSCRIBE) - line 2636
+            // - DID_RENEW - line 2645
+            // - DID_CHANGE_RENEWAL_PREF + UPGRADE - line 2694
+            // For INITIAL_BUY, PaymentService checks recordState.Status != Completed to skip adding duplicate
             result.IsRenewal = notification.NotificationType == "DID_RENEW" ||
+                               notification.NotificationType == "SUBSCRIBED" ||
                                (notification.NotificationType == "DID_CHANGE_RENEWAL_PREF" && notification.Subtype == "UPGRADE");
 
             if (transactionInfo != null)

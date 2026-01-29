@@ -433,9 +433,17 @@ public class GooglePlayProvider : IPaymentProvider
                     webhookEvent.Price.Value, webhookEvent.CancelReason);
             }
             
-            // Determine if this is a renewal or product change - both should add transaction record
-            // PRODUCT_CHANGE is similar to Apple's UPGRADE (weekly to monthly, etc.)
-            result.IsRenewal = webhookEvent.EventType == "RENEWAL" || 
+            // Determine if this event should add a transaction record
+            // Old code (UserBillingGAgent) called ProcessGooglePlayPurchaseSuccessAsync for:
+            // - SUBSCRIPTION_PURCHASED -> RevenueCat: INITIAL_PURCHASE
+            // - SUBSCRIPTION_RENEWED -> RevenueCat: RENEWAL
+            // - SUBSCRIPTION_RECOVERED -> RevenueCat: UNCANCELLATION (resubscribe after cancel)
+            // - SUBSCRIPTION_RESTARTED -> RevenueCat: UNCANCELLATION
+            // - PRODUCT_CHANGE is similar to Apple's UPGRADE (weekly to monthly, etc.)
+            // For INITIAL_PURCHASE, PaymentService checks recordState.Status != Completed to skip duplicate
+            result.IsRenewal = webhookEvent.EventType == "INITIAL_PURCHASE" ||
+                               webhookEvent.EventType == "RENEWAL" || 
+                               webhookEvent.EventType == "UNCANCELLATION" ||
                                webhookEvent.EventType == "PRODUCT_CHANGE";
 
             result.VerificationResult = new VerificationResult

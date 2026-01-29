@@ -32,6 +32,19 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
                 
             case RecordStatusChangedEvent e:
                 state.Status = e.NewStatus;
+                // When cancelled/expired, also update the last transaction status
+                // This matches old code behavior where InvoiceDetail.Status was updated on cancel
+                if (e.NewStatus == (int)PaymentStatus.Cancelled || e.NewStatus == (int)PaymentStatus.Expired)
+                {
+                    var lastTxn = state.Transactions
+                        .Where(t => t.Status == (int)PaymentStatus.Completed)
+                        .OrderByDescending(t => t.CreatedAt)
+                        .FirstOrDefault();
+                    if (lastTxn != null)
+                    {
+                        lastTxn.Status = e.NewStatus;
+                    }
+                }
                 break;
                 
             case RecordPeriodUpdatedEvent e:

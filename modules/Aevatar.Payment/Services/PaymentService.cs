@@ -1049,8 +1049,19 @@ public class PaymentService : IPaymentService
                             paymentId, currentStatus);
                     }
                     
-                    var isRenewal = result.VerificationResult?.ExpiresDate != null && 
+                    // Use Provider's IsRenewal flag which is set for:
+                    // - Apple: DID_RENEW, SUBSCRIBED (INITIAL_BUY/RESUBSCRIBE), DID_CHANGE_RENEWAL_PREF + UPGRADE
+                    // - Google: INITIAL_PURCHASE, RENEWAL, UNCANCELLATION, PRODUCT_CHANGE
+                    // - Stripe: invoice.paid with billing_reason=subscription_cycle
+                    // Also require record to already be Completed (not first purchase)
+                    var isRenewal = result.IsRenewal && 
                                     recordState?.Status == (int)AgentModels.PaymentStatus.Completed;
+                    
+                    // Log for troubleshooting transaction addition
+                    _logger.LogInformation(
+                        "[PaymentService] Renewal check for {PaymentId}: ProviderIsRenewal={ProviderIsRenewal}, " +
+                        "RecordStatus={RecordStatus}, FinalIsRenewal={FinalIsRenewal}, EventType={EventType}, TransactionId={TransactionId}",
+                        paymentId, result.IsRenewal, recordState?.Status, isRenewal, result.EventType, result.TransactionId);
                     
                     // CRITICAL: Update record status to Completed
                     // This triggers Event Sourcing and ES projection
