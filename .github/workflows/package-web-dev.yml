@@ -32,7 +32,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      # Set up .NET 9 SDK
+      # Set up .NET 10 SDK
       - name: Setup .NET
         uses: actions/setup-dotnet@v3
         with:
@@ -46,7 +46,7 @@ jobs:
 
       # Install ABP CLI
       - name: Install ABP CLI
-        run: dotnet tool install -g Volo.Abp.Cli --version 9.0.3
+        run: dotnet tool install -g Volo.Abp.Cli --version 10.0.2
 
       - name: Add dotnet tools to PATH
         run: echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
