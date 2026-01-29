@@ -81,14 +81,14 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
                 {
                     refundTxn.Status = (int)PaymentStatus.Refunded;
                 }
-                // Check if all transactions are refunded
-                if (state.Transactions.All(t => t.Status == (int)PaymentStatus.Refunded))
+                // Match old code: only update main status if refunding the LATEST transaction
+                // Old code: if (invoiceDetail == invoiceDetails.LastOrDefault()) { paymentSummary.Status = Refunded; }
+                var latestTxn = state.Transactions
+                    .OrderByDescending(t => t.CreatedAt)
+                    .FirstOrDefault();
+                if (latestTxn?.TransactionId == e.TransactionId)
                 {
                     state.Status = (int)PaymentStatus.Refunded;
-                }
-                else
-                {
-                    state.Status = (int)PaymentStatus.PartialRefunded;
                 }
                 break;
             
