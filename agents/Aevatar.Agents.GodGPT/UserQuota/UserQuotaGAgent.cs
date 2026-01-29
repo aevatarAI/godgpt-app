@@ -949,6 +949,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         }
 
         // Calculate subscription end date
+        // Logic from old code:
+        // - If evt.PeriodEnd is provided (e.g., from Apple ExpiresDate), use it directly
+        // - Otherwise, if subscription is active, extend from current EndDate (cumulative)
+        // - Otherwise, start from current time (new subscription)
         DateTime periodEnd;
         if (evt.PeriodEnd != null)
         {
@@ -959,15 +963,19 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         }
         else
         {
-            var startDate = evt.PeriodStart?.ToDateTime() ?? DateTime.UtcNow;
+            // Cumulative logic from old code: extend from current EndDate if active
+            var startDate = subscriptionInfo.IsActive && subscriptionInfo.EndDate > DateTime.UtcNow
+                ? subscriptionInfo.EndDate
+                : DateTime.UtcNow;
             periodEnd = SubscriptionHelper.GetSubscriptionEndDate(planType, startDate);
             if (trialDays > 0)
             {
                 periodEnd = periodEnd.AddDays(trialDays);
             }
             Logger.LogInformation(
-                "[UserQuotaGAgent][HandlePaymentCompleted] Calculated PeriodEnd (no event PeriodEnd): StartDate={StartDate}, PlanType={PlanType}, TrialDays={TrialDays}, PeriodEnd={PeriodEnd}",
-                startDate, planType, trialDays, periodEnd);
+                "[UserQuotaGAgent][HandlePaymentCompleted] Calculated PeriodEnd (no event PeriodEnd): " +
+                "SubscriptionIsActive={IsActive}, CurrentEndDate={CurrentEndDate}, StartDate={StartDate}, PlanType={PlanType}, TrialDays={TrialDays}, PeriodEnd={PeriodEnd}",
+                subscriptionInfo.IsActive, subscriptionInfo.EndDate, startDate, planType, trialDays, periodEnd);
         }
 
         // Update subscription
