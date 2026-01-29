@@ -325,21 +325,25 @@ public partial class ChatGAgentManager
         {
             var paymentIndexGAgent = await GetPaymentIndexAgentAsync(AgentId.ExtractRawId(Id));
             
-            // Get ALL subscriptions (including expired) and clear their PaymentRecords in parallel
+            // Get ALL subscriptions (including expired) and clear their PaymentRecords
+            // Fire-and-forget: Orleans Grain is single-threaded, don't block on these
             var allSubscriptions = await paymentIndexGAgent.GetAllSubscriptionsAsync();
-            var clearTasks = allSubscriptions.Subscriptions.Select(async subscription =>
+            foreach (var subscription in allSubscriptions.Subscriptions)
             {
-                try
+                var paymentId = subscription.PaymentId;
+                _ = Task.Run(async () =>
                 {
-                    var paymentRecordGAgent = await GetPaymentRecordAgentAsync(subscription.PaymentId);
-                    await paymentRecordGAgent.ClearAsync();
-                }
-                catch (Exception ex)
-                {
-                    Logger.LogError(ex, "[ChatGAgentManager][ClearAllAsync] PaymentRecordGAgent ClearAsync error paymentId: {PaymentId}", subscription.PaymentId);
-                }
-            });
-            await Task.WhenAll(clearTasks);
+                    try
+                    {
+                        var paymentRecordGAgent = await GetPaymentRecordAgentAsync(paymentId);
+                        await paymentRecordGAgent.ClearAsync();
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "[ChatGAgentManager][ClearAllAsync] PaymentRecordGAgent ClearAsync error paymentId: {PaymentId}", paymentId);
+                    }
+                });
+            }
             
             // Clear the index itself
             await paymentIndexGAgent.ClearAllAsync();
