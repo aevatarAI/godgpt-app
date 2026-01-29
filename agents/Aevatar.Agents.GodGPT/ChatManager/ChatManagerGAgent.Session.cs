@@ -324,20 +324,28 @@ public partial class ChatGAgentManager
         // Clear payment data (replaces UserBillingGAgent)
         try
         {
-            var paymentIndexGAgent = await GetPaymentIndexAgentAsync(AgentId.ExtractRawId(Id));
+            var paymentIndexGAgent = await GetPaymentIndexAgentAsync(rawUserId);
+            Logger.LogInformation("[ChatGAgentManager][ClearAllAsync] Got PaymentIndexGAgent for userId: {UserId}", rawUserId);
             
             // Get ALL subscriptions (including expired) and clear their PaymentRecords
-            // Fire-and-forget: Orleans Grain is single-threaded, don't block on these
             var allSubscriptions = await paymentIndexGAgent.GetAllSubscriptionsAsync();
+            Logger.LogInformation("[ChatGAgentManager][ClearAllAsync] Found {Count} subscriptions to clear for userId: {UserId}", 
+                allSubscriptions.Subscriptions.Count, rawUserId);
+            
+            // Fire-and-forget: Orleans Grain is single-threaded, don't block on these
             foreach (var subscription in allSubscriptions.Subscriptions)
             {
                 var paymentId = subscription.PaymentId;
+                Logger.LogInformation("[ChatGAgentManager][ClearAllAsync] Clearing PaymentRecord: {PaymentId}, BusinessType: {BusinessType}, Platform: {Platform}", 
+                    paymentId, subscription.BusinessType, subscription.Platform);
+                    
                 _ = Task.Run(async () =>
                 {
                     try
                     {
                         var paymentRecordGAgent = await GetPaymentRecordAgentAsync(paymentId);
                         await paymentRecordGAgent.ClearAsync();
+                        Logger.LogInformation("[ChatGAgentManager][ClearAllAsync] Successfully cleared PaymentRecord: {PaymentId}", paymentId);
                     }
                     catch (Exception ex)
                     {
