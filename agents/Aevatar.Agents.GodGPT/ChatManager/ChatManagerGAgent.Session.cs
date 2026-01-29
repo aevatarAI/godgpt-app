@@ -325,9 +325,9 @@ public partial class ChatGAgentManager
         {
             var paymentIndexGAgent = await GetPaymentIndexAgentAsync(AgentId.ExtractRawId(Id));
             
-            // Get ALL subscriptions (including expired) and clear their PaymentRecords
+            // Get ALL subscriptions (including expired) and clear their PaymentRecords in parallel
             var allSubscriptions = await paymentIndexGAgent.GetAllSubscriptionsAsync();
-            foreach (var subscription in allSubscriptions.Subscriptions)
+            var clearTasks = allSubscriptions.Subscriptions.Select(async subscription =>
             {
                 try
                 {
@@ -338,7 +338,8 @@ public partial class ChatGAgentManager
                 {
                     Logger.LogError(ex, "[ChatGAgentManager][ClearAllAsync] PaymentRecordGAgent ClearAsync error paymentId: {PaymentId}", subscription.PaymentId);
                 }
-            }
+            });
+            await Task.WhenAll(clearTasks);
             
             // Clear the index itself
             await paymentIndexGAgent.ClearAllAsync();
