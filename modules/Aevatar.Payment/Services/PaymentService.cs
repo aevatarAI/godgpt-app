@@ -923,6 +923,20 @@ public class PaymentService : IPaymentService
                         }
                     }
                     
+                    // For PeriodEnd in PaymentIndexGAgent:
+                    // - Stripe: use webhook-provided PeriodEnd (accurate)
+                    // - Apple/Google: use default 1 month (actual EndDate is managed by UserQuotaGAgent)
+                    Google.Protobuf.WellKnownTypes.Timestamp indexPeriodEnd;
+                    if (platform == PaymentPlatform.Stripe && result.PeriodEnd.HasValue)
+                    {
+                        indexPeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime());
+                    }
+                    else
+                    {
+                        // Default to 1 month for Apple/Google (UserQuotaGAgent calculates actual EndDate)
+                        indexPeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1));
+                    }
+                    
                     await indexAgent.AddActiveSubscriptionAsync(new AgentModels.Protos.ActiveSubscriptionProto
                     {
                         PaymentId = paymentId,
@@ -933,11 +947,7 @@ public class PaymentService : IPaymentService
                         Amount = (long)(indexProductAmount * 100), // Convert to smallest unit (cents)
                         Currency = indexCurrency,
                         SubscriptionId = result.SubscriptionId ?? string.Empty,
-                        PeriodEnd = result.PeriodEnd.HasValue
-                            ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
-                            : (result.VerificationResult?.ExpiresDate.HasValue == true
-                                ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.VerificationResult.ExpiresDate.Value.ToUniversalTime())
-                                : Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1))),
+                        PeriodEnd = indexPeriodEnd,
                         CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)
                     });
                     await indexAgent.IncrementPaymentCountAsync();
@@ -963,8 +973,9 @@ public class PaymentService : IPaymentService
                 recordState = await recordAgent.GetRecordStateAsync();
             }
             
-            // Update PeriodEnd if webhook provides one (invoice.paid renewals)
-            if (indexAgent != null && result.PeriodEnd.HasValue)
+            // Update PeriodEnd in PaymentIndexGAgent if webhook provides one (invoice.paid renewals)
+            // Only for Stripe - Apple/Google have short Sandbox periods, we let UserQuotaGAgent calculate
+            if (indexAgent != null && result.PeriodEnd.HasValue && platform == PaymentPlatform.Stripe)
             {
                 _logger.LogInformation(
                     "[PaymentService] Updating PeriodEnd for {PaymentId} to {PeriodEnd}",
@@ -1051,7 +1062,8 @@ public class PaymentService : IPaymentService
                     }
                     
                     // Process renewal in agent
-                    if (result.VerificationResult?.ExpiresDate != null)
+                    // Only update PeriodEnd for Stripe (Apple/Google have short Sandbox periods)
+                    if (result.VerificationResult?.ExpiresDate != null && platform == PaymentPlatform.Stripe)
                     {
                         // Convert amount to smallest unit (cents) for Protobuf
                         var renewalAmount = (long)((result.VerificationResult.Amount ?? 0) * 100);
@@ -1073,14 +1085,22 @@ public class PaymentService : IPaymentService
                     }
 
                     // Build payment completed event
-                    // Use PeriodEnd from webhook result (invoice.paid) if available, otherwise fallback to VerificationResult
-                    var periodEnd = result.PeriodEnd ?? result.VerificationResult?.ExpiresDate;
+                    // For Stripe: use PeriodEnd from webhook result (invoice.paid) - Stripe periods are accurate
+                    // For Apple/Google: DON'T use platform ExpiresDate (Sandbox has short periods like 3-5 minutes)
+                    //   Let UserQuotaGAgent calculate using SubscriptionHelper.GetSubscriptionEndDate
+                    DateTime? periodEnd = null;
+                    if (platform == PaymentPlatform.Stripe)
+                    {
+                        // Stripe periods are reliable, use them
+                        periodEnd = result.PeriodEnd ?? result.VerificationResult?.ExpiresDate;
+                    }
+                    // For Apple/Google: leave periodEnd as null, UserQuotaGAgent will calculate based on PlanType
                     
                     _logger.LogInformation(
-                        "[PaymentService] Building PaymentCompletedEvent: " +
+                        "[PaymentService] Building PaymentCompletedEvent: Platform={Platform}, " +
                         "result.PeriodEnd={ResultPeriodEnd}, result.VerificationResult.ExpiresDate={ExpiresDate}, " +
-                        "finalPeriodEnd={FinalPeriodEnd}, SubscriptionId={SubscriptionId}",
-                        result.PeriodEnd, result.VerificationResult?.ExpiresDate, periodEnd, eventContext.SubscriptionId);
+                        "finalPeriodEnd={FinalPeriodEnd} (null means UserQuotaGAgent will calculate), SubscriptionId={SubscriptionId}",
+                        platform, result.PeriodEnd, result.VerificationResult?.ExpiresDate, periodEnd, eventContext.SubscriptionId);
                     
                     var completedEvent = new PaymentCompletedEvent
                     {
