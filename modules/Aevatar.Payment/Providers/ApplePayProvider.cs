@@ -560,9 +560,9 @@ public class ApplePayProvider : IPaymentProvider
             OriginalTransactionId = root.GetProperty("originalTransactionId").GetString() ?? string.Empty,
             ProductId = root.GetProperty("productId").GetString() ?? string.Empty,
             PurchaseDate = DateTimeOffset.FromUnixTimeMilliseconds(
-                root.GetProperty("purchaseDate").GetInt64()).DateTime,
+                root.GetProperty("purchaseDate").GetInt64()).UtcDateTime,
             ExpiresDate = root.TryGetProperty("expiresDate", out var exp) 
-                ? DateTimeOffset.FromUnixTimeMilliseconds(exp.GetInt64()).DateTime 
+                ? DateTimeOffset.FromUnixTimeMilliseconds(exp.GetInt64()).UtcDateTime 
                 : null,
             AutoRenewing = !root.TryGetProperty("revocationDate", out _),
             AppAccountToken = root.TryGetProperty("appAccountToken", out var token) 
@@ -601,9 +601,9 @@ public class ApplePayProvider : IPaymentProvider
                 OriginalTransactionId = txRoot.GetProperty("originalTransactionId").GetString() ?? string.Empty,
                 ProductId = txRoot.GetProperty("productId").GetString() ?? string.Empty,
                 PurchaseDate = DateTimeOffset.FromUnixTimeMilliseconds(
-                    txRoot.GetProperty("purchaseDate").GetInt64()).DateTime,
+                    txRoot.GetProperty("purchaseDate").GetInt64()).UtcDateTime,
                 ExpiresDate = txRoot.TryGetProperty("expiresDate", out var exp)
-                    ? DateTimeOffset.FromUnixTimeMilliseconds(exp.GetInt64()).DateTime
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(exp.GetInt64()).UtcDateTime
                     : null,
                 AutoRenewing = !txRoot.TryGetProperty("revocationDate", out var revDate),
                 AppAccountToken = txRoot.TryGetProperty("appAccountToken", out var token)
@@ -613,7 +613,7 @@ public class ApplePayProvider : IPaymentProvider
                 Price = txRoot.TryGetProperty("price", out var price) ? price.GetInt64() / 1000m : null,
                 Currency = txRoot.TryGetProperty("currency", out var currency) ? currency.GetString() : null,
                 RevocationDate = revDate.ValueKind != JsonValueKind.Undefined
-                    ? DateTimeOffset.FromUnixTimeMilliseconds(revDate.GetInt64()).DateTime
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(revDate.GetInt64()).UtcDateTime
                     : null,
                 RevocationReason = txRoot.TryGetProperty("revocationReason", out var revReason)
                     ? revReason.GetInt32().ToString()

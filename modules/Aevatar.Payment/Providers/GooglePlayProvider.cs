@@ -501,10 +501,10 @@ public class GooglePlayProvider : IPaymentProvider
             Currency = eventData.TryGetProperty("currency", out var currency) 
                 ? currency.GetString() : null,
             PurchaseDate = eventData.TryGetProperty("purchased_at_ms", out var purchMs) 
-                ? DateTimeOffset.FromUnixTimeMilliseconds(purchMs.GetInt64()).DateTime 
+                ? DateTimeOffset.FromUnixTimeMilliseconds(purchMs.GetInt64()).UtcDateTime 
                 : null,
             ExpiresDate = eventData.TryGetProperty("expiration_at_ms", out var expMs) && expMs.ValueKind != System.Text.Json.JsonValueKind.Null
-                ? DateTimeOffset.FromUnixTimeMilliseconds(expMs.GetInt64()).DateTime 
+                ? DateTimeOffset.FromUnixTimeMilliseconds(expMs.GetInt64()).UtcDateTime 
                 : null,
             CancelReason = eventData.TryGetProperty("cancel_reason", out var cancelReason) 
                 ? cancelReason.GetString() : null,
