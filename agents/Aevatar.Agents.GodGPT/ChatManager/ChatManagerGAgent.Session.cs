@@ -317,7 +317,8 @@ public partial class ChatGAgentManager
     {
         //Do not clear the content of ShareGrain. When querying, first determine whether the Session exists
         // Record the event to clear all sessions
-        var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
+        var rawUserId = AgentId.ExtractRawId(Id);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(rawUserId);
         await userQuotaGAgent.ClearAllAsync();
 
         // Clear payment data (replaces UserBillingGAgent)
@@ -364,7 +365,7 @@ public partial class ChatGAgentManager
             Logger.LogError(e, "[ChatGAgentManager][ClearAllAsync] InvitationGAgent ClearAllAsync error userId: {UserId}", Id);
         }
 
-        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(Id);
+        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(rawUserId);
         await userInfoCollectionGAgent.ClearAllAsync();
 
         var userProfileActor = await _actorFactory.CreateGAgentActorAsync<UserProfileGAgent>(AgentId.ExtractRawId(Id));
