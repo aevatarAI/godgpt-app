@@ -5,12 +5,16 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.CQRS;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.Common.Helpers;
+using Aevatar.Application.Grains.UserQuota;
 using Aevatar.GodGPT.Dtos;
 using Aevatar.Payment.Abstractions;
 using Aevatar.Payment.Providers;
+using Aevatar.Payment.Agents.Protos;
+using Google.Protobuf;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -36,6 +40,7 @@ public class GodGPTPaymentController : AevatarController
     private readonly ILogger<GodGPTPaymentController> _logger;
     private readonly IPaymentService _paymentService;
     private readonly IStateIndexService? _stateIndexService;
+    private readonly IGAgentActorFactory? _actorFactory;
     private readonly Dictionary<string, int> _productPlanTypes; // productId/priceId -> PlanType
     private readonly Dictionary<string, bool> _productIsUltimate; // productId/priceId -> IsUltimate
 
@@ -45,11 +50,13 @@ public class GodGPTPaymentController : AevatarController
         IOptions<StripeOptions>? stripeOptions = null,
         IOptions<ApplePayOptions>? appleOptions = null,
         IOptions<GooglePlayOptions>? googleOptions = null,
-        IStateIndexService? stateIndexService = null)
+        IStateIndexService? stateIndexService = null,
+        IGAgentActorFactory? actorFactory = null)
     {
         _logger = logger;
         _paymentService = paymentService;
         _stateIndexService = stateIndexService;
+        _actorFactory = actorFactory;
         
         // Build unified product -> PlanType lookup from all platforms
         _productPlanTypes = BuildProductPlanTypeLookup(
@@ -216,6 +223,16 @@ public class GodGPTPaymentController : AevatarController
         if (string.IsNullOrWhiteSpace(input.PriceId))
             return BadRequest("PriceId cannot be empty");
         
+        // Validate subscription upgrade path before creating checkout session
+        var (isValid, errorMessage) = await ValidateSubscriptionUpgradePathAsync(currentUserId, input.PriceId);
+        if (!isValid)
+        {
+            _logger.LogWarning(
+                "[GodGPTPaymentController][CreateCheckoutSessionAsync] Upgrade validation failed for user {UserId}: {Error}",
+                currentUserId, errorMessage);
+            return BadRequest(errorMessage);
+        }
+        
         try
         {
             var result = await _paymentService.CreateSubscriptionAsync(
@@ -258,6 +275,16 @@ public class GodGPTPaymentController : AevatarController
         _logger.LogWarning("CreateSubscriptionAsync Platform={Platform}", input.DevicePlatform);
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
+
+        // Validate subscription upgrade path before creating subscription
+        var (isValid, errorMessage) = await ValidateSubscriptionUpgradePathAsync(currentUserId, input.PriceId);
+        if (!isValid)
+        {
+            _logger.LogWarning(
+                "[GodGPTPaymentController][CreateSubscriptionAsync] Upgrade validation failed for user {UserId}: {Error}",
+                currentUserId, errorMessage);
+            throw new UserFriendlyException(errorMessage ?? "Invalid subscription upgrade path");
+        }
 
         var result = await _paymentService.CreateSubscriptionAsync(
             currentUserId,
@@ -400,12 +427,11 @@ public class GodGPTPaymentController : AevatarController
     
     
     /// <summary>
-    /// Parse transactions array from ES data.
-    /// StateDocumentConverter serializes repeated fields as JSON strings,
-    /// and ElasticsearchStateIndexService.ConvertJsonElement now auto-deserializes them.
-    /// So transactions should already be a List or Dictionary.
+    /// Parse transactions array from ES data using Protobuf JSON parser.
+    /// StateDocumentConverter serializes repeated TransactionProto fields as JSON strings.
+    /// Directly parse to TransactionProto objects - much simpler and type-safe!
     /// </summary>
-    private static List<Dictionary<string, object>>? ParseTransactionsFromData(
+    private static List<TransactionProto>? ParseTransactionsFromData(
         Dictionary<string, object?> data, 
         ILogger<GodGPTPaymentController>? logger = null)
     {
@@ -414,16 +440,25 @@ public class GodGPTPaymentController : AevatarController
             if (!data.TryGetValue("transactions", out var transactionsObj) || transactionsObj == null)
                 return null;
             
-            // Case 1: Already a List<Dictionary<string, object>> (after auto-deserialization)
+            string? transactionsJson = null;
+            
+            // Case 1: Already a List (after auto-deserialization by ConvertJsonElement)
             if (transactionsObj is List<object> list)
             {
-                var result = new List<Dictionary<string, object>>();
+                var result = new List<TransactionProto>();
                 foreach (var item in list)
                 {
-                    if (item is Dictionary<string, object> dict)
-                        result.Add(dict);
-                    else if (item is Dictionary<string, object?> dictNullable)
-                        result.Add(dictNullable.ToDictionary(kvp => kvp.Key, kvp => kvp.Value ?? (object)string.Empty));
+                    try
+                    {
+                        // Convert to JSON string first, then parse with Protobuf
+                        var jsonStr = item is JsonElement je ? je.GetRawText() : JsonSerializer.Serialize(item);
+                        var txProto = JsonParser.Default.Parse<TransactionProto>(jsonStr);
+                        result.Add(txProto);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger?.LogWarning(ex, "[GodGPTPaymentController][ParseTransactionsFromData] Failed to parse transaction from list item");
+                    }
                 }
                 if (result.Count > 0)
                 {
@@ -434,32 +469,62 @@ public class GodGPTPaymentController : AevatarController
                 }
             }
             
-            // Case 2: Still a string (fallback for old data or if auto-deserialization didn't work)
-            if (transactionsObj is string transactionsJson)
+            // Case 2: JSON string - parse using Protobuf JSON parser
+            if (transactionsObj is string str)
             {
-                if (string.IsNullOrEmpty(transactionsJson) || transactionsJson == "[]")
-                    return null;
-                
-                // Handle escaped JSON string
-                if (transactionsJson.StartsWith("\"") && transactionsJson.EndsWith("\"") && transactionsJson.Length > 2)
+                transactionsJson = str;
+            }
+            else if (transactionsObj is JsonElement jsonElem && jsonElem.ValueKind == JsonValueKind.String)
+            {
+                transactionsJson = jsonElem.GetString();
+            }
+            
+            if (string.IsNullOrEmpty(transactionsJson) || transactionsJson == "[]")
+                return null;
+            
+            // Handle escaped JSON string (double-quoted JSON string)
+            if (transactionsJson.StartsWith("\"") && transactionsJson.EndsWith("\"") && transactionsJson.Length > 2)
+            {
+                var unescapedJson = JsonSerializer.Deserialize<string>(transactionsJson);
+                if (!string.IsNullOrEmpty(unescapedJson))
+                    transactionsJson = unescapedJson;
+            }
+            // Handle triple quotes (from ES raw JSON)
+            else if (transactionsJson.StartsWith("\"\"\"") && transactionsJson.EndsWith("\"\"\"") && transactionsJson.Length > 6)
+            {
+                transactionsJson = transactionsJson.Substring(3, transactionsJson.Length - 6);
+            }
+            
+            // Parse JSON array - each element is a TransactionProto JSON
+            using var doc = JsonDocument.Parse(transactionsJson);
+            var root = doc.RootElement;
+            
+            if (root.ValueKind != JsonValueKind.Array)
+                return null;
+            
+            var resultList = new List<TransactionProto>();
+            foreach (var txElement in root.EnumerateArray())
+            {
+                try
                 {
-                    var unescapedJson = JsonSerializer.Deserialize<string>(transactionsJson);
-                    if (!string.IsNullOrEmpty(unescapedJson))
-                        transactionsJson = unescapedJson;
+                    var txJson = txElement.GetRawText();
+                    var txProto = JsonParser.Default.Parse<TransactionProto>(txJson);
+                    resultList.Add(txProto);
                 }
-                else if (transactionsJson.StartsWith("\"\"\"") && transactionsJson.EndsWith("\"\"\"") && transactionsJson.Length > 6)
+                catch (Exception ex)
                 {
-                    transactionsJson = transactionsJson.Substring(3, transactionsJson.Length - 6);
+                    logger?.LogWarning(ex,
+                        "[GodGPTPaymentController][ParseTransactionsFromData] Failed to parse transaction using Protobuf parser. JSON: {Json}",
+                        txElement.GetRawText().Length > 200 ? txElement.GetRawText().Substring(0, 200) + "..." : txElement.GetRawText());
                 }
-                
-                var transactions = JsonSerializer.Deserialize<List<Dictionary<string, object>>>(transactionsJson);
-                if (transactions != null && transactions.Count > 0)
-                {
-                    logger?.LogDebug(
-                        "[GodGPTPaymentController][ParseTransactionsFromData] Successfully parsed {Count} transactions from JSON string",
-                        transactions.Count);
-                    return transactions;
-                }
+            }
+            
+            if (resultList.Count > 0)
+            {
+                logger?.LogDebug(
+                    "[GodGPTPaymentController][ParseTransactionsFromData] Successfully parsed {Count} transactions using Protobuf JSON parser",
+                    resultList.Count);
+                return resultList;
             }
             
             return null;
@@ -478,47 +543,35 @@ public class GodGPTPaymentController : AevatarController
     /// </summary>
     private static PaymentSummaryDto MapTransactionToPaymentSummaryDto(
         StateQueryResult item,
-        Dictionary<string, object> tx,
+        TransactionProto tx,
         Dictionary<string, int> productPlanTypes,
         Dictionary<string, bool> productIsUltimate)
     {
         // Start with base record data
         var dto = MapToPaymentSummaryDto(item, productPlanTypes, productIsUltimate);
         
-        // Override with transaction-level data
-        if (tx.TryGetValue("amount", out var amount))
-            dto.Amount = ConvertToInt64(amount) / 100m;
-        if (tx.TryGetValue("currency", out var currency) && currency != null)
-            dto.Currency = currency.ToString() ?? "USD";
-        if (tx.TryGetValue("netAmount", out var netAmount) && netAmount != null)
-            dto.AmountNetTotal = ConvertToInt64(netAmount) / 100m;
-        if (tx.TryGetValue("status", out var status))
-            dto.Status = ConvertToInt32(status);
+        // Override with transaction-level data - directly from Protobuf object!
+        dto.Amount = tx.Amount / 100m;
+        dto.Currency = tx.Currency;
+        if (tx.NetAmount != 0)
+            dto.AmountNetTotal = tx.NetAmount / 100m;
+        dto.Status = tx.Status;
         
-        // Transaction timestamps
-        if (tx.TryGetValue("createdAt", out var createdAt) && createdAt != null)
-            dto.CreatedAtRaw = ParseTimestampFromTransaction(createdAt);
-        if (tx.TryGetValue("completedAt", out var completedAt) && completedAt != null)
-            dto.CompletedAtRaw = ParseTimestampFromTransaction(completedAt);
+        // Transaction timestamps - directly from Protobuf Timestamp
+        dto.CreatedAtRaw = tx.CreatedAt.ToDateTime();
+        if (tx.CompletedAt != null && (tx.CompletedAt.Seconds != 0 || tx.CompletedAt.Nanos != 0))
+            dto.CompletedAtRaw = tx.CompletedAt.ToDateTime();
         
         // Transaction period dates
-        if (tx.TryGetValue("periodStart", out var periodStart) && periodStart != null)
-            dto.SubscriptionStartDateRaw = ParseTimestampFromTransaction(periodStart);
-        if (tx.TryGetValue("periodEnd", out var periodEnd) && periodEnd != null)
-            dto.SubscriptionEndDateRaw = ParseTimestampFromTransaction(periodEnd);
+        if (tx.PeriodStart != null && (tx.PeriodStart.Seconds != 0 || tx.PeriodStart.Nanos != 0))
+            dto.SubscriptionStartDateRaw = tx.PeriodStart.ToDateTime();
+        if (tx.PeriodEnd != null && (tx.PeriodEnd.Seconds != 0 || tx.PeriodEnd.Nanos != 0))
+            dto.SubscriptionEndDateRaw = tx.PeriodEnd.ToDateTime();
         
         // Trial info from transaction
-        if (tx.TryGetValue("isTrial", out var isTrial))
-        {
-            if (isTrial is JsonElement isTrialElem && isTrialElem.ValueKind == JsonValueKind.True)
-                dto.IsTrial = true;
-            else if (isTrial is JsonElement isTrialElem2 && isTrialElem2.ValueKind == JsonValueKind.False)
-                dto.IsTrial = false;
-            else
-                dto.IsTrial = Convert.ToBoolean(isTrial ?? false);
-        }
-        if (tx.TryGetValue("trialCode", out var trialCode) && trialCode != null)
-            dto.TrialCode = trialCode.ToString();
+        dto.IsTrial = tx.IsTrial;
+        if (!string.IsNullOrEmpty(tx.TrialCode))
+            dto.TrialCode = tx.TrialCode;
         
         return dto;
     }
@@ -1032,6 +1085,93 @@ public class GodGPTPaymentController : AevatarController
             _ => 30
         };
         return Math.Round(price / days, 2).ToString("F2");
+    }
+
+    #endregion
+
+    #region Subscription Upgrade Validation
+
+    /// <summary>
+    /// Validates if the upgrade path is allowed before creating a subscription.
+    /// Prevents downgrade purchases (e.g., Year user buying Month plan).
+    /// </summary>
+    /// <param name="userId">Current user ID</param>
+    /// <param name="productId">Target product ID (priceId for Stripe, productId for Apple/Google)</param>
+    /// <returns>Validation result with error message if invalid</returns>
+    private async Task<(bool IsValid, string? ErrorMessage)> ValidateSubscriptionUpgradePathAsync(
+        Guid userId, string productId)
+    {
+        // Skip validation if ActorFactory is not available
+        if (_actorFactory == null)
+        {
+            _logger.LogWarning(
+                "[GodGPTPaymentController][ValidateSubscriptionUpgradePath] ActorFactory not available, skipping validation");
+            return (true, null);
+        }
+
+        // Get target product configuration
+        if (!_productPlanTypes.TryGetValue(productId, out var targetPlanTypeInt))
+        {
+            _logger.LogWarning(
+                "[GodGPTPaymentController][ValidateSubscriptionUpgradePath] ProductId {ProductId} not found in configuration",
+                productId);
+            // Allow purchase if product not found (configuration issue, not user error)
+            return (true, null);
+        }
+
+        var targetPlanType = (QuotaPlanType)targetPlanTypeInt;
+        var targetIsUltimate = _productIsUltimate.GetValueOrDefault(productId, false);
+
+        try
+        {
+            // Get user's current subscription via UserQuotaGAgent
+            var userQuotaActor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId.ToString());
+            var userQuotaAgent = userQuotaActor.As<IUserQuotaGAgent>();
+            var currentSubscription = await userQuotaAgent.GetSubscriptionAsync(targetIsUltimate);
+
+            // If no active subscription, allow any purchase
+            if (!currentSubscription.IsActive)
+            {
+                _logger.LogInformation(
+                    "[GodGPTPaymentController][ValidateSubscriptionUpgradePath] User {UserId} has no active subscription, allowing purchase",
+                    userId);
+                return (true, null);
+            }
+
+            var currentPlanType = (QuotaPlanType)(int)currentSubscription.PlanType;
+
+            _logger.LogInformation(
+                "[GodGPTPaymentController][ValidateSubscriptionUpgradePath] Validating: Current={CurrentPlan}, Target={TargetPlan}, UserId={UserId}",
+                currentPlanType, targetPlanType, userId);
+
+            // Use IsUpgradeOrSameLevel to allow same-level renewals and upgrades
+            // This matches the business logic: users can renew or upgrade, but not downgrade
+            if (!SubscriptionHelper.IsUpgradeOrSameLevel(currentPlanType, targetPlanType))
+            {
+                var currentPlanName = SubscriptionHelper.GetPlanDisplayName(currentPlanType, targetIsUltimate);
+                var targetPlanName = SubscriptionHelper.GetPlanDisplayName(targetPlanType, targetIsUltimate);
+
+                _logger.LogWarning(
+                    "[GodGPTPaymentController][ValidateSubscriptionUpgradePath] Invalid downgrade: {CurrentPlan} -> {TargetPlan}, UserId={UserId}",
+                    currentPlanName, targetPlanName, userId);
+
+                return (false, $"Invalid upgrade path: {currentPlanName} users cannot downgrade to {targetPlanName}. Please wait for your current subscription to expire or contact support.");
+            }
+
+            _logger.LogInformation(
+                "[GodGPTPaymentController][ValidateSubscriptionUpgradePath] Valid path: {CurrentPlan} -> {TargetPlan}, UserId={UserId}",
+                currentPlanType, targetPlanType, userId);
+
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "[GodGPTPaymentController][ValidateSubscriptionUpgradePath] Error validating for user {UserId}, allowing purchase",
+                userId);
+            // On error, allow purchase to avoid blocking legitimate payments
+            return (true, null);
+        }
     }
 
     #endregion

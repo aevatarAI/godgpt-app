@@ -81,6 +81,40 @@ public class GooglePlayProvider : IPaymentProvider
         return Math.Round(amount / days, 2).ToString("F2");
     }
 
+    /// <summary>
+    /// Calculate real subscription end date based on product's PlanType.
+    /// This matches old code behavior - Google Play Sandbox may have short periods.
+    /// </summary>
+    private DateTime? CalculatePeriodEndFromProduct(string? productId)
+    {
+        if (string.IsNullOrEmpty(productId))
+            return null;
+        
+        var product = _options.Products.FirstOrDefault(p => p.ProductId == productId);
+        if (product == null)
+        {
+            _logger.LogWarning("[GooglePlayProvider] Product {ProductId} not found, using 30 days default", productId);
+            return DateTime.UtcNow.AddDays(30);
+        }
+        
+        var billingCycle = product.GetBillingCycle();
+        var endDate = billingCycle switch
+        {
+            BillingCycle.Daily => DateTime.UtcNow.AddDays(1),
+            BillingCycle.Weekly => DateTime.UtcNow.AddDays(7),
+            BillingCycle.Monthly => DateTime.UtcNow.AddDays(30),
+            BillingCycle.Quarterly => DateTime.UtcNow.AddDays(90),
+            BillingCycle.Yearly => DateTime.UtcNow.AddDays(390), // Match old code: 390 days for yearly
+            _ => DateTime.UtcNow.AddDays(30)
+        };
+        
+        _logger.LogInformation(
+            "[GooglePlayProvider] Calculated PeriodEnd for {ProductId}: BillingCycle={Cycle}, EndDate={EndDate}",
+            productId, billingCycle, endDate);
+        
+        return endDate;
+    }
+
     public async Task<SubscriptionResult> CreateSubscriptionAsync(
         SubscriptionRequest request, 
         CancellationToken ct = default)
@@ -399,8 +433,10 @@ public class GooglePlayProvider : IPaymentProvider
                     webhookEvent.Price.Value, webhookEvent.CancelReason);
             }
             
-            // Determine if this is a renewal - Google Play uses "RENEWAL" event type
-            result.IsRenewal = webhookEvent.EventType == "RENEWAL";
+            // Determine if this is a renewal or product change - both should add transaction record
+            // PRODUCT_CHANGE is similar to Apple's UPGRADE (weekly to monthly, etc.)
+            result.IsRenewal = webhookEvent.EventType == "RENEWAL" || 
+                               webhookEvent.EventType == "PRODUCT_CHANGE";
 
             result.VerificationResult = new VerificationResult
             {
@@ -409,11 +445,16 @@ public class GooglePlayProvider : IPaymentProvider
                 OriginalTransactionId = webhookEvent.OriginalTransactionId,
                 ProductId = webhookEvent.ProductId,
                 PurchaseDate = webhookEvent.PurchaseDate,
-                ExpiresDate = webhookEvent.ExpiresDate,
+                ExpiresDate = webhookEvent.ExpiresDate, // Keep original for reference
                 AutoRenewing = webhookEvent.AutoRenewing,
                 Amount = webhookEvent.Price,
                 Currency = webhookEvent.Currency
             };
+            
+            // Calculate real PeriodEnd based on PlanType (not platform ExpiresDate)
+            // Google Play Sandbox may have short periods, production returns real dates
+            // This matches old code behavior
+            result.PeriodEnd = CalculatePeriodEndFromProduct(webhookEvent.ProductId);
 
             return Task.FromResult(result);
         }

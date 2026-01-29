@@ -1061,26 +1061,42 @@ public class PaymentService : IPaymentService
                             "[PaymentService] Marked payment {PaymentId} as Completed", paymentId);
                     }
                     
-                    // Process renewal in agent
-                    // Only update PeriodEnd for Stripe (Apple/Google have short Sandbox periods)
-                    if (result.VerificationResult?.ExpiresDate != null && platform == PaymentPlatform.Stripe)
+                    // Process renewal/upgrade in agent - add transaction record for ALL platforms
+                    // Old code (UserBillingGAgent.HandleDidRenewAsync) added InvoiceDetail for:
+                    // - DID_RENEW (renewal)
+                    // - DID_CHANGE_RENEWAL_PREF + UPGRADE (weekly to monthly upgrade)
+                    // New code must maintain this behavior for consistency
+                    if (isRenewal && !string.IsNullOrEmpty(result.TransactionId))
                     {
                         // Convert amount to smallest unit (cents) for Protobuf
-                        var renewalAmount = (long)((result.VerificationResult.Amount ?? 0) * 100);
+                        var renewalAmount = (long)((result.VerificationResult?.Amount ?? 0) * 100);
+                        
+                        // PeriodEnd is calculated by each Provider based on PlanType:
+                        // - Stripe: uses actual ExpiresDate from webhook (reliable)
+                        // - Apple/Google: calculates based on product config (Sandbox has short periods)
+                        // This matches old code (CalculateSubscriptionDurationAsync) behavior
+                        var renewalPeriodStart = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime());
+                        var renewalPeriodEnd = result.PeriodEnd != null
+                            ? Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
+                            : Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1).ToUniversalTime()); // Fallback
                         
                         await recordAgent.ProcessRenewalAsync(new RenewalInfoProto
                         {
-                            ExternalTransactionId = result.TransactionId ?? string.Empty,
-                            PeriodStart = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime()),
-                            PeriodEnd = Timestamp.FromDateTime(result.VerificationResult.ExpiresDate.Value.ToUniversalTime()),
+                            ExternalTransactionId = result.TransactionId,
+                            PeriodStart = renewalPeriodStart,
+                            PeriodEnd = renewalPeriodEnd,
                             Amount = renewalAmount,
-                            Currency = result.VerificationResult.Currency ?? "USD"
+                            Currency = result.VerificationResult?.Currency ?? "USD"
                         });
+                        
+                        _logger.LogInformation(
+                            "[PaymentService] Added renewal transaction for {PaymentId}: Platform={Platform}, TransactionId={TransactionId}, Amount={Amount}, PeriodEnd={PeriodEnd}",
+                            paymentId, platform, result.TransactionId, renewalAmount, result.PeriodEnd);
 
-                        if (indexAgent != null)
+                        // Update PeriodEnd in index for all platforms (now calculated correctly by each Provider)
+                        if (indexAgent != null && result.PeriodEnd != null)
                         {
-                            await indexAgent.UpdateSubscriptionPeriodEndAsync(
-                                paymentId, result.VerificationResult.ExpiresDate.Value);
+                            await indexAgent.UpdateSubscriptionPeriodEndAsync(paymentId, result.PeriodEnd.Value);
                         }
                     }
 
