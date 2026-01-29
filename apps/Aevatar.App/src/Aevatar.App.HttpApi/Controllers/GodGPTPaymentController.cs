@@ -15,6 +15,7 @@ using Aevatar.Payment.Abstractions;
 using Aevatar.Payment.Providers;
 using Aevatar.Payment.Agents.Protos;
 using Google.Protobuf;
+using Google.Protobuf.WellKnownTypes;
 using Asp.Versioning;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -495,7 +496,9 @@ public class GodGPTPaymentController : AevatarController
                 transactionsJson = transactionsJson.Substring(3, transactionsJson.Length - 6);
             }
             
-            // Parse JSON array - each element is a TransactionProto JSON
+            // Parse JSON array - data was serialized with System.Text.Json (not Protobuf JSON),
+            // so Timestamp fields are in object format {"seconds":xxx,"nanos":xxx} instead of RFC3339 string.
+            // We need to manually parse and map the fields.
             using var doc = JsonDocument.Parse(transactionsJson);
             var root = doc.RootElement;
             
@@ -507,14 +510,14 @@ public class GodGPTPaymentController : AevatarController
             {
                 try
                 {
-                    var txJson = txElement.GetRawText();
-                    var txProto = JsonParser.Default.Parse<TransactionProto>(txJson);
-                    resultList.Add(txProto);
+                    var txProto = ParseTransactionFromJsonElement(txElement);
+                    if (txProto != null)
+                        resultList.Add(txProto);
                 }
                 catch (Exception ex)
                 {
                     logger?.LogWarning(ex,
-                        "[GodGPTPaymentController][ParseTransactionsFromData] Failed to parse transaction using Protobuf parser. JSON: {Json}",
+                        "[GodGPTPaymentController][ParseTransactionsFromData] Failed to parse transaction. JSON: {Json}",
                         txElement.GetRawText().Length > 200 ? txElement.GetRawText().Substring(0, 200) + "..." : txElement.GetRawText());
                 }
             }
@@ -522,7 +525,7 @@ public class GodGPTPaymentController : AevatarController
             if (resultList.Count > 0)
             {
                 logger?.LogDebug(
-                    "[GodGPTPaymentController][ParseTransactionsFromData] Successfully parsed {Count} transactions using Protobuf JSON parser",
+                    "[GodGPTPaymentController][ParseTransactionsFromData] Successfully parsed {Count} transactions",
                     resultList.Count);
                 return resultList;
             }
@@ -536,6 +539,79 @@ public class GodGPTPaymentController : AevatarController
                 data.TryGetValue("transactions", out var tx) ? tx?.GetType().Name : "null");
             return null;
         }
+    }
+    
+    /// <summary>
+    /// Parse a single transaction from JsonElement (handles System.Text.Json serialized Timestamp format)
+    /// </summary>
+    private static TransactionProto? ParseTransactionFromJsonElement(JsonElement elem)
+    {
+        var tx = new TransactionProto();
+        
+        if (elem.TryGetProperty("transactionId", out var txId))
+            tx.TransactionId = txId.GetString() ?? "";
+        if (elem.TryGetProperty("externalTransactionId", out var extTxId))
+            tx.ExternalTransactionId = extTxId.GetString() ?? "";
+        if (elem.TryGetProperty("invoiceId", out var invId))
+            tx.InvoiceId = invId.GetString() ?? "";
+        if (elem.TryGetProperty("purchaseToken", out var pt))
+            tx.PurchaseToken = pt.GetString() ?? "";
+        if (elem.TryGetProperty("transactionType", out var txType))
+            tx.TransactionType = txType.GetInt32();
+        if (elem.TryGetProperty("status", out var status))
+            tx.Status = status.GetInt32();
+        if (elem.TryGetProperty("amount", out var amt))
+            tx.Amount = amt.GetInt64();
+        if (elem.TryGetProperty("currency", out var cur))
+            tx.Currency = cur.GetString() ?? "USD";
+        if (elem.TryGetProperty("netAmount", out var netAmt))
+            tx.NetAmount = netAmt.GetInt64();
+        if (elem.TryGetProperty("isTrial", out var trial))
+            tx.IsTrial = trial.GetBoolean();
+        if (elem.TryGetProperty("trialCode", out var trialCode))
+            tx.TrialCode = trialCode.GetString() ?? "";
+        
+        // Parse Timestamp fields (System.Text.Json format: {"seconds":xxx,"nanos":xxx})
+        if (elem.TryGetProperty("periodStart", out var ps))
+            tx.PeriodStart = ParseTimestampFromJsonElement(ps);
+        if (elem.TryGetProperty("periodEnd", out var pe))
+            tx.PeriodEnd = ParseTimestampFromJsonElement(pe);
+        if (elem.TryGetProperty("createdAt", out var ca))
+            tx.CreatedAt = ParseTimestampFromJsonElement(ca);
+        if (elem.TryGetProperty("completedAt", out var coa))
+            tx.CompletedAt = ParseTimestampFromJsonElement(coa);
+        
+        return tx;
+    }
+    
+    /// <summary>
+    /// Parse Timestamp from JsonElement (handles {"seconds":xxx,"nanos":xxx} format)
+    /// </summary>
+    private static Timestamp? ParseTimestampFromJsonElement(JsonElement elem)
+    {
+        if (elem.ValueKind == JsonValueKind.Null)
+            return null;
+        
+        if (elem.ValueKind == JsonValueKind.Object)
+        {
+            long seconds = 0;
+            int nanos = 0;
+            if (elem.TryGetProperty("seconds", out var s))
+                seconds = s.GetInt64();
+            if (elem.TryGetProperty("nanos", out var n))
+                nanos = n.GetInt32();
+            return new Timestamp { Seconds = seconds, Nanos = nanos };
+        }
+        
+        // Try parse as string (RFC3339 format)
+        if (elem.ValueKind == JsonValueKind.String)
+        {
+            var str = elem.GetString();
+            if (!string.IsNullOrEmpty(str) && DateTime.TryParse(str, out var dt))
+                return Timestamp.FromDateTime(dt.ToUniversalTime());
+        }
+        
+        return null;
     }
     
     /// <summary>
