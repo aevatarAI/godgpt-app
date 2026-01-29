@@ -1078,6 +1078,13 @@ public class PaymentService : IPaymentService
                     // Build payment completed event
                     // Use PeriodEnd from webhook result (invoice.paid) if available, otherwise fallback to VerificationResult
                     var periodEnd = result.PeriodEnd ?? result.VerificationResult?.ExpiresDate;
+                    
+                    _logger.LogInformation(
+                        "[PaymentService] Building PaymentCompletedEvent: " +
+                        "result.PeriodEnd={ResultPeriodEnd}, result.VerificationResult.ExpiresDate={ExpiresDate}, " +
+                        "finalPeriodEnd={FinalPeriodEnd}, SubscriptionId={SubscriptionId}",
+                        result.PeriodEnd, result.VerificationResult?.ExpiresDate, periodEnd, eventContext.SubscriptionId);
+                    
                     var completedEvent = new PaymentCompletedEvent
                     {
                         Context = eventContext,

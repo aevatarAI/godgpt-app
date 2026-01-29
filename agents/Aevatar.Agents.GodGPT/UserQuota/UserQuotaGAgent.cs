@@ -906,8 +906,18 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         var isUltimate = GetIsUltimateFromMetadata(metadataDict);
         var trialDays = GetTrialDaysFromMetadata(metadataDict);
 
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCompleted] Extracted plan info: PlanType={PlanType}, IsUltimate={IsUltimate}, TrialDays={TrialDays}",
+            planType, isUltimate, trialDays);
+
         // Get current subscription
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCompleted] Getting current subscription for IsUltimate={IsUltimate}",
+            isUltimate);
         var subscriptionInfo = await GetSubscriptionAsync(isUltimate);
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCompleted] Got subscription: IsActive={IsActive}, PlanType={PlanType}, SubscriptionIds.Count={Count}",
+            subscriptionInfo.IsActive, subscriptionInfo.PlanType, subscriptionInfo.SubscriptionIds?.Count ?? 0);
         var subscriptionIds = subscriptionInfo.SubscriptionIds ?? new List<string>();
         var invoiceIds = subscriptionInfo.InvoiceIds ?? new List<string>();
 
@@ -943,6 +953,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         if (evt.PeriodEnd != null)
         {
             periodEnd = evt.PeriodEnd.ToDateTime();
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCompleted] Using PeriodEnd from event: {PeriodEnd}",
+                periodEnd);
         }
         else
         {
@@ -952,6 +965,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             {
                 periodEnd = periodEnd.AddDays(trialDays);
             }
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCompleted] Calculated PeriodEnd (no event PeriodEnd): StartDate={StartDate}, PlanType={PlanType}, TrialDays={TrialDays}, PeriodEnd={PeriodEnd}",
+                startDate, planType, trialDays, periodEnd);
         }
 
         // Update subscription
