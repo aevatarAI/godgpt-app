@@ -354,8 +354,9 @@ public partial class ChatGAgentManager
                 });
             }
             
-            // Clear the index itself
-            await paymentIndexGAgent.ClearAllAsync();
+            // NOTE: Do NOT clear PaymentIndexGAgent - it's internal data not exposed to users
+            // Keeping the index allows subsequent webhook events to still find corresponding PaymentRecords
+            // The PaymentRecord data is already cleared above, which satisfies account deletion requirements
         }
         catch (Exception e)
         {

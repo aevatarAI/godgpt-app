@@ -455,6 +455,15 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     public async Task ClearAsync()
     {
+        // Idempotency check: skip if already cleared or never initialized
+        if (string.IsNullOrEmpty(State.PaymentId) || State.Status == (int)PaymentStatus.None)
+        {
+            Logger.LogInformation(
+                "[PaymentRecordGAgent] Skipping clear - already cleared or not initialized. PaymentId={PaymentId}, Status={Status}",
+                State.PaymentId, State.Status);
+            return;
+        }
+        
         Logger.LogWarning("[PaymentRecordGAgent] Clearing all data for payment {PaymentId}", Id);
 
         RaiseEvent(new RecordClearedEvent
