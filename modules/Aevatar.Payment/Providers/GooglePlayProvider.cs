@@ -52,7 +52,7 @@ public class GooglePlayProvider : IPaymentProvider
                 ProductId = p.ProductId,
                 Name = p.Name,
                 Description = p.Description,
-                Price = p.Price,
+                Price = p.Amount,
                 Currency = p.Currency,
                 PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
                 BillingCycle = billingCycle,
@@ -61,7 +61,7 @@ public class GooglePlayProvider : IPaymentProvider
                 {
                     ["originalPlanType"] = p.PlanType.ToString(),
                     ["isUltimate"] = p.IsUltimate.ToString().ToLower(),
-                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Price, billingCycle)
+                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, billingCycle)
                 }
             };
         }).ToList());
@@ -79,6 +79,40 @@ public class GooglePlayProvider : IPaymentProvider
             _ => 30
         };
         return Math.Round(amount / days, 2).ToString("F2");
+    }
+
+    /// <summary>
+    /// Calculate real subscription end date based on product's PlanType.
+    /// This matches old code behavior - Google Play Sandbox may have short periods.
+    /// </summary>
+    private DateTime? CalculatePeriodEndFromProduct(string? productId)
+    {
+        if (string.IsNullOrEmpty(productId))
+            return null;
+        
+        var product = _options.Products.FirstOrDefault(p => p.ProductId == productId);
+        if (product == null)
+        {
+            _logger.LogWarning("[GooglePlayProvider] Product {ProductId} not found, using 30 days default", productId);
+            return DateTime.UtcNow.AddDays(30);
+        }
+        
+        var billingCycle = product.GetBillingCycle();
+        var endDate = billingCycle switch
+        {
+            BillingCycle.Daily => DateTime.UtcNow.AddDays(1),
+            BillingCycle.Weekly => DateTime.UtcNow.AddDays(7),
+            BillingCycle.Monthly => DateTime.UtcNow.AddDays(30),
+            BillingCycle.Quarterly => DateTime.UtcNow.AddDays(90),
+            BillingCycle.Yearly => DateTime.UtcNow.AddDays(390), // Match old code: 390 days for yearly
+            _ => DateTime.UtcNow.AddDays(30)
+        };
+        
+        _logger.LogInformation(
+            "[GooglePlayProvider] Calculated PeriodEnd for {ProductId}: BillingCycle={Cycle}, EndDate={EndDate}",
+            productId, billingCycle, endDate);
+        
+        return endDate;
     }
 
     public async Task<SubscriptionResult> CreateSubscriptionAsync(
@@ -399,8 +433,18 @@ public class GooglePlayProvider : IPaymentProvider
                     webhookEvent.Price.Value, webhookEvent.CancelReason);
             }
             
-            // Determine if this is a renewal - Google Play uses "RENEWAL" event type
-            result.IsRenewal = webhookEvent.EventType == "RENEWAL";
+            // Determine if this event should add a transaction record
+            // Old code (UserBillingGAgent) called ProcessGooglePlayPurchaseSuccessAsync for:
+            // - SUBSCRIPTION_PURCHASED -> RevenueCat: INITIAL_PURCHASE
+            // - SUBSCRIPTION_RENEWED -> RevenueCat: RENEWAL
+            // - SUBSCRIPTION_RECOVERED -> RevenueCat: UNCANCELLATION (resubscribe after cancel)
+            // - SUBSCRIPTION_RESTARTED -> RevenueCat: UNCANCELLATION
+            // - PRODUCT_CHANGE is similar to Apple's UPGRADE (weekly to monthly, etc.)
+            // For INITIAL_PURCHASE, PaymentService checks recordState.Status != Completed to skip duplicate
+            result.IsRenewal = webhookEvent.EventType == "INITIAL_PURCHASE" ||
+                               webhookEvent.EventType == "RENEWAL" || 
+                               webhookEvent.EventType == "UNCANCELLATION" ||
+                               webhookEvent.EventType == "PRODUCT_CHANGE";
 
             result.VerificationResult = new VerificationResult
             {
@@ -409,11 +453,16 @@ public class GooglePlayProvider : IPaymentProvider
                 OriginalTransactionId = webhookEvent.OriginalTransactionId,
                 ProductId = webhookEvent.ProductId,
                 PurchaseDate = webhookEvent.PurchaseDate,
-                ExpiresDate = webhookEvent.ExpiresDate,
+                ExpiresDate = webhookEvent.ExpiresDate, // Keep original for reference
                 AutoRenewing = webhookEvent.AutoRenewing,
                 Amount = webhookEvent.Price,
                 Currency = webhookEvent.Currency
             };
+            
+            // Calculate real PeriodEnd based on PlanType (not platform ExpiresDate)
+            // Google Play Sandbox may have short periods, production returns real dates
+            // This matches old code behavior
+            result.PeriodEnd = CalculatePeriodEndFromProduct(webhookEvent.ProductId);
 
             return Task.FromResult(result);
         }
@@ -501,10 +550,10 @@ public class GooglePlayProvider : IPaymentProvider
             Currency = eventData.TryGetProperty("currency", out var currency) 
                 ? currency.GetString() : null,
             PurchaseDate = eventData.TryGetProperty("purchased_at_ms", out var purchMs) 
-                ? DateTimeOffset.FromUnixTimeMilliseconds(purchMs.GetInt64()).DateTime 
+                ? DateTimeOffset.FromUnixTimeMilliseconds(purchMs.GetInt64()).UtcDateTime 
                 : null,
             ExpiresDate = eventData.TryGetProperty("expiration_at_ms", out var expMs) && expMs.ValueKind != System.Text.Json.JsonValueKind.Null
-                ? DateTimeOffset.FromUnixTimeMilliseconds(expMs.GetInt64()).DateTime 
+                ? DateTimeOffset.FromUnixTimeMilliseconds(expMs.GetInt64()).UtcDateTime 
                 : null,
             CancelReason = eventData.TryGetProperty("cancel_reason", out var cancelReason) 
                 ? cancelReason.GetString() : null,
@@ -618,7 +667,7 @@ public class GoogleProductConfig
     public string ProductId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public decimal Price { get; set; }
+    public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
     
     /// <summary>

@@ -93,7 +93,8 @@ message ActiveSubscriptionListResponse {
 
 // Request type for payment record creation (must be Protobuf for RPC)
 message CreatePaymentRequestProto {
-  // User info
+  // Identifiers
+  string payment_id = 21;             // Business payment ID (e.g., "payment_stripe_xxx")
   string user_id = 1;
   string external_order_id = 2;
   

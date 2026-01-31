@@ -7,6 +7,7 @@ using Aevatar.Application.Grains.Agents.Invitation;
 using Aevatar.Application.Grains.Invitation;
 using Aevatar.Application.Grains.UserInfo;
 using Aevatar.Application.Grains.UserQuota;
+using Aevatar.Payment.Agents;
 using GodGPT.GAgents.SpeechChat;
 using Google.Protobuf.WellKnownTypes;
 using Microsoft.Extensions.DependencyInjection;
@@ -29,6 +30,20 @@ public partial class ChatGAgentManager
     {
         var actor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId);
         return actor.As<IUserQuotaGAgent>();
+    }
+    
+    private async Task<IPaymentIndexGAgent> GetPaymentIndexAgentAsync(string userId)
+    {
+        var actor = await _actorFactory.CreateGAgentActorAsync<PaymentIndexGAgent>(userId);
+        return actor.As<IPaymentIndexGAgent>();
+    }
+    
+    private async Task<IPaymentRecordGAgent> GetPaymentRecordAgentAsync(string paymentId)
+    {
+        // Convert paymentId to stable Agent ID (same logic as PaymentService)
+        var agentId = PaymentIdHelper.ToAgentIdString(paymentId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<PaymentRecordGAgent>(agentId);
+        return actor.As<IPaymentRecordGAgent>();
     }
     
     #endregion

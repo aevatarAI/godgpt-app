@@ -42,7 +42,7 @@ public class ApplePayProvider : IPaymentProvider
                 ProductId = p.ProductId,
                 Name = p.Name,
                 Description = p.Description,
-                Price = p.Price,
+                Price = p.Amount,
                 Currency = p.Currency,
                 PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
                 BillingCycle = billingCycle,
@@ -51,7 +51,7 @@ public class ApplePayProvider : IPaymentProvider
                 {
                     ["originalPlanType"] = p.PlanType.ToString(),
                     ["isUltimate"] = p.IsUltimate.ToString().ToLower(),
-                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Price, billingCycle)
+                    ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, billingCycle)
                 }
             };
         }).ToList());
@@ -69,6 +69,41 @@ public class ApplePayProvider : IPaymentProvider
             _ => 30
         };
         return Math.Round(amount / days, 2).ToString("F2");
+    }
+
+    /// <summary>
+    /// Calculate real subscription end date based on product's PlanType.
+    /// This matches old code (UserBillingGAgent.CalculateSubscriptionDurationAsync) behavior.
+    /// Apple Sandbox returns short periods (3-5 minutes), so we calculate real EndDate ourselves.
+    /// </summary>
+    private DateTime? CalculatePeriodEndFromProduct(string? productId)
+    {
+        if (string.IsNullOrEmpty(productId))
+            return null;
+        
+        var product = _options.Products.FirstOrDefault(p => p.ProductId == productId);
+        if (product == null)
+        {
+            _logger.LogWarning("[ApplePayProvider] Product {ProductId} not found, using 30 days default", productId);
+            return DateTime.UtcNow.AddDays(30);
+        }
+        
+        var billingCycle = product.GetBillingCycle();
+        var endDate = billingCycle switch
+        {
+            BillingCycle.Daily => DateTime.UtcNow.AddDays(1),
+            BillingCycle.Weekly => DateTime.UtcNow.AddDays(7),
+            BillingCycle.Monthly => DateTime.UtcNow.AddDays(30),
+            BillingCycle.Quarterly => DateTime.UtcNow.AddDays(90),
+            BillingCycle.Yearly => DateTime.UtcNow.AddDays(390), // Match old code: 390 days for yearly
+            _ => DateTime.UtcNow.AddDays(30)
+        };
+        
+        _logger.LogInformation(
+            "[ApplePayProvider] Calculated PeriodEnd for {ProductId}: BillingCycle={Cycle}, EndDate={EndDate}",
+            productId, billingCycle, endDate);
+        
+        return endDate;
     }
 
     public async Task<SubscriptionResult> CreateSubscriptionAsync(
@@ -251,8 +286,15 @@ public class ApplePayProvider : IPaymentProvider
             
             result.NewStatus = MapAppleEventToStatus(notification.NotificationType, notification.Subtype);
             
-            // Determine if this is a renewal - Apple uses "DID_RENEW" notification type
-            result.IsRenewal = notification.NotificationType == "DID_RENEW";
+            // Determine if this is a renewal/upgrade/resubscribe - all should add transaction record
+            // Old code (UserBillingGAgent.HandleDidRenewAsync) was called for:
+            // - SUBSCRIBED (both INITIAL_BUY and RESUBSCRIBE) - line 2636
+            // - DID_RENEW - line 2645
+            // - DID_CHANGE_RENEWAL_PREF + UPGRADE - line 2694
+            // For INITIAL_BUY, PaymentService checks recordState.Status != Completed to skip adding duplicate
+            result.IsRenewal = notification.NotificationType == "DID_RENEW" ||
+                               notification.NotificationType == "SUBSCRIBED" ||
+                               (notification.NotificationType == "DID_CHANGE_RENEWAL_PREF" && notification.Subtype == "UPGRADE");
 
             if (transactionInfo != null)
             {
@@ -264,11 +306,16 @@ public class ApplePayProvider : IPaymentProvider
                     OriginalTransactionId = transactionInfo.OriginalTransactionId,
                     ProductId = transactionInfo.ProductId,
                     PurchaseDate = transactionInfo.PurchaseDate,
-                    ExpiresDate = transactionInfo.ExpiresDate,
+                    ExpiresDate = transactionInfo.ExpiresDate, // Keep original for reference
                     AutoRenewing = transactionInfo.AutoRenewing,
                     Amount = transactionInfo.Price,
                     Currency = transactionInfo.Currency
                 };
+                
+                // Calculate real PeriodEnd based on PlanType (not platform ExpiresDate)
+                // Apple Sandbox returns short periods (3-5 minutes), production returns real dates
+                // Old code used CalculateSubscriptionDurationAsync to get real EndDate
+                result.PeriodEnd = CalculatePeriodEndFromProduct(transactionInfo.ProductId);
             }
 
             // Enhanced logging for refund events
@@ -283,8 +330,8 @@ public class ApplePayProvider : IPaymentProvider
             else
             {
                 _logger.LogInformation(
-                    "[ApplePayProvider] Webhook: Type={Type}, UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
-                    notification.NotificationType, result.UserId, orderId, transactionInfo?.ProductId);
+                    "[ApplePayProvider] Webhook: Type={Type}, Subtype={Subtype}, UserId={UserId}, OrderId={OrderId}, ProductId={ProductId}",
+                    notification.NotificationType, notification.Subtype ?? "(none)", result.UserId, orderId, transactionInfo?.ProductId);
             }
 
             return result;
@@ -559,9 +606,9 @@ public class ApplePayProvider : IPaymentProvider
             OriginalTransactionId = root.GetProperty("originalTransactionId").GetString() ?? string.Empty,
             ProductId = root.GetProperty("productId").GetString() ?? string.Empty,
             PurchaseDate = DateTimeOffset.FromUnixTimeMilliseconds(
-                root.GetProperty("purchaseDate").GetInt64()).DateTime,
+                root.GetProperty("purchaseDate").GetInt64()).UtcDateTime,
             ExpiresDate = root.TryGetProperty("expiresDate", out var exp) 
-                ? DateTimeOffset.FromUnixTimeMilliseconds(exp.GetInt64()).DateTime 
+                ? DateTimeOffset.FromUnixTimeMilliseconds(exp.GetInt64()).UtcDateTime 
                 : null,
             AutoRenewing = !root.TryGetProperty("revocationDate", out _),
             AppAccountToken = root.TryGetProperty("appAccountToken", out var token) 
@@ -600,9 +647,9 @@ public class ApplePayProvider : IPaymentProvider
                 OriginalTransactionId = txRoot.GetProperty("originalTransactionId").GetString() ?? string.Empty,
                 ProductId = txRoot.GetProperty("productId").GetString() ?? string.Empty,
                 PurchaseDate = DateTimeOffset.FromUnixTimeMilliseconds(
-                    txRoot.GetProperty("purchaseDate").GetInt64()).DateTime,
+                    txRoot.GetProperty("purchaseDate").GetInt64()).UtcDateTime,
                 ExpiresDate = txRoot.TryGetProperty("expiresDate", out var exp)
-                    ? DateTimeOffset.FromUnixTimeMilliseconds(exp.GetInt64()).DateTime
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(exp.GetInt64()).UtcDateTime
                     : null,
                 AutoRenewing = !txRoot.TryGetProperty("revocationDate", out var revDate),
                 AppAccountToken = txRoot.TryGetProperty("appAccountToken", out var token)
@@ -612,7 +659,7 @@ public class ApplePayProvider : IPaymentProvider
                 Price = txRoot.TryGetProperty("price", out var price) ? price.GetInt64() / 1000m : null,
                 Currency = txRoot.TryGetProperty("currency", out var currency) ? currency.GetString() : null,
                 RevocationDate = revDate.ValueKind != JsonValueKind.Undefined
-                    ? DateTimeOffset.FromUnixTimeMilliseconds(revDate.GetInt64()).DateTime
+                    ? DateTimeOffset.FromUnixTimeMilliseconds(revDate.GetInt64()).UtcDateTime
                     : null,
                 RevocationReason = txRoot.TryGetProperty("revocationReason", out var revReason)
                     ? revReason.GetInt32().ToString()
@@ -644,29 +691,69 @@ public class ApplePayProvider : IPaymentProvider
     {
         return type switch
         {
+            // Subscription lifecycle events
             "SUBSCRIBED" => true,
             "DID_RENEW" => true,
-            "DID_CHANGE_RENEWAL_STATUS" when subtype == "AUTO_RENEW_DISABLED" => true,
+            "DID_CHANGE_RENEWAL_STATUS" => true, // Both AUTO_RENEW_ENABLED and AUTO_RENEW_DISABLED
+            "DID_CHANGE_RENEWAL_PREF" => true,   // UPGRADE/DOWNGRADE
             "EXPIRED" => true,
             "GRACE_PERIOD_EXPIRED" => true,
+            
+            // Refund events
             "REVOKE" => true,
-            "DID_CHANGE_RENEWAL_PREF" => true,
             "REFUND" => true,
+            "REFUND_REVERSED" => true,           // Reinstate subscription after refund reversal
+            
+            // Offer events
+            "OFFER_REDEEMED" => true,            // May trigger upgrade
+            
+            // Skip events that don't need processing
+            // TEST, DID_FAIL_TO_RENEW, RENEWAL_EXTENDED, PRICE_INCREASE, etc.
             _ => false
         };
     }
 
-    private static PaymentStatus MapAppleEventToStatus(string type, string? subtype)
+    private static PaymentStatus? MapAppleEventToStatus(string type, string? subtype)
     {
         return type switch
         {
+            // Subscription active/renewed
             "SUBSCRIBED" => PaymentStatus.Completed,
             "DID_RENEW" => PaymentStatus.Completed,
+            
+            // Subscription ended
             "EXPIRED" => PaymentStatus.Expired,
             "GRACE_PERIOD_EXPIRED" => PaymentStatus.Expired,
+            
+            // Refund/revoke
             "REVOKE" => PaymentStatus.Refunded,
             "REFUND" => PaymentStatus.Refunded,
-            "DID_CHANGE_RENEWAL_STATUS" when subtype == "AUTO_RENEW_DISABLED" => PaymentStatus.Cancelled,
+            
+            // Refund reversed - reinstate subscription (same as old code)
+            "REFUND_REVERSED" => PaymentStatus.Completed,
+            
+            // Auto-renewal status change
+            // Both AUTO_RENEW_ENABLED and AUTO_RENEW_DISABLED should NOT trigger status change events.
+            // - AUTO_RENEW_DISABLED: User wants to cancel at period end, but subscription stays active until EXPIRED
+            // - AUTO_RENEW_ENABLED: User re-enabled auto-renewal, actual payment via DID_RENEW
+            // Old code only updated PaymentSummary.Status but did NOT call UserQuotaGAgent.UpdateSubscriptionAsync
+            // The actual cancellation happens when EXPIRED event is received
+            "DID_CHANGE_RENEWAL_STATUS" => null, // No status change for either subtype
+            
+            // Renewal preference change (plan upgrade/downgrade)
+            "DID_CHANGE_RENEWAL_PREF" when subtype == "UPGRADE" => PaymentStatus.Completed,
+            "DID_CHANGE_RENEWAL_PREF" => null, // DOWNGRADE - effective at next renewal
+            
+            // Offer redeemed
+            "OFFER_REDEEMED" when subtype == "UPGRADE" => PaymentStatus.Completed,
+            "OFFER_REDEEMED" => null, // Other offer types - no immediate status change
+            
+            // Events that don't change status
+            "DID_FAIL_TO_RENEW" => null, // In grace period or billing retry
+            "RENEWAL_EXTENDED" => null, // Just extends date, doesn't change status
+            "PRICE_INCREASE" => null, // Pending customer consent
+            "TEST" => null, // Test notification
+            
             _ => PaymentStatus.Pending
         };
     }
@@ -760,7 +847,7 @@ public class AppleProductConfig
     public string ProductId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public decimal Price { get; set; }
+    public decimal Amount { get; set; }
     public string Currency { get; set; } = "USD";
     
     /// <summary>

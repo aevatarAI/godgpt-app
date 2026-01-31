@@ -65,6 +65,11 @@ public interface IInvitationGAgent : Aevatar.Agents.Abstractions.IGAgent
     /// <param name="credits">The amount of credits to reward</param>
     /// <returns>True if the reward was successfully processed, false if already rewarded for this tweet</returns>
     Task<bool> ProcessTwitterRewardAsync(string tweetId, int credits);
+    
+    /// <summary>
+    /// Clear all invitation data (for account deletion)
+    /// </summary>
+    Task ClearAllAsync();
 }
 
 [GenerateSerializer]
