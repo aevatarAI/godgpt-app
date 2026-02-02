@@ -68,29 +68,29 @@ public partial class ChatGAgentManager
             var userQuotaGrain = await GetUserQuotaAgentAsync(Id);
 
             // Check Ultimate subscription first (higher priority)
-            var ultimateSubscription = await userQuotaGrain.GetSubscriptionAsync(ultimate: true);
+            var ultimateSubscription = await userQuotaGrain.GetSubscriptionProtoAsync(ultimate: true);
             if (ultimateSubscription.IsActive)
             {
                 return ultimateSubscription.PlanType switch
                 {
-                    PlanType.Day => UserMembershipTier.UltimateDay,
-                    PlanType.Week => UserMembershipTier.UltimateWeek,
-                    PlanType.Month => UserMembershipTier.UltimateMonth,
-                    PlanType.Year => UserMembershipTier.UltimateYear,
+                    QuotaPlanType.Day => UserMembershipTier.UltimateDay,
+                    QuotaPlanType.Week => UserMembershipTier.UltimateWeek,
+                    QuotaPlanType.Month => UserMembershipTier.UltimateMonth,
+                    QuotaPlanType.Year => UserMembershipTier.UltimateYear,
                     _ => UserMembershipTier.UltimateMonth // Default fallback for unknown plan types
                 };
             }
 
             // Check Premium subscription
-            var premiumSubscription = await userQuotaGrain.GetSubscriptionAsync(ultimate: false);
+            var premiumSubscription = await userQuotaGrain.GetSubscriptionProtoAsync(ultimate: false);
             if (premiumSubscription.IsActive)
             {
                 return premiumSubscription.PlanType switch
                 {
-                    PlanType.Day => UserMembershipTier.PremiumDay,
-                    PlanType.Week => UserMembershipTier.PremiumWeek,
-                    PlanType.Month => UserMembershipTier.PremiumMonth,
-                    PlanType.Year => UserMembershipTier.PremiumYear,
+                    QuotaPlanType.Day => UserMembershipTier.PremiumDay,
+                    QuotaPlanType.Week => UserMembershipTier.PremiumWeek,
+                    QuotaPlanType.Month => UserMembershipTier.PremiumMonth,
+                    QuotaPlanType.Year => UserMembershipTier.PremiumYear,
                     _ => UserMembershipTier.PremiumMonth // Default fallback for unknown plan types
                 };
             }

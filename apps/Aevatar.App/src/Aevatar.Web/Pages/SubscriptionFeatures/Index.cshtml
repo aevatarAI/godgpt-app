@@ -1,0 +1,268 @@
+@page
+@using System.Text.Json
+@using Aevatar.Agents.GodGPT.Protos.Subscription
+@using Aevatar.App.Localization
+@using Microsoft.AspNetCore.Mvc.Localization
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Blockquote
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Button
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Card
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Grid
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Table
+@using Volo.Abp.AspNetCore.Mvc.UI.Bundling.TagHelpers
+@using Volo.Abp.AspNetCore.Mvc.UI.Layout
+@model Aevatar.Web.Pages.SubscriptionFeatures.IndexModel
+@inject IHtmlLocalizer<AevatarResource> L
+@inject IPageLayout PageLayout
+@{
+    PageLayout.Content.Title = L["SubscriptionFeatures"].Value;
+    PageLayout.Content.BreadCrumb.Add(L["Menu:SubscriptionManagement"].Value);
+    PageLayout.Content.BreadCrumb.Add(L["SubscriptionFeatures"].Value);
+}
+
+<abp-card>
+    <abp-card-header>
+        <abp-row>
+            <abp-column size-md="_6">
+                <abp-card-title>@L["SubscriptionFeatures"]</abp-card-title>
+            </abp-column>
+            <abp-column size-md="_6" class="text-end">
+                @if (Model.CanCreate)
+                {
+                    <abp-button id="BtnCreateFeature" 
+                                button-type="Primary" 
+                                icon="fas fa-plus"
+                                text="@L["CreateFeature"].Value">
+                    </abp-button>
+                }
+            </abp-column>
+        </abp-row>
+    </abp-card-header>
+    <abp-card-body>
+        <form method="get" class="mb-3">
+            <abp-row>
+                <abp-column size-md="_3">
+                    <select name="TypeFilter" class="form-select" onchange="this.form.submit()">
+                        @foreach (var option in Model.TypeOptions)
+                        {
+                            <option value="@option.Value" selected="@(Model.TypeFilter == option.Value)">
+                                @option.Text
+                            </option>
+                        }
+                    </select>
+                </abp-column>
+                @if (Model.CanReorder)
+                {
+                    <abp-column size-md="_9" class="text-end">
+                        <small class="text-muted">
+                            <i class="fas fa-grip-vertical me-1"></i>@L["ReorderFeatures"]
+                        </small>
+                    </abp-column>
+                }
+            </abp-row>
+        </form>
+        
+        <abp-table striped-rows="true" id="featuresTable">
+            <thead>
+                <tr>
+                    @if (Model.CanReorder)
+                    {
+                        <th style="width: 40px;"></th>
+                    }
+                    <th style="width: 100px;">@L["Actions"]</th>
+                    <th>@L["NameKey"]</th>
+                    <th>@L["DescriptionKey"]</th>
+                    <th>@L["FeatureType"]</th>
+                    <th>@L["Usage"]</th>
+                    <th>@L["DisplayOrder"]</th>
+                </tr>
+            </thead>
+            <tbody id="featuresList">
+                @foreach (var feature in Model.Features)
+                {
+                    <tr data-id="@feature.Id" data-order="@feature.DisplayOrder">
+                        @if (Model.CanReorder)
+                        {
+                            <td class="drag-handle" style="cursor: grab;">
+                                <i class="fas fa-grip-vertical text-muted"></i>
+                            </td>
+                        }
+                        <td>
+                            @if (Model.CanEdit || Model.CanDelete)
+                            {
+                                <div class="dropdown">
+                                    <button class="btn btn-primary btn-sm dropdown-toggle" 
+                                            type="button" 
+                                            data-bs-toggle="dropdown" 
+                                            aria-expanded="false">
+                                        @L["Actions"]
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        @if (Model.CanEdit)
+                                        {
+                                            <li>
+                                                <a class="dropdown-item btn-edit" href="#" 
+                                                   data-id="@feature.Id">
+                                                    <i class="fas fa-edit me-2"></i>@L["Edit"]
+                                                </a>
+                                            </li>
+                                        }
+                                        @if (Model.CanDelete)
+                                        {
+                                            <li><hr class="dropdown-divider"></li>
+                                            <li>
+                                                <a class="dropdown-item btn-delete text-danger" href="#" 
+                                                   data-id="@feature.Id"
+                                                   data-name="@feature.Name">
+                                                    <i class="fas fa-trash me-2"></i>@L["Delete"]
+                                                </a>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                        </td>
+                        <td>
+                            <span class="fw-bold">@feature.Name</span>
+                            <br/>
+                            <small class="text-muted"><code>@feature.NameKey</code></small>
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(feature.Description))
+                            {
+                                <span>@feature.Description</span>
+                                <br/>
+                                <small class="text-muted"><code>@feature.DescriptionKey</code></small>
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+                        <td>
+                            @if (feature.Type == SubscriptionFeatureType.None)
+                            {
+                                <span class="badge bg-secondary">@feature.TypeName</span>
+                            }
+                            else if (feature.Type == SubscriptionFeatureType.Core)
+                            {
+                                <span class="badge bg-primary">@feature.TypeName</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-success">@feature.TypeName</span>
+                            }
+                        </td>
+                        <td>
+                            @if (feature.Usage != null)
+                            {
+                                <span class="badge bg-info">
+                                    @feature.Usage
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+                        <td>
+                            <span class="badge bg-secondary">@feature.DisplayOrder</span>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </abp-table>
+        
+        @if (!Model.Features.Any())
+        {
+            <div class="text-center py-5">
+                <i class="fas fa-list-check fa-3x text-muted mb-3"></i>
+                <p class="text-muted">@L["NoFeaturesFound"]</p>
+                @if (Model.CanCreate)
+                {
+                    <abp-button id="BtnCreateFirstFeature" 
+                                button-type="Primary" 
+                                icon="fas fa-plus"
+                                text="@L["CreateFirstFeature"].Value">
+                    </abp-button>
+                }
+            </div>
+        }
+    </abp-card-body>
+</abp-card>
+
+@section scripts {
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <script src="~/js/subscription/features-reorder.js?v=2"></script>
+    <script>
+        $(function () {
+            var localizedMessages = {
+                deleteConfirmTitle: @Html.Raw(JsonSerializer.Serialize(L["Delete"].Value)),
+                deleteConfirmMessage: @Html.Raw(JsonSerializer.Serialize(L["DeleteWarningFeature"].Value)),
+                deleteSuccess: @Html.Raw(JsonSerializer.Serialize(L["FeatureDeletedSuccessfully"].Value)),
+                reorderSuccess: @Html.Raw(JsonSerializer.Serialize(L["FeaturesReorderedSuccessfully"].Value))
+            };
+
+            var createModal = new abp.ModalManager(abp.appPath + 'SubscriptionFeatures/CreateModal');
+            var editModal = new abp.ModalManager(abp.appPath + 'SubscriptionFeatures/EditModal');
+
+            $('#BtnCreateFeature, #BtnCreateFirstFeature').click(function (e) {
+                e.preventDefault();
+                createModal.open();
+            });
+
+            createModal.onResult(function () {
+                location.reload();
+            });
+
+            $(document).on('click', '.btn-edit', function (e) {
+                e.preventDefault();
+                var id = $(this).data('id');
+                editModal.open({ id: id });
+            });
+
+            editModal.onResult(function () {
+                location.reload();
+            });
+
+            $(document).on('click', '.btn-delete', function (e) {
+                e.preventDefault();
+                var id = $(this).data('id');
+                var name = $(this).data('name');
+
+                abp.message.confirm(
+                    localizedMessages.deleteConfirmMessage,
+                    localizedMessages.deleteConfirmTitle
+                ).then(function (confirmed) {
+                    if (confirmed) {
+                        abp.ajax({
+                            url: abp.appPath + 'api/admin/subscription/features/' + id,
+                            type: 'DELETE'
+                        }).then(function () {
+                            abp.notify.success(localizedMessages.deleteSuccess);
+                            location.reload();
+                        });
+                    }
+                });
+            });
+
+            // Initialize drag-and-drop if user has reorder permission
+            @if (Model.CanReorder)
+            {
+                <text>
+                initFeatureReorder('#featuresList', function(orders) {
+                    abp.ajax({
+                        url: abp.appPath + 'api/admin/subscription/features/reorder',
+                        type: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify(orders)
+                    }).then(function () {
+                        abp.notify.success(localizedMessages.reorderSuccess);
+                        location.reload();
+                    });
+                });
+                </text>
+            }
+        });
+    </script>
+}

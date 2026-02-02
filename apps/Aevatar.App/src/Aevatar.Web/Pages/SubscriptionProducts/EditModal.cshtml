@@ -1,0 +1,90 @@
+@page
+@using Aevatar.App.Localization
+@using Microsoft.AspNetCore.Mvc.Localization
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Alert
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Blockquote
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Form
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Modal
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Table
+@model Aevatar.Web.Pages.SubscriptionProducts.EditModalModel
+@inject IHtmlLocalizer<AevatarResource> L
+@{
+    Layout = null;
+}
+
+<form method="post" asp-page="/SubscriptionProducts/EditModal">
+    <abp-modal>
+        <abp-modal-header title="@L["EditProduct"].Value"></abp-modal-header>
+        <abp-modal-body>
+            <input type="hidden" asp-for="Id" />
+            
+            <abp-input asp-for="Product.NameKey" label="@L["NameKey"].Value" />
+            <abp-select asp-for="Product.PlanType" 
+                        asp-items="Model.PlanTypeOptions"
+                        label="@L["PlanType"].Value" />
+            <abp-input asp-for="Product.DescriptionKey" label="@L["DescriptionKey"].Value" />
+            <abp-input asp-for="Product.HighlightKey" label="@L["HighlightKey"].Value" />
+            
+            <div class="mb-3">
+                <label class="form-label">@L["Platform"]</label>
+                <input type="text" class="form-control" value="@Model.GetPlatformDisplayName(Model.Product.Platform)" readonly disabled />
+            </div>
+            
+            <div class="mb-3">
+                <label class="form-label">@L["PlatformProductId"]</label>
+                <input type="text" class="form-control" value="@Model.Product.PlatformProductId" readonly disabled />
+            </div>
+            
+            <div class="mb-3">
+                <label class="form-label">@L["Features"]</label>
+                <select asp-for="Product.FeatureIds" 
+                        asp-items="Model.AvailableFeatures"
+                        class="form-select" 
+                        multiple="multiple">
+                </select>
+            </div>
+            
+            <abp-select asp-for="Product.LabelId" 
+                        asp-items="Model.AvailableLabels"
+                        label="@L["Label"].Value" />
+            
+            <abp-input asp-for="Product.IsUltimate" label="@L["IsUltimate"].Value" />
+            
+            <abp-input asp-for="Product.DisplayOrder" label="@L["DisplayOrder"].Value" />
+            
+            @if (Model.IsStripePlatform)
+            {
+                <hr />
+                <h6>@L["Prices"]</h6>
+                @if (Model.Prices.Any())
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered">
+                            <thead>
+                                <tr>
+                                    <th>@L["Currency"]</th>
+                                    <th>@L["Price"]</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var price in Model.Prices)
+                                {
+                                    <tr>
+                                        <td><code>@price.Currency</code></td>
+                                        <td>@price.Price.ToString("N2")</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+                else
+                {
+                    <p class="text-muted"><em>@L["PricesNotSynced"]</em></p>
+                }
+            }
+        </abp-modal-body>
+        <abp-modal-footer buttons="@(AbpModalButtons.Cancel | AbpModalButtons.Save)"></abp-modal-footer>
+    </abp-modal>
+</form>

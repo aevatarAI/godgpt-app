@@ -2,6 +2,9 @@ using Aevatar.App.Application.Services;
 using Aevatar.App.Application.Services.Payment;
 using Aevatar.App.Application.Services.Push;
 using Aevatar.App.Application.Contracts.Services;
+using Aevatar.App.Services.Subscription;
+using Aevatar.App.Services.Subscription.Options;
+using Aevatar.App.Services.Subscription.Providers;
 using Aevatar.App.Application.Contracts.Services.Push;
 using Aevatar.Application.Grains;
 using Microsoft.Extensions.DependencyInjection;
@@ -57,7 +60,21 @@ public class AppApplicationModule : AbpModule
         // Register GodGPTPaymentBusinessService (handles Stripe operations in HttpApi layer)
         context.Services.AddScoped<IGodGPTPaymentBusinessService, GodGPTPaymentBusinessService>();
         
+        // Platform Price Sync
         var configuration = context.Services.GetConfiguration();
+        Configure<PlatformPriceSyncOptions>(configuration.GetSection(PlatformPriceSyncOptions.SectionName));
+        context.Services.AddTransient<IPlatformPriceSyncService, PlatformPriceSyncService>();
+        context.Services.AddTransient<ISubscriptionProductService, SubscriptionProductService>();
+        context.Services.AddTransient<ISubscriptionLabelService, SubscriptionLabelService>();
+        context.Services.AddTransient<ISubscriptionFeatureService, SubscriptionFeatureService>();
+        // Register platform price providers (Strategy Pattern)
+        context.Services.AddSingleton<IPlatformPriceProvider, StripePriceProvider>();
+        context.Services.AddSingleton<IPlatformPriceProviderFactory, PlatformPriceProviderFactory>();
+
+        // User Subscription
+        Configure<UserSubscriptionOptions>(configuration.GetSection(UserSubscriptionOptions.SectionName));
+        context.Services.AddTransient<IUserSubscriptionService, UserSubscriptionService>();
+
         // Push Notification Services
         Configure<FirebaseMessagingOptions>(configuration.GetSection(FirebaseMessagingOptions.SectionName));
         context.Services.AddHttpClient<IFirebaseMessagingClient, FirebaseMessagingClient>();

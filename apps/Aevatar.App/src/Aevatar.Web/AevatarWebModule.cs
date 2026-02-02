@@ -5,6 +5,8 @@ using Aevatar.App;
 using Aevatar.App.HttpApi.Host.Extensions;
 using Aevatar.App.Localization;
 using Aevatar.App.MongoDB;
+using Aevatar.App.Services.Subscription.BackgroundWorkers;
+using Aevatar.Payment.Providers;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Extensions.DependencyInjection;
 using Microsoft.AspNetCore.Hosting;
@@ -27,6 +29,7 @@ using Volo.Abp.AspNetCore.Mvc.UI.Theme.Shared;
 using Volo.Abp.AspNetCore.Serilog;
 using Volo.Abp.Autofac;
 using Volo.Abp.AutoMapper;
+using Volo.Abp.BackgroundWorkers;
 using Volo.Abp.Caching;
 using Volo.Abp.Caching.StackExchangeRedis;
 using Volo.Abp.Identity.Web;
@@ -35,6 +38,7 @@ using Volo.Abp.Security.Claims;
 using Volo.Abp.SettingManagement.Web;
 using Volo.Abp.Swashbuckle;
 using Volo.Abp.OpenIddict;
+using Volo.Abp.Threading;
 using Volo.Abp.UI.Navigation.Urls;
 using Volo.Abp.UI.Navigation;
 using Volo.Abp.VirtualFileSystem;
@@ -110,11 +114,13 @@ public class AevatarWebModule : AbpModule
         var hostingEnvironment = context.Services.GetHostingEnvironment();
         var configuration = context.Services.GetConfiguration();
 
+        context.Services.Configure<StripeOptions>(
+            configuration.GetSection(StripeOptions.SectionName));
         ConfigureAuthentication(context);
         ConfigureUrls(configuration);
         ConfigureBundles();
         // Configure Agent Runtime (Local or Orleans)
-        //ConfigureAgentRuntime(context, configuration);
+        ConfigureAgentRuntime(context, configuration);
         ConfigureAutoMapper();
         ConfigureVirtualFileSystem(hostingEnvironment);
         ConfigureNavigationServices();
@@ -233,11 +239,10 @@ public class AevatarWebModule : AbpModule
 
     public override void OnApplicationInitialization(ApplicationInitializationContext context)
     {
-        //TODO 
-        // AsyncHelper.RunSync(async () =>
-        // {
-        //     await context.AddBackgroundWorkerAsync<PlatformPriceSyncWorker>();
-        // }) ;
+        AsyncHelper.RunSync(async () =>
+        {
+            await context.AddBackgroundWorkerAsync<PlatformPriceSyncWorker>();
+        }) ;
         var app = context.GetApplicationBuilder();
         var env = context.GetEnvironment();
 

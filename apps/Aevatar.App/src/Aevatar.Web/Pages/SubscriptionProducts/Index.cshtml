@@ -1,0 +1,560 @@
+@page
+@using System.Text.Json
+@using Aevatar.Agents.GodGPT.Protos.InviteCode
+@using Aevatar.App.Localization
+@using Microsoft.AspNetCore.Mvc.Localization
+@using Microsoft.AspNetCore.Mvc.TagHelpers
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Alert
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Blockquote
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Button
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Card
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Grid
+@using Volo.Abp.AspNetCore.Mvc.UI.Bootstrap.TagHelpers.Table
+@using Volo.Abp.AspNetCore.Mvc.UI.Bundling.TagHelpers
+@using Volo.Abp.AspNetCore.Mvc.UI.Layout
+@model Aevatar.Web.Pages.SubscriptionProducts.IndexModel
+@inject IHtmlLocalizer<AevatarResource> L
+@inject IPageLayout PageLayout
+@{
+    PageLayout.Content.Title = L["SubscriptionProducts"].Value;
+    PageLayout.Content.BreadCrumb.Add(L["Menu:SubscriptionManagement"].Value);
+    PageLayout.Content.BreadCrumb.Add(L["SubscriptionProducts"].Value);
+}
+
+<abp-card>
+    <abp-card-header>
+        <abp-row>
+            <abp-column size-md="_6">
+                <abp-card-title>@L["SubscriptionProducts"]</abp-card-title>
+            </abp-column>
+            <abp-column size-md="_6" class="text-end">
+                @if (Model.CanCreate)
+                {
+                    <abp-button id="BtnCreateProduct" 
+                                button-type="Primary" 
+                                icon="fas fa-plus"
+                                text="@L["CreateProduct"].Value">
+                    </abp-button>
+                }
+            </abp-column>
+        </abp-row>
+    </abp-card-header>
+    <abp-card-body>
+        <form method="get" class="mb-3">
+            <abp-row>
+                <abp-column size-md="_3">
+                    <select name="PlatformFilter" class="form-select" onchange="this.form.submit()">
+                        @foreach (var option in Model.PlatformOptions)
+                        {
+                            var isSelected = Model.PlatformFilter.HasValue 
+                                ? option.Value == ((int)Model.PlatformFilter.Value).ToString()
+                                : string.IsNullOrEmpty(option.Value);
+                            <option value="@option.Value" selected="@isSelected">
+                                @option.Text
+                            </option>
+                        }
+                    </select>
+                </abp-column>
+                <abp-column size-md="_3">
+                    <select name="IsListedFilter" class="form-select" onchange="this.form.submit()">
+                        @foreach (var option in Model.ListedStatusOptions)
+                        {
+                            var isSelected = (Model.IsListedFilter?.ToString().ToLower() ?? "") == option.Value.ToLower();
+                            <option value="@option.Value" selected="@isSelected">
+                                @option.Text
+                            </option>
+                        }
+                    </select>
+                </abp-column>
+            </abp-row>
+        </form>
+        
+        <abp-table striped-rows="true">
+            <thead>
+                <tr>
+                    <th style="width: 120px;">@L["Actions"]</th>
+                    <th>@L["NameKey"]</th>
+                    <th>@L["PlanType"]</th>
+                    <th>@L["DescriptionKey"]</th>
+                    <th>@L["HighlightKey"]</th>
+                    <th>@L["Platform"]</th>
+                    <th>@L["PlatformProductId"]</th>
+                    <th>@L["Prices"]</th>
+                    <th>@L["Label"]</th>
+                    <th>@L["IsUltimate"]</th>
+                    <th>@L["IsListed"]</th>
+                    <th>@L["DisplayOrder"]</th>
+                    <th>@L["Features"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var product in Model.Products)
+                {
+                    <tr>
+                        <td>
+                            @if (Model.CanEdit || Model.CanDelete || Model.CanSetListed || Model.CanSyncPrice)
+                            {
+                                <div class="dropdown">
+                                    <button class="btn btn-primary btn-sm dropdown-toggle" 
+                                            type="button" 
+                                            data-bs-toggle="dropdown" 
+                                            aria-expanded="false">
+                                        @L["Actions"]
+                                    </button>
+                                    <ul class="dropdown-menu">
+                                        @if (Model.CanEdit)
+                                        {
+                                            <li>
+                                                <a class="dropdown-item btn-edit" href="#" 
+                                                   data-id="@product.Id">
+                                                    <i class="fas fa-edit me-2"></i>@L["Edit"]
+                                                </a>
+                                            </li>
+                                        }
+                                        @if (Model.CanSyncPrice && product.Platform == PaymentPlatform.Stripe)
+                                        {
+                                            <li>
+                                                <a class="dropdown-item btn-sync-price" href="#" 
+                                                   data-id="@product.Id">
+                                                    <i class="fas fa-sync me-2"></i>@L["SyncPrice"]
+                                                </a>
+                                            </li>
+                                        }
+                                        @if (Model.CanSetPrice && product.Platform == PaymentPlatform.GooglePlay)
+                                        {
+                                            <li>
+                                                <a class="dropdown-item btn-set-price" href="#" 
+                                                   data-id="@product.Id">
+                                                    <i class="fas fa-dollar-sign me-2"></i>@L["SetPrice"]
+                                                </a>
+                                            </li>
+                                        }
+                                        @if (Model.CanDeletePrice && product.Platform == PaymentPlatform.GooglePlay && product.Prices.Any())
+                                        {
+                                            <li>
+                                                <a class="dropdown-item btn-delete-price text-warning" href="#" 
+                                                   data-id="@product.Id"
+                                                   data-name="@product.Name"
+                                                   data-currencies="@JsonSerializer.Serialize(product.Prices.Select(p => p.Currency))">
+                                                    <i class="fas fa-trash-alt me-2"></i>@L["DeletePrice"]
+                                                </a>
+                                            </li>
+                                        }
+                                        @if (Model.CanSetListed)
+                                        {
+                                            @if (product.IsListed == true)
+                                            {
+                                                <li>
+                                                    <a class="dropdown-item btn-unlist" href="#" 
+                                                       data-id="@product.Id">
+                                                        <i class="fas fa-eye-slash me-2"></i>@L["Unlist"]
+                                                    </a>
+                                                </li>
+                                            }
+                                            else
+                                            {
+                                                <li>
+                                                    <a class="dropdown-item btn-list" href="#" 
+                                                       data-id="@product.Id">
+                                                        <i class="fas fa-eye me-2"></i>@L["List"]
+                                                    </a>
+                                                </li>
+                                            }
+                                        }
+                                        @if (Model.CanDelete)
+                                        {
+                                            <li><hr class="dropdown-divider"></li>
+                                            <li>
+                                                <a class="dropdown-item btn-delete text-danger" href="#" 
+                                                   data-id="@product.Id"
+                                                   data-name="@product.Name">
+                                                    <i class="fas fa-trash me-2"></i>@L["Delete"]
+                                                </a>
+                                            </li>
+                                        }
+                                    </ul>
+                                </div>
+                            }
+                        </td>
+                        <td>
+                            <span class="fw-bold">@product.Name</span>
+                            <br/>
+                            <small class="text-muted"><code>@product.NameKey</code></small>
+                        </td>
+                        <td>
+                            <span class="badge bg-primary">@product.PlanType</span>
+                        </td>
+                        <td>
+                            <span>@product.Description</span>
+                            <br/>
+                            <small class="text-muted"><code>@product.DescriptionKey</code></small>
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(product.Highlight))
+                            {
+                                <span>@product.Highlight</span>
+                                <br/>
+                                <small class="text-muted"><code>@product.HighlightKey</code></small>
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+                        <td>
+                            <span class="badge bg-info">@Model.GetPlatformDisplayName(product.Platform)</span>
+                        </td>
+                        <td>
+                            <code class="small">@product.PlatformProductId</code>
+                        </td>
+                        <td>
+                            @if (product.Prices.Any())
+                            {
+                                @foreach (var price in product.Prices)
+                                {
+                                    <div class="mb-1">
+                                        <div>@price.Price.ToString("N2") @price.Currency</div>
+                                        <small class="text-muted">@price.LastSyncedAt.ToString("yyyy-MM-dd HH:mm")</small>
+                                    </div>
+                                }
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+                        <td>
+                            @if (product.Label != null)
+                            {
+                                <span class="badge bg-warning text-dark">@product.Label.Name</span>
+                                <br/>
+                                <small class="text-muted"><code>@product.Label.NameKey</code></small>
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+                        <td>
+                            @if (product.IsUltimate)
+                            {
+                                <span class="badge bg-danger">
+                                    <i class="fas fa-crown me-1"></i>@L["Ultimate"]
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+                        <td>
+                            @if (product.IsListed == true)
+                            {
+                                <span class="badge bg-success">@L["Listed"]</span>
+                            }
+                            else if (product.IsListed == false)
+                            {
+                                <span class="badge bg-danger">@L["Delisted"]</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">@L["NotListed"]</span>
+                            }
+                        </td>
+                        <td>
+                            <span class="badge bg-secondary">@product.DisplayOrder</span>
+                        </td>
+                        <td>
+                            @if (product.Features.Any())
+                            {
+                                <button class="btn btn-sm btn-outline-primary btn-view-features" 
+                                        type="button"
+                                        data-product-name="@product.Name"
+                                        data-features="@System.Text.Json.JsonSerializer.Serialize(product.Features.Select(f => new { f.Name, f.Description, f.TypeName, Usage = f.Usage.ToString() }))">
+                                    <i class="fas fa-list-check me-1"></i>@product.Features.Count
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="text-muted">-</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </abp-table>
+        
+        @if (!Model.Products.Any())
+        {
+            <div class="text-center py-5">
+                <i class="fas fa-box fa-3x text-muted mb-3"></i>
+                <p class="text-muted">@L["NoProductsFound"]</p>
+                @if (Model.CanCreate)
+                {
+                    <abp-button id="BtnCreateFirstProduct" 
+                                button-type="Primary" 
+                                icon="fas fa-plus"
+                                text="@L["CreateFirstProduct"].Value">
+                    </abp-button>
+                }
+            </div>
+        }
+    </abp-card-body>
+</abp-card>
+
+<!-- Features Modal -->
+<div class="modal fade" id="featuresModal" tabindex="-1" aria-labelledby="featuresModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="featuresModalLabel">
+                    <i class="fas fa-list-check me-2"></i>@L["ProductFeatures"]
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3" id="featuresModalProductName"></p>
+                <ul class="list-group" id="featuresModalList">
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@L["Close"]</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Price Modal -->
+<div class="modal fade" id="deletePriceModal" tabindex="-1" aria-labelledby="deletePriceModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deletePriceModalLabel">
+                    <i class="fas fa-trash-alt me-2 text-warning"></i>@L["DeletePrice"]
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="text-muted mb-3" id="deletePriceModalProductName"></p>
+                <div class="mb-3">
+                    <label for="deletePriceCurrencySelect" class="form-label">@L["SelectCurrency"]</label>
+                    <select class="form-select" id="deletePriceCurrencySelect">
+                    </select>
+                </div>
+                <div class="alert alert-warning">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    @L["ConfirmDeletePrice"]
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@L["Cancel"]</button>
+                <button type="button" class="btn btn-danger" id="confirmDeletePriceBtn">@L["Delete"]</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@section scripts {
+    <script>
+        $(function () {
+            var localizedMessages = {
+                deleteConfirmTitle: @Html.Raw(JsonSerializer.Serialize(L["Delete"].Value)),
+                deleteConfirmMessage: @Html.Raw(JsonSerializer.Serialize(L["ConfirmDelete"].Value)),
+                deleteSuccess: @Html.Raw(JsonSerializer.Serialize(L["ProductDeletedSuccessfully"].Value)),
+                listSuccess: @Html.Raw(JsonSerializer.Serialize(L["ProductListedSuccessfully"].Value)),
+                unlistSuccess: @Html.Raw(JsonSerializer.Serialize(L["ProductUnlistedSuccessfully"].Value)),
+                syncPriceSuccess: @Html.Raw(JsonSerializer.Serialize(L["PriceSyncedSuccessfully"].Value)),
+                setPriceSuccess: @Html.Raw(JsonSerializer.Serialize(L["PriceSetSuccessfully"].Value)),
+                deletePriceConfirmTitle: @Html.Raw(JsonSerializer.Serialize(L["DeletePrice"].Value)),
+                deletePriceConfirmMessage: @Html.Raw(JsonSerializer.Serialize(L["ConfirmDeletePrice"].Value)),
+                deletePriceSuccess: @Html.Raw(JsonSerializer.Serialize(L["PriceDeletedSuccessfully"].Value))
+            };
+
+            var createModal = new abp.ModalManager(abp.appPath + 'SubscriptionProducts/CreateModal');
+            var editModal = new abp.ModalManager(abp.appPath + 'SubscriptionProducts/EditModal');
+            var setPriceModal = new abp.ModalManager(abp.appPath + 'SubscriptionProducts/SetPriceModal');
+
+            $('#BtnCreateProduct, #BtnCreateFirstProduct').click(function (e) {
+                e.preventDefault();
+                createModal.open();
+            });
+
+            createModal.onResult(function () {
+                location.reload();
+            });
+
+            $(document).on('click', '.btn-edit', function (e) {
+                e.preventDefault();
+                var id = $(this).data('id');
+                editModal.open({ id: id });
+            });
+
+            editModal.onResult(function () {
+                location.reload();
+            });
+
+            $(document).on('click', '.btn-set-price', function (e) {
+                e.preventDefault();
+                var id = $(this).data('id');
+                setPriceModal.open({ id: id });
+            });
+
+            setPriceModal.onResult(function () {
+                abp.notify.success(localizedMessages.setPriceSuccess);
+                location.reload();
+            });
+
+            // Delete Price Modal
+            var deletePriceModal = new bootstrap.Modal(document.getElementById('deletePriceModal'));
+            var currentDeletePriceProductId = null;
+
+            $(document).on('click', '.btn-delete-price', function (e) {
+                e.preventDefault();
+                currentDeletePriceProductId = $(this).data('id');
+                var name = $(this).data('name');
+                var currencies = $(this).data('currencies');
+
+                $('#deletePriceModalProductName').text(name);
+                
+                // Populate currency select
+                var $select = $('#deletePriceCurrencySelect').empty();
+                if (currencies && currencies.length > 0) {
+                    currencies.forEach(function(currency) {
+                        $select.append($('<option>').val(currency).text(currency));
+                    });
+                }
+
+                deletePriceModal.show();
+            });
+
+            $('#confirmDeletePriceBtn').click(function () {
+                var currency = $('#deletePriceCurrencySelect').val();
+                if (!currency || !currentDeletePriceProductId) return;
+
+                abp.ajax({
+                    url: abp.appPath + 'api/admin/subscription/products/' + currentDeletePriceProductId + '/prices?platform=2&currency=' + currency,
+                    type: 'DELETE'
+                }).then(function () {
+                    deletePriceModal.hide();
+                    abp.notify.success(localizedMessages.deletePriceSuccess);
+                    location.reload();
+                });
+            });
+
+            $(document).on('click', '.btn-sync-price', function (e) {
+                e.preventDefault();
+                var id = $(this).data('id');
+                var $btn = $(this);
+                $btn.addClass('disabled');
+                abp.ajax({
+                    url: abp.appPath + 'api/admin/subscription/products/' + id + '/sync-prices',
+                    type: 'POST'
+                }).done(function () {
+                    abp.notify.success(localizedMessages.syncPriceSuccess);
+                    location.reload();
+                }).fail(function () {
+                    $btn.removeClass('disabled');
+                });
+            });
+
+            $(document).on('click', '.btn-list', function (e) {
+                e.preventDefault();
+                var id = $(this).data('id');
+                setListed(id, true);
+            });
+
+            $(document).on('click', '.btn-unlist', function (e) {
+                e.preventDefault();
+                var id = $(this).data('id');
+                setListed(id, false);
+            });
+
+            function setListed(id, isListed) {
+                var action = isListed ? 'list' : 'unlist';
+                abp.ajax({
+                    url: abp.appPath + 'api/admin/subscription/products/' + id + '/' + action,
+                    type: 'POST'
+                }).then(function () {
+                    abp.notify.success(isListed ? localizedMessages.listSuccess : localizedMessages.unlistSuccess);
+                    location.reload();
+                });
+            }
+
+            $(document).on('click', '.btn-delete', function (e) {
+                e.preventDefault();
+                var id = $(this).data('id');
+                var name = $(this).data('name');
+
+                abp.message.confirm(
+                    localizedMessages.deleteConfirmMessage,
+                    localizedMessages.deleteConfirmTitle
+                ).then(function (confirmed) {
+                    if (confirmed) {
+                        abp.ajax({
+                            url: abp.appPath + 'api/admin/subscription/products/' + id,
+                            type: 'DELETE'
+                        }).then(function () {
+                            abp.notify.success(localizedMessages.deleteSuccess);
+                            location.reload();
+                        });
+                    }
+                });
+            });
+
+            // Features modal
+            var featuresModal = new bootstrap.Modal(document.getElementById('featuresModal'));
+            
+            $(document).on('click', '.btn-view-features', function (e) {
+                e.preventDefault();
+                var productName = $(this).data('product-name');
+                var features = $(this).data('features');
+                
+                $('#featuresModalProductName').text(productName);
+                
+                // Clear existing content
+                var $list = $('#featuresModalList').empty();
+                
+                if (features && features.length > 0) {
+                    features.forEach(function(feature) {
+                        var badgeClass = feature.TypeName === 'Core' ? 'bg-primary' : 'bg-success';
+                        
+                        // Build DOM elements safely to prevent XSS
+                        var $li = $('<li class="list-group-item">');
+                        var $div = $('<div class="d-flex justify-content-between align-items-start">');
+                        
+                        // Name span with icon - use .text() for safe text insertion
+                        var $nameSpan = $('<span>').append(
+                            $('<i class="fas fa-check-circle text-success me-2">')
+                        ).append(document.createTextNode(feature.Name || ''));
+                        
+                        // Badges container
+                        var $badges = $('<span>');
+                        
+                        // Type badge
+                        var $typeBadge = $('<span>').addClass('badge ' + badgeClass + ' me-1').text(feature.TypeName || '');
+                        $badges.append($typeBadge);
+                        
+                        // Usage badge (if exists)
+                        if (feature.Usage) {
+                            var $usageBadge = $('<span>').addClass('badge bg-info').text(feature.Usage);
+                            $badges.append($usageBadge);
+                        }
+                        
+                        $div.append($nameSpan).append($badges);
+                        $li.append($div);
+                        
+                        // Description (if exists) - use .text() for safe text insertion
+                        if (feature.Description) {
+                            var $desc = $('<small class="text-muted ms-4 d-block">').text(feature.Description);
+                            $li.append($desc);
+                        }
+                        
+                        $list.append($li);
+                    });
+                }
+                
+                featuresModal.show();
+            });
+        });
+    </script>
+}
