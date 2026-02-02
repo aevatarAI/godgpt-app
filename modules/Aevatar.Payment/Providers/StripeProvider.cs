@@ -634,8 +634,9 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Session session)
         {
-            // Extract orderId from metadata (stable key for PaymentRecordGAgent)
+            // Extract orderId and priceId from metadata (stable keys for PaymentRecordGAgent)
             result.OrderId = TryGetFromMetadata(session.Metadata, "order_id");
+            result.ProductId = TryGetFromMetadata(session.Metadata, "price_id");
             result.SubscriptionId = session.SubscriptionId;
             // NOTE: Don't set NewStatus = Completed here!
             // checkout.session.completed only means user completed checkout flow.
@@ -644,8 +645,8 @@ public class StripeProvider : IPaymentProvider
             result.NewStatus = PaymentStatus.Processing;
             
             _logger.LogInformation(
-                "[StripeProvider] checkout.session.completed: OrderId={OrderId}, SubscriptionId={SubscriptionId}, Status=Processing (waiting for invoice.paid)",
-                result.OrderId, session.SubscriptionId);
+                "[StripeProvider] checkout.session.completed: OrderId={OrderId}, SubscriptionId={SubscriptionId}, ProductId={ProductId}, Status=Processing (waiting for invoice.paid)",
+                result.OrderId, session.SubscriptionId, result.ProductId ?? "(null)");
         }
         return Task.CompletedTask;
     }
