@@ -1,0 +1,84 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.protos.userdevice;
+
+import "google/protobuf/timestamp.proto";
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.UserDevice";
+
+// =============================================================================
+// State
+// =============================================================================
+
+// UserDeviceGAgent state - stores the most recently used device for push notifications
+message UserDeviceState {
+  string user_id = 1;                             // User ID (Guid as string)
+  string device_id = 2;                           // Unique device identifier (client-generated)
+  string push_token = 3;                          // Push token (APNS/FCM)
+  string time_zone_id = 4;                        // Timezone ID (e.g., "Asia/Shanghai")
+  bool push_enabled = 5;                          // Whether push is enabled by user
+  google.protobuf.Timestamp token_updated_at = 6; // Token update timestamp
+  google.protobuf.Timestamp last_active_at = 7;   // Last active timestamp
+  string platform = 8;                            // Platform: ios / android / web
+  string app_version = 9;                         // App version
+  bool token_invalid = 10;                        // Whether token is marked invalid
+  string language = 11;                           // Device language (e.g., "zh-CN", "en-US")
+}
+
+// =============================================================================
+// RPC Response Types
+// =============================================================================
+
+// Device information
+message DeviceInfo {
+  string device_id = 1;                           // Unique device identifier (client-generated)
+  string push_token = 2;                          // Push token (APNS/FCM)
+  string time_zone_id = 3;                        // Timezone ID (e.g., "Asia/Shanghai")
+  bool push_enabled = 4;                          // Whether push is enabled by user
+  google.protobuf.Timestamp token_updated_at = 5; // Token update timestamp
+  google.protobuf.Timestamp last_active_at = 6;   // Last active timestamp
+  string platform = 7;                            // Platform: ios / android / web
+  string app_version = 8;                         // App version
+  bool token_invalid = 9;                         // Whether token is marked invalid
+  string language = 10;                           // Device language (e.g., "zh-CN", "en-US")
+}
+
+// Push target (for push service)
+message PushTarget {
+  string user_id = 1;
+  string device_id = 2;
+  string push_token = 3;
+  string platform = 4;
+  string language = 5;
+  string time_zone_id = 6;
+}
+
+// =============================================================================
+// Events
+// =============================================================================
+
+// Register or update device (replaces any existing device)
+message RegisterOrUpdateDeviceEvent {
+  string device_id = 1;
+  string push_token = 2;
+  string time_zone_id = 3;
+  bool push_enabled = 4;
+  string platform = 5;
+  string app_version = 6;
+  string language = 7;
+  google.protobuf.Timestamp timestamp = 8;
+}
+
+// Update token only
+message UpdateDeviceTokenEvent {
+  string push_token = 1;
+  google.protobuf.Timestamp timestamp = 2;
+}
+
+// Clear device (user logout)
+message ClearDeviceEvent {
+}
+
+// Mark token as invalid
+message MarkDeviceTokenInvalidEvent {
+}

@@ -13,6 +13,9 @@ public class AppPermissionDefinitionProvider : PermissionDefinitionProvider
 
         // Language Management permissions
         DefineLanguageManagementPermissions(context);
+
+        // Push Notification Management permissions
+        DefinePushNotificationPermissions(context);
     }
     
     private void DefineLanguageManagementPermissions(IPermissionDefinitionContext context)
@@ -54,6 +57,22 @@ public class AppPermissionDefinitionProvider : PermissionDefinitionProvider
         languageTextsPermission.AddChild(
             AppPermissions.LanguageManagement.LanguageTexts.Restore,
             L("Permission:LanguageManagement.LanguageTexts.Restore"));
+    }
+
+    private void DefinePushNotificationPermissions(IPermissionDefinitionContext context)
+    {
+        var pushNotificationGroup = context.AddGroup(
+            AppPermissions.PushNotification.GroupName,
+            L("Permission:PushNotificationManagement"));
+
+        // Base permission for push notification management
+        var pushPermission = pushNotificationGroup.AddPermission(
+            AppPermissions.PushNotification.Default,
+            L("Permission:PushNotificationManagement.Default"));
+
+        pushPermission.AddChild(
+            AppPermissions.PushNotification.SendByTimezone,
+            L("Permission:PushNotificationManagement.SendByTimezone"));
     }
 
     private static LocalizableString L(string name)

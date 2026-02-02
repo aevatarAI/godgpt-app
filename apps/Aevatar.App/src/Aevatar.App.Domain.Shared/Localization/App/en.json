@@ -19,6 +19,10 @@
     "Permission:LanguageManagement.LanguageTexts.Edit": "Edit Language Texts",
     "Permission:LanguageManagement.LanguageTexts.Restore": "Restore Language Texts",
 
+    "Permission:PushNotificationManagement": "Push Notification Management",
+    "Permission:PushNotificationManagement.Default": "Access Push Notifications",
+    "Permission:PushNotificationManagement.SendByTimezone": "Send Push by Timezone",
+
     "Languages": "Languages",
     "LanguageTexts": "Language Texts",
     "LanguageManagement": "Language Management",
