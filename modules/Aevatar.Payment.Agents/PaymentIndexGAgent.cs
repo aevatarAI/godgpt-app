@@ -96,11 +96,11 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
                 break;
                 
             case ActiveSubscriptionRemovedEvent e:
-                var toRemove = state.ActiveSubscriptions.FirstOrDefault(s => s.PaymentId == e.PaymentId);
-                if (toRemove != null)
+                // Update status to Cancelled instead of removing (preserves history)
+                var toCancel = state.ActiveSubscriptions.FirstOrDefault(s => s.PaymentId == e.PaymentId);
+                if (toCancel != null)
                 {
-                    state.ActiveSubscriptions.Remove(toRemove);
-                    state.ActiveSubscriptionCount = state.ActiveSubscriptions.Count;
+                    toCancel.Status = 8; // PaymentStatus.Cancelled
                 }
                 break;
                 
@@ -210,7 +210,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
     public async Task RemoveActiveSubscriptionAsync(string paymentId)
     {
         Logger.LogInformation(
-            "[PaymentIndexGAgent] Removing active subscription {PaymentId} for user {UserId}",
+            "[PaymentIndexGAgent] Marking subscription {PaymentId} as Cancelled for user {UserId}",
             paymentId, Id);
 
         RaiseEvent(new ActiveSubscriptionRemovedEvent
@@ -226,7 +226,11 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
     public Task<ActiveSubscriptionListResponse> GetActiveSubscriptionsAsync()
     {
         var response = new ActiveSubscriptionListResponse();
+        // Filter: not cancelled (status != 8) AND not expired
+        // Status 0 = default (active), 5 = Completed (active)
+        // Status 8 = Cancelled, 9 = Expired, 10 = Refunded - should be filtered
         var activeSubscriptions = State.ActiveSubscriptions
+            .Where(s => s.Status < 8) // Exclude Cancelled(8), Expired(9), Refunded(10)
             .Where(s => s.PeriodEnd == null || s.PeriodEnd.ToDateTime() > DateTime.UtcNow);
         
         response.Subscriptions.AddRange(activeSubscriptions);
@@ -243,8 +247,10 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
     public Task<ActiveSubscriptionListResponse> GetActiveSubscriptionsByBusinessAsync(string businessType)
     {
         var response = new ActiveSubscriptionListResponse();
+        // Filter: not cancelled (status < 8) AND not expired AND matching business type
         var activeSubscriptions = State.ActiveSubscriptions
             .Where(s => s.BusinessType == businessType)
+            .Where(s => s.Status < 8) // Exclude Cancelled(8), Expired(9), Refunded(10)
             .Where(s => s.PeriodEnd == null || s.PeriodEnd.ToDateTime() > DateTime.UtcNow);
         
         response.Subscriptions.AddRange(activeSubscriptions);
@@ -254,6 +260,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
     public Task<bool> HasActiveSubscriptionAsync(string? businessType = null)
     {
         var query = State.ActiveSubscriptions
+            .Where(s => s.Status < 8) // Exclude Cancelled(8), Expired(9), Refunded(10)
             .Where(s => s.PeriodEnd == null || s.PeriodEnd.ToDateTime() > DateTime.UtcNow);
 
         if (!string.IsNullOrEmpty(businessType))
