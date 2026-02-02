@@ -53,6 +53,8 @@ message SubscriptionInfoProto {
     google.protobuf.Timestamp end_date = 5;
     repeated string subscription_ids = 6;
     repeated string invoice_ids = 7;
+    string platform_product_id = 8;
+    optional int32 platform = 9;
 }
 
 message RateLimitInfoProto {

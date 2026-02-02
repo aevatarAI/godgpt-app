@@ -15,5 +15,9 @@ public class SubscriptionInfoDto
     public DateTime EndDate { get; set; }
     public List<string> SubscriptionIds { get; set; } = new();
     public List<string> InvoiceIds { get; set; } = new();
+    
+    public string? PlatformProductId { get; set; }
+    
+    public int? Platform { get; set; }
 }
 

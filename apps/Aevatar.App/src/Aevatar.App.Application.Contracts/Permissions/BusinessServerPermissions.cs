@@ -149,6 +149,25 @@ public static class AppPermissions
     }
 
     /// <summary>
+    /// Permissions for Terms of Service Management module.
+    /// </summary>
+    public static class TermsManagement
+    {
+        public const string GroupName = "TermsManagement";
+        
+        /// <summary>
+        /// Permissions for ToS Versions management.
+        /// </summary>
+        public static class Versions
+        {
+            public const string Default = GroupName + ".Versions";
+            public const string Create = Default + ".Create";
+            public const string Edit = Default + ".Edit";
+            public const string Delete = Default + ".Delete";
+        }
+    }
+
+    /// <summary>
     /// Permissions for Push Notification Management module.
     /// </summary>
     public static class PushNotification

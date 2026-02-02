@@ -1,6 +1,7 @@
 using System.Threading.Tasks;
 using Aevatar.App.Localization;
 using Aevatar.App.Permissions;
+using Aevatar.App.Services.Subscription.Permissions;
 using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp.Identity.Web.Navigation;
 using Volo.Abp.SettingManagement.Web.Navigation;
@@ -67,6 +68,49 @@ public class AevatarMenuContributor : IMenuContributor
         );
 
         context.Menu.Items.Insert(1, languageManagement);
+        
+        // Subscription Management Menu
+        var subscriptionManagement = new ApplicationMenuItem(
+            AevatarMenus.SubscriptionManagement,
+            l["Menu:SubscriptionManagement"],
+            icon: "fas fa-shopping-cart",
+            order: 2
+        );
+
+        subscriptionManagement.AddItem(
+            new ApplicationMenuItem(
+                AevatarMenus.SubscriptionProducts,
+                l["Menu:SubscriptionProducts"],
+                "~/SubscriptionProducts",
+                icon: "fas fa-box",
+                order: 1,
+                requiredPermissionName: SubscriptionProductPermissions.Products.Default
+            )
+        );
+
+        subscriptionManagement.AddItem(
+            new ApplicationMenuItem(
+                AevatarMenus.SubscriptionFeatures,
+                l["Menu:SubscriptionFeatures"],
+                "~/SubscriptionFeatures",
+                icon: "fas fa-list-check",
+                order: 2,
+                requiredPermissionName: SubscriptionProductPermissions.Features.Default
+            )
+        );
+
+        subscriptionManagement.AddItem(
+            new ApplicationMenuItem(
+                AevatarMenus.SubscriptionLabels,
+                l["Menu:SubscriptionLabels"],
+                "~/SubscriptionLabels",
+                icon: "fas fa-tags",
+                order: 3,
+                requiredPermissionName: SubscriptionProductPermissions.Labels.Default
+            )
+        );
+
+        context.Menu.Items.Insert(2, subscriptionManagement);
 
         // Configure administration menu order
         administration.SetSubItemOrder(IdentityMenuNames.GroupName, 1);

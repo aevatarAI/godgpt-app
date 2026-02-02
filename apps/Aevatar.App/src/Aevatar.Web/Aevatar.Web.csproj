@@ -83,14 +83,7 @@
     <_ContentIncludedByDefault Remove="Pages\SubscriptionProducts\Index.cshtml" />
     <_ContentIncludedByDefault Remove="Pages\SubscriptionProducts\SetPriceModal.cshtml" />
   </ItemGroup>
-
-  <ItemGroup>
-    <ProjectReference Include="..\..\..\..\plugins\Aevatar.Agents.Plugins.CQRS\Aevatar.Agents.Plugins.CQRS.csproj" />
-    <ProjectReference Include="..\..\..\..\plugins\Aevatar.Agents.Plugins.MassTransit\Aevatar.Agents.Plugins.MassTransit.csproj" />
-    <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Runtime.Local\Aevatar.Agents.Runtime.Local.csproj" />
-    <ProjectReference Include="..\..\..\..\src\Aevatar.Agents.Runtime.Orleans\Aevatar.Agents.Runtime.Orleans.csproj" />
-  </ItemGroup>
-
+  
 <!--  <ItemGroup>-->
 <!--    <Content Include="../../configurations/appsettings.Shared.json" CopyToPublishDirectory="PreserveNewest" CopyToOutputDirectory="PreserveNewest" Link="appsettings.Shared.json" />-->
 <!--  </ItemGroup>-->

@@ -27,6 +27,7 @@ using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
 using Orleans;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
+using Aevatar.App.Common;
 using Google.Protobuf.WellKnownTypes;
 using Aevatar.App.Common;
 

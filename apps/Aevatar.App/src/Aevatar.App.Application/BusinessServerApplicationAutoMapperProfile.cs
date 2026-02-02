@@ -1,6 +1,8 @@
 using System;
 using Aevatar.Agents.GodGPT.Protos.UserDevice;
 using Aevatar.App.LanguageManagement;
+using Aevatar.App.Services.Terms;
+using Aevatar.App.Terms;
 using Aevatar.Dtos.Push;
 using AutoMapper;
 
@@ -16,6 +18,9 @@ public class AppApplicationAutoMapperProfile : Profile
         
         CreateMap<Language, LanguageDto>();
         
+        // Terms of Service mappings
+        CreateMap<TermsOfServiceVersion, TermsVersionDto>();
+
         // Push notification mappings
         CreateMap<DeviceInfo, DeviceInfoDto>()
             .ForMember(dest => dest.TokenUpdatedAt, opt => opt.MapFrom(src => src.TokenUpdatedAt != null ? src.TokenUpdatedAt.ToDateTime() : (DateTime?)null))

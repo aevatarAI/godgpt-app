@@ -159,6 +159,9 @@ public static class AwakeningParserHelper
         // Remove [SUGGESTIONS]...[/SUGGESTIONS] tags that may be appended by LLM
         cleanedContent = Regex.Replace(cleanedContent, @"\s*\[SUGGESTIONS\].*?\[/SUGGESTIONS\]\s*", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
         
+        // Remove [SUGGESTIONS]...[/SUGGESTIONS] tags that may be appended by LLM
+        cleanedContent = Regex.Replace(cleanedContent, @"\s*\[SUGGESTIONS\].*?\[/SUGGESTIONS\]\s*", "", RegexOptions.Singleline | RegexOptions.IgnoreCase);
+
         // Remove markdown code block markers more robustly
         // Handle cases like "```json\n" or "```\n"
         if (cleanedContent.StartsWith("```json", StringComparison.OrdinalIgnoreCase))

@@ -1,0 +1,361 @@
+syntax = "proto3";
+
+package aevatar.agents.godgpt.subscription;
+
+option csharp_namespace = "Aevatar.Agents.GodGPT.Protos.Subscription";
+
+import "google/protobuf/timestamp.proto";
+import "Protos/invite_code.proto";
+
+// =============================================================================
+// Enums
+// =============================================================================
+
+// Maps to: Aevatar.Application.Grains.Subscription.Enums.SubscriptionFeatureType
+enum SubscriptionFeatureType {
+    SUBSCRIPTION_FEATURE_TYPE_NONE = 0;     // Not applicable (for ProductDisplay usage)
+    SUBSCRIPTION_FEATURE_TYPE_CORE = 1;     // Core feature included in basic plans
+    SUBSCRIPTION_FEATURE_TYPE_ADVANCED = 2; // Advanced feature for premium plans
+}
+
+// Maps to: Aevatar.Application.Grains.Subscription.Enums.SubscriptionFeatureUsage
+enum SubscriptionFeatureUsage {
+    SUBSCRIPTION_FEATURE_USAGE_COMPARISON = 0;       // Used for plan comparison display
+    SUBSCRIPTION_FEATURE_USAGE_PRODUCT_DISPLAY = 1;  // Used for product list/card display
+}
+
+// =============================================================================
+// Models (embedded in State)
+// =============================================================================
+
+// Platform price model embedded in GAgent state
+message PlatformPrice {
+    string id = 1;                                    // Guid as string
+    string product_id = 2;                            // Guid as string
+    double price = 3;                                 // decimal -> double
+    string currency = 4;                              // Default: "USD"
+    string platform_price_id = 5;                     // Platform-specific price ID
+    aevatar.agents.godgpt.invitecode.PaymentPlatform platform = 6;
+    google.protobuf.Timestamp last_synced_at = 7;
+}
+
+// Subscription feature model
+message SubscriptionFeature {
+    string id = 1;                                    // Guid as string
+    string name_key = 2;
+    optional string description_key = 3;
+    SubscriptionFeatureType type = 4;
+    int32 display_order = 5;
+    google.protobuf.Timestamp created_at = 6;
+    optional google.protobuf.Timestamp updated_at = 7;
+    SubscriptionFeatureUsage usage = 8;
+}
+
+// Subscription label model
+message SubscriptionLabel {
+    string id = 1;                                    // Guid as string
+    string name_key = 2;
+    google.protobuf.Timestamp created_at = 3;
+    optional google.protobuf.Timestamp updated_at = 4;
+}
+
+// Subscription product model
+message SubscriptionProduct {
+    string id = 1;                                    // Guid as string
+    string name_key = 2;
+    optional string label_id = 3;                     // Nullable Guid
+    aevatar.agents.godgpt.invitecode.PlanType plan_type = 4;
+    string description_key = 5;
+    optional string highlight_key = 6;
+    bool is_ultimate = 7;
+    repeated string feature_ids = 8;                  // List<Guid>
+    string platform_product_id = 9;
+    aevatar.agents.godgpt.invitecode.PaymentPlatform platform = 10;
+    optional bool is_listed = 11;                     // Nullable bool
+    google.protobuf.Timestamp created_at = 12;
+    optional google.protobuf.Timestamp updated_at = 13;
+    int32 display_order = 14;
+}
+
+// =============================================================================
+// States
+// =============================================================================
+
+// State for PlatformPriceGAgent
+message PlatformPriceState {
+    map<string, PlatformPriceList> product_prices = 1;  // Map<Guid, List<PlatformPrice>>
+    map<string, string> price_id_to_product_map = 2;    // Map<string, Guid>
+    google.protobuf.Timestamp last_platform_price_sync_at = 3;
+}
+
+// Helper message for list of platform prices
+message PlatformPriceList {
+    repeated PlatformPrice prices = 1;
+}
+
+// State for SubscriptionFeatureGAgent
+message SubscriptionFeatureState {
+    map<string, SubscriptionFeature> features = 1; // Map<Guid, SubscriptionFeature>
+}
+
+// State for SubscriptionLabelGAgent
+message SubscriptionLabelState {
+    map<string, SubscriptionLabel> labels = 1;     // Map<Guid, SubscriptionLabel>
+}
+
+// State for SubscriptionProductGAgent
+message SubscriptionProductState {
+    map<string, SubscriptionProduct> products = 1; // Map<Guid, SubscriptionProduct>
+}
+
+// =============================================================================
+// Events - Platform Price
+// =============================================================================
+
+// Event raised when a price is set (created or updated)
+message PriceSetEvent {
+    string product_id = 1;                            // Guid as string
+    aevatar.agents.godgpt.invitecode.PaymentPlatform platform = 2;
+    string platform_price_id = 3;
+    double price = 4;                                 // decimal -> double
+    string currency = 5;
+}
+
+// Event raised when a price is deleted
+message PriceDeletedEvent {
+    string product_id = 1;                            // Guid as string
+    aevatar.agents.godgpt.invitecode.PaymentPlatform platform = 2;
+    string currency = 3;
+    string platform_price_id = 4;
+}
+
+// Event raised when platform price sync is completed
+message PlatformPriceSyncCompletedEvent {
+    google.protobuf.Timestamp synced_at = 1;
+}
+
+// =============================================================================
+// Events - Product
+// =============================================================================
+
+// Event raised when a product is created
+message ProductCreatedEvent {
+    string product_id = 1;                            // Guid as string
+    string name_key = 2;
+    optional string label_id = 3;                     // Nullable Guid
+    aevatar.agents.godgpt.invitecode.PlanType plan_type = 4;
+    string description_key = 5;
+    optional string highlight_key = 6;
+    bool is_ultimate = 7;
+    repeated string feature_ids = 8;                  // List<Guid>
+    string platform_product_id = 9;
+    aevatar.agents.godgpt.invitecode.PaymentPlatform platform = 10;
+    int32 display_order = 11;
+}
+
+// Event raised when a product is updated
+message ProductUpdatedEvent {
+    string product_id = 1;                            // Guid as string
+    optional string name_key = 2;
+    optional string label_id = 3;                     // Nullable Guid
+    optional aevatar.agents.godgpt.invitecode.PlanType plan_type = 4;
+    optional string description_key = 5;
+    optional string highlight_key = 6;
+    optional bool is_ultimate = 7;
+    repeated string feature_ids = 8;                  // Empty means not updated
+    optional int32 display_order = 9;
+}
+
+// Event raised when a product is deleted
+message ProductDeletedEvent {
+    string product_id = 1;                            // Guid as string
+}
+
+// Event raised when a product is listed or unlisted
+message ProductListedEvent {
+    string product_id = 1;                            // Guid as string
+    bool is_listed = 2;
+}
+
+// =============================================================================
+// Events - Subscription Feature
+// =============================================================================
+
+// Event raised when a feature is created
+message SubscriptionFeatureCreatedEvent {
+    string feature_id = 1;                            // Guid as string
+    string name_key = 2;
+    optional string description_key = 3;
+    SubscriptionFeatureType type = 4;
+    int32 display_order = 5;
+    SubscriptionFeatureUsage usage = 6;
+}
+
+// Event raised when a feature is updated
+message SubscriptionFeatureUpdatedEvent {
+    string feature_id = 1;                            // Guid as string
+    optional string name_key = 2;
+    optional string description_key = 3;
+    optional SubscriptionFeatureType type = 4;
+    optional int32 display_order = 5;
+    optional SubscriptionFeatureUsage usage = 6;
+}
+
+// Event raised when a feature is deleted
+message SubscriptionFeatureDeletedEvent {
+    string feature_id = 1;                            // Guid as string
+}
+
+// Event raised when features are reordered
+message SubscriptionFeaturesReorderedEvent {
+    repeated SubscriptionFeatureOrderItem orders = 1;
+}
+
+// Item representing feature ID and its display order
+message SubscriptionFeatureOrderItem {
+    string feature_id = 1;                            // Guid as string
+    int32 display_order = 2;
+}
+
+// =============================================================================
+// Events - Subscription Label
+// =============================================================================
+
+// Event raised when a label is created
+message SubscriptionLabelCreatedEvent {
+    string label_id = 1;                              // Guid as string
+    string name_key = 2;
+}
+
+// Event raised when a label is updated
+message SubscriptionLabelUpdatedEvent {
+    string label_id = 1;                              // Guid as string
+    string name_key = 2;
+}
+
+// Event raised when a label is deleted
+message SubscriptionLabelDeletedEvent {
+    string label_id = 1;                              // Guid as string
+}
+
+// =============================================================================
+// DTOs
+// =============================================================================
+
+// DTO for creating a subscription product
+message CreateProductDto {
+    string name_key = 1;
+    optional string label_id = 2;                     // Nullable Guid
+    aevatar.agents.godgpt.invitecode.PlanType plan_type = 3;
+    string description_key = 4;
+    optional string highlight_key = 5;
+    bool is_ultimate = 6;
+    repeated string feature_ids = 7;                  // List<Guid>
+    string platform_product_id = 8;
+    aevatar.agents.godgpt.invitecode.PaymentPlatform platform = 9;
+    int32 display_order = 10;
+}
+
+// DTO for updating a subscription product
+message UpdateProductDto {
+    optional string name_key = 1;
+    optional string label_id = 2;                     // Nullable Guid
+    optional aevatar.agents.godgpt.invitecode.PlanType plan_type = 3;
+    optional string description_key = 4;
+    optional string highlight_key = 5;
+    optional bool is_ultimate = 6;
+    repeated string feature_ids = 7;                  // Empty means not updated
+    optional int32 display_order = 8;
+}
+
+// DTO for creating a subscription feature
+message CreateSubscriptionFeatureDto {
+    string name_key = 1;
+    optional string description_key = 2;
+    SubscriptionFeatureType type = 3;
+    int32 display_order = 4;
+    SubscriptionFeatureUsage usage = 5;
+}
+
+// DTO for updating a subscription feature
+message UpdateSubscriptionFeatureDto {
+    optional string name_key = 1;
+    optional string description_key = 2;
+    optional SubscriptionFeatureType type = 3;
+    optional int32 display_order = 4;
+    optional SubscriptionFeatureUsage usage = 5;
+}
+
+// DTO for creating a subscription label
+message CreateSubscriptionLabelDto {
+    string name_key = 1;
+}
+
+// DTO for updating a subscription label
+message UpdateSubscriptionLabelDto {
+    string name_key = 1;
+}
+
+// DTO for setting a platform price
+message SetPriceDto {
+    aevatar.agents.godgpt.invitecode.PaymentPlatform platform = 1;
+    optional string platform_price_id = 2;
+    double price = 3;                                 // decimal -> double
+    string currency = 4;
+}
+
+// Item representing feature ID and its display order for reordering
+message SubscriptionFeatureOrderItemDto {
+    string feature_id = 1;                            // Guid as string
+    int32 display_order = 2;
+}
+
+// =============================================================================
+// RPC Request/Response Wrappers
+// =============================================================================
+// These are required because RpcProxy only supports IMessage, not List<T>
+
+// Request wrapper for list of feature IDs
+message SubscriptionFeatureIdList {
+    repeated string feature_ids = 1;
+}
+
+// Request wrapper for list of feature order items
+message SubscriptionFeatureOrderListDto {
+    repeated SubscriptionFeatureOrderItemDto orders = 1;
+}
+
+// Response wrapper for list of subscription products
+message SubscriptionProductList {
+    repeated SubscriptionProduct products = 1;
+}
+
+// Response wrapper for list of subscription features
+message SubscriptionFeatureList {
+    repeated SubscriptionFeature features = 1;
+}
+
+// Response wrapper for list of subscription labels
+message SubscriptionLabelList {
+    repeated SubscriptionLabel labels = 1;
+}
+
+message PlatformPriceInfo {
+    // Platform-specific price ID (e.g., Stripe price_xxx, Apple product_xxx)
+    string price_id = 1;
+    
+    // Platform-specific product ID that this price belongs to
+    string platform_product_id = 2;
+    
+    // Actual price amount (already converted from platform units)
+    // For Stripe: converted from cents to dollars
+    double price = 3;
+    
+    // ISO 4217 currency code (uppercase, e.g., "USD", "JPY")
+    string currency = 4;
+}
+
+// Wrapper for list of platform price info (for RPC compatibility)
+message PlatformPriceInfoList {
+    repeated PlatformPriceInfo prices = 1;
+}
