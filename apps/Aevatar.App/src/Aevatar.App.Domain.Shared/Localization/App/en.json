@@ -67,6 +67,10 @@
     "subscription.feature.priority_support.description": "Get help when you need it",
     "subscription.feature.advanced_analytics": "Advanced Analytics",
     "subscription.feature.advanced_analytics.description": "Detailed insights and reports",
+    
+    "Permission:PushNotificationManagement": "Push Notification Management",
+    "Permission:PushNotificationManagement.Default": "Access Push Notifications",
+    "Permission:PushNotificationManagement.SendByTimezone": "Send Push by Timezone",
 
     "Languages": "Languages",
     "LanguageTexts": "Language Texts",

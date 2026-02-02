@@ -50,7 +50,11 @@
     "Permission:LanguageManagement.LanguageTexts": "语言文本",
     "Permission:LanguageManagement.LanguageTexts.Create": "创建语言文本",
     "Permission:LanguageManagement.LanguageTexts.Edit": "编辑语言文本",
-    "Permission:LanguageManagement.LanguageTexts.Restore": "恢复语言文本",
+    "Permission:LanguageManagement.LanguageTexts.Restore": "恢复语言文本",  
+
+    "Permission:PushNotificationManagement": "推送通知管理",
+    "Permission:PushNotificationManagement.Default": "访问推送通知",
+    "Permission:PushNotificationManagement.SendByTimezone": "按时区发送推送",
 
     "Permission:SubscriptionProductManagement": "订阅商品管理",
     "Permission:SubscriptionProductManagement.Products": "商品",

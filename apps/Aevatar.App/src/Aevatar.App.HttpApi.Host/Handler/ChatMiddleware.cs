@@ -29,6 +29,7 @@ using Orleans;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Aevatar.App.Common;
 using Google.Protobuf.WellKnownTypes;
+using Aevatar.App.Common;
 
 namespace Aevatar.App.HttpApi.Host.Handler;
 
@@ -54,7 +55,7 @@ public class ChatMiddleware
         ILocalizationService localizationService,
         IIpLocationService ipLocationService,
         IGAgentActorFactory actorFactory,
-        IAgentContextAccessor agentContextAccessor, 
+        IAgentContextAccessor agentContextAccessor,
         IMetricsRecorder metricsRecorder, 
         IMessageStreamProvider? messageStreamProvider = null)
     {

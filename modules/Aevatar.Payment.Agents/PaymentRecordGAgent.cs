@@ -81,19 +81,27 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
                 break;
                 
             case RefundProcessedEvent e:
-                var refundTxn = state.Transactions.FirstOrDefault(t => t.TransactionId == e.TransactionId);
+                // Directly set main status (order already located by orderId, like old code)
+                state.Status = (int)PaymentStatus.Refunded;
+                
+                // Try to match transaction by InvoiceId or ExternalTransactionId first
+                TransactionProto? refundTxn = null;
+                if (!string.IsNullOrEmpty(e.TransactionId))
+                {
+                    refundTxn = state.Transactions.FirstOrDefault(t => 
+                        t.InvoiceId == e.TransactionId || t.ExternalTransactionId == e.TransactionId);
+                }
+                // Fallback: use latest completed transaction if no match
+                if (refundTxn == null)
+                {
+                    refundTxn = state.Transactions
+                        .Where(t => t.Status == (int)PaymentStatus.Completed)
+                        .OrderByDescending(t => t.CreatedAt)
+                        .FirstOrDefault();
+                }
                 if (refundTxn != null)
                 {
                     refundTxn.Status = (int)PaymentStatus.Refunded;
-                }
-                // Match old code: only update main status if refunding the LATEST transaction
-                // Old code: if (invoiceDetail == invoiceDetails.LastOrDefault()) { paymentSummary.Status = Refunded; }
-                var latestTxn = state.Transactions
-                    .OrderByDescending(t => t.CreatedAt)
-                    .FirstOrDefault();
-                if (latestTxn?.TransactionId == e.TransactionId)
-                {
-                    state.Status = (int)PaymentStatus.Refunded;
                 }
                 break;
             
@@ -408,31 +416,14 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     public async Task ProcessRefundAsync(RefundInfoProto refund)
     {
-        var transactionId = refund.TransactionId;
-        
-        // If no specific transaction, refund the latest completed one
-        if (string.IsNullOrEmpty(transactionId))
-        {
-            var latestCompleted = State.Transactions
-                .Where(t => t.Status == (int)PaymentStatus.Completed)
-                .OrderByDescending(t => t.CreatedAt)
-                .FirstOrDefault();
-            transactionId = latestCompleted?.TransactionId;
-        }
-
-        if (string.IsNullOrEmpty(transactionId))
-        {
-            Logger.LogWarning("[PaymentRecordGAgent] No transaction to refund");
-            return;
-        }
-
+        // Simple logic (like old code): Apply will handle updating main status and latest transaction
         Logger.LogInformation(
-            "[PaymentRecordGAgent] Processing refund for transaction {TransactionId}",
-            transactionId);
+            "[PaymentRecordGAgent] Processing refund: TransactionId={TransactionId}, Amount={Amount}",
+            refund.TransactionId, refund.RefundAmount);
 
         RaiseEvent(new RefundProcessedEvent
         {
-            TransactionId = transactionId,
+            TransactionId = refund.TransactionId,
             RefundAmount = refund.RefundAmount,
             Reason = refund.Reason,
             RefundedAt = Timestamp.FromDateTime(DateTime.UtcNow)

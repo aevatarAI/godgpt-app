@@ -93,11 +93,11 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
             _logger.LogWarning(ex, "[GodGPTPaymentBusinessService] Failed to register business agents for {UserId}", userId);
         }
         
-        // Renewals don't need to cancel old subscriptions
-        if (isRenewal)
-        {
-            return;
-        }
+        // NOTE: Removed isRenewal check here.
+        // Old code (UserBillingGAgent) always cancelled Stripe subscriptions on Apple Pay success,
+        // regardless of whether it was INITIAL_BUY or RESUBSCRIBE.
+        // Cross-platform subscriptions should always be cancelled.
+        // Same-platform logic is handled in CancelOldSubscriptionsAsync.
 
         // Determine isUltimate from product configuration
         var isUltimate = GetIsUltimateFromProductId(platform, productId);
@@ -160,10 +160,13 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
             
             // Get real SubscriptionId from PaymentRecordGAgent state
             // PaymentId now uses OrderId as key, so we need to query the agent
+            // IMPORTANT: Must use PaymentIdHelper.ToAgentIdString() to convert paymentId to Agent ID
+            // PaymentService uses MD5 hash to generate stable GUID from paymentId string
             string? subscriptionId = null;
             try
             {
-                var paymentRecordActor = await _actorFactory.CreateGAgentActorAsync<PaymentRecordGAgent>(sub.PaymentId);
+                var agentId = PaymentIdHelper.ToAgentIdString(sub.PaymentId);
+                var paymentRecordActor = await _actorFactory.CreateGAgentActorAsync<PaymentRecordGAgent>(agentId);
                 var recordState = await paymentRecordActor.As<IPaymentRecordGAgent>().GetRecordStateAsync();
                 subscriptionId = recordState.SubscriptionId;
             }

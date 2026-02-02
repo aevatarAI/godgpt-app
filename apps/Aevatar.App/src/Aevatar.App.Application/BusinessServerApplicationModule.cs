@@ -1,9 +1,11 @@
 using Aevatar.App.Application.Services;
 using Aevatar.App.Application.Services.Payment;
+using Aevatar.App.Application.Services.Push;
 using Aevatar.App.Application.Contracts.Services;
 using Aevatar.App.Services.Subscription;
 using Aevatar.App.Services.Subscription.Options;
 using Aevatar.App.Services.Subscription.Providers;
+using Aevatar.App.Application.Contracts.Services.Push;
 using Aevatar.Application.Grains;
 using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp.PermissionManagement;
@@ -72,5 +74,11 @@ public class AppApplicationModule : AbpModule
         // User Subscription
         Configure<UserSubscriptionOptions>(configuration.GetSection(UserSubscriptionOptions.SectionName));
         context.Services.AddTransient<IUserSubscriptionService, UserSubscriptionService>();
+
+        // Push Notification Services
+        Configure<FirebaseMessagingOptions>(configuration.GetSection(FirebaseMessagingOptions.SectionName));
+        context.Services.AddHttpClient<IFirebaseMessagingClient, FirebaseMessagingClient>();
+        context.Services.AddScoped<IUserDeviceService, UserDeviceService>();
+        context.Services.AddScoped<IPushNotificationService, PushNotificationService>();
     }
 }

@@ -440,9 +440,21 @@ public class GooglePlayProvider : IPaymentProvider
             // - SUBSCRIPTION_RECOVERED -> RevenueCat: UNCANCELLATION (resubscribe after cancel)
             // - SUBSCRIPTION_RESTARTED -> RevenueCat: UNCANCELLATION
             // - PRODUCT_CHANGE is similar to Apple's UPGRADE (weekly to monthly, etc.)
-            // For INITIAL_PURCHASE, PaymentService checks recordState.Status != Completed to skip duplicate
-            result.IsRenewal = webhookEvent.EventType == "INITIAL_PURCHASE" ||
-                               webhookEvent.EventType == "RENEWAL" || 
+            // 
+            // IMPORTANT: IsRenewal has TWO purposes:
+            // 1. PaymentService: determines if we should add a transaction record (true = add)
+            // 2. GodGPTPaymentBusinessService: determines if we should cancel old subscriptions (true = skip)
+            // 
+            // Event analysis:
+            // - INITIAL_PURCHASE: First purchase of a NEW product (could be cross-platform upgrade)
+            //   Should NOT be renewal for cancellation logic - may need to cancel Stripe/Apple subscriptions
+            // - RENEWAL: Auto-renewal of same subscription - true (no cancel needed)
+            // - UNCANCELLATION: Restore cancelled subscription - true (same subscription restored)
+            // - PRODUCT_CHANGE: In-app upgrade/downgrade - true (Google handles old subscription)
+            // 
+            // For PaymentService transaction logic, all events should add transaction.
+            // For GodGPTPaymentBusinessService cancellation logic, only INITIAL_PURCHASE needs cancel check.
+            result.IsRenewal = webhookEvent.EventType == "RENEWAL" || 
                                webhookEvent.EventType == "UNCANCELLATION" ||
                                webhookEvent.EventType == "PRODUCT_CHANGE";
 

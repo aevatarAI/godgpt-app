@@ -439,7 +439,8 @@ public class StripeProvider : IPaymentProvider
             var result = new WebhookResult
             {
                 Success = true,
-                EventType = stripeEvent.Type
+                EventType = stripeEvent.Type,
+                ShouldProcess = true  // Default to true, set to false for unhandled events
             };
 
             // Extract user ID from metadata
@@ -592,27 +593,38 @@ public class StripeProvider : IPaymentProvider
 
         if (stripeEvent.Data.Object is Session session)
         {
-            userIdStr = session.ClientReferenceId ?? session.Metadata?.GetValueOrDefault("user_id");
+            // Session: ClientReferenceId is the primary source, fallback to metadata
+            userIdStr = session.ClientReferenceId 
+                ?? session.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? session.Metadata?.GetValueOrDefault("user_id");
         }
         else if (stripeEvent.Data.Object is Invoice invoice)
         {
-            userIdStr = invoice.Metadata?.GetValueOrDefault("user_id");
+            // Invoice: Try subscription metadata first (where we store internal_user_id),
+            // then invoice metadata as fallback
+            userIdStr = invoice.Parent?.SubscriptionDetails?.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? invoice.Parent?.SubscriptionDetails?.Metadata?.GetValueOrDefault("user_id")
+                ?? invoice.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? invoice.Metadata?.GetValueOrDefault("user_id");
         }
         else if (stripeEvent.Data.Object is Subscription subscription)
         {
-            userIdStr = subscription.Metadata?.GetValueOrDefault("user_id");
+            // Subscription: Try both key names
+            userIdStr = subscription.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? subscription.Metadata?.GetValueOrDefault("user_id");
         }
         else if (stripeEvent.Data.Object is PaymentIntent paymentIntent)
         {
-            userIdStr = paymentIntent.Metadata?.GetValueOrDefault("internal_user_id");
+            userIdStr = paymentIntent.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? paymentIntent.Metadata?.GetValueOrDefault("user_id");
         }
         else if (stripeEvent.Data.Object is Charge charge)
         {
             // Try Charge metadata first, then PaymentIntent metadata
-            userIdStr = charge.Metadata?.GetValueOrDefault("user_id")
-                ?? charge.Metadata?.GetValueOrDefault("internal_user_id")
-                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("user_id")
-                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("internal_user_id");
+            userIdStr = charge.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? charge.Metadata?.GetValueOrDefault("user_id")
+                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("user_id");
         }
 
         return Guid.TryParse(userIdStr, out var userId) ? userId : null;
@@ -622,8 +634,9 @@ public class StripeProvider : IPaymentProvider
     {
         if (stripeEvent.Data.Object is Session session)
         {
-            // Extract orderId from metadata (stable key for PaymentRecordGAgent)
+            // Extract orderId and priceId from metadata (stable keys for PaymentRecordGAgent)
             result.OrderId = TryGetFromMetadata(session.Metadata, "order_id");
+            result.ProductId = TryGetFromMetadata(session.Metadata, "price_id");
             result.SubscriptionId = session.SubscriptionId;
             // NOTE: Don't set NewStatus = Completed here!
             // checkout.session.completed only means user completed checkout flow.
@@ -632,8 +645,8 @@ public class StripeProvider : IPaymentProvider
             result.NewStatus = PaymentStatus.Processing;
             
             _logger.LogInformation(
-                "[StripeProvider] checkout.session.completed: OrderId={OrderId}, SubscriptionId={SubscriptionId}, Status=Processing (waiting for invoice.paid)",
-                result.OrderId, session.SubscriptionId);
+                "[StripeProvider] checkout.session.completed: OrderId={OrderId}, SubscriptionId={SubscriptionId}, ProductId={ProductId}, Status=Processing (waiting for invoice.paid)",
+                result.OrderId, session.SubscriptionId, result.ProductId ?? "(null)");
         }
         return Task.CompletedTask;
     }
@@ -809,17 +822,22 @@ public class StripeProvider : IPaymentProvider
                 priceId = lineItem.Pricing.PriceDetails.Price;
             }
             
+            // Fallback: Get priceId from subscription metadata (set during session creation)
+            if (string.IsNullOrEmpty(priceId))
+            {
+                priceId = TryGetFromMetadata(subscriptionMetadata, "price_id");
+            }
+            
             // Determine if this is a renewal based on billing_reason
-            // - subscription_create: First-time subscription
-            // - subscription_cycle: Renewal payment
             var isRenewal = invoice.BillingReason == "subscription_cycle";
             
             // Extract period end from invoice line item
-            DateTime? periodEnd = null;
-            if (lineItem?.Period?.End != null)
-            {
-                periodEnd = lineItem.Period.End;
-            }
+            DateTime? periodEnd = lineItem?.Period?.End;
+            
+            _logger.LogInformation(
+                "[StripeProvider] invoice.paid: PriceId={PriceId}, AmountPaid={AmountPaid}",
+                priceId ?? "(null)",
+                invoice.AmountPaid / 100m);
             
             result.TransactionId = invoice.Id;
             result.SubscriptionId = subscriptionId;
@@ -1052,7 +1070,9 @@ public class StripeProvider : IPaymentProvider
             // Extract business data from metadata
             result.OrderId = TryGetFromMetadata(metadata, "order_id");
             result.ProductId = TryGetFromMetadata(metadata, "price_id");
-            result.TransactionId = charge.Id;
+            // Use invoice ID to match ExternalTransactionId stored in invoice.paid
+            // Charge.Invoice contains the invoice ID that was stored as ExternalTransactionId
+            result.TransactionId = chargeInvoiceId ?? charge.Id;
             result.NewStatus = PaymentStatus.Refunded;
             result.ShouldProcess = true;
             
