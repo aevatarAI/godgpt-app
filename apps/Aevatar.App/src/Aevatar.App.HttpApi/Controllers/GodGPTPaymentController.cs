@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.CQRS;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Application.Grains.ChatManager.Dtos;
 using Aevatar.Application.Grains.Common.Helpers;
 using Aevatar.Application.Grains.UserQuota;
