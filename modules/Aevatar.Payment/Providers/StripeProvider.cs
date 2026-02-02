@@ -439,7 +439,8 @@ public class StripeProvider : IPaymentProvider
             var result = new WebhookResult
             {
                 Success = true,
-                EventType = stripeEvent.Type
+                EventType = stripeEvent.Type,
+                ShouldProcess = true  // Default to true, set to false for unhandled events
             };
 
             // Extract user ID from metadata
