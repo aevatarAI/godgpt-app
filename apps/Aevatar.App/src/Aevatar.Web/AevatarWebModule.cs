@@ -114,7 +114,7 @@ public class AevatarWebModule : AbpModule
         ConfigureUrls(configuration);
         ConfigureBundles();
         // Configure Agent Runtime (Local or Orleans)
-        //ConfigureAgentRuntime(context, configuration);
+        ConfigureAgentRuntime(context, configuration);
         ConfigureAutoMapper();
         ConfigureVirtualFileSystem(hostingEnvironment);
         ConfigureNavigationServices();
