@@ -173,6 +173,8 @@ public class Program
         if (!otelEnabled)
         {
             Log.Information("📊 OpenTelemetry: Disabled (set OpenTelemetry:Enabled=true to enable)");
+            // Register null provider so MetricsRecorder can still be resolved
+            builder.Services.AddSingleton<IInstrumentationProvider>(_ => new NullInstrumentationProvider());
             return;
         }
         
