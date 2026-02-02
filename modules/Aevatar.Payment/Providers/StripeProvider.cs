@@ -593,27 +593,38 @@ public class StripeProvider : IPaymentProvider
 
         if (stripeEvent.Data.Object is Session session)
         {
-            userIdStr = session.ClientReferenceId ?? session.Metadata?.GetValueOrDefault("user_id");
+            // Session: ClientReferenceId is the primary source, fallback to metadata
+            userIdStr = session.ClientReferenceId 
+                ?? session.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? session.Metadata?.GetValueOrDefault("user_id");
         }
         else if (stripeEvent.Data.Object is Invoice invoice)
         {
-            userIdStr = invoice.Metadata?.GetValueOrDefault("user_id");
+            // Invoice: Try subscription metadata first (where we store internal_user_id),
+            // then invoice metadata as fallback
+            userIdStr = invoice.Parent?.SubscriptionDetails?.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? invoice.Parent?.SubscriptionDetails?.Metadata?.GetValueOrDefault("user_id")
+                ?? invoice.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? invoice.Metadata?.GetValueOrDefault("user_id");
         }
         else if (stripeEvent.Data.Object is Subscription subscription)
         {
-            userIdStr = subscription.Metadata?.GetValueOrDefault("user_id");
+            // Subscription: Try both key names
+            userIdStr = subscription.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? subscription.Metadata?.GetValueOrDefault("user_id");
         }
         else if (stripeEvent.Data.Object is PaymentIntent paymentIntent)
         {
-            userIdStr = paymentIntent.Metadata?.GetValueOrDefault("internal_user_id");
+            userIdStr = paymentIntent.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? paymentIntent.Metadata?.GetValueOrDefault("user_id");
         }
         else if (stripeEvent.Data.Object is Charge charge)
         {
             // Try Charge metadata first, then PaymentIntent metadata
-            userIdStr = charge.Metadata?.GetValueOrDefault("user_id")
-                ?? charge.Metadata?.GetValueOrDefault("internal_user_id")
-                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("user_id")
-                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("internal_user_id");
+            userIdStr = charge.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? charge.Metadata?.GetValueOrDefault("user_id")
+                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("internal_user_id")
+                ?? charge.PaymentIntent?.Metadata?.GetValueOrDefault("user_id");
         }
 
         return Guid.TryParse(userIdStr, out var userId) ? userId : null;

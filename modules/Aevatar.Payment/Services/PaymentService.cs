@@ -157,10 +157,22 @@ public class PaymentService : IPaymentService
 
         var result = await provider.CreateSubscriptionAsync(request, ct);
 
-        // Use OrderId instead of SubscriptionId for consistency check
-        // OrderId is guaranteed to exist (provider generates it if not provided)
-        // SubscriptionId at creation time is sessionId, not real subscriptionId yet
-        if (result.Success && !string.IsNullOrEmpty(result.OrderId))
+        // Create payment record based on platform:
+        // 
+        // - Stripe: Do NOT create record here! 
+        //   Reason: Checkout session creation doesn't mean payment succeeded (user might abandon checkout).
+        //   Record will be created via webhook (invoice.paid) when payment actually succeeds.
+        //
+        // - Apple/Google: Create record here when transaction is verified (Status=Completed).
+        //   Reason: Webhook may not have UserId (AppAccountToken might be empty). 
+        //   Old architecture used a fallback: query existing payment record by OriginalTransactionId to get UserId.
+        //   By creating record during client verification, we bind UserId to OriginalTransactionId,
+        //   allowing subsequent webhooks (renewals, etc.) to find UserId even without AppAccountToken.
+        //   ProcessWebhookResultAsync checks IsInitializedAsync() to avoid duplicate creation.
+        if (result.Success && 
+            !string.IsNullOrEmpty(result.OrderId) && 
+            result.Status == PaymentStatus.Completed &&
+            (platform == PaymentPlatform.AppStore || platform == PaymentPlatform.GooglePlay))
         {
             await RecordPaymentAsync(userId, platform, request, result);
         }
@@ -888,11 +900,25 @@ public class PaymentService : IPaymentService
             // Get payment record state (Protobuf) for event context
             var recordState = await recordAgent.GetRecordStateAsync();
             
+            // Determine UserId: prefer webhook result, fallback to existing record state
+            // This handles Apple/Google renewals where AppAccountToken might be empty but record exists
+            Guid? effectiveUserId = result.UserId;
+            if (!effectiveUserId.HasValue && !string.IsNullOrEmpty(recordState.UserId))
+            {
+                if (Guid.TryParse(recordState.UserId, out var recordUserId))
+                {
+                    effectiveUserId = recordUserId;
+                    _logger.LogInformation(
+                        "[PaymentService] UserId not in webhook, using existing record UserId: {UserId}",
+                        effectiveUserId);
+                }
+            }
+            
             // Get index agent once for both updates and event broadcasting (requires UserId)
             AgentModels.IPaymentIndexGAgent? indexAgent = null;
-            if (result.UserId.HasValue)
+            if (effectiveUserId.HasValue)
             {
-                indexAgent = await GetIndexAgentAsync(result.UserId.Value);
+                indexAgent = await GetIndexAgentAsync(effectiveUserId.Value);
                 
                 // Add to index agent if payment record was just created and payment is completed
                 if (!initialized && result.NewStatus == PaymentStatus.Completed)
