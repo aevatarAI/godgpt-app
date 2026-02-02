@@ -1,10 +1,12 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using System.Threading.Tasks;
 using Aevatar.Agents;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.GodGPT.Protos.GodChatStream;
+using Aevatar.App.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Newtonsoft.Json;
@@ -31,6 +33,8 @@ public class SseStreamHandler
     private IMessageStreamSubscription? _messageSubscription;
     private TaskCompletionSource? _exitSignal;
 
+    private readonly IMetricsRecorder _metricsRecorder;
+
     public bool IsLastChunkReceived => _ifLastChunk;
     public bool IsClientDisconnected => _clientDisconnected;
 
@@ -40,6 +44,7 @@ public class SseStreamHandler
         string handlerName,
         string sessionId,
         string chatId,
+        IMetricsRecorder metricsRecorder,
         Stopwatch stopwatch,
         CancellationToken cancellationToken)
     {
@@ -48,6 +53,7 @@ public class SseStreamHandler
         _handlerName = handlerName;
         _sessionId = sessionId;
         _chatId = chatId;
+        _metricsRecorder = metricsRecorder;
         _stopwatch = stopwatch;
         _cancellationToken = cancellationToken;
     }
@@ -106,6 +112,8 @@ public class SseStreamHandler
                     _logger.LogInformation(
                         "[ChatMiddleware][{Handler}] Stream got first message: SessionId={SessionId}, Duration={Duration}ms",
                         _handlerName, _sessionId, _stopwatch.ElapsedMilliseconds);
+
+                    _metricsRecorder.Record($"{_handlerName}_first_response", _stopwatch);
                 }
 
                 var responseData = $"data: {JsonConvert.SerializeObject(httpResponse)}\n\n";
@@ -122,6 +130,7 @@ public class SseStreamHandler
                     {
                         await _messageSubscription.UnsubscribeAsync();
                     }
+                    _metricsRecorder.Record(_handlerName, _stopwatch);
                 }
             }
             catch (OperationCanceledException)

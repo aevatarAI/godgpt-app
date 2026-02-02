@@ -80,36 +80,23 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
         Logger.LogInformation("[UserInfoCollectionGAgent][UpdateUserInfoCollectionAsync] Updating user info collection userId:{userId}", request.UserId);
         var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
 
-        // Validate required fields if they are being updated
+        // Validate optional fields if they are being updated
         if (request.NameInfo != null)
         {
-            if ((request.NameInfo.Gender != 1 && request.NameInfo.Gender != 2) || 
-                string.IsNullOrWhiteSpace(request.NameInfo.FirstName) || 
-                string.IsNullOrWhiteSpace(request.NameInfo.LastName))
+            // Gender is optional, but if provided must be valid (1 or 2)
+            if (request.NameInfo.HasGender && 
+                request.NameInfo.Gender != 1 && request.NameInfo.Gender != 2)
             {
                 return new UserInfoCollectionResponseProto
                 {
                     Success = false,
-                    Message = "Gender, FirstName, and LastName are required",
+                    Message = "Gender is invalid",
                     Data = ConvertStateToProto()
                 };
             }
         }
-        
-        if (request.LocationInfo != null)
-        {
-            if (string.IsNullOrWhiteSpace(request.LocationInfo.Country) || 
-                string.IsNullOrWhiteSpace(request.LocationInfo.City))
-            {
-                return new UserInfoCollectionResponseProto
-                {
-                    Success = false,
-                    Message = "Country and City are required",
-                    Data = ConvertStateToProto()
-                };
-            }
-        }
-        
+
+        // BirthDateInfo is optional - validate only if values are provided
         if (request.BirthDateInfo != null)
         {
             if (!request.BirthDateInfo.HasDay || !request.BirthDateInfo.HasMonth || !request.BirthDateInfo.HasYear)
@@ -471,7 +458,7 @@ User Language: {languageText}";
         if (State.LastUpdated != null)
             result.UpdatedAt = State.LastUpdated;
         
-        if (!string.IsNullOrWhiteSpace(State.FirstName))
+        if (!string.IsNullOrWhiteSpace(State.FirstName) || !string.IsNullOrWhiteSpace(State.LastName) || State.Gender > 0)
         {
             result.NameInfo = new UserNameInfoProto
             {
@@ -481,7 +468,7 @@ User Language: {languageText}";
             };
         }
         
-        if (!string.IsNullOrWhiteSpace(State.Country))
+        if (!string.IsNullOrWhiteSpace(State.Country) || !string.IsNullOrWhiteSpace(State.City))
         {
             result.LocationInfo = new UserLocationInfoProto
             {
@@ -519,43 +506,9 @@ User Language: {languageText}";
     
     private bool IsCollectionCompleted()
     {
-        return State.Gender != 0 &&
-               !string.IsNullOrWhiteSpace(State.FirstName) &&
-               !string.IsNullOrWhiteSpace(State.LastName) &&
-               !string.IsNullOrWhiteSpace(State.Country) &&
-               !string.IsNullOrWhiteSpace(State.City) &&
-               State.Day > 0 && State.Month > 0 && State.Year > 0 &&
-               State.SeekingInterests.Count > 0 &&
+        return State.SeekingInterests.Count > 0 &&
                State.SourceChannels.Count > 0;
     }
-
-    #region EventHandlers
-
-    [EventHandler]
-    public void HandleInitializeUserInfoCollectionEvent(InitializeUserInfoCollectionEvent @event)
-    {
-        TransitionState(State, @event);
-    }
-
-    [EventHandler]
-    public void HandleUpdateUserInfoCollectionEvent(UpdateUserInfoCollectionEvent @event)
-    {
-        TransitionState(State, @event);
-    }
-
-    [EventHandler]
-    public void HandleClearUserInfoCollectionEvent(ClearUserInfoCollectionEvent @event)
-    {
-        TransitionState(State, @event);
-    }
-
-    [EventHandler]
-    public void HandleUpdateFixStateEvent(UpdateFixStateEvent @event)
-    {
-        TransitionState(State, @event);
-    }
-
-    #endregion
     
     protected override void TransitionState(UserInfoCollectionState state, IMessage evt)
     {
