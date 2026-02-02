@@ -81,17 +81,17 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
                 break;
                 
             case RefundProcessedEvent e:
-                var refundTxn = state.Transactions.FirstOrDefault(t => t.TransactionId == e.TransactionId);
+                // Match by ExternalTransactionId (invoice ID from webhook) instead of internal TransactionId
+                var refundTxn = state.Transactions.FirstOrDefault(t => t.ExternalTransactionId == e.TransactionId);
                 if (refundTxn != null)
                 {
                     refundTxn.Status = (int)PaymentStatus.Refunded;
                 }
                 // Match old code: only update main status if refunding the LATEST transaction
-                // Old code: if (invoiceDetail == invoiceDetails.LastOrDefault()) { paymentSummary.Status = Refunded; }
                 var latestTxn = state.Transactions
                     .OrderByDescending(t => t.CreatedAt)
                     .FirstOrDefault();
-                if (latestTxn?.TransactionId == e.TransactionId)
+                if (latestTxn?.ExternalTransactionId == e.TransactionId)
                 {
                     state.Status = (int)PaymentStatus.Refunded;
                 }

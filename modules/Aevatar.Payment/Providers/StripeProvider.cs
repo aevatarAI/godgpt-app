@@ -812,25 +812,13 @@ public class StripeProvider : IPaymentProvider
                 result.UserId = userId;
             }
             
-            // Extract priceId and price from invoice line items
-            // Stripe.net 48.x uses Pricing.PriceDetails.Price for price info
+            // Extract priceId from invoice line items
+            // Stripe.net 48.x uses Pricing.PriceDetails.Price for price info (returns string ID)
             var lineItem = invoice.Lines?.Data?.FirstOrDefault();
             string? priceId = null;
-            decimal? lineItemUnitAmount = null;
-            
             if (lineItem?.Pricing?.Type == "price_details" && !string.IsNullOrEmpty(lineItem.Pricing.PriceDetails?.Price))
             {
                 priceId = lineItem.Pricing.PriceDetails.Price;
-                if (lineItem.Pricing.PriceDetails.UnitAmount.HasValue)
-                {
-                    lineItemUnitAmount = lineItem.Pricing.PriceDetails.UnitAmount.Value / 100m;
-                }
-            }
-            
-            // Fallback: Get priceId from subscription metadata (set during session creation)
-            if (string.IsNullOrEmpty(priceId))
-            {
-                priceId = TryGetFromMetadata(subscriptionMetadata, "price_id");
             }
             
             // Determine if this is a renewal based on billing_reason
@@ -839,16 +827,10 @@ public class StripeProvider : IPaymentProvider
             // Extract period end from invoice line item
             DateTime? periodEnd = lineItem?.Period?.End;
             
-            // Use lineItem unit amount (product price), fallback to AmountPaid (may be 0 for trials)
-            var amountToUse = lineItemUnitAmount ?? (invoice.AmountPaid / 100m);
-            
             _logger.LogInformation(
-                "[StripeProvider] invoice.paid: PriceId={PriceId}, Price.Id={PriceIdFromLineItem}, UnitAmount={UnitAmount}, AmountPaid={AmountPaid}, FinalAmount={FinalAmount}",
+                "[StripeProvider] invoice.paid: PriceId={PriceId}, AmountPaid={AmountPaid}",
                 priceId ?? "(null)",
-                lineItem?.Price?.Id ?? "(null)",
-                lineItemUnitAmount?.ToString() ?? "(null)",
-                invoice.AmountPaid / 100m,
-                amountToUse);
+                invoice.AmountPaid / 100m);
             
             result.TransactionId = invoice.Id;
             result.SubscriptionId = subscriptionId;
@@ -862,7 +844,7 @@ public class StripeProvider : IPaymentProvider
                 TransactionId = invoice.Id,
                 OriginalTransactionId = subscriptionId,
                 ProductId = priceId, // Also store in VerificationResult
-                Amount = amountToUse, // Use lineItem unit amount (product price) instead of AmountPaid
+                Amount = invoice.AmountPaid / 100m,
                 Currency = invoice.Currency?.ToUpper() ?? "USD",
                 PurchaseDate = invoice.Created
             };
@@ -1081,7 +1063,9 @@ public class StripeProvider : IPaymentProvider
             // Extract business data from metadata
             result.OrderId = TryGetFromMetadata(metadata, "order_id");
             result.ProductId = TryGetFromMetadata(metadata, "price_id");
-            result.TransactionId = charge.Id;
+            // Use invoice ID to match ExternalTransactionId stored in invoice.paid
+            // Charge.Invoice contains the invoice ID that was stored as ExternalTransactionId
+            result.TransactionId = chargeInvoiceId ?? charge.Id;
             result.NewStatus = PaymentStatus.Refunded;
             result.ShouldProcess = true;
             
