@@ -79,9 +79,14 @@ public interface IPaymentIndexGAgent : IGAgent
     // ========== Query (Active Subscriptions Only, Fast) ==========
     
     /// <summary>
-    /// Get all active subscriptions (returns Protobuf wrapper for RPC)
+    /// Get all active subscriptions (filters out expired, returns Protobuf wrapper for RPC)
     /// </summary>
     Task<ActiveSubscriptionListResponse> GetActiveSubscriptionsAsync();
+    
+    /// <summary>
+    /// Get all subscriptions without filtering (for cleanup/management)
+    /// </summary>
+    Task<ActiveSubscriptionListResponse> GetAllSubscriptionsAsync();
     
     /// <summary>
     /// Get active subscriptions by business type (returns Protobuf wrapper for RPC)

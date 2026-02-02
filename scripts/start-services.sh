@@ -102,7 +102,7 @@ main() {
     sleep 3
     
     # 3. Start HttpApi
-    start_service "httpapi" "$APP_DIR" "44345" "Aevatar.App.HttpApi.Host/Aevatar.App.HttpApi.Host.csproj"
+    start_service "httpapi" "$APP_DIR" "8082" "Aevatar.App.HttpApi.Host/Aevatar.App.HttpApi.Host.csproj"
     
     log_info "========================================"
     log_info "All services started!"
@@ -111,7 +111,7 @@ main() {
     log_info "Services:"
     log_info "  - Silo:      Running (Port 11111, Gateway 30000)"
     log_info "  - AuthServer: https://localhost:44320"
-    log_info "  - HttpApi:    https://localhost:44345"
+    log_info "  - HttpApi:    http://localhost:8082"
     log_info ""
     log_info "Logs:"
     log_info "  - Silo:      $PID_DIR/silo.log"

@@ -147,4 +147,23 @@ public static class AppPermissions
             public const string Restore = Default + ".Restore";
         }
     }
+
+    /// <summary>
+    /// Permissions for Terms of Service Management module.
+    /// </summary>
+    public static class TermsManagement
+    {
+        public const string GroupName = "TermsManagement";
+        
+        /// <summary>
+        /// Permissions for ToS Versions management.
+        /// </summary>
+        public static class Versions
+        {
+            public const string Default = GroupName + ".Versions";
+            public const string Create = Default + ".Create";
+            public const string Edit = Default + ".Edit";
+            public const string Delete = Default + ".Delete";
+        }
+    }
 }

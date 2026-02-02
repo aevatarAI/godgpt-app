@@ -13,6 +13,9 @@ public class AppPermissionDefinitionProvider : PermissionDefinitionProvider
 
         // Language Management permissions
         DefineLanguageManagementPermissions(context);
+
+         // Terms of Service Management permission
+        DefineTermsManagementPermissions(context);
     }
     
     private void DefineLanguageManagementPermissions(IPermissionDefinitionContext context)
@@ -54,6 +57,30 @@ public class AppPermissionDefinitionProvider : PermissionDefinitionProvider
         languageTextsPermission.AddChild(
             AppPermissions.LanguageManagement.LanguageTexts.Restore,
             L("Permission:LanguageManagement.LanguageTexts.Restore"));
+    }
+
+    private void DefineTermsManagementPermissions(IPermissionDefinitionContext context)
+    {
+        var termsManagementGroup = context.AddGroup(
+            AppPermissions.TermsManagement.GroupName,
+            L("Permission:TermsManagement"));
+
+        // ToS Versions permissions
+        var versionsPermission = termsManagementGroup.AddPermission(
+            AppPermissions.TermsManagement.Versions.Default,
+            L("Permission:TermsManagement.Versions"));
+
+        versionsPermission.AddChild(
+            AppPermissions.TermsManagement.Versions.Create,
+            L("Permission:TermsManagement.Versions.Create"));
+
+        versionsPermission.AddChild(
+            AppPermissions.TermsManagement.Versions.Edit,
+            L("Permission:TermsManagement.Versions.Edit"));
+
+        versionsPermission.AddChild(
+            AppPermissions.TermsManagement.Versions.Delete,
+            L("Permission:TermsManagement.Versions.Delete"));
     }
 
     private static LocalizableString L(string name)

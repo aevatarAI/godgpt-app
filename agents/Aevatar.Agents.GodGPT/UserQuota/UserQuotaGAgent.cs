@@ -66,9 +66,6 @@ public interface IUserQuotaGAgent : Aevatar.Agents.Abstractions.IGAgent
     Task<bool> InitializeCreditsAsync();
     Task<CreditsInfoProto> GetCreditsAsync();
     Task<bool> IsSubscribedAsync(bool ultimate = false);
-    Task<SubscriptionInfoDto> GetSubscriptionAsync(bool ultimate = false);
-    Task<SubscriptionInfoDto> GetAndSetSubscriptionAsync(bool ultimate = false);
-    Task UpdateSubscriptionAsync(SubscriptionInfoDto subscriptionInfoDto, bool ultimate = false);
     
     // RPC-compatible Protobuf methods
     Task<SubscriptionInfoProto> GetSubscriptionProtoAsync(bool ultimate = false);
@@ -195,8 +192,14 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 StartDate = startDate,
                 EndDate = endDate,
                 SubscriptionIds = subscriptionInfo.SubscriptionIds.ToList(),
-                InvoiceIds = subscriptionInfo.InvoiceIds.ToList()
+                InvoiceIds = subscriptionInfo.InvoiceIds.ToList(),
+                PlatformProductId = !string.IsNullOrWhiteSpace(subscriptionInfo!.PlatformProductId) ? subscriptionInfo.PlatformProductId : null
             };
+
+            if (subscriptionInfo.HasPlatform)
+            {
+                subscriptionDto.Platform = subscriptionInfo.Platform;
+            }  
 
             RaiseEvent(new UpdateSubscriptionEvent
             {
@@ -249,7 +252,9 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             StartDate = subscriptionInfo?.StartDate?.ToDateTime() ?? DateTime.MinValue,
             EndDate = subscriptionInfo?.EndDate?.ToDateTime() ?? DateTime.MinValue,
             SubscriptionIds = subscriptionInfo?.SubscriptionIds.ToList() ?? new List<string>(),
-            InvoiceIds = subscriptionInfo?.InvoiceIds.ToList() ?? new List<string>()
+            InvoiceIds = subscriptionInfo?.InvoiceIds.ToList() ?? new List<string>(),
+            PlatformProductId = !string.IsNullOrWhiteSpace(subscriptionInfo!.PlatformProductId) ? subscriptionInfo.PlatformProductId : null,
+            Platform = subscriptionInfo.HasPlatform ? subscriptionInfo.Platform : null
         };
     }
     
@@ -560,7 +565,11 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             EndDate = expiresDate,
             Status = PaymentStatus.Completed,
             SubscriptionIds = State.Subscription?.SubscriptionIds.ToList() ?? new List<string>(),
-            InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>()
+            InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>(),
+            PlatformProductId = !string.IsNullOrWhiteSpace(State.Subscription?.PlatformProductId)
+                ? State.Subscription?.PlatformProductId
+                : null,
+            Platform = State.Subscription != null && State.Subscription.HasPlatform ? State.Subscription.Platform : null
         };
 
         RaiseEvent(new UpdateSubscriptionEvent { SubscriptionInfo = MapToProtoSubscriptionFromDto(subscriptionDto), IsUltimate = false });
@@ -580,7 +589,11 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             StartDate = State.Subscription?.StartDate?.ToDateTime() ?? DateTime.MinValue,
             EndDate = State.Subscription?.EndDate?.ToDateTime() ?? DateTime.MinValue,
             SubscriptionIds = State.Subscription?.SubscriptionIds.ToList() ?? new List<string>(),
-            InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>()
+            InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>(),
+            PlatformProductId = !string.IsNullOrWhiteSpace(State.Subscription?.PlatformProductId)
+                ? State.Subscription?.PlatformProductId
+                : null,
+            Platform = State.Subscription != null && State.Subscription.HasPlatform ? State.Subscription.Platform : null
         };
 
         RaiseEvent(new UpdateSubscriptionEvent { SubscriptionInfo = MapToProtoSubscriptionFromDto(subscriptionDto), IsUltimate = false });
@@ -1010,6 +1023,11 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         subscriptionInfo.Status = PaymentStatus.Completed;
         subscriptionInfo.SubscriptionIds = subscriptionIds;
         subscriptionInfo.InvoiceIds = invoiceIds;
+        if (!string.IsNullOrWhiteSpace(evt.Context.ProductId))
+        {
+            subscriptionInfo.PlatformProductId = evt.Context.ProductId;
+        }
+        subscriptionInfo.Platform = evt.Context.Platform;
 
         await UpdateSubscriptionAsync(subscriptionInfo, isUltimate);
 
@@ -1101,6 +1119,8 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
     /// <summary>
     /// Handle payment cancelled event - update user subscription status
+    /// Only processes: refund (rollback EndDate) and grace_period_expired (immediate revocation)
+    /// EXPIRED/Cancel events are NOT sent here - user membership expires naturally via EndDate
     /// </summary>
     [EventHandler]
     public async Task HandlePaymentCancelled(PaymentCancelledEvent evt)
@@ -1118,6 +1138,16 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 evt.Context?.BusinessType);
             return;
         }
+        
+        // Only process "refund" and "grace_period_expired" events
+        // PaymentService only sends these two types now
+        if (evt.Reason != "refund" && evt.Reason != "grace_period_expired")
+        {
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping unknown Reason={Reason}",
+                evt.Reason);
+            return;
+        }
 
         var userId = Guid.Parse(evt.Context.UserId);
         // Extract actual user GUID from Agent Id (format: "UserQuotaGAgent:guid")
@@ -1130,73 +1160,59 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             return;
         }
 
-        Logger.LogInformation(
-            "[UserQuotaGAgent][HandlePaymentCancelled] Processing cancellation for user {UserId}, PaymentId: {PaymentId}, SubscriptionId: {SubscriptionId}, Immediate: {Immediate}",
-            userId, evt.Context.PaymentId, evt.Context.SubscriptionId, evt.Immediate);
-
-        // Determine which subscription to cancel by matching SubscriptionId
-        // First try to match by SubscriptionId, then fallback to business metadata
-        bool? isUltimateToCancel = null;
+        var subId = evt.Context.SubscriptionId;
         
-        if (!string.IsNullOrEmpty(evt.Context.SubscriptionId))
-        {
-            // Check Premium subscription
-            var premiumSubscription = await GetSubscriptionAsync(false);
-            if (premiumSubscription != null && premiumSubscription.IsActive && 
-                premiumSubscription.SubscriptionIds != null &&
-                premiumSubscription.SubscriptionIds.Contains(evt.Context.SubscriptionId))
-            {
-                isUltimateToCancel = false;
-                Logger.LogInformation(
-                    "[UserQuotaGAgent][HandlePaymentCancelled] Matched Premium subscription by SubscriptionId {SubscriptionId}",
-                    evt.Context.SubscriptionId);
-            }
-            
-            // Check Ultimate subscription
-            if (!isUltimateToCancel.HasValue)
-            {
-                var ultimateSubscription = await GetSubscriptionAsync(true);
-                if (ultimateSubscription != null && ultimateSubscription.IsActive && 
-                    ultimateSubscription.SubscriptionIds != null &&
-                    ultimateSubscription.SubscriptionIds.Contains(evt.Context.SubscriptionId))
-                {
-                    isUltimateToCancel = true;
-                    Logger.LogInformation(
-                        "[UserQuotaGAgent][HandlePaymentCancelled] Matched Ultimate subscription by SubscriptionId {SubscriptionId}",
-                        evt.Context.SubscriptionId);
-                }
-            }
-        }
-        
-        // Fallback to business metadata if SubscriptionId match failed
-        if (!isUltimateToCancel.HasValue)
-        {
-            var metadataDict = evt.Context.BusinessMetadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value) 
-                ?? new Dictionary<string, string>();
-            isUltimateToCancel = GetIsUltimateFromMetadata(metadataDict);
-            Logger.LogInformation(
-                "[UserQuotaGAgent][HandlePaymentCancelled] Using business metadata to determine subscription type: IsUltimate={IsUltimate}",
-                isUltimateToCancel.Value);
-        }
-
-        // Cancel the matched subscription
-        var subscription = await GetSubscriptionAsync(isUltimateToCancel.Value);
-        if (subscription == null || !subscription.IsActive)
+        // SubscriptionId is required
+        if (string.IsNullOrEmpty(subId))
         {
             Logger.LogInformation(
-                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - subscription inactive for user {UserId}",
+                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - Empty SubscriptionId for user {UserId}",
                 userId);
             return;
         }
+
+        Logger.LogInformation(
+            "[UserQuotaGAgent][HandlePaymentCancelled] Processing {Reason} for user {UserId}, SubscriptionId: {SubscriptionId}",
+            evt.Reason, userId, subId);
+
+        // Find which subscription contains this SubscriptionId
+        bool? isUltimate = null;
         
-        // Check if this is a refund
-        var isRefund = evt.Reason == "refund";
-        var subId = evt.Context.SubscriptionId;
-        var subscriptionInList = !string.IsNullOrEmpty(subId) && subscription.SubscriptionIds.Contains(subId);
+        // Check Premium subscription
+        var premiumSubscription = await GetSubscriptionAsync(false);
+        if (premiumSubscription?.SubscriptionIds?.Contains(subId) == true)
+        {
+            isUltimate = false;
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCancelled] Found SubscriptionId {SubscriptionId} in Premium subscription",
+                subId);
+        }
         
+        // Check Ultimate subscription
+        if (!isUltimate.HasValue)
+        {
+            var ultimateSubscription = await GetSubscriptionAsync(true);
+            if (ultimateSubscription?.SubscriptionIds?.Contains(subId) == true)
+            {
+                isUltimate = true;
+                Logger.LogInformation(
+                    "[UserQuotaGAgent][HandlePaymentCancelled] Found SubscriptionId {SubscriptionId} in Ultimate subscription",
+                    subId);
+            }
+        }
+        
+        // SubscriptionId not found in any subscription list - already processed or invalid
+        if (!isUltimate.HasValue)
+        {
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - SubscriptionId {SubscriptionId} not found in any subscription list for user {UserId}",
+                subId, userId);
+            return;
+        }
+
         // Calculate rollback days for refunds
         int rollbackDays = 0;
-        if (isRefund)
+        if (evt.Reason == "refund")
         {
             var metadataDict = evt.Context.BusinessMetadata?.ToDictionary(kvp => kvp.Key, kvp => kvp.Value) 
                 ?? new Dictionary<string, string>();
@@ -1205,47 +1221,18 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             rollbackDays = SubscriptionHelper.GetDaysForPlanType(quotaPlanType);
             
             Logger.LogInformation(
-                "[UserQuotaGAgent][HandlePaymentCancelled] Refund detected - PlanType={PlanType}, RollbackDays={RollbackDays}",
+                "[UserQuotaGAgent][HandlePaymentCancelled] Refund - PlanType={PlanType}, RollbackDays={RollbackDays}",
                 planType, rollbackDays);
         }
         
-        // Skip if SubscriptionId not in list (already processed or user has newer subscription)
-        // Exception: For refunds, still need to rollback EndDate even if SubscriptionId was already removed by Cancel
-        if (!string.IsNullOrEmpty(subId))
-        {
-            if (!subscriptionInList && !isRefund)
-            {
-                // Normal cancel: skip if already processed
-                Logger.LogInformation(
-                    "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - SubscriptionId {SubscriptionId} not in list for user {UserId}",
-                    subId, userId);
-                return;
-            }
-            else if (!subscriptionInList && isRefund)
-            {
-                // Refund after Cancel: need to rollback EndDate
-                Logger.LogInformation(
-                    "[UserQuotaGAgent][HandlePaymentCancelled] Refund after Cancel - SubscriptionId {SubscriptionId} already removed, but still rollback EndDate by {RollbackDays} days",
-                    subId, rollbackDays);
-            }
-        }
-        else
-        {
-            // If SubscriptionId is empty (old data), skip to prevent incorrect cancellation
-            Logger.LogInformation(
-                "[UserQuotaGAgent][HandlePaymentCancelled] Skipping - Empty SubscriptionId (old data format) for user {UserId}",
-                userId);
-            return;
-        }
-        
         Logger.LogInformation(
-            "[UserQuotaGAgent][HandlePaymentCancelled] Cancelling {SubscriptionType} subscription for user {UserId}, SubscriptionId={SubscriptionId}, IsRefund={IsRefund}, RollbackDays={RollbackDays}",
-            isUltimateToCancel.Value ? "Ultimate" : "Premium", userId, subId ?? "(none)", isRefund, rollbackDays);
+            "[UserQuotaGAgent][HandlePaymentCancelled] Processing {Reason} for {SubscriptionType} subscription, UserId={UserId}, SubscriptionId={SubscriptionId}, RollbackDays={RollbackDays}",
+            evt.Reason, isUltimate.Value ? "Ultimate" : "Premium", userId, subId, rollbackDays);
         
         RaiseEvent(new CancelSubscriptionEvent 
         { 
-            IsUltimate = isUltimateToCancel.Value, 
-            SubscriptionId = subId ?? string.Empty,
+            IsUltimate = isUltimate.Value, 
+            SubscriptionId = subId,
             Reason = evt.Reason,
             RollbackDays = rollbackDays
         });
@@ -1431,8 +1418,10 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             PlanType = (QuotaPlanType)(int)sub.PlanType,
             Status = (QuotaPaymentStatus)(int)sub.Status,
             StartDate = Timestamp.FromDateTime(DateTime.SpecifyKind(sub.StartDate, DateTimeKind.Utc)),
-            EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(sub.EndDate, DateTimeKind.Utc))
+            EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(sub.EndDate, DateTimeKind.Utc)),
         };
+        if (!string.IsNullOrWhiteSpace(sub.PlatformProductId)) result.PlatformProductId = sub.PlatformProductId;
+        if (sub.Platform.HasValue) result.Platform = sub.Platform.Value;
         if (sub.SubscriptionIds != null) result.SubscriptionIds.AddRange(sub.SubscriptionIds);
         if (sub.InvoiceIds != null) result.InvoiceIds.AddRange(sub.InvoiceIds);
         return result;
@@ -1491,29 +1480,54 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 subscription.SubscriptionIds.AddRange(updateSubscription.SubscriptionInfo.SubscriptionIds);
                 subscription.InvoiceIds.Clear();
                 subscription.InvoiceIds.AddRange(updateSubscription.SubscriptionInfo.InvoiceIds);
+                if (!string.IsNullOrWhiteSpace(updateSubscription.SubscriptionInfo.PlatformProductId))
+                {
+                    subscription.PlatformProductId = updateSubscription.SubscriptionInfo.PlatformProductId;
+                }
+
+                if (updateSubscription.SubscriptionInfo.HasPlatform)
+                {
+                    subscription.Platform = updateSubscription.SubscriptionInfo.Platform;
+                }
+                
                 break;
 
             case CancelSubscriptionEvent cancelSubscription:
                 var sub = cancelSubscription.IsUltimate ? state.UltimateSubscription : state.Subscription;
                 if (sub != null)
                 {
-                    // Refund: rollback EndDate by specified days
-                    if (cancelSubscription.RollbackDays > 0 && sub.EndDate != null)
-                    {
-                        var currentEndDate = sub.EndDate.ToDateTime();
-                        var newEndDate = currentEndDate.AddDays(-cancelSubscription.RollbackDays);
-                        sub.EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(newEndDate, DateTimeKind.Utc));
-                    }
-                    
-                    // Remove SubscriptionId from list
+                    // Always remove SubscriptionId from list (both refund and grace_period_expired)
                     if (!string.IsNullOrEmpty(cancelSubscription.SubscriptionId))
                     {
                         sub.SubscriptionIds.Remove(cancelSubscription.SubscriptionId);
                     }
                     
-                    // Only cancel membership if list is empty (no other active subscriptions)
-                    if (sub.SubscriptionIds.Count == 0)
+                    // Handle based on Reason:
+                    // - refund: Rollback EndDate (user got money back), revoke if EndDate is now in past
+                    // - grace_period_expired: Immediate revocation (user failed to pay)
+                    if (cancelSubscription.Reason == "refund")
                     {
+                        // Refund: rollback EndDate by specified days
+                        if (cancelSubscription.RollbackDays > 0 && sub.EndDate != null)
+                        {
+                            var currentEndDate = sub.EndDate.ToDateTime();
+                            var newEndDate = currentEndDate.AddDays(-cancelSubscription.RollbackDays);
+                            sub.EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(newEndDate, DateTimeKind.Utc));
+                        }
+                        
+                        // If EndDate is now in the past after rollback, revoke immediately
+                        var endDate = sub.EndDate?.ToDateTime() ?? DateTime.MinValue;
+                        if (endDate <= DateTime.UtcNow)
+                        {
+                            sub.IsActive = false;
+                            sub.PlanType = QuotaPlanType.None;
+                            sub.Status = QuotaPaymentStatus.None;
+                        }
+                    }
+                    else if (cancelSubscription.Reason == "grace_period_expired")
+                    {
+                        // Grace period expired: immediate revocation
+                        // User failed to pay during grace period, revoke access now
                         sub.IsActive = false;
                         sub.PlanType = QuotaPlanType.None;
                         sub.Status = QuotaPaymentStatus.None;

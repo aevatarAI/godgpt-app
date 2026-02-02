@@ -233,6 +233,13 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
         return Task.FromResult(response);
     }
 
+    public Task<ActiveSubscriptionListResponse> GetAllSubscriptionsAsync()
+    {
+        var response = new ActiveSubscriptionListResponse();
+        response.Subscriptions.AddRange(State.ActiveSubscriptions);
+        return Task.FromResult(response);
+    }
+
     public Task<ActiveSubscriptionListResponse> GetActiveSubscriptionsByBusinessAsync(string businessType)
     {
         var response = new ActiveSubscriptionListResponse();

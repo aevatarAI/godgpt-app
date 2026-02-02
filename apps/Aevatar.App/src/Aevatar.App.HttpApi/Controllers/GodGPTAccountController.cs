@@ -1,10 +1,13 @@
 using Aevatar.App.HttpApi.Controllers;
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
+using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.App.Application.Contracts.Services.User;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.ChatManager.Dtos;
+using Aevatar.Application.Grains.ChatManager.UserQuota;
 using Aevatar.GAgents.AI.Common;
 using GodGPT.GAgents.SpeechChat;
 using Asp.Versioning;
@@ -46,14 +49,47 @@ public class GodGPTAccountController : AevatarController
     /// Get current user's profile
     /// </summary>
     [HttpGet("godgpt/account")]
-    public async Task<UserProfileDto> GetUserProfileAsync()
+    public async Task<UserProfileApiResponse> GetUserProfileAsync()
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
         var userProfileDto = await _userService.GetUserProfileAsync(currentUserId);
         _logger.LogDebug("[GodGPTAccountController][GetUserProfileAsync] userId: {0}, duration: {1}ms",
             currentUserId, stopwatch.ElapsedMilliseconds);
-        return userProfileDto;
+        return ToApiResponse(userProfileDto);
+    }
+    
+    private static UserProfileApiResponse ToApiResponse(UserProfileDto dto)
+    {
+        return new UserProfileApiResponse
+        {
+            Gender = dto.Gender,
+            BirthDate = dto.BirthDate,
+            BirthPlace = dto.BirthPlace,
+            FullName = dto.FullName,
+            Credits = dto.Credits,
+            Subscription = ToSubscriptionApiResponse(dto.Subscription),
+            UltimateSubscription = ToSubscriptionApiResponse(dto.UltimateSubscription),
+            Id = dto.Id,
+            InviterId = dto.InviterId,
+            VoiceLanguage = dto.VoiceLanguage,
+            IsFirstConversation = dto.IsFirstConversation
+        };
+    }
+    
+    private static SubscriptionApiResponse? ToSubscriptionApiResponse(Aevatar.Agents.GodGPT.Protos.UserQuota.SubscriptionInfoProto? proto)
+    {
+        if (proto == null) return null;
+        return new SubscriptionApiResponse
+        {
+            IsActive = proto.IsActive,
+            PlanType = (int)proto.PlanType,
+            Status = (int)proto.Status,
+            StartDate = proto.StartDate?.ToDateTime(),
+            EndDate = proto.EndDate?.ToDateTime(),
+            SubscriptionIds = proto.SubscriptionIds?.ToList() ?? new List<string>(),
+            InvoiceIds = proto.InvoiceIds?.ToList() ?? new List<string>()
+        };
     }
 
     /// <summary>
@@ -278,4 +314,36 @@ public class BasicUserInfoDto
     /// User avatar URL (reserved for future use)
     /// </summary>
     public string? Avatar { get; set; }
+}
+
+/// <summary>
+/// User profile API response with ISO8601 dates
+/// </summary>
+public class UserProfileApiResponse
+{
+    public string? Gender { get; set; }
+    public DateTime BirthDate { get; set; }
+    public string? BirthPlace { get; set; }
+    public string? FullName { get; set; }
+    public CreditsInfoDto? Credits { get; set; }
+    public SubscriptionApiResponse? Subscription { get; set; }
+    public SubscriptionApiResponse? UltimateSubscription { get; set; }
+    public Guid Id { get; set; }
+    public Guid? InviterId { get; set; }
+    public VoiceLanguageEnum VoiceLanguage { get; set; }
+    public bool? IsFirstConversation { get; set; }
+}
+
+/// <summary>
+/// Subscription info with DateTime (serializes as ISO8601)
+/// </summary>
+public class SubscriptionApiResponse
+{
+    public bool IsActive { get; set; }
+    public int PlanType { get; set; }
+    public int Status { get; set; }
+    public DateTime? StartDate { get; set; }
+    public DateTime? EndDate { get; set; }
+    public List<string> SubscriptionIds { get; set; } = new();
+    public List<string> InvoiceIds { get; set; } = new();
 }

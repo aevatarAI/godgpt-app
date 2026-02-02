@@ -71,6 +71,41 @@ public class ApplePayProvider : IPaymentProvider
         return Math.Round(amount / days, 2).ToString("F2");
     }
 
+    /// <summary>
+    /// Calculate real subscription end date based on product's PlanType.
+    /// This matches old code (UserBillingGAgent.CalculateSubscriptionDurationAsync) behavior.
+    /// Apple Sandbox returns short periods (3-5 minutes), so we calculate real EndDate ourselves.
+    /// </summary>
+    private DateTime? CalculatePeriodEndFromProduct(string? productId)
+    {
+        if (string.IsNullOrEmpty(productId))
+            return null;
+        
+        var product = _options.Products.FirstOrDefault(p => p.ProductId == productId);
+        if (product == null)
+        {
+            _logger.LogWarning("[ApplePayProvider] Product {ProductId} not found, using 30 days default", productId);
+            return DateTime.UtcNow.AddDays(30);
+        }
+        
+        var billingCycle = product.GetBillingCycle();
+        var endDate = billingCycle switch
+        {
+            BillingCycle.Daily => DateTime.UtcNow.AddDays(1),
+            BillingCycle.Weekly => DateTime.UtcNow.AddDays(7),
+            BillingCycle.Monthly => DateTime.UtcNow.AddDays(30),
+            BillingCycle.Quarterly => DateTime.UtcNow.AddDays(90),
+            BillingCycle.Yearly => DateTime.UtcNow.AddDays(390), // Match old code: 390 days for yearly
+            _ => DateTime.UtcNow.AddDays(30)
+        };
+        
+        _logger.LogInformation(
+            "[ApplePayProvider] Calculated PeriodEnd for {ProductId}: BillingCycle={Cycle}, EndDate={EndDate}",
+            productId, billingCycle, endDate);
+        
+        return endDate;
+    }
+
     public async Task<SubscriptionResult> CreateSubscriptionAsync(
         SubscriptionRequest request, 
         CancellationToken ct = default)
@@ -251,13 +286,19 @@ public class ApplePayProvider : IPaymentProvider
             
             result.NewStatus = MapAppleEventToStatus(notification.NotificationType, notification.Subtype);
             
-            // Determine if this is a renewal - Apple uses "DID_RENEW" notification type
-            result.IsRenewal = notification.NotificationType == "DID_RENEW";
+            // Determine if this is a renewal/upgrade/resubscribe - all should add transaction record
+            // Old code (UserBillingGAgent.HandleDidRenewAsync) was called for:
+            // - SUBSCRIBED (both INITIAL_BUY and RESUBSCRIBE) - line 2636
+            // - DID_RENEW - line 2645
+            // - DID_CHANGE_RENEWAL_PREF + UPGRADE - line 2694
+            // For INITIAL_BUY, PaymentService checks recordState.Status != Completed to skip adding duplicate
+            result.IsRenewal = notification.NotificationType == "DID_RENEW" ||
+                               notification.NotificationType == "SUBSCRIBED" ||
+                               (notification.NotificationType == "DID_CHANGE_RENEWAL_PREF" && notification.Subtype == "UPGRADE");
 
             if (transactionInfo != null)
             {
                 result.ProductId = transactionInfo.ProductId; // For product config lookup
-                result.PeriodEnd = transactionInfo.ExpiresDate; // Set PeriodEnd for PaymentService
                 result.VerificationResult = new VerificationResult
                 {
                     IsValid = true,
@@ -265,11 +306,16 @@ public class ApplePayProvider : IPaymentProvider
                     OriginalTransactionId = transactionInfo.OriginalTransactionId,
                     ProductId = transactionInfo.ProductId,
                     PurchaseDate = transactionInfo.PurchaseDate,
-                    ExpiresDate = transactionInfo.ExpiresDate,
+                    ExpiresDate = transactionInfo.ExpiresDate, // Keep original for reference
                     AutoRenewing = transactionInfo.AutoRenewing,
                     Amount = transactionInfo.Price,
                     Currency = transactionInfo.Currency
                 };
+                
+                // Calculate real PeriodEnd based on PlanType (not platform ExpiresDate)
+                // Apple Sandbox returns short periods (3-5 minutes), production returns real dates
+                // Old code used CalculateSubscriptionDurationAsync to get real EndDate
+                result.PeriodEnd = CalculatePeriodEndFromProduct(transactionInfo.ProductId);
             }
 
             // Enhanced logging for refund events

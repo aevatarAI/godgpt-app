@@ -317,15 +317,64 @@ public partial class ChatGAgentManager
     {
         //Do not clear the content of ShareGrain. When querying, first determine whether the Session exists
         // Record the event to clear all sessions
-        var userQuotaGAgent = await GetUserQuotaAgentAsync(Id);
+        var rawUserId = AgentId.ExtractRawId(Id);
+        var userQuotaGAgent = await GetUserQuotaAgentAsync(rawUserId);
         await userQuotaGAgent.ClearAllAsync();
 
-        // TODO: [USER_BILLING_DISABLED] UserBillingGAgent not implemented
-        // var userBillingActor = await _actorFactory.CreateGAgentActorAsync<UserBillingGAgent>(Id);
-        // var userBillingGAgent = (IUserBillingGAgent)userBillingActor.GetAgent();
-        // await userBillingGAgent.ClearAllAsync();
+        // Clear payment data (replaces UserBillingGAgent)
+        try
+        {
+            var paymentIndexGAgent = await GetPaymentIndexAgentAsync(rawUserId);
+            Logger.LogInformation("[ChatGAgentManager][ClearAllAsync] Got PaymentIndexGAgent for userId: {UserId}", rawUserId);
+            
+            // Get ALL subscriptions (including expired) and clear their PaymentRecords
+            var allSubscriptions = await paymentIndexGAgent.GetAllSubscriptionsAsync();
+            Logger.LogInformation("[ChatGAgentManager][ClearAllAsync] Found {Count} subscriptions to clear for userId: {UserId}", 
+                allSubscriptions.Subscriptions.Count, rawUserId);
+            
+            // Fire-and-forget: Orleans Grain is single-threaded, don't block on these
+            foreach (var subscription in allSubscriptions.Subscriptions)
+            {
+                var paymentId = subscription.PaymentId;
+                Logger.LogInformation("[ChatGAgentManager][ClearAllAsync] Clearing PaymentRecord: {PaymentId}, BusinessType: {BusinessType}, Platform: {Platform}", 
+                    paymentId, subscription.BusinessType, subscription.Platform);
+                    
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var paymentRecordGAgent = await GetPaymentRecordAgentAsync(paymentId);
+                        await paymentRecordGAgent.ClearAsync();
+                        Logger.LogInformation("[ChatGAgentManager][ClearAllAsync] Successfully cleared PaymentRecord: {PaymentId}", paymentId);
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "[ChatGAgentManager][ClearAllAsync] PaymentRecordGAgent ClearAsync error paymentId: {PaymentId}", paymentId);
+                    }
+                });
+            }
+            
+            // NOTE: Do NOT clear PaymentIndexGAgent - it's internal data not exposed to users
+            // Keeping the index allows subsequent webhook events to still find corresponding PaymentRecords
+            // The PaymentRecord data is already cleared above, which satisfies account deletion requirements
+        }
+        catch (Exception e)
+        {
+            Logger.LogError(e, "[ChatGAgentManager][ClearAllAsync] PaymentIndexGAgent ClearAllAsync error userId: {UserId}", Id);
+        }
 
-        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(Id);
+        // Clear invitation data
+        try
+        {
+            var invitationGAgent = await GetInvitationAgentAsync(AgentId.ExtractRawId(Id));
+            await invitationGAgent.ClearAllAsync();
+        }
+        catch (Exception e)
+        {
+            Logger.LogError(e, "[ChatGAgentManager][ClearAllAsync] InvitationGAgent ClearAllAsync error userId: {UserId}", Id);
+        }
+
+        var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(rawUserId);
         await userInfoCollectionGAgent.ClearAllAsync();
 
         var userProfileActor = await _actorFactory.CreateGAgentActorAsync<UserProfileGAgent>(AgentId.ExtractRawId(Id));

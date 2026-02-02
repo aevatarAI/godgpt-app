@@ -432,6 +432,12 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
     {
         TransitionState(State, @event);
     }
+    
+    [EventHandler]
+    public void HandleClearAllInvitationEvent(ClearAllInvitationEvent @event)
+    {
+        TransitionState(State, @event);
+    }
 
     /// <summary>
     /// Handle payment completed event - process invitee subscription rewards
@@ -602,6 +608,19 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
                     state.TotalCreditsEarned += reward.Credits;
                 }
                 break;
+            
+            case ClearAllInvitationEvent:
+                // Clear all invitation data
+                state.InviterId = string.Empty;
+                state.CurrentInviteCode = string.Empty;
+                state.Invitees.Clear();
+                state.TotalInvites = 0;
+                state.ValidInvites = 0;
+                state.TotalCreditsEarned = 0;
+                state.TotalCreditsFromX = 0;
+                state.RewardHistory.Clear();
+                state.LastRewardTierUpdate = null;
+                break;
 
             default:
                 Logger.LogWarning("Unhandled event type {EventType}", evt.GetType().Name);
@@ -653,6 +672,19 @@ public class InvitationGAgent : GAgentBase<InvitationState>, IInvitationGAgent
         await ConfirmEventsAsync();
 
         return true;
+    }
+    
+    public async Task ClearAllAsync()
+    {
+        Logger.LogInformation("[InvitationGAgent][ClearAllAsync] Clearing all invitation data for user {UserId}", Id);
+        
+        RaiseEvent(new ClearAllInvitationEvent
+        {
+            ClearedAt = Timestamp.FromDateTime(DateTime.UtcNow)
+        });
+        await ConfirmEventsAsync();
+        
+        Logger.LogInformation("[InvitationGAgent][ClearAllAsync] Successfully cleared all invitation data for user {UserId}", Id);
     }
 
     private async Task<IInviteCodeGAgent> GetInviteCodeAgentAsync(string codeGrainId)
