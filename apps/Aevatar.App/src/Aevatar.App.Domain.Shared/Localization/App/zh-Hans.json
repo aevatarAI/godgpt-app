@@ -72,6 +72,10 @@
     "Permission:SubscriptionProductManagement.Prices.Delete": "删除价格",
     "Permission:SubscriptionProductManagement.Prices.SyncPrice": "同步价格",
 
+    "Permission:PushNotificationManagement": "推送通知管理",
+    "Permission:PushNotificationManagement.Default": "访问推送通知",
+    "Permission:PushNotificationManagement.SendByTimezone": "按时区发送推送",
+
     "subscription.product.weekly": "周套餐",
     "subscription.product.weekly.description": "一周内使用全部功能",
     "subscription.product.weekly.highlight": "尝鲜体验",

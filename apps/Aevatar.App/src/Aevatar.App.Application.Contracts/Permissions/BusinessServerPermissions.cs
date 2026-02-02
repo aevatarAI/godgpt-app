@@ -166,4 +166,22 @@ public static class AppPermissions
             public const string Delete = Default + ".Delete";
         }
     }
+
+    /// <summary>
+    /// Permissions for Push Notification Management module.
+    /// </summary>
+    public static class PushNotification
+    {
+        public const string GroupName = "PushNotificationManagement";
+        
+        /// <summary>
+        /// Base permission for push notification management.
+        /// </summary>
+        public const string Default = GroupName + ".Default";
+        
+        /// <summary>
+        /// Permission to send push notifications by timezone.
+        /// </summary>
+        public const string SendByTimezone = GroupName + ".SendByTimezone";
+    }
 }

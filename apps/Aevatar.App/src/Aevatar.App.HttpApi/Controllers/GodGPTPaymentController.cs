@@ -1225,7 +1225,7 @@ public class GodGPTPaymentController : AevatarController
             // Get user's current subscription via UserQuotaGAgent
             var userQuotaActor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userId.ToString());
             var userQuotaAgent = userQuotaActor.As<IUserQuotaGAgent>();
-            var currentSubscription = await userQuotaAgent.GetSubscriptionAsync(targetIsUltimate);
+            var currentSubscription = await userQuotaAgent.GetSubscriptionProtoAsync(targetIsUltimate);
 
             // If no active subscription, allow any purchase
             if (!currentSubscription.IsActive)

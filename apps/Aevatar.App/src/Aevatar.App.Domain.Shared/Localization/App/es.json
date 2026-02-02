@@ -47,6 +47,10 @@
     "Permission:LanguageManagement.LanguageTexts": "Textos de Idiomas",
     "Permission:LanguageManagement.LanguageTexts.Create": "Crear Textos de Idiomas",
     "Permission:LanguageManagement.LanguageTexts.Edit": "Editar Textos de Idiomas",
-    "Permission:LanguageManagement.LanguageTexts.Restore": "Restaurar Textos de Idiomas"
+    "Permission:LanguageManagement.LanguageTexts.Restore": "Restaurar Textos de Idiomas",
+
+    "Permission:PushNotificationManagement": "Gestión de Notificaciones Push",
+    "Permission:PushNotificationManagement.Default": "Acceder a Notificaciones Push",
+    "Permission:PushNotificationManagement.SendByTimezone": "Enviar Push por Zona Horaria"
   }
 }
