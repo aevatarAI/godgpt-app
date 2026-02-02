@@ -799,8 +799,8 @@ public class PaymentService : IPaymentService
                 
                 _logger.LogInformation(
                     "[PaymentService] Payment record {PaymentId} not found, creating from webhook data " +
-                    "(OrderId={OrderId}, SubscriptionId={SubscriptionId}, UserId={UserId})",
-                    paymentId, orderId, result.SubscriptionId, result.UserId);
+                    "(OrderId={OrderId}, SubscriptionId={SubscriptionId}, UserId={UserId}, ProductId={ProductId})",
+                    paymentId, orderId, result.SubscriptionId, result.UserId, result.ProductId ?? "(null)");
                 
                 // Initialize payment record from webhook data
                 var createFromWebhook = new AgentModels.Protos.CreatePaymentRequestProto
@@ -823,7 +823,7 @@ public class PaymentService : IPaymentService
                 decimal productAmount = result.VerificationResult?.Amount ?? 0;
                 string currency = result.VerificationResult?.Currency ?? "USD";
                 
-                // Auto-infer plan_type and is_ultimate from product config (like old code: GetProductConfigAsync)
+                // Get product config to infer plan_type, is_ultimate, and use config price if available
                 if (!string.IsNullOrEmpty(result.ProductId))
                 {
                     try
@@ -834,14 +834,14 @@ public class PaymentService : IPaymentService
                         
                         if (product != null)
                         {
-                            // Use product display name instead of ProductId (Price ID)
                             productName = product.Name ?? product.ProductId;
-                            // Use product price if verification result doesn't have amount
-                            if (productAmount == 0)
+                            currency = product.Currency ?? currency;
+                            
+                            // Use product config price if > 0, otherwise keep verification amount
+                            if (product.Price > 0)
                             {
                                 productAmount = product.Price;
                             }
-                            currency = product.Currency ?? currency;
                             
                             // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
                             // This is the correct Common.Constants.PlanType value, not Payment.Abstractions.PlanType
@@ -879,13 +879,13 @@ public class PaymentService : IPaymentService
                         else
                         {
                             _logger.LogWarning(
-                                "[PaymentService] Product {ProductId} not found in config, using defaults for webhook record",
-                                result.ProductId);
+                                "[PaymentService] Product {ProductId} not found in config, using verification amount: {Amount}",
+                                result.ProductId, productAmount);
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "[PaymentService] Failed to infer plan_type/is_ultimate from product config for webhook record");
+                        _logger.LogWarning(ex, "[PaymentService] Failed to get product config for ProductId={ProductId}", result.ProductId);
                     }
                 }
                 
