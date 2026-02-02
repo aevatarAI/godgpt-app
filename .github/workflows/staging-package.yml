@@ -2,7 +2,7 @@ name: Package Staging
 on:
   push:
     branches:
-      - "godgpt"
+      - "deploy/godgpt"
 run-name: Deploy godgpt-app on ${{ github.ref }} to Staging from ${{ github.sha }}
 env:
   DOTNET_INSTALL_DIR: "./.dotnet"

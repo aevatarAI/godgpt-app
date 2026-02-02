@@ -28,6 +28,7 @@ using Newtonsoft.Json;
 using Orleans;
 using Aevatar.Agents.GodGPT.Protos.GodChat;
 using Google.Protobuf.WellKnownTypes;
+using Aevatar.App.Common;
 
 namespace Aevatar.App.HttpApi.Host.Handler;
 
@@ -44,6 +45,7 @@ public class ChatMiddleware
     private readonly IGAgentActorFactory _actorFactory;
     private readonly IMessageStreamProvider? _messageStreamProvider;
     private readonly IAgentContextAccessor _agentContextAccessor;
+    private readonly IMetricsRecorder _metricsRecorder;
 
     public ChatMiddleware(
         RequestDelegate next,
@@ -53,6 +55,7 @@ public class ChatMiddleware
         IIpLocationService ipLocationService,
         IGAgentActorFactory actorFactory,
         IAgentContextAccessor agentContextAccessor,
+        IMetricsRecorder metricsRecorder, 
         IMessageStreamProvider? messageStreamProvider = null)
     {
         _next = next;
@@ -61,6 +64,7 @@ public class ChatMiddleware
         _ipLocationService = ipLocationService;
         _actorFactory = actorFactory;
         _agentContextAccessor = agentContextAccessor;
+        _metricsRecorder = metricsRecorder;
         _messageStreamProvider = messageStreamProvider;
     }
 
@@ -174,8 +178,8 @@ public class ChatMiddleware
             var protoInput = BuildStartStreamChatInput(request, chatId);
 
             // Setup SSE handler and subscribe
-            var sseHandler = new SseStreamHandler(context, _logger, "HandleAuthenticatedChatAsync", 
-                request.SessionId.ToString(), chatId, stopwatch, context.RequestAborted);
+            var sseHandler = new SseStreamHandler(context, _logger, "HandleAuthenticatedChatAsync",
+                request.SessionId.ToString(), chatId, _metricsRecorder, stopwatch, context.RequestAborted);
             sseHandler.SetupSseHeaders();
             
             _logger.LogInformation("[ChatMiddleware][TraceId={TraceId}] STEP1 - Subscribing to stream: SessionId={SessionId}, ChatId={ChatId}, ElapsedMs={ElapsedMs}ms",
@@ -265,7 +269,7 @@ public class ChatMiddleware
             }
 
             var sseHandler = new SseStreamHandler(context, _logger, "HandleGuestChatAsync", 
-                sessionId, chatId, stopwatch, context.RequestAborted);
+                sessionId, chatId, _metricsRecorder, stopwatch, context.RequestAborted);
             sseHandler.SetupSseHeaders();
             
             await sseHandler.SubscribeAsync(messageStream);
@@ -352,7 +356,7 @@ public class ChatMiddleware
             try
             {
                 var sseHandler = new SseStreamHandler(context, _logger, "HandleVoiceChatAsync", 
-                    request.SessionId.ToString(), chatId, stopwatch, combinedCts.Token);
+                    request.SessionId.ToString(), chatId, _metricsRecorder, stopwatch, combinedCts.Token);
                 sseHandler.SetupSseHeaders();
                 
                 await sseHandler.SubscribeAsync(messageStream);

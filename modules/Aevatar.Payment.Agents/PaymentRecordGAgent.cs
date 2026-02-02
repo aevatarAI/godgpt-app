@@ -32,6 +32,19 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
                 
             case RecordStatusChangedEvent e:
                 state.Status = e.NewStatus;
+                // When cancelled/expired, also update the last transaction status
+                // This matches old code behavior where InvoiceDetail.Status was updated on cancel
+                if (e.NewStatus == (int)PaymentStatus.Cancelled || e.NewStatus == (int)PaymentStatus.Expired)
+                {
+                    var lastTxn = state.Transactions
+                        .Where(t => t.Status == (int)PaymentStatus.Completed)
+                        .OrderByDescending(t => t.CreatedAt)
+                        .FirstOrDefault();
+                    if (lastTxn != null)
+                    {
+                        lastTxn.Status = e.NewStatus;
+                    }
+                }
                 break;
                 
             case RecordPeriodUpdatedEvent e:
@@ -60,23 +73,56 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             case RenewalProcessedEvent e:
                 state.Transactions.Add(e.RenewalTransaction);
                 state.PeriodEnd = e.NewPeriodEnd;
+                // Update main record's product info (matches old code: existingSubscription.PlanType = appleProduct.PlanType)
+                if (!string.IsNullOrEmpty(e.NewProductId))
+                    state.ProductId = e.NewProductId;
+                if (e.NewBillingCycle != 0)
+                    state.BillingCycle = e.NewBillingCycle;
                 break;
                 
             case RefundProcessedEvent e:
-                var refundTxn = state.Transactions.FirstOrDefault(t => t.TransactionId == e.TransactionId);
+                // Directly set main status (order already located by orderId, like old code)
+                state.Status = (int)PaymentStatus.Refunded;
+                
+                // Try to match transaction by InvoiceId or ExternalTransactionId first
+                TransactionProto? refundTxn = null;
+                if (!string.IsNullOrEmpty(e.TransactionId))
+                {
+                    refundTxn = state.Transactions.FirstOrDefault(t => 
+                        t.InvoiceId == e.TransactionId || t.ExternalTransactionId == e.TransactionId);
+                }
+                // Fallback: use latest completed transaction if no match
+                if (refundTxn == null)
+                {
+                    refundTxn = state.Transactions
+                        .Where(t => t.Status == (int)PaymentStatus.Completed)
+                        .OrderByDescending(t => t.CreatedAt)
+                        .FirstOrDefault();
+                }
                 if (refundTxn != null)
                 {
                     refundTxn.Status = (int)PaymentStatus.Refunded;
                 }
-                // Check if all transactions are refunded
-                if (state.Transactions.All(t => t.Status == (int)PaymentStatus.Refunded))
-                {
-                    state.Status = (int)PaymentStatus.Refunded;
-                }
-                else
-                {
-                    state.Status = (int)PaymentStatus.PartialRefunded;
-                }
+                break;
+            
+            case RecordClearedEvent:
+                // Clear all data
+                state.PaymentId = string.Empty;
+                state.UserId = string.Empty;
+                state.ExternalOrderId = string.Empty;
+                state.SubscriptionId = string.Empty;
+                state.BusinessType = string.Empty;
+                state.BusinessId = string.Empty;
+                state.ProductId = string.Empty;
+                state.PriceId = string.Empty;
+                state.ProductName = string.Empty;
+                state.CustomerId = string.Empty;
+                state.Status = (int)PaymentStatus.None;
+                state.Amount = 0;
+                state.NetAmount = 0;
+                state.Currency = string.Empty;
+                state.Transactions.Clear();
+                state.BusinessMetadata.Clear();
                 break;
         }
         
@@ -94,13 +140,18 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             return;
         }
 
+        // Use business paymentId if provided, otherwise fallback to Agent ID
+        var paymentId = !string.IsNullOrEmpty(request.PaymentId) 
+            ? request.PaymentId 
+            : Id.ToString();
+            
         Logger.LogInformation(
             "[PaymentRecordGAgent] Initializing payment {PaymentId} for user {UserId}",
-            Id, request.UserId);
+            paymentId, request.UserId);
 
         var record = new PaymentRecordStateProto
         {
-            PaymentId = Id.ToString(),
+            PaymentId = paymentId,
             UserId = request.UserId,
             ExternalOrderId = request.ExternalOrderId ?? string.Empty,
             SubscriptionId = request.SubscriptionId ?? string.Empty,
@@ -315,13 +366,13 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         await ConfirmEventsAsync();
     }
 
-    // ========== Renewal Processing ==========
+    // ========== Transaction Processing ==========
 
     public async Task ProcessRenewalAsync(RenewalInfoProto renewal)
     {
         Logger.LogInformation(
-            "[PaymentRecordGAgent] Processing renewal, new period end: {PeriodEnd}",
-            renewal.PeriodEnd.ToDateTime());
+            "[PaymentRecordGAgent] Processing transaction, period end: {PeriodEnd}",
+            renewal.PeriodEnd?.ToDateTime());
 
         var transaction = new TransactionProto
         {
@@ -337,7 +388,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             CreatedAt = Timestamp.FromDateTime(DateTime.UtcNow),
             CompletedAt = Timestamp.FromDateTime(DateTime.UtcNow),
             IsTrial = renewal.IsTrial,
-            TrialCode = renewal.TrialCode ?? string.Empty
+            TrialCode = renewal.TrialCode ?? string.Empty,
+            // Product info per transaction (matches old InvoiceDetail.PriceId/PlanType)
+            ProductId = renewal.ProductId ?? string.Empty,
+            PlanType = renewal.PlanType,
+            MembershipLevel = renewal.MembershipLevel ?? string.Empty
         };
 
         foreach (var promo in renewal.Promotions)
@@ -348,7 +403,10 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         RaiseEvent(new RenewalProcessedEvent
         {
             RenewalTransaction = transaction,
-            NewPeriodEnd = renewal.PeriodEnd
+            NewPeriodEnd = renewal.PeriodEnd,
+            // Update main record's product info (matches old code: existingSubscription.PlanType = appleProduct.PlanType)
+            NewProductId = renewal.ProductId ?? string.Empty,
+            NewBillingCycle = renewal.PlanType
         });
 
         await ConfirmEventsAsync();
@@ -358,31 +416,14 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
 
     public async Task ProcessRefundAsync(RefundInfoProto refund)
     {
-        var transactionId = refund.TransactionId;
-        
-        // If no specific transaction, refund the latest completed one
-        if (string.IsNullOrEmpty(transactionId))
-        {
-            var latestCompleted = State.Transactions
-                .Where(t => t.Status == (int)PaymentStatus.Completed)
-                .OrderByDescending(t => t.CreatedAt)
-                .FirstOrDefault();
-            transactionId = latestCompleted?.TransactionId;
-        }
-
-        if (string.IsNullOrEmpty(transactionId))
-        {
-            Logger.LogWarning("[PaymentRecordGAgent] No transaction to refund");
-            return;
-        }
-
+        // Simple logic (like old code): Apply will handle updating main status and latest transaction
         Logger.LogInformation(
-            "[PaymentRecordGAgent] Processing refund for transaction {TransactionId}",
-            transactionId);
+            "[PaymentRecordGAgent] Processing refund: TransactionId={TransactionId}, Amount={Amount}",
+            refund.TransactionId, refund.RefundAmount);
 
         RaiseEvent(new RefundProcessedEvent
         {
-            TransactionId = transactionId,
+            TransactionId = refund.TransactionId,
             RefundAmount = refund.RefundAmount,
             Reason = refund.Reason,
             RefundedAt = Timestamp.FromDateTime(DateTime.UtcNow)
@@ -399,6 +440,29 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             RefundAmount = refundAmount,
             Reason = reason
         });
+    }
+
+    // ========== Management ==========
+
+    public async Task ClearAsync()
+    {
+        // Idempotency check: skip if already cleared or never initialized
+        if (string.IsNullOrEmpty(State.PaymentId) || State.Status == (int)PaymentStatus.None)
+        {
+            Logger.LogInformation(
+                "[PaymentRecordGAgent] Skipping clear - already cleared or not initialized. PaymentId={PaymentId}, Status={Status}",
+                State.PaymentId, State.Status);
+            return;
+        }
+        
+        Logger.LogWarning("[PaymentRecordGAgent] Clearing all data for payment {PaymentId}", Id);
+
+        RaiseEvent(new RecordClearedEvent
+        {
+            ClearedAt = Timestamp.FromDateTime(DateTime.UtcNow)
+        });
+
+        await ConfirmEventsAsync();
     }
 
     // ========== Proto Conversions ==========
@@ -490,7 +554,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             Promotions = proto.Promotions.Select(FromProto).ToList(),
             IsTrial = proto.IsTrial,
             TrialCode = proto.TrialCode,
-            Metadata = proto.Metadata.ToDictionary(kv => kv.Key, kv => kv.Value)
+            Metadata = proto.Metadata.ToDictionary(kv => kv.Key, kv => kv.Value),
+            // Product info per transaction
+            ProductId = proto.ProductId,
+            PlanType = proto.PlanType,
+            MembershipLevel = proto.MembershipLevel
         };
     }
 
@@ -522,7 +590,11 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
             Currency = txn.Currency,
             IsTrial = txn.IsTrial,
             TrialCode = txn.TrialCode ?? string.Empty,
-            CreatedAt = Timestamp.FromDateTime(txn.CreatedAt.ToUniversalTime())
+            CreatedAt = Timestamp.FromDateTime(txn.CreatedAt.ToUniversalTime()),
+            // Product info per transaction
+            ProductId = txn.ProductId ?? string.Empty,
+            PlanType = txn.PlanType,
+            MembershipLevel = txn.MembershipLevel ?? string.Empty
         };
 
         if (txn.NetAmount.HasValue)

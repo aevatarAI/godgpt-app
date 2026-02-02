@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Aevatar.App.Common;
 using Aevatar.App.HttpApi.Host.Extensions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
@@ -201,6 +202,9 @@ public class Program
                 .AddOtlpExporter(options =>
                 {
                     options.Endpoint = new Uri(collectorEndpoint);
-                }));
+                })
+                .AddMeter(serviceName));
+        builder.Services.AddSingleton<IInstrumentationProvider>(_ =>
+            new InstrumentationProvider(serviceName, serviceVersion));
     }
 }

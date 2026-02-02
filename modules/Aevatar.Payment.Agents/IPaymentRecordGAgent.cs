@@ -126,6 +126,13 @@ public interface IPaymentRecordGAgent : IGAgent
     /// Notify callback agent about refund completion (if configured).
     /// </summary>
     Task NotifyRefundCompletedToCallbackAsync(Protos.RefundCompletedEvent evt);
+    
+    // ========== Management ==========
+    
+    /// <summary>
+    /// Clear all data (for account deletion)
+    /// </summary>
+    Task ClearAsync();
 }
 
 // Note: RenewalInfo and RefundInfo are now defined as Protobuf messages

@@ -157,10 +157,22 @@ public class PaymentService : IPaymentService
 
         var result = await provider.CreateSubscriptionAsync(request, ct);
 
-        // Use OrderId instead of SubscriptionId for consistency check
-        // OrderId is guaranteed to exist (provider generates it if not provided)
-        // SubscriptionId at creation time is sessionId, not real subscriptionId yet
-        if (result.Success && !string.IsNullOrEmpty(result.OrderId))
+        // Create payment record based on platform:
+        // 
+        // - Stripe: Do NOT create record here! 
+        //   Reason: Checkout session creation doesn't mean payment succeeded (user might abandon checkout).
+        //   Record will be created via webhook (invoice.paid) when payment actually succeeds.
+        //
+        // - Apple/Google: Create record here when transaction is verified (Status=Completed).
+        //   Reason: Webhook may not have UserId (AppAccountToken might be empty). 
+        //   Old architecture used a fallback: query existing payment record by OriginalTransactionId to get UserId.
+        //   By creating record during client verification, we bind UserId to OriginalTransactionId,
+        //   allowing subsequent webhooks (renewals, etc.) to find UserId even without AppAccountToken.
+        //   ProcessWebhookResultAsync checks IsInitializedAsync() to avoid duplicate creation.
+        if (result.Success && 
+            !string.IsNullOrEmpty(result.OrderId) && 
+            result.Status == PaymentStatus.Completed &&
+            (platform == PaymentPlatform.AppStore || platform == PaymentPlatform.GooglePlay))
         {
             await RecordPaymentAsync(userId, platform, request, result);
         }
@@ -526,14 +538,9 @@ public class PaymentService : IPaymentService
 
     private async Task<AgentModels.IPaymentRecordGAgent> GetRecordAgentAsync(string paymentId)
     {
-        // Convert paymentId to a stable Guid, then to string for agent ID
-        var guidBytes = new byte[16];
-        var hashBytes = System.Security.Cryptography.MD5.HashData(
-            System.Text.Encoding.UTF8.GetBytes(paymentId));
-        Array.Copy(hashBytes, guidBytes, 16);
-        var agentId = new Guid(guidBytes);
-
-        var actor = await _actorFactory.CreateGAgentActorAsync<AgentModels.PaymentRecordGAgent>(agentId.ToString());
+        // Convert paymentId to stable Agent ID using shared helper
+        var agentId = AgentModels.PaymentIdHelper.ToAgentIdString(paymentId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<AgentModels.PaymentRecordGAgent>(agentId);
         return actor.As<AgentModels.IPaymentRecordGAgent>();
     }
 
@@ -599,6 +606,7 @@ public class PaymentService : IPaymentService
             
             var createRequest = new AgentModels.Protos.CreatePaymentRequestProto
             {
+                PaymentId = paymentId, // Business payment ID for ES display
                 UserId = userId.ToString(),
                 Platform = (int)ToAgentPlatform(platform),
                 ExternalOrderId = orderId, // Store orderId for business logic reference
@@ -655,11 +663,12 @@ public class PaymentService : IPaymentService
                         }
                         else
                         {
-                            // Fallback: use product.PlanType (but this is wrong enum, should be avoided)
+                            // Fallback: convert BillingCycle to legacy PlanType (Day=1, Month=2, Year=3, Week=4)
+                            legacyPlanType = BillingCycleToLegacyPlanType(product.BillingCycle);
                             _logger.LogWarning(
-                                "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using fallback",
-                                request.ProductId);
-                            createRequest.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
+                                "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using BillingCycle fallback: {LegacyPlanType}",
+                                request.ProductId, legacyPlanType);
+                            createRequest.BusinessMetadata["plan_type"] = legacyPlanType.ToString();
                         }
                     }
                     else if (int.TryParse(createRequest.BusinessMetadata["plan_type"], out var pt))
@@ -790,12 +799,13 @@ public class PaymentService : IPaymentService
                 
                 _logger.LogInformation(
                     "[PaymentService] Payment record {PaymentId} not found, creating from webhook data " +
-                    "(OrderId={OrderId}, SubscriptionId={SubscriptionId}, UserId={UserId})",
-                    paymentId, orderId, result.SubscriptionId, result.UserId);
+                    "(OrderId={OrderId}, SubscriptionId={SubscriptionId}, UserId={UserId}, ProductId={ProductId})",
+                    paymentId, orderId, result.SubscriptionId, result.UserId, result.ProductId ?? "(null)");
                 
                 // Initialize payment record from webhook data
                 var createFromWebhook = new AgentModels.Protos.CreatePaymentRequestProto
                 {
+                    PaymentId = paymentId, // Business payment ID for ES display
                     UserId = result.UserId.Value.ToString(),
                     Platform = (int)ToAgentPlatform(platform),
                     ExternalOrderId = orderId, // Store orderId for business logic reference
@@ -813,7 +823,7 @@ public class PaymentService : IPaymentService
                 decimal productAmount = result.VerificationResult?.Amount ?? 0;
                 string currency = result.VerificationResult?.Currency ?? "USD";
                 
-                // Auto-infer plan_type and is_ultimate from product config (like old code: GetProductConfigAsync)
+                // Get product config to infer plan_type, is_ultimate, and use config price if available
                 if (!string.IsNullOrEmpty(result.ProductId))
                 {
                     try
@@ -824,14 +834,14 @@ public class PaymentService : IPaymentService
                         
                         if (product != null)
                         {
-                            // Use product display name instead of ProductId (Price ID)
                             productName = product.Name ?? product.ProductId;
-                            // Use product price if verification result doesn't have amount
-                            if (productAmount == 0)
+                            currency = product.Currency ?? currency;
+                            
+                            // Use product config price if > 0, otherwise keep verification amount
+                            if (product.Price > 0)
                             {
                                 productAmount = product.Price;
                             }
-                            currency = product.Currency ?? currency;
                             
                             // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
                             // This is the correct Common.Constants.PlanType value, not Payment.Abstractions.PlanType
@@ -843,11 +853,12 @@ public class PaymentService : IPaymentService
                             }
                             else
                             {
-                                // Fallback: use product.PlanType (but this is wrong enum, should be avoided)
+                                // Fallback: convert BillingCycle to legacy PlanType (Day=1, Month=2, Year=3, Week=4)
+                                legacyPlanType = BillingCycleToLegacyPlanType(product.BillingCycle);
                                 _logger.LogWarning(
-                                    "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using fallback",
-                                    result.ProductId);
-                                createFromWebhook.BusinessMetadata["plan_type"] = ((int)product.PlanType).ToString();
+                                    "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using BillingCycle fallback: {LegacyPlanType}",
+                                    result.ProductId, legacyPlanType);
+                                createFromWebhook.BusinessMetadata["plan_type"] = legacyPlanType.ToString();
                             }
                             // PlanType.Premium is used to indicate Ultimate tier in config
                             createFromWebhook.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
@@ -868,13 +879,13 @@ public class PaymentService : IPaymentService
                         else
                         {
                             _logger.LogWarning(
-                                "[PaymentService] Product {ProductId} not found in config, using defaults for webhook record",
-                                result.ProductId);
+                                "[PaymentService] Product {ProductId} not found in config, using verification amount: {Amount}",
+                                result.ProductId, productAmount);
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "[PaymentService] Failed to infer plan_type/is_ultimate from product config for webhook record");
+                        _logger.LogWarning(ex, "[PaymentService] Failed to get product config for ProductId={ProductId}", result.ProductId);
                     }
                 }
                 
@@ -889,11 +900,25 @@ public class PaymentService : IPaymentService
             // Get payment record state (Protobuf) for event context
             var recordState = await recordAgent.GetRecordStateAsync();
             
+            // Determine UserId: prefer webhook result, fallback to existing record state
+            // This handles Apple/Google renewals where AppAccountToken might be empty but record exists
+            Guid? effectiveUserId = result.UserId;
+            if (!effectiveUserId.HasValue && !string.IsNullOrEmpty(recordState.UserId))
+            {
+                if (Guid.TryParse(recordState.UserId, out var recordUserId))
+                {
+                    effectiveUserId = recordUserId;
+                    _logger.LogInformation(
+                        "[PaymentService] UserId not in webhook, using existing record UserId: {UserId}",
+                        effectiveUserId);
+                }
+            }
+            
             // Get index agent once for both updates and event broadcasting (requires UserId)
             AgentModels.IPaymentIndexGAgent? indexAgent = null;
-            if (result.UserId.HasValue)
+            if (effectiveUserId.HasValue)
             {
-                indexAgent = await GetIndexAgentAsync(result.UserId.Value);
+                indexAgent = await GetIndexAgentAsync(effectiveUserId.Value);
                 
                 // Add to index agent if payment record was just created and payment is completed
                 if (!initialized && result.NewStatus == PaymentStatus.Completed)
@@ -926,6 +951,20 @@ public class PaymentService : IPaymentService
                         }
                     }
                     
+                    // For PeriodEnd in PaymentIndexGAgent:
+                    // - Stripe: use webhook-provided PeriodEnd (accurate)
+                    // - Apple/Google: use default 1 month (actual EndDate is managed by UserQuotaGAgent)
+                    Google.Protobuf.WellKnownTypes.Timestamp indexPeriodEnd;
+                    if (platform == PaymentPlatform.Stripe && result.PeriodEnd.HasValue)
+                    {
+                        indexPeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime());
+                    }
+                    else
+                    {
+                        // Default to 1 month for Apple/Google (UserQuotaGAgent calculates actual EndDate)
+                        indexPeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1));
+                    }
+                    
                     await indexAgent.AddActiveSubscriptionAsync(new AgentModels.Protos.ActiveSubscriptionProto
                     {
                         PaymentId = paymentId,
@@ -936,11 +975,7 @@ public class PaymentService : IPaymentService
                         Amount = (long)(indexProductAmount * 100), // Convert to smallest unit (cents)
                         Currency = indexCurrency,
                         SubscriptionId = result.SubscriptionId ?? string.Empty,
-                        PeriodEnd = result.PeriodEnd.HasValue
-                            ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
-                            : (result.VerificationResult?.ExpiresDate.HasValue == true
-                                ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.VerificationResult.ExpiresDate.Value.ToUniversalTime())
-                                : Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1))),
+                        PeriodEnd = indexPeriodEnd,
                         CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)
                     });
                     await indexAgent.IncrementPaymentCountAsync();
@@ -966,8 +1001,9 @@ public class PaymentService : IPaymentService
                 recordState = await recordAgent.GetRecordStateAsync();
             }
             
-            // Update PeriodEnd if webhook provides one (invoice.paid renewals)
-            if (indexAgent != null && result.PeriodEnd.HasValue)
+            // Update PeriodEnd in PaymentIndexGAgent if webhook provides one (invoice.paid renewals)
+            // Only for Stripe - Apple/Google have short Sandbox periods, we let UserQuotaGAgent calculate
+            if (indexAgent != null && result.PeriodEnd.HasValue && platform == PaymentPlatform.Stripe)
             {
                 _logger.LogInformation(
                     "[PaymentService] Updating PeriodEnd for {PaymentId} to {PeriodEnd}",
@@ -1041,10 +1077,21 @@ public class PaymentService : IPaymentService
                             paymentId, currentStatus);
                     }
                     
-                    var isRenewal = result.VerificationResult?.ExpiresDate != null && 
+                    // Use Provider's IsRenewal flag which is set for:
+                    // - Apple: DID_RENEW, SUBSCRIBED (INITIAL_BUY/RESUBSCRIBE), DID_CHANGE_RENEWAL_PREF + UPGRADE
+                    // - Google: INITIAL_PURCHASE, RENEWAL, UNCANCELLATION, PRODUCT_CHANGE
+                    // - Stripe: invoice.paid with billing_reason=subscription_cycle
+                    // Also require record to already be Completed (not first purchase)
+                    var isRenewal = result.IsRenewal && 
                                     recordState?.Status == (int)AgentModels.PaymentStatus.Completed;
                     
-                    // CRITICAL: Update record status to Completed
+                    // Log for troubleshooting transaction addition
+                    _logger.LogInformation(
+                        "[PaymentService] Renewal check for {PaymentId}: ProviderIsRenewal={ProviderIsRenewal}, " +
+                        "RecordStatus={RecordStatus}, FinalIsRenewal={FinalIsRenewal}, EventType={EventType}, TransactionId={TransactionId}",
+                        paymentId, result.IsRenewal, recordState?.Status, isRenewal, result.EventType, result.TransactionId);
+                    
+                    // CRITICAL: Update record status to Completed (only for first purchase)
                     // This triggers Event Sourcing and ES projection
                     if (!isRenewal)
                     {
@@ -1053,37 +1100,96 @@ public class PaymentService : IPaymentService
                             "[PaymentService] Marked payment {PaymentId} as Completed", paymentId);
                     }
                     
-                    // Process renewal in agent
-                    if (result.VerificationResult?.ExpiresDate != null)
+                    // Add transaction record for BOTH first purchase and renewal
+                    // Old code (UserBillingGAgent) added InvoiceDetail for:
+                    // - First purchase (SUBSCRIBED/INITIAL_PURCHASE)
+                    // - DID_RENEW (renewal)
+                    // - DID_CHANGE_RENEWAL_PREF + UPGRADE (weekly to monthly upgrade)
+                    // New code must maintain this behavior for consistency
+                    if (!string.IsNullOrEmpty(result.TransactionId))
                     {
                         // Convert amount to smallest unit (cents) for Protobuf
-                        var renewalAmount = (long)((result.VerificationResult.Amount ?? 0) * 100);
+                        var renewalAmount = (long)((result.VerificationResult?.Amount ?? 0) * 100);
+                        
+                        // PeriodEnd is calculated by each Provider based on PlanType:
+                        // - Stripe: uses actual ExpiresDate from webhook (reliable)
+                        // - Apple/Google: calculates based on product config (Sandbox has short periods)
+                        // This matches old code (CalculateSubscriptionDurationAsync) behavior
+                        var renewalPeriodStart = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime());
+                        var renewalPeriodEnd = result.PeriodEnd != null
+                            ? Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
+                            : Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1).ToUniversalTime()); // Fallback
+                        
+                        // Get product info for this transaction (matches old InvoiceDetail.PriceId/PlanType)
+                        var renewalProductId = result.ProductId ?? string.Empty;
+                        var renewalPlanType = 0;
+                        var renewalMembershipLevel = "Premium";
+                        
+                        if (!string.IsNullOrEmpty(result.ProductId))
+                        {
+                            try
+                            {
+                                var provider = GetProvider(platform);
+                                var products = await provider.GetProductsAsync();
+                                var product = products.FirstOrDefault(p => p.ProductId == result.ProductId);
+                                if (product != null)
+                                {
+                                    // Get originalPlanType from metadata (correct Common.Constants.PlanType value)
+                                    if (product.Metadata?.TryGetValue("originalPlanType", out var ptStr) == true &&
+                                        int.TryParse(ptStr, out var pt))
+                                    {
+                                        renewalPlanType = pt;
+                                    }
+                                    renewalMembershipLevel = product.PlanType == PlanType.Premium ? "Ultimate" : "Premium";
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                _logger.LogWarning(ex, "[PaymentService] Failed to get product info for renewal transaction");
+                            }
+                        }
                         
                         await recordAgent.ProcessRenewalAsync(new RenewalInfoProto
                         {
-                            ExternalTransactionId = result.TransactionId ?? string.Empty,
-                            PeriodStart = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime()),
-                            PeriodEnd = Timestamp.FromDateTime(result.VerificationResult.ExpiresDate.Value.ToUniversalTime()),
+                            ExternalTransactionId = result.TransactionId,
+                            PeriodStart = renewalPeriodStart,
+                            PeriodEnd = renewalPeriodEnd,
                             Amount = renewalAmount,
-                            Currency = result.VerificationResult.Currency ?? "USD"
+                            Currency = result.VerificationResult?.Currency ?? "USD",
+                            // Product info per transaction (matches old InvoiceDetail)
+                            ProductId = renewalProductId,
+                            PlanType = renewalPlanType,
+                            MembershipLevel = renewalMembershipLevel
                         });
+                        
+                        _logger.LogInformation(
+                            "[PaymentService] Added transaction for {PaymentId}: Platform={Platform}, TransactionId={TransactionId}, Amount={Amount}, ProductId={ProductId}",
+                            paymentId, platform, result.TransactionId, renewalAmount, renewalProductId);
 
-                        if (indexAgent != null)
+                        // Update PeriodEnd in index for all platforms (now calculated correctly by each Provider)
+                        if (indexAgent != null && result.PeriodEnd != null)
                         {
-                            await indexAgent.UpdateSubscriptionPeriodEndAsync(
-                                paymentId, result.VerificationResult.ExpiresDate.Value);
+                            await indexAgent.UpdateSubscriptionPeriodEndAsync(paymentId, result.PeriodEnd.Value);
                         }
                     }
 
                     // Build payment completed event
-                    // Use PeriodEnd from webhook result (invoice.paid) if available, otherwise fallback to VerificationResult
-                    var periodEnd = result.PeriodEnd ?? result.VerificationResult?.ExpiresDate;
+                    // For Stripe: use PeriodEnd from webhook result (invoice.paid) - Stripe periods are accurate
+                    // For Apple/Google: DON'T use platform ExpiresDate (Sandbox has short periods like 3-5 minutes)
+                    //   Let UserQuotaGAgent calculate using SubscriptionHelper.GetSubscriptionEndDate
+                    DateTime? periodEnd = null;
+                    if (platform == PaymentPlatform.Stripe)
+                    {
+                        // Stripe periods are reliable, use them
+                        periodEnd = result.PeriodEnd ?? result.VerificationResult?.ExpiresDate;
+                    }
+                    // For Apple/Google: leave periodEnd as null, UserQuotaGAgent will calculate based on PlanType
                     
                     _logger.LogInformation(
-                        "[PaymentService] Building PaymentCompletedEvent: " +
+                        "[PaymentService] Building PaymentCompletedEvent: Platform={Platform}, " +
                         "result.PeriodEnd={ResultPeriodEnd}, result.VerificationResult.ExpiresDate={ExpiresDate}, " +
-                        "finalPeriodEnd={FinalPeriodEnd}, SubscriptionId={SubscriptionId}",
-                        result.PeriodEnd, result.VerificationResult?.ExpiresDate, periodEnd, eventContext.SubscriptionId);
+                        "finalPeriodEnd={FinalPeriodEnd} (null means UserQuotaGAgent will calculate), SubscriptionId={SubscriptionId}",
+                        platform, result.PeriodEnd, result.VerificationResult?.ExpiresDate, periodEnd, eventContext.SubscriptionId);
                     
                     var completedEvent = new PaymentCompletedEvent
                     {
@@ -1134,19 +1240,31 @@ public class PaymentService : IPaymentService
                     {
                         await indexAgent.RemoveActiveSubscriptionAsync(paymentId);
                         
-                        // Build and broadcast cancellation event to business layer
-                        var cancelledEvent = new PaymentCancelledEvent
+                        // Only send PaymentCancelledEvent for GRACE_PERIOD_EXPIRED
+                        // EXPIRED/Cancel: user membership expires naturally through EndDate check
+                        // GRACE_PERIOD_EXPIRED: user failed to pay during grace period, need immediate revocation
+                        if (result.EventType == "GRACE_PERIOD_EXPIRED")
                         {
-                            Context = eventContext,
-                            Reason = result.VerificationResult?.ErrorMessage ?? "Subscription cancelled",
-                            Immediate = result.NewStatus == PaymentStatus.Cancelled, // Cancelled is immediate, Expired is at period end
-                            EffectiveDate = result.PeriodEnd.HasValue
-                                ? Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
-                                : null,
-                            CancelledAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
-                        };
-                        
-                        await indexAgent.NotifyPaymentCancelledAsync(cancelledEvent);
+                            var cancelledEvent = new PaymentCancelledEvent
+                            {
+                                Context = eventContext,
+                                Reason = "grace_period_expired",
+                                Immediate = true, // Grace period expired = immediate revocation
+                                CancelledAt = Timestamp.FromDateTime(DateTime.UtcNow.ToUniversalTime())
+                            };
+                            
+                            await indexAgent.NotifyPaymentCancelledAsync(cancelledEvent);
+                            
+                            _logger.LogInformation(
+                                "[PaymentService] GRACE_PERIOD_EXPIRED - Notified business layer for payment {PaymentId}",
+                                paymentId);
+                        }
+                        else
+                        {
+                            _logger.LogInformation(
+                                "[PaymentService] {EventType} - Only updated PaymentRecord, no business notification (user membership expires via EndDate). PaymentId={PaymentId}",
+                                result.EventType, paymentId);
+                        }
                     }
                 }
                 else if (result.NewStatus == PaymentStatus.Refunded)
@@ -1389,6 +1507,22 @@ public class PaymentService : IPaymentService
             Currency = sub.Currency,
             PeriodEnd = sub.PeriodEnd?.ToDateTime() ?? DateTime.MaxValue,
             CreatedAt = sub.CreatedAt?.ToDateTime() ?? DateTime.UtcNow
+        };
+    }
+    
+    /// <summary>
+    /// Convert BillingCycle enum to legacy PlanType value (Day=1, Month=2, Year=3, Week=4)
+    /// </summary>
+    private static int BillingCycleToLegacyPlanType(BillingCycle cycle)
+    {
+        return cycle switch
+        {
+            BillingCycle.Daily => 1,     // Day
+            BillingCycle.Monthly => 2,   // Month
+            BillingCycle.Yearly => 3,    // Year
+            BillingCycle.Weekly => 4,    // Week
+            BillingCycle.Quarterly => 2, // Treat as Month (fallback)
+            _ => 2                        // Default to Month
         };
     }
 }
