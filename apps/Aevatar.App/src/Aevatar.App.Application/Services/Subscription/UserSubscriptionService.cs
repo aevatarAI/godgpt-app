@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.App.Services.Subscription.Dtos;
 using Aevatar.App.Services.Subscription.Options;
