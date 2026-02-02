@@ -11,6 +11,11 @@
       "Permission:LanguageManagement.LanguageTexts.Create": "建立語言文字",
       "Permission:LanguageManagement.LanguageTexts.Edit": "編輯語言文字",
       "Permission:LanguageManagement.LanguageTexts.Restore": "恢復語言文字",
+
+      "Permission:PushNotificationManagement": "推送通知管理",
+      "Permission:PushNotificationManagement.Default": "存取推送通知",
+      "Permission:PushNotificationManagement.SendByTimezone": "按時區發送推送",
+
       "Welcome": "歡迎",
       "LongWelcomeMessage": "歡迎來到此應用程式. 這是一個基於ABP框架的起始專案. 有關更多訊息, 請瀏覽 abp.io."
     }

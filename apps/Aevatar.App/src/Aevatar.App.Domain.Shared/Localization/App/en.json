@@ -44,6 +44,10 @@
     "Permission:TermsManagement.Versions.Create": "Create ToS Versions",
     "Permission:TermsManagement.Versions.Edit": "Edit ToS Versions",
 
+    "Permission:PushNotificationManagement": "Push Notification Management",
+    "Permission:PushNotificationManagement.Default": "Access Push Notifications",
+    "Permission:PushNotificationManagement.SendByTimezone": "Send Push by Timezone",
+
     "subscription.product.weekly": "Weekly",
     "subscription.product.weekly.description": "Access all features for one week",
     "subscription.product.weekly.highlight": "Try it out",
