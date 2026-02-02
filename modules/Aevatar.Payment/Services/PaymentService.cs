@@ -157,10 +157,22 @@ public class PaymentService : IPaymentService
 
         var result = await provider.CreateSubscriptionAsync(request, ct);
 
-        // Use OrderId instead of SubscriptionId for consistency check
-        // OrderId is guaranteed to exist (provider generates it if not provided)
-        // SubscriptionId at creation time is sessionId, not real subscriptionId yet
-        if (result.Success && !string.IsNullOrEmpty(result.OrderId))
+        // Create payment record based on platform:
+        // 
+        // - Stripe: Do NOT create record here! 
+        //   Reason: Checkout session creation doesn't mean payment succeeded (user might abandon checkout).
+        //   Record will be created via webhook (invoice.paid) when payment actually succeeds.
+        //
+        // - Apple/Google: Create record here when transaction is verified (Status=Completed).
+        //   Reason: Webhook may not have UserId (AppAccountToken might be empty). 
+        //   Old architecture used a fallback: query existing payment record by OriginalTransactionId to get UserId.
+        //   By creating record during client verification, we bind UserId to OriginalTransactionId,
+        //   allowing subsequent webhooks (renewals, etc.) to find UserId even without AppAccountToken.
+        //   ProcessWebhookResultAsync checks IsInitializedAsync() to avoid duplicate creation.
+        if (result.Success && 
+            !string.IsNullOrEmpty(result.OrderId) && 
+            result.Status == PaymentStatus.Completed &&
+            (platform == PaymentPlatform.AppStore || platform == PaymentPlatform.GooglePlay))
         {
             await RecordPaymentAsync(userId, platform, request, result);
         }
@@ -787,8 +799,8 @@ public class PaymentService : IPaymentService
                 
                 _logger.LogInformation(
                     "[PaymentService] Payment record {PaymentId} not found, creating from webhook data " +
-                    "(OrderId={OrderId}, SubscriptionId={SubscriptionId}, UserId={UserId})",
-                    paymentId, orderId, result.SubscriptionId, result.UserId);
+                    "(OrderId={OrderId}, SubscriptionId={SubscriptionId}, UserId={UserId}, ProductId={ProductId})",
+                    paymentId, orderId, result.SubscriptionId, result.UserId, result.ProductId ?? "(null)");
                 
                 // Initialize payment record from webhook data
                 var createFromWebhook = new AgentModels.Protos.CreatePaymentRequestProto
@@ -811,7 +823,7 @@ public class PaymentService : IPaymentService
                 decimal productAmount = result.VerificationResult?.Amount ?? 0;
                 string currency = result.VerificationResult?.Currency ?? "USD";
                 
-                // Auto-infer plan_type and is_ultimate from product config (like old code: GetProductConfigAsync)
+                // Get product config to infer plan_type, is_ultimate, and use config price if available
                 if (!string.IsNullOrEmpty(result.ProductId))
                 {
                     try
@@ -822,14 +834,14 @@ public class PaymentService : IPaymentService
                         
                         if (product != null)
                         {
-                            // Use product display name instead of ProductId (Price ID)
                             productName = product.Name ?? product.ProductId;
-                            // Use product price if verification result doesn't have amount
-                            if (productAmount == 0)
+                            currency = product.Currency ?? currency;
+                            
+                            // Use product config price if > 0, otherwise keep verification amount
+                            if (product.Price > 0)
                             {
                                 productAmount = product.Price;
                             }
-                            currency = product.Currency ?? currency;
                             
                             // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
                             // This is the correct Common.Constants.PlanType value, not Payment.Abstractions.PlanType
@@ -867,13 +879,13 @@ public class PaymentService : IPaymentService
                         else
                         {
                             _logger.LogWarning(
-                                "[PaymentService] Product {ProductId} not found in config, using defaults for webhook record",
-                                result.ProductId);
+                                "[PaymentService] Product {ProductId} not found in config, using verification amount: {Amount}",
+                                result.ProductId, productAmount);
                         }
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogWarning(ex, "[PaymentService] Failed to infer plan_type/is_ultimate from product config for webhook record");
+                        _logger.LogWarning(ex, "[PaymentService] Failed to get product config for ProductId={ProductId}", result.ProductId);
                     }
                 }
                 
@@ -888,11 +900,25 @@ public class PaymentService : IPaymentService
             // Get payment record state (Protobuf) for event context
             var recordState = await recordAgent.GetRecordStateAsync();
             
+            // Determine UserId: prefer webhook result, fallback to existing record state
+            // This handles Apple/Google renewals where AppAccountToken might be empty but record exists
+            Guid? effectiveUserId = result.UserId;
+            if (!effectiveUserId.HasValue && !string.IsNullOrEmpty(recordState.UserId))
+            {
+                if (Guid.TryParse(recordState.UserId, out var recordUserId))
+                {
+                    effectiveUserId = recordUserId;
+                    _logger.LogInformation(
+                        "[PaymentService] UserId not in webhook, using existing record UserId: {UserId}",
+                        effectiveUserId);
+                }
+            }
+            
             // Get index agent once for both updates and event broadcasting (requires UserId)
             AgentModels.IPaymentIndexGAgent? indexAgent = null;
-            if (result.UserId.HasValue)
+            if (effectiveUserId.HasValue)
             {
-                indexAgent = await GetIndexAgentAsync(result.UserId.Value);
+                indexAgent = await GetIndexAgentAsync(effectiveUserId.Value);
                 
                 // Add to index agent if payment record was just created and payment is completed
                 if (!initialized && result.NewStatus == PaymentStatus.Completed)

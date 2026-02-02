@@ -291,9 +291,23 @@ public class ApplePayProvider : IPaymentProvider
             // - SUBSCRIBED (both INITIAL_BUY and RESUBSCRIBE) - line 2636
             // - DID_RENEW - line 2645
             // - DID_CHANGE_RENEWAL_PREF + UPGRADE - line 2694
-            // For INITIAL_BUY, PaymentService checks recordState.Status != Completed to skip adding duplicate
+            // 
+            // IMPORTANT: IsRenewal has TWO purposes:
+            // 1. PaymentService: determines if we should add a transaction record (true = add)
+            // 2. GodGPTPaymentBusinessService: determines if we should cancel old subscriptions (true = skip)
+            // 
+            // For SUBSCRIBED events:
+            // - INITIAL_BUY: First purchase of a NEW product (e.g., Basic -> Ultimate upgrade)
+            //   Should NOT be treated as renewal for cancellation logic - needs to cancel old subscription
+            // - RESUBSCRIBE: Re-subscribing to SAME product after cancellation
+            //   Can be treated as renewal - no old subscription to cancel
+            // 
+            // For PaymentService transaction logic, all SUBSCRIBED events should add transaction.
+            // But for GodGPTPaymentBusinessService cancellation logic, only RESUBSCRIBE is renewal.
+            // 
+            // Solution: INITIAL_BUY = false (needs to cancel old), RESUBSCRIBE = true (no cancel needed)
             result.IsRenewal = notification.NotificationType == "DID_RENEW" ||
-                               notification.NotificationType == "SUBSCRIBED" ||
+                               (notification.NotificationType == "SUBSCRIBED" && notification.Subtype == "RESUBSCRIBE") ||
                                (notification.NotificationType == "DID_CHANGE_RENEWAL_PREF" && notification.Subtype == "UPGRADE");
 
             if (transactionInfo != null)
