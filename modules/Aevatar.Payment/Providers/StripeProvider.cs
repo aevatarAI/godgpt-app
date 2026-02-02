@@ -821,6 +821,12 @@ public class StripeProvider : IPaymentProvider
                 priceId = lineItem.Pricing.PriceDetails.Price;
             }
             
+            // Fallback: Get priceId from subscription metadata (set during session creation)
+            if (string.IsNullOrEmpty(priceId))
+            {
+                priceId = TryGetFromMetadata(subscriptionMetadata, "price_id");
+            }
+            
             // Determine if this is a renewal based on billing_reason
             var isRenewal = invoice.BillingReason == "subscription_cycle";
             
