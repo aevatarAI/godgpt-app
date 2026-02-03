@@ -419,6 +419,15 @@ public class StateMigrationJob
                         }
                     }
                     
+                    // Handle AdditionalUserDeviceRecords from ChatManager converter
+                    if (converter is ChatManagerStateConverter chatManagerConverter)
+                    {
+                        foreach (var (agentId, deviceState) in chatManagerConverter.AdditionalUserDeviceRecords)
+                        {
+                            bulkWriteBuffer.Add((agentId, deviceState, "UserDeviceGAgent"));
+                        }
+                    }
+                    
                     // Bulk write when buffer reaches threshold
                     if (bulkWriteBuffer.Count >= bulkWriteSize)
                     {
