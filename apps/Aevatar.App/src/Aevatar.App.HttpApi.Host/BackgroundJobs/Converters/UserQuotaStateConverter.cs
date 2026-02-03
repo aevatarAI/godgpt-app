@@ -28,12 +28,27 @@ public class UserQuotaStateConverter : IStateConverter
         }
 
         // Credits: int
-        if (oldState.TryGetValue("Credits", out var creditsObj))
+        // IMPORTANT: If Credits field exists in old data, user has been initialized
+        // Must set HasInitialCredits = true to prevent re-initialization (which would reset credits to 320)
+        var hasCreditsInOldData = oldState.TryGetValue("Credits", out var creditsObj);
+        if (hasCreditsInOldData)
+        {
             newState.Credits = ConvertToInt32(creditsObj);
+        }
 
         // HasInitialCredits: bool
-        if (oldState.TryGetValue("HasInitialCredits", out var hasInitialCreditsObj))
+        // Priority: 1) If old data has Credits field, always mark as initialized
+        //           2) Otherwise, use old HasInitialCredits value if exists
+        // This prevents the bug where credits=0 users get re-initialized to 320
+        if (hasCreditsInOldData)
+        {
+            // User already has credits data (even if 0), mark as initialized
+            newState.HasInitialCredits = true;
+        }
+        else if (oldState.TryGetValue("HasInitialCredits", out var hasInitialCreditsObj))
+        {
             newState.HasInitialCredits = ConvertToBool(hasInitialCreditsObj);
+        }
 
         // HasShownInitialCreditsToast: bool
         if (oldState.TryGetValue("HasShownInitialCreditsToast", out var hasShownToastObj))

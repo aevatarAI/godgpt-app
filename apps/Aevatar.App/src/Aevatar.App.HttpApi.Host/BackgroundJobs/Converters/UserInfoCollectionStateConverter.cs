@@ -27,8 +27,21 @@ public class UserInfoCollectionStateConverter : IStateConverter
                 newState.UserId = guid.ToString("D");
         }
 
-        if (oldState.TryGetValue("IsInitialized", out var isInitializedObj))
+        // IsInitialized: bool
+        // IMPORTANT: If any meaningful data exists, mark as initialized
+        // to prevent GetUserInfoCollectionAsync/GetUserInfoDisplayAsync returning null
+        var hasMeaningfulData = oldState.ContainsKey("UserId") || 
+                                oldState.ContainsKey("Gender") ||
+                                oldState.ContainsKey("FirstName") ||
+                                oldState.ContainsKey("Country");
+        if (hasMeaningfulData)
+        {
+            newState.IsInitialized = true;
+        }
+        else if (oldState.TryGetValue("IsInitialized", out var isInitializedObj))
+        {
             newState.IsInitialized = ConvertToBool(isInitializedObj);
+        }
 
         if (oldState.TryGetValue("CreatedAt", out var createdAtObj))
         {
