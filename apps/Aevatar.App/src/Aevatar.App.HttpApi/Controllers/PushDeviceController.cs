@@ -49,8 +49,9 @@ public class PushDeviceController : AevatarController
         {
             var stopwatch = Stopwatch.StartNew();
             var currentUserId = (Guid)CurrentUser.Id!;
-            
-            var result = await _userDeviceService.RegisterOrUpdateDeviceAsync(currentUserId, input);
+            var language = HttpContext.GetGodGPTLanguage();
+
+            var result = await _userDeviceService.RegisterOrUpdateDeviceAsync(currentUserId, language, input);
             
             _logger.LogDebug(
                 "[PushDeviceController][RegisterDevice] UserId: {UserId}, DeviceId: {DeviceId}, Duration: {Duration}ms",
@@ -96,41 +97,49 @@ public class PushDeviceController : AevatarController
             return StatusCode(500, new { error = localizedMessage });
         }
     }
-
+    
     /// <summary>
-    /// Get current device information.
+    /// Query device status (timezone, push settings)
+    /// Used for debugging and settings verification
     /// </summary>
-    [HttpGet]
-    public async Task<DeviceInfoDto?> GetDeviceAsync()
+    [HttpGet("{deviceId}")]
+    public virtual async Task<IActionResult> GetDeviceStatusAsync(string deviceId)
     {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
+        try
+        {
+            var currentUserId = (Guid)CurrentUser.Id!;
         
-        var result = await _userDeviceService.GetDeviceAsync(currentUserId);
-        
-        _logger.LogDebug(
-            "[PushDeviceController][GetDevice] UserId: {UserId}, HasDevice: {HasDevice}, Duration: {Duration}ms",
-            currentUserId, result != null, stopwatch.ElapsedMilliseconds);
-        
-        return result;
-    }
+            var result = await _userDeviceService.GetDeviceAsync(currentUserId);
 
-    /// <summary>
-    /// Clear device information.
-    /// Called on user logout.
-    /// </summary>
-    [HttpDelete]
-    public async Task<IActionResult> ClearDeviceAsync()
-    {
-        var stopwatch = Stopwatch.StartNew();
-        var currentUserId = (Guid)CurrentUser.Id!;
-        
-        await _userDeviceService.ClearDeviceAsync(currentUserId);
-        
-        _logger.LogDebug(
-            "[PushDeviceController][ClearDevice] UserId: {UserId}, Duration: {Duration}ms",
-            currentUserId, stopwatch.ElapsedMilliseconds);
-        
-        return Ok(new { Success = true, Message = "Device cleared successfully" });
+            if (result == null || result.DeviceId != deviceId)
+            {
+                // Return empty object with pushEnabled=true for non-existent devices
+                return Ok(new
+                {
+                    result = true,
+                    deviceId = deviceId,
+                    timeZoneId = "",
+                    pushEnabled = true,
+                    pushLanguage = "",
+                    pushToken = ""
+                });
+            }
+            return Ok(new
+            {
+                DeviceId = result.DeviceId,
+                TimeZoneId = result.TimeZoneId,
+                PushEnabled = result.PushEnabled,
+                PushLanguage = result.Language,
+                PushToken = result.PushToken
+            });
+        }
+        catch (Exception ex)
+        {
+            var language = HttpContext.GetGodGPTLanguage();
+            var localizedMessage =
+                _localizationService.GetLocalizedException(GodGPTExceptionMessageKeys.InternalServerError, language);
+            _logger.LogError(ex, "Failed to get device status for device {DeviceId}", deviceId);
+            return StatusCode(500, new { error = localizedMessage });
+        }
     }
 }
