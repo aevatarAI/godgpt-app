@@ -4,6 +4,7 @@ using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.GodGPT.Protos.UserDevice;
 using Aevatar.App.Application.Contracts.Services.Push;
+using Aevatar.App.Domain.Shared;
 using Aevatar.Application.Grains.Agents.UserDevice;
 using Aevatar.Dtos.Push;
 using Microsoft.Extensions.Logging;
@@ -31,7 +32,7 @@ public class UserDeviceService : IUserDeviceService
     }
 
     /// <inheritdoc />
-    public async Task<RegisterDeviceResult> RegisterOrUpdateDeviceAsync(Guid userId, RegisterDeviceInput input)
+    public async Task<RegisterDeviceResult> RegisterOrUpdateDeviceAsync(Guid userId, GodGPTChatLanguage language, RegisterDeviceInput input)
     {
         try
         {
@@ -66,7 +67,7 @@ public class UserDeviceService : IUserDeviceService
                 input.PushEnabled,
                 input.Platform ?? string.Empty,
                 input.AppVersion ?? string.Empty,
-                string.Empty);
+                ConvertGodGPTChatLanguageToString(language));
             
             return new RegisterDeviceResult
             {
@@ -120,5 +121,16 @@ public class UserDeviceService : IUserDeviceService
             _logger.LogError(ex, "[UserDeviceService][ClearDevice] Failed for UserId: {UserId}", userId);
             throw;
         }
+    }
+    
+    private static string ConvertGodGPTChatLanguageToString(GodGPTChatLanguage language)
+    {
+        return language switch
+        {
+            GodGPTChatLanguage.TraditionalChinese => "zh-tw",  // Traditional Chinese
+            GodGPTChatLanguage.Spanish => "es",
+            GodGPTChatLanguage.English => "en",
+            _ => "en"
+        };
     }
 }

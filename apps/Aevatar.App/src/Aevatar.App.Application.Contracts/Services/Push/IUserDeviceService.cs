@@ -1,5 +1,6 @@
 using System;
 using System.Threading.Tasks;
+using Aevatar.App.Domain.Shared;
 using Aevatar.Dtos.Push;
 
 namespace Aevatar.App.Application.Contracts.Services.Push;
@@ -13,7 +14,7 @@ public interface IUserDeviceService
     /// Register or update device information.
     /// Called on app launch/login.
     /// </summary>
-    Task<RegisterDeviceResult> RegisterOrUpdateDeviceAsync(Guid userId, RegisterDeviceInput input);
+    Task<RegisterDeviceResult> RegisterOrUpdateDeviceAsync(Guid userId, GodGPTChatLanguage language, RegisterDeviceInput input);
     
     /// <summary>
     /// Get device information for a user.
