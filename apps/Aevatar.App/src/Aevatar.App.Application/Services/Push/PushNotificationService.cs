@@ -77,7 +77,7 @@ public class PushNotificationService : IPushNotificationService
                     QueryString = BuildTimezoneQuery(input.TimeZoneId),
                     PageIndex = pageIndex,
                     PageSize = PageSize,
-                    SortFields = new List<string> { "userId:asc" }
+                    SortFields = new List<string> { "userId.keyword:asc" }
                 };
                 
                 var queryResult = await _stateIndexService.QueryAsync(query, ct);
