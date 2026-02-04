@@ -93,6 +93,7 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
             case ActiveSubscriptionAddedEvent e:
                 state.ActiveSubscriptions.Add(e.Subscription);
                 state.ActiveSubscriptionCount = state.ActiveSubscriptions.Count;
+                state.TotalPaymentCount++; // Auto-increment when adding subscription
                 break;
                 
             case ActiveSubscriptionRemovedEvent e:
@@ -165,10 +166,20 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
 
     public async Task AddActiveSubscriptionAsync(ActiveSubscriptionProto subscription)
     {
+        // Idempotent: skip if already exists
+        if (State.ActiveSubscriptions.Any(s => s.PaymentId == subscription.PaymentId))
+        {
+            Logger.LogDebug(
+                "[PaymentIndexGAgent] Subscription {PaymentId} already exists, skipping",
+                subscription.PaymentId);
+            return;
+        }
+        
         Logger.LogInformation(
             "[PaymentIndexGAgent] Adding active subscription {PaymentId} for user {UserId}",
             subscription.PaymentId, Id);
 
+        // Event handler auto-increments TotalPaymentCount
         RaiseEvent(new ActiveSubscriptionAddedEvent
         {
             Subscription = subscription

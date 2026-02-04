@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text.Json;
 using Aevatar.Agents.GodGPT.Protos.ChatManager;
+using Aevatar.Agents.GodGPT.Protos.UserDevice;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 
@@ -9,11 +11,21 @@ namespace Aevatar.App.HttpApi.Host.BackgroundJobs.Converters;
 
 /// <summary>
 /// ChatManager State converter
+/// Also extracts UserDevicesV2 to generate UserDeviceState for UserDeviceGAgent
 /// </summary>
 public class ChatManagerStateConverter : IStateConverter
 {
+    /// <summary>
+    /// Additional UserDeviceState records extracted from UserDevicesV2
+    /// Key: AgentId (UserDeviceGAgent:{userId}), Value: UserDeviceState
+    /// </summary>
+    public List<(string AgentId, IMessage State)> AdditionalUserDeviceRecords { get; } = new();
+
     public IMessage? Convert(Dictionary<string, object?>? oldState)
     {
+        // Clear previous records
+        AdditionalUserDeviceRecords.Clear();
+        
         if (oldState == null)
             return new ChatManagerStateProto();
 
@@ -105,7 +117,138 @@ public class ChatManagerStateConverter : IStateConverter
         if (oldState.TryGetValue("StateVersion", out var stateVersionObj))
             newState.StateVersion = ConvertToInt32(stateVersionObj);
 
+        // Extract UserDevicesV2 and select best device for UserDeviceState
+        // Only process V2 devices, ignore V1 (UserDevices)
+        if (oldState.TryGetValue("UserDevicesV2", out var devicesV2Obj) && devicesV2Obj != null)
+        {
+            var bestDevice = SelectBestDeviceV2(devicesV2Obj);
+            if (bestDevice != null && !string.IsNullOrEmpty(newState.UserId))
+            {
+                var userDeviceState = ConvertToUserDeviceState(bestDevice, newState.UserId);
+                if (userDeviceState != null)
+                {
+                    var agentId = $"UserDeviceGAgent:{newState.UserId}";
+                    AdditionalUserDeviceRecords.Add((agentId, userDeviceState));
+                }
+            }
+        }
+
         return newState;
+    }
+
+    /// <summary>
+    /// Select best device from UserDevicesV2
+    /// Rule: PushEnabled == true, OrderByDescending(LastTokenUpdate), FirstOrDefault
+    /// </summary>
+    private Dictionary<string, object?>? SelectBestDeviceV2(object? devicesObj)
+    {
+        var devicesDict = ConvertToDictionary(devicesObj);
+        if (devicesDict == null || devicesDict.Count == 0)
+            return null;
+
+        // Parse all devices and filter by PushEnabled
+        var enabledDevices = new List<(Dictionary<string, object?> Device, DateTime LastTokenUpdate)>();
+        
+        foreach (var kvp in devicesDict)
+        {
+            var deviceDict = ConvertToDictionary(kvp.Value);
+            if (deviceDict == null)
+                continue;
+
+            // Check PushEnabled
+            var pushEnabled = false;
+            if (deviceDict.TryGetValue("PushEnabled", out var pushEnabledObj))
+                pushEnabled = ConvertToBool(pushEnabledObj);
+
+            if (!pushEnabled)
+                continue;
+
+            // Get LastTokenUpdate for sorting
+            var lastTokenUpdate = DateTime.MinValue;
+            if (deviceDict.TryGetValue("LastTokenUpdate", out var lastTokenUpdateObj))
+            {
+                var dt = ConvertToDateTime(lastTokenUpdateObj);
+                if (dt.HasValue)
+                    lastTokenUpdate = dt.Value;
+            }
+
+            enabledDevices.Add((deviceDict, lastTokenUpdate));
+        }
+
+        if (enabledDevices.Count == 0)
+            return null;
+
+        // Sort by LastTokenUpdate descending and take first
+        var bestDevice = enabledDevices
+            .OrderByDescending(d => d.LastTokenUpdate)
+            .First()
+            .Device;
+
+        return bestDevice;
+    }
+
+    /// <summary>
+    /// Convert device dictionary to UserDeviceState
+    /// </summary>
+    private UserDeviceState? ConvertToUserDeviceState(Dictionary<string, object?> deviceDict, string userId)
+    {
+        var state = new UserDeviceState
+        {
+            UserId = userId
+        };
+
+        // DeviceId
+        if (deviceDict.TryGetValue("DeviceId", out var deviceIdObj))
+            state.DeviceId = ConvertToString(deviceIdObj);
+
+        // PushToken
+        if (deviceDict.TryGetValue("PushToken", out var pushTokenObj))
+            state.PushToken = ConvertToString(pushTokenObj);
+
+        // TimeZoneId
+        if (deviceDict.TryGetValue("TimeZoneId", out var timeZoneIdObj))
+            state.TimeZoneId = ConvertToString(timeZoneIdObj);
+
+        // PushEnabled
+        if (deviceDict.TryGetValue("PushEnabled", out var pushEnabledObj))
+            state.PushEnabled = ConvertToBool(pushEnabledObj);
+
+        // LastTokenUpdate -> token_updated_at
+        if (deviceDict.TryGetValue("LastTokenUpdate", out var lastTokenUpdateObj))
+        {
+            var dt = ConvertToDateTime(lastTokenUpdateObj);
+            if (dt.HasValue)
+                state.TokenUpdatedAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
+        }
+
+        // LastActiveAt -> last_active_at
+        if (deviceDict.TryGetValue("LastActiveAt", out var lastActiveAtObj))
+        {
+            var dt = ConvertToDateTime(lastActiveAtObj);
+            if (dt.HasValue)
+                state.LastActiveAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
+        }
+
+        // Platform
+        if (deviceDict.TryGetValue("Platform", out var platformObj))
+            state.Platform = ConvertToString(platformObj);
+
+        // AppVersion
+        if (deviceDict.TryGetValue("AppVersion", out var appVersionObj))
+            state.AppVersion = ConvertToString(appVersionObj);
+
+        // ConsecutiveFailures > 0 -> token_invalid = true
+        if (deviceDict.TryGetValue("ConsecutiveFailures", out var failuresObj))
+        {
+            var failures = ConvertToInt32(failuresObj);
+            state.TokenInvalid = failures > 0;
+        }
+
+        // PushLanguage -> language
+        if (deviceDict.TryGetValue("PushLanguage", out var pushLanguageObj))
+            state.Language = ConvertToString(pushLanguageObj);
+
+        return state;
     }
 
     private SessionInfoProto? ConvertSessionInfo(object? obj)
