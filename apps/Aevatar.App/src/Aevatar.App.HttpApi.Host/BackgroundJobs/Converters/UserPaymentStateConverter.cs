@@ -82,8 +82,10 @@ public class UserPaymentStateConverter : IStateConverter
             oldState.TryGetValue("Mode", out paymentModeObj))
             newState.PaymentMode = ConvertPaymentMode(paymentModeObj);
 
-        // BillingCycle: int (enum)
-        if (oldState.TryGetValue("BillingCycle", out var billingCycleObj))
+        // BillingCycle: int (enum) - old data uses "PlanType" field name
+        if (oldState.TryGetValue("PlanType", out var planTypeObj) && planTypeObj != null)
+            newState.BillingCycle = ConvertToInt32(planTypeObj);
+        else if (oldState.TryGetValue("BillingCycle", out var billingCycleObj) && billingCycleObj != null)
             newState.BillingCycle = ConvertToInt32(billingCycleObj);
 
         // PeriodStart: DateTime -> Timestamp
@@ -116,7 +118,7 @@ public class UserPaymentStateConverter : IStateConverter
             newState.NetAmount = ConvertToInt64(netAmountObj);
 
         // Status: int (enum)
-        if (oldState.TryGetValue("Status", out var statusObj))
+        if (oldState.TryGetValue("Status", out var statusObj) && statusObj != null)
             newState.Status = ConvertToInt32(statusObj);
 
         // CreatedAt: DateTime -> Timestamp
