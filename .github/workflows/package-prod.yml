@@ -3,7 +3,7 @@ name: Package Production
 on:
   push:
     tags:
-      - "v*.*.*"
+      - "v*"
 
 run-name: Deploy godgpt-app on ${{ github.ref }} to Production from ${{ github.sha }}
 env:
