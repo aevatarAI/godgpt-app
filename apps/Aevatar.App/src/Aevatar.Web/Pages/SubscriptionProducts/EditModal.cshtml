@@ -38,12 +38,65 @@
             
             <div class="mb-3">
                 <label class="form-label">@L["Features"]</label>
-                <select asp-for="Product.FeatureIds" 
-                        asp-items="Model.AvailableFeatures"
-                        class="form-select" 
-                        multiple="multiple">
-                </select>
+                <div class="border rounded p-2" id="featuresContainer">
+                    @{
+                        var featureIndex = 0;
+                        var collapsedCount = 5;
+                    }
+                    @foreach (var feature in Model.AvailableFeatures)
+                    {
+                        var isHidden = featureIndex >= collapsedCount;
+                        <div class="form-check feature-item @(isHidden ? "d-none feature-collapsed" : "")">
+                            <input class="form-check-input" 
+                                   type="checkbox" 
+                                   name="Product.FeatureIds" 
+                                   value="@feature.Value" 
+                                   id="feature_@featureIndex"
+                                   @(feature.Selected ? "checked" : "") />
+                            <label class="form-check-label" for="feature_@featureIndex">
+                                @feature.Text
+                            </label>
+                        </div>
+                        featureIndex++;
+                    }
+                </div>
+                @if (Model.AvailableFeatures.Count > collapsedCount)
+                {
+                    <button type="button" class="btn btn-link btn-sm p-0 mt-1" id="toggleFeaturesBtn" onclick="toggleFeatures()">
+                        <i class="fas fa-chevron-down" id="toggleIcon"></i>
+                        <span id="toggleText">@L["ShowAll"] (@Model.AvailableFeatures.Count)</span>
+                    </button>
+                }
             </div>
+            
+            <script>
+                var featuresExpanded = false;
+                var collapseText = @Html.Raw(Json.Serialize(L["Collapse"].Value));
+                var showAllText = @Html.Raw(Json.Serialize(L["ShowAll"].Value)) + ' (@Model.AvailableFeatures.Count)';
+                
+                function toggleFeatures() {
+                    featuresExpanded = !featuresExpanded;
+                    var collapsedItems = document.querySelectorAll('.feature-collapsed');
+                    var toggleText = document.getElementById('toggleText');
+                    var toggleIcon = document.getElementById('toggleIcon');
+                    
+                    collapsedItems.forEach(function(item) {
+                        if (featuresExpanded) {
+                            item.classList.remove('d-none');
+                        } else {
+                            item.classList.add('d-none');
+                        }
+                    });
+                    
+                    if (featuresExpanded) {
+                        toggleText.textContent = collapseText;
+                        toggleIcon.className = 'fas fa-chevron-up';
+                    } else {
+                        toggleText.textContent = showAllText;
+                        toggleIcon.className = 'fas fa-chevron-down';
+                    }
+                }
+            </script>
             
             <abp-select asp-for="Product.LabelId" 
                         asp-items="Model.AvailableLabels"

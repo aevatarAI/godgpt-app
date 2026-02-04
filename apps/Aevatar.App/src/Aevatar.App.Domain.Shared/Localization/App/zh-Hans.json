@@ -227,6 +227,8 @@
     "ConfirmDeletePrice": "此操作无法撤销。",
     "PriceDeletedSuccessfully": "价格删除成功",
     "SelectCurrency": "选择要删除的货币",
+    "ShowAll": "显示全部",
+    "Collapse": "收起",
 
     "pricing_card_title_2": "月度",
     "pricing_card_title_3": "年度",
