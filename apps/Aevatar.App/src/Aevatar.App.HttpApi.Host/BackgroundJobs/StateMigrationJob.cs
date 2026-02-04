@@ -675,10 +675,9 @@ public class StateMigrationJob
         var shortName = ExtractShortTypeName(oldTypeName);
         
         // Handle special cases where agent was refactored
+        // NOTE: ChatGAgentManager is NOT renamed - Orleans Grain uses original class name as ID prefix
         return shortName switch
         {
-            // ChatManager renamed from ChatGAgentManager to ChatManagerGAgent
-            "ChatGAgentManager" => "ChatManagerGAgent",
             "UserBillingGAgent" => "PaymentIndexGAgent",
             // Orleans grain states mapped to agent states
             "ShareState" => "ShareLinkGAgent",
