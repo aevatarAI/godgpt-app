@@ -1307,13 +1307,23 @@ public class StateMigrationJob
             if (converter is UserBillingGrainStateConverter grainConverter && grainConverter.AdditionalPaymentRecords.Count > 0)
             {
                 result.AdditionalRecords = grainConverter.AdditionalPaymentRecords
-                    .Select(r => new AdditionalRecordInfo { AgentId = r.AgentId, StateType = r.State.GetType().Name })
+                    .Select(r => new AdditionalRecordInfo 
+                    { 
+                        AgentId = r.AgentId, 
+                        StateType = r.State.GetType().Name,
+                        ConvertedStateJson = JsonFormatter.Default.Format(r.State)
+                    })
                     .ToList();
             }
             else if (converter is UserBillingStateConverter billingConverter && billingConverter.AdditionalPaymentRecords.Count > 0)
             {
                 result.AdditionalRecords = billingConverter.AdditionalPaymentRecords
-                    .Select(r => new AdditionalRecordInfo { AgentId = r.AgentId, StateType = r.State.GetType().Name })
+                    .Select(r => new AdditionalRecordInfo 
+                    { 
+                        AgentId = r.AgentId, 
+                        StateType = r.State.GetType().Name,
+                        ConvertedStateJson = JsonFormatter.Default.Format(r.State)
+                    })
                     .ToList();
             }
 
@@ -1398,6 +1408,11 @@ public class StateMigrationJob
             {
                 // UserBillingState uses "userbilling/xxx" format
                 fullId = $"userbilling/{normalizedId}";
+            }
+            else if (fullCollectionName == "OrleansgodgptprodUserQuotaState")
+            {
+                // UserQuotaState uses "userquota/xxx_Quota" format
+                fullId = $"userquota/{recordId}_Quota";
             }
             else
             {
@@ -1932,6 +1947,7 @@ public class AdditionalRecordInfo
 {
     public string AgentId { get; set; } = string.Empty;
     public string StateType { get; set; } = string.Empty;
+    public string? ConvertedStateJson { get; set; }
 }
 
 /// <summary>

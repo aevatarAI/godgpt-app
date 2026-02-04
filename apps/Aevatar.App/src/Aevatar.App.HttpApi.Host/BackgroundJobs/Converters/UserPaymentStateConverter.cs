@@ -306,26 +306,18 @@ public class UserPaymentStateConverter : IStateConverter
     }
     
     /// <summary>
-    /// Convert decimal dollars to cents. If value looks like cents already (no decimal places), return as-is.
+    /// Convert decimal dollars to cents. Always multiply by 100.
     /// </summary>
     private static long ConvertDecimalToCents(decimal value)
     {
-        // If value has decimal places, it's likely dollars - convert to cents
-        // If value is a whole number > 100, it's likely already in cents
-        if (value == Math.Floor(value) && value >= 100)
-            return (long)value; // Already in cents
         return (long)Math.Round(value * 100);
     }
     
     /// <summary>
-    /// Convert double dollars to cents.
+    /// Convert double dollars to cents. Always multiply by 100.
     /// </summary>
     private static long ConvertDoubleToCents(double value)
     {
-        // If value has decimal places, it's likely dollars - convert to cents
-        // If value is a whole number > 100, it's likely already in cents
-        if (Math.Abs(value - Math.Floor(value)) < 0.0001 && value >= 100)
-            return (long)value; // Already in cents
         return (long)Math.Round(value * 100);
     }
 
