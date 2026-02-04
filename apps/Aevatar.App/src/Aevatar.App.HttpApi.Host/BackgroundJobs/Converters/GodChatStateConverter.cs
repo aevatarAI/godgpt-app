@@ -70,20 +70,10 @@ public class GodChatStateConverter : IStateConverter
                 newState.ChatManagerGuid = guid.ToString("D");
         }
 
-        // RegionProxies: List<RegionProxiesEntry> -> repeated RegionProxiesEntryProto
-        if (oldState.TryGetValue("RegionProxies", out var regionProxiesObj) && regionProxiesObj != null)
-        {
-            var regionList = ConvertToList(regionProxiesObj);
-            if (regionList != null)
-            {
-                foreach (var regionObj in regionList)
-                {
-                    var regionEntry = ConvertRegionProxiesEntry(regionObj);
-                    if (regionEntry != null)
-                        newState.RegionProxies.Add(regionEntry);
-                }
-            }
-        }
+        // RegionProxies: SKIP migration - let GodChatGAgent create new proxies on demand
+        // Old AIAgentStatusProxy states have low value (temporary availability flags)
+        // and will be garbage after migration. New proxies will be auto-created.
+        // See: GodChatGAgent.ProxyManagement.cs - InitializeRegionProxiesAsync()
 
         // FirstChatTime: DateTime? -> optional Timestamp
         if (oldState.TryGetValue("FirstChatTime", out var firstChatTimeObj))
@@ -116,20 +106,8 @@ public class GodChatStateConverter : IStateConverter
             }
         }
 
-        // ProxyInitStatuses: List<ProxyInitStatusEntry> -> repeated ProxyInitStatusEntryProto
-        if (oldState.TryGetValue("ProxyInitStatuses", out var proxyInitStatusesObj) && proxyInitStatusesObj != null)
-        {
-            var statusList = ConvertToList(proxyInitStatusesObj);
-            if (statusList != null)
-            {
-                foreach (var statusObj in statusList)
-                {
-                    var statusEntry = ConvertProxyInitStatusEntry(statusObj);
-                    if (statusEntry != null)
-                        newState.ProxyInitStatuses.Add(statusEntry);
-                }
-            }
-        }
+        // ProxyInitStatuses: SKIP - related to RegionProxies which is also skipped
+        // No proxies = no proxy init statuses to track
 
         return newState;
     }

@@ -329,7 +329,6 @@ public class StateMigrationJob
             return result;
         }
 
-        var jsonFormatter = new JsonFormatter(JsonFormatter.Settings.Default);
         const int limit = 500; // Batch size for pagination
         const int bulkWriteSize = 100; // Bulk write size for MongoDB
         int batchNumber = 0;
@@ -356,8 +355,12 @@ public class StateMigrationJob
                 continue;
             }
 
-            _logger.LogInformation("[StateMigration] [{TypeName}] Processing batch {Batch}: {Count} records (cursor={Cursor}, hasMore={HasMore}, fetchTime={FetchTime}ms)",
-                collection.TypeName, batchNumber, records.Count, cursor ?? "skip=0", hasMore, fetchDuration.ToString("F2"));
+            // Log every 10th batch or first batch to reduce noise
+            if (batchNumber == 1 || batchNumber % 10 == 0)
+            {
+                _logger.LogInformation("[StateMigration] [{TypeName}] Batch {Batch}: {Count} records, hasMore={HasMore}",
+                    collection.TypeName, batchNumber, records.Count, hasMore);
+            }
 
             result.TotalRecords += records.Count;
             
@@ -375,7 +378,7 @@ public class StateMigrationJob
                     // Log sample records (first 3 only)
                     if (sampleLogged < 3)
                     {
-                        LogSampleRecord(collection.TypeName, sampleLogged + 1, record, converter, jsonFormatter);
+                        LogSampleRecord(collection.TypeName, sampleLogged + 1, record);
                         sampleLogged++;
                     }
 
@@ -387,25 +390,18 @@ public class StateMigrationJob
                     var newState = converter.Convert(record.State);
                     if (newState == null)
                     {
-                        _logger.LogWarning(
-                            "[StateMigration] [{TypeName}] Converter returned null for Id={Id}",
-                            collection.TypeName, record.Id);
+                        // Log first 10 null conversions with state keys for debugging
+                        if (result.FailedCount < 10)
+                        {
+                            var stateKeys = record.State?.Keys != null 
+                                ? string.Join(",", record.State.Keys.Take(20)) 
+                                : "null";
+                            _logger.LogWarning(
+                                "[StateMigration] [{TypeName}] Converter returned null for Id={Id}, StateKeys=[{StateKeys}]",
+                                collection.TypeName, record.Id, stateKeys);
+                        }
                         result.FailedCount++;
                         continue;
-                    }
-
-                    // Log first 3 successful conversions
-                    if (result.SuccessCount < 3)
-                    {
-                        var stateBytes = newState.ToByteArray();
-                        var newStateJson = jsonFormatter.Format(newState);
-                        if (newStateJson.Length > 500) newStateJson = newStateJson[..500] + "...(truncated)";
-                        
-                        _logger.LogInformation(
-                            "[StateMigration] [{TypeName}] Converted: OldId={OldId} -> NewId={NewId}, " +
-                            "NewStateType={StateType}, NewStateBytes={Bytes}",
-                            collection.TypeName, record.Id, newAgentId, 
-                            newState.GetType().FullName, stateBytes.Length);
                     }
 
                     // Handle agent type name mapping
@@ -448,23 +444,23 @@ public class StateMigrationJob
                     // Bulk write when buffer reaches threshold
                     if (bulkWriteBuffer.Count >= bulkWriteSize)
                     {
-                        var writeStartTime = DateTime.UtcNow;
                         var writeResult = await BulkWriteStateAsync(bulkWriteBuffer, cancellationToken);
-                        var writeDuration = (DateTime.UtcNow - writeStartTime).TotalMilliseconds;
-                        
                         result.SuccessCount += writeResult.SuccessCount;
                         result.FailedCount += writeResult.FailedCount;
-                        
-                        _logger.LogInformation("[StateMigration] [{TypeName}] Bulk write: {Success} success, {Failed} failed, time={Time}ms",
-                            collection.TypeName, writeResult.SuccessCount, writeResult.FailedCount, writeDuration.ToString("F2"));
-                        
                         bulkWriteBuffer.Clear();
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "[StateMigration] [{TypeName}] Error converting record {Id}", 
-                        collection.TypeName, record.Id);
+                    // Log first 10 conversion errors with details
+                    if (result.FailedCount < 10)
+                    {
+                        var stateKeys = record.State?.Keys != null 
+                            ? string.Join(",", record.State.Keys.Take(20)) 
+                            : "null";
+                        _logger.LogWarning(ex, "[StateMigration] [{TypeName}] Error converting record {Id}, StateKeys=[{StateKeys}], Error={Error}", 
+                            collection.TypeName, record.Id, stateKeys, ex.Message);
+                    }
                     result.FailedCount++;
                 }
             }
@@ -472,72 +468,40 @@ public class StateMigrationJob
             // Write remaining records in buffer
             if (bulkWriteBuffer.Count > 0)
             {
-                var writeStartTime = DateTime.UtcNow;
                 var writeResult = await BulkWriteStateAsync(bulkWriteBuffer, cancellationToken);
-                var writeDuration = (DateTime.UtcNow - writeStartTime).TotalMilliseconds;
-                
                 result.SuccessCount += writeResult.SuccessCount;
                 result.FailedCount += writeResult.FailedCount;
-                
-                _logger.LogInformation("[StateMigration] [{TypeName}] Final bulk write: {Success} success, {Failed} failed, time={Time}ms",
-                    collection.TypeName, writeResult.SuccessCount, writeResult.FailedCount, writeDuration.ToString("F2"));
-                
                 bulkWriteBuffer.Clear();
             }
-            
-            // Log batch completion
-            _logger.LogInformation("[StateMigration] [{TypeName}] Batch {Batch} done: success={Success}, failed={Failed}",
-                collection.TypeName, batchNumber, result.SuccessCount, result.FailedCount);
 
             // Check if there are more records using hasMore flag
             if (!hasMore)
                 break;
             
-            // Cursor is already updated above (line 348), no need to increment skip
-            
             // Delay between batches
             await Task.Delay(_options.BatchDelayMs, cancellationToken);
         }
 
+        // Log collection completion summary
         _logger.LogInformation(
-            "[StateMigration] {TypeName}: Total={Total}, Success={Success}, Failed={Failed}",
+            "[StateMigration] [{TypeName}] Completed: Total={Total}, Success={Success}, Failed={Failed}",
             collection.TypeName, result.TotalRecords, result.SuccessCount, result.FailedCount);
 
         return result;
     }
 
     /// <summary>
-    /// Log sample record for debugging
+    /// Log sample record for debugging (only first sample, minimal info)
     /// </summary>
-    private void LogSampleRecord(string typeName, int index, ExportedRecord record, 
-        IStateConverter converter, JsonFormatter jsonFormatter)
+    private void LogSampleRecord(string typeName, int index, ExportedRecord record)
     {
-        _logger.LogInformation(
-            "[StateMigration] [{TypeName}] Sample record {Index}: Id={Id}, StateKeys=[{StateKeys}]",
-            typeName, index, record.Id,
-            record.State != null ? string.Join(",", record.State.Keys.Take(10)) : "N/A");
-            
-        if (record.State != null)
-        {
-            try
-            {
-                var originalJson = JsonSerializer.Serialize(record.State, 
-                    new JsonSerializerOptions { WriteIndented = false });
-                if (originalJson.Length > 800) originalJson = originalJson[..800] + "...(truncated)";
-                _logger.LogInformation("[StateMigration] [{TypeName}] Sample {Index} OriginalJson: {Json}",
-                    typeName, index, originalJson);
-                    
-                var convertedState = converter.Convert(record.State);
-                if (convertedState != null)
-                {
-                    var newStateJson = jsonFormatter.Format(convertedState);
-                    if (newStateJson.Length > 800) newStateJson = newStateJson[..800] + "...(truncated)";
-                    _logger.LogInformation("[StateMigration] [{TypeName}] Sample {Index} ConvertedJson: {Json}",
-                        typeName, index, newStateJson);
-                }
-            }
-            catch { /* Ignore logging errors */ }
-        }
+        // Only log first sample with key info
+        if (index > 1) return;
+        
+        _logger.LogDebug(
+            "[StateMigration] [{TypeName}] Sample: Id={Id}, Keys=[{StateKeys}]",
+            typeName, record.Id,
+            record.State != null ? string.Join(",", record.State.Keys.Take(5)) : "N/A");
     }
 
     /// <summary>
@@ -650,7 +614,8 @@ public class StateMigrationJob
             "UserBillingGAgent" => new UserBillingStateConverter(),
             "GoogleAuthGAgent" => new GoogleAuthStateConverter(),
             "GoogleIdentityBindingGAgent" => new GoogleIdentityBindingStateConverter(),
-            "AIAgentStatusProxy" => new AIAgentStatusProxyStateConverter(),
+            // AIAgentStatusProxy skipped - low-value runtime state, proxies will be auto-created
+            // "AIAgentStatusProxy" => new AIAgentStatusProxyStateConverter(),
             "TwitterAuthGAgent" => new TwitterAuthStateConverter(),
             "TwitterIdentityBindingGAgent" => new TwitterIdentityBindingStateConverter(),
             // Orleans grain states (converted to agent states)
@@ -1039,15 +1004,50 @@ public class StateMigrationJob
         }
     }
 
+    // Explicit mapping for GodGPT agents where Protobuf namespace differs from Agent namespace
+    // Key: Protobuf StateType full name, Value: Actual Agent full type name
+    private static readonly Dictionary<string, string> _stateTypeToAgentTypeMapping = new()
+    {
+        // GodGPT agents - Protobuf namespace (Aevatar.Agents.GodGPT.Protos.*) 
+        // differs from Agent namespace (Aevatar.Application.Grains.*)
+        ["Aevatar.Agents.GodGPT.Protos.UserDevice.UserDeviceState"] = "Aevatar.Application.Grains.Agents.UserDevice.UserDeviceGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserQuota.UserQuotaState"] = "Aevatar.Application.Grains.UserQuota.UserQuotaGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserInfo.UserInfoCollectionState"] = "Aevatar.Application.Grains.UserInfo.UserInfoCollectionGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Invitation.InvitationState"] = "Aevatar.Application.Grains.Invitation.InvitationGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Invitation.InviteCodeState"] = "Aevatar.Application.Grains.Agents.Invitation.InviteCodeGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserStatistics.UserStatisticsState"] = "Aevatar.Application.Grains.UserStatistics.UserStatisticsGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserFeedback.UserFeedbackState"] = "Aevatar.Application.Grains.UserFeedback.UserFeedbackGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Anonymous.AnonymousUserState"] = "Aevatar.Application.Grains.Agents.Anonymous.AnonymousUserGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.GodChat.GodChatStateProto"] = "Aevatar.Application.Grains.Agents.ChatManager.Chat.GodChatGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.ChatManager.ChatManagerStateProto"] = "Aevatar.Application.Grains.Agents.ChatManager.ChatGAgentManager",
+        ["Aevatar.Agents.GodGPT.Protos.Configuration.ConfigurationState"] = "Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent.ConfigurationGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStateProto"] = "GodGPT.GAgents.Awakening.AwakeningGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserInvitation.UserInvitationState"] = "Aevatar.Application.Grains.UserInvitation.UserInvitationGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserProfile.UserProfileState"] = "Aevatar.Application.Grains.UserProfile.UserProfileGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.FreeTrialCode.FreeTrialCodeFactoryState"] = "Aevatar.Application.Grains.FreeTrialCode.FreeTrialCodeFactoryGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Twitter.TwitterAuthState"] = "Aevatar.Application.Grains.Twitter.TwitterAuthGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Twitter.TwitterIdentityBindingState"] = "Aevatar.Application.Grains.Twitter.TwitterIdentityBindingGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Twitter.TwitterMonitorState"] = "Aevatar.Application.Grains.Twitter.TwitterMonitorGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Twitter.TwitterRewardState"] = "Aevatar.Application.Grains.Twitter.TwitterRewardGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Share.ShareLinkProto"] = "Aevatar.Application.Grains.Agents.ChatManager.Share.ShareLinkGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.VoiceSynthesis.VoiceSynthesisStateProto"] = "Aevatar.Application.Grains.Agents.ChatManager.VoiceSynthesis.VoiceSynthesisGAgent",
+    };
+
     /// <summary>
     /// Derive full AgentType from StateType for ES index naming.
-    /// StateType: "Aevatar.Agents.GodGPT.Protos.UserDevice.UserDeviceState"
-    /// AgentType: "Aevatar.Agents.GodGPT.UserDevice.UserDeviceGAgent"
+    /// Uses explicit mapping for GodGPT agents, falls back to generic derivation for others (e.g., Payment).
     /// </summary>
     private string DeriveAgentTypeFromStateType(string? stateType, string agentId, string collectionName)
     {
         if (!string.IsNullOrEmpty(stateType))
         {
+            // First, try explicit mapping (for GodGPT agents with inconsistent namespaces)
+            if (_stateTypeToAgentTypeMapping.TryGetValue(stateType, out var mappedAgentType))
+            {
+                return mappedAgentType;
+            }
+            
+            // Fallback: Generic derivation (works for Payment module where namespaces are consistent)
             // Remove ".Protos" from the namespace and replace "State" suffix with "GAgent"
             var agentType = stateType.Replace(".Protos", "");
             
