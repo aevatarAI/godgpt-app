@@ -58,6 +58,24 @@ public class GodGPTAccountController : AevatarController
             currentUserId, stopwatch.ElapsedMilliseconds);
         return ToApiResponse(userProfileDto);
     }
+
+    /// <summary>
+    /// Test endpoint: Get user profile by user ID (temporary, no auth required)
+    /// </summary>
+    [HttpGet("godgpt/account/test")]
+    [AllowAnonymous]
+    public async Task<UserProfileApiResponse> GetUserProfileTestAsync([FromQuery] string? userId = null)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        // Default test ID if not provided
+        var testUserId = string.IsNullOrEmpty(userId) 
+            ? Guid.Parse("9bcf411b-f21e-f1d9-10cc-3a1aa2a71eb7")
+            : Guid.Parse(userId);
+        var userProfileDto = await _userService.GetUserProfileAsync(testUserId);
+        _logger.LogDebug("[GodGPTAccountController][GetUserProfileTestAsync] userId: {0}, duration: {1}ms",
+            testUserId, stopwatch.ElapsedMilliseconds);
+        return ToApiResponse(userProfileDto);
+    }
     
     private static UserProfileApiResponse ToApiResponse(UserProfileDto dto)
     {

@@ -113,6 +113,23 @@ public class GodGPTSessionController : AevatarController
     }
 
     /// <summary>
+    /// Test endpoint: Get all sessions by user ID (temporary, no auth required)
+    /// </summary>
+    [HttpGet("godgpt/session-list/test")]
+    [AllowAnonymous]
+    public async Task<List<SessionInfoDto>> GetSessionListTestAsync([FromQuery] string? userId = null)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var testUserId = string.IsNullOrEmpty(userId) 
+            ? Guid.Parse("9bcf411b-f21e-f1d9-10cc-3a1aa2a71eb7")
+            : Guid.Parse(userId);
+        var sessionList = await _sessionService.GetSessionListAsync(testUserId);
+        _logger.LogDebug("[GodGPTSessionController][GetSessionListTestAsync] userId: {0}, duration: {1}ms",
+            testUserId.ToString(), stopwatch.ElapsedMilliseconds);
+        return sessionList;
+    }
+
+    /// <summary>
     /// Search sessions by keyword
     /// </summary>
     [HttpGet("godgpt/sessions/search")]
@@ -187,6 +204,56 @@ public class GodGPTSessionController : AevatarController
             sessionId, currentUserId, sessionInfo != null, stopwatch.ElapsedMilliseconds);
 
         return sessionInfo;
+    }
+
+    /// <summary>
+    /// Test endpoint: Get message list for a session by userId (temporary, no auth required)
+    /// </summary>
+    [HttpGet("godgpt/chat/test/{sessionId}")]
+    [AllowAnonymous]
+    public async Task<List<ChatMessageWithMetaDto>> GetSessionMessageListTestAsync(Guid sessionId, [FromQuery] string? userId = null)
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var testUserId = string.IsNullOrEmpty(userId) 
+            ? Guid.Parse("9bcf411b-f21e-f1d9-10cc-3a1aa2a71eb7")
+            : Guid.Parse(userId);
+        var chatMessages = new List<ChatMessageWithMetaDto>();
+        try
+        {
+            var managerActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(testUserId.ToString());
+            var createActorMs = stopwatch.ElapsedMilliseconds;
+            
+            var manager = managerActor.As<IChatManagerGAgent>();
+            var language = HttpContext.GetGodGPTLanguage();
+            var agentContext = _agentContextAccessor.GetOrCreate();
+            agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
+            var protoResult = await manager.GetSessionMessageListWithMetaAsync(sessionId);
+            var grainCallMs = stopwatch.ElapsedMilliseconds - createActorMs;
+            
+            // Convert Proto to DTO for HTTP response
+            chatMessages = protoResult.Entries.Select(e => new ChatMessageWithMetaDto
+            {
+                ChatRole = (Aevatar.GAgents.ChatAgent.Dtos.ChatRole)e.Message.ChatRole,
+                Content = e.Message.Content,
+                IsVoiceMessage = e.Meta?.IsVoiceMessage ?? false,
+                VoiceLanguage = (global::GodGPT.GAgents.SpeechChat.VoiceLanguageEnum)(e.Meta?.VoiceLanguage ?? 0),
+                VoiceParseSuccess = e.Meta?.VoiceParseSuccess ?? true,
+                VoiceParseErrorMessage = e.Meta?.VoiceParseErrorMessage,
+                VoiceDurationSeconds = e.Meta?.VoiceDurationSeconds ?? 0.0,
+                ImageKeys = e.Message.ImageKeys?.ToList() ?? new List<string>()
+            }).ToList();
+            
+            _logger.LogInformation(
+                "[GodGPTSessionController][GetSessionMessageListTestAsync] sessionId={SessionId}, userId={UserId}, MsgCount={MsgCount}, TotalMs={TotalMs}",
+                sessionId, testUserId, chatMessages.Count, stopwatch.ElapsedMilliseconds);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("[GodGPTSessionController][GetSessionMessageListTestAsync] exception sessionId={SessionId}, error={Error}",
+                sessionId, ex.Message);
+        }
+
+        return chatMessages;
     }
 
     /// <summary>

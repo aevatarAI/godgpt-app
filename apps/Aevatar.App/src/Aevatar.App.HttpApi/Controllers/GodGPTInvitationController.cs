@@ -72,6 +72,22 @@ public class GodGPTInvitationController : AevatarController
         return invitationInfo;
     }
     
+    /// <summary>
+    /// Test endpoint: Get invitation info by fixed test ID (temporary, no auth required)
+    /// </summary>
+    [HttpGet("test")]
+    [AllowAnonymous]
+    public async Task<GetInvitationInfoResponse> GetInvitationInfoTestAsync()
+    {
+        var stopwatch = Stopwatch.StartNew();
+        // Fixed test ID: 9bcf411b-f21e-f1d9-10cc-3a1aa2a71eb7
+        var testUserId = Guid.Parse("9bcf411b-f21e-f1d9-10cc-3a1aa2a71eb7");
+        var invitationInfo = await _invitationService.GetInvitationInfoAsync(testUserId);
+        _logger.LogDebug("[GodGPTInvitationController][GetInvitationInfoTestAsync] userId: {0}, duration: {1}ms",
+            testUserId.ToString(), stopwatch.ElapsedMilliseconds);
+        return invitationInfo;
+    }
+    
     [HttpGet("code-type")]
     public async Task<GetInvitationCodeTypeResponse> GetInvitationCodeTypeAsync(GetInvitationCodeTypeRequest input)
     {
