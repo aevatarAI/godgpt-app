@@ -14,6 +14,7 @@ using Aevatar.Agents.GodGPT.Protos.UserStatistics;
 using Aevatar.Agents.GodGPT.Protos.Anonymous;
 using Aevatar.App.Application.Services;
 using Aevatar.Application.Grains.Agents.ChatManager;
+using Aevatar.Application.Grains.Agents.Invitation;
 using Aevatar.Application.Grains.UserQuota;
 using Aevatar.Payment.Agents;
 using Aevatar.App.HttpApi.Host.BackgroundJobs.Converters;
@@ -621,7 +622,7 @@ public class StateMigrationJob
             // Orleans grain states (converted to agent states)
             "ShareState" => new ShareStateConverter(),
             "UserPaymentState" => new UserPaymentStateConverter(),
-            "UserBillingState" => new UserBillingGrainStateConverter(), // Orleans grain state
+            // "UserBillingState" => new UserBillingGrainStateConverter(), // Skipped - use UserBillingGAgent instead
             _ => null
         };
     }
@@ -744,6 +745,8 @@ public class StateMigrationJob
                     try
                     {
                         var stateBytes = state.ToByteArray();
+                        // [BsonId] on AgentStateDocument.AgentId maps to _id in MongoDB
+                        // C# driver LINQ query x.AgentId translates to { _id: ... }
                         var document = new BsonDocument
                         {
                             { "_id", agentId },
@@ -828,9 +831,10 @@ public class StateMigrationJob
             // Match AgentStateDocument structure exactly:
             // - _id: AgentId (not a separate AgentId field!)
             // - StateType: Full type name
+            // [BsonId] on AgentStateDocument.AgentId maps to _id in MongoDB
             var document = new BsonDocument
             {
-                { "_id", agentId },  // AgentId as _id (matching [BsonId] attribute)
+                { "_id", agentId },
                 { "StateData", new BsonBinaryData(stateBytes, BsonBinarySubType.Binary) },
                 { "StateType", stateTypeFullName },  // Full type name
                 { "Version", 1L },
@@ -1600,9 +1604,33 @@ public class StateMigrationJob
                     result.Message = "Agent state retrieved successfully";
                     break;
 
+                case "invitecodegagent":
+                case "invitecode":
+                    if (_actorFactory == null)
+                    {
+                        result.Found = false;
+                        result.Message = "IGAgentActorFactory not available";
+                        return result;
+                    }
+                    var inviteCodeActor = await _actorFactory.CreateGAgentActorAsync<InviteCodeGAgent>(userGuid.ToString());
+                    var inviteCodeGAgent = inviteCodeActor.As<IInviteCodeGAgent>();
+                    var isInitialized = await inviteCodeGAgent.IsInitialized();
+                    var codeInfo = await inviteCodeGAgent.GetCodeInfoAsync();
+                    result.Found = true;
+                    result.AgentData = new
+                    {
+                        IsInitialized = isInitialized,
+                        BatchId = codeInfo.BatchId,
+                        TrialDays = codeInfo.TrialDays,
+                        PlanType = codeInfo.PlanType.ToString(),
+                        IsUltimate = codeInfo.IsUltimate
+                    };
+                    result.Message = "Agent state retrieved successfully";
+                    break;
+
                 default:
                     result.Found = false;
-                    result.Message = $"Unsupported agent type: {agentType}. Supported: InvitationGAgent, UserQuotaGAgent, PaymentIndexGAgent, ChatGAgentManager";
+                    result.Message = $"Unsupported agent type: {agentType}. Supported: InvitationGAgent, UserQuotaGAgent, PaymentIndexGAgent, ChatGAgentManager, InviteCodeGAgent";
                     break;
             }
         }
