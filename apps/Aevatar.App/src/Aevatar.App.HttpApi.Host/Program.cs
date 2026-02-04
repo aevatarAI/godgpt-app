@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Aevatar.App.Common;
 using Aevatar.App.HttpApi.Host.Extensions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.Extensions.Configuration;
@@ -176,6 +177,8 @@ public class Program
         if (!otelEnabled)
         {
             Log.Information("📊 OpenTelemetry: Disabled (set OpenTelemetry:Enabled=true to enable)");
+            // Register null provider so MetricsRecorder can still be resolved
+            builder.Services.AddSingleton<IInstrumentationProvider>(_ => new NullInstrumentationProvider());
             return;
         }
         
@@ -205,7 +208,10 @@ public class Program
                 .AddOtlpExporter(options =>
                 {
                     options.Endpoint = new Uri(collectorEndpoint);
-                }));
+                })
+                .AddMeter(serviceName));
+        builder.Services.AddSingleton<IInstrumentationProvider>(_ =>
+            new InstrumentationProvider(serviceName, serviceVersion));
     }
 }
 

@@ -49,21 +49,22 @@ public class UserInfoService : IUserInfoService
         
         if (updateDto.NameInfo != null)
         {
-            protoRequest.NameInfo = new UserNameInfoProto
-            {
-                Gender = updateDto.NameInfo.Gender,
-                FirstName = updateDto.NameInfo.FirstName ?? string.Empty,
-                LastName = updateDto.NameInfo.LastName ?? string.Empty
-            };
+            protoRequest.NameInfo = new UserNameInfoProto();
+            if (updateDto.NameInfo.Gender.HasValue)
+                protoRequest.NameInfo.Gender = updateDto.NameInfo.Gender.Value;
+            if(updateDto.NameInfo.FirstName != null)
+                protoRequest.NameInfo.FirstName = updateDto.NameInfo.FirstName;
+            if(updateDto.NameInfo.LastName != null)
+                protoRequest.NameInfo.LastName = updateDto.NameInfo.LastName;
         }
         
         if (updateDto.LocationInfo != null)
         {
-            protoRequest.LocationInfo = new UserLocationInfoProto
-            {
-                Country = updateDto.LocationInfo.Country ?? string.Empty,
-                City = updateDto.LocationInfo.City ?? string.Empty
-            };
+            protoRequest.LocationInfo = new UserLocationInfoProto();
+            if(updateDto.LocationInfo.Country != null)
+                protoRequest.LocationInfo.Country = updateDto.LocationInfo.Country;
+            if(updateDto.LocationInfo.City != null)
+                protoRequest.LocationInfo.City = updateDto.LocationInfo.City;
         }
         
         if (updateDto.BirthDateInfo != null)
@@ -111,7 +112,7 @@ public class UserInfoService : IUserInfoService
         
         if (protoResult == null)
         {
-            return null;
+            return new UserInfoCollectionDto(){IsInitialized = false};
         }
         
         // Convert Protobuf to DTO
