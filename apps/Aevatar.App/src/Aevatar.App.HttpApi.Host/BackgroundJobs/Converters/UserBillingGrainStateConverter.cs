@@ -279,7 +279,10 @@ public class UserBillingGrainStateConverter : IStateConverter
             state.PaymentMode = ConvertPaymentMode(paymentModeEl);
 
         // BillingCycle: int enum (None=0, Weekly=1, Monthly=2, Quarterly=3, Yearly=4, Lifetime=5)
-        if (je.TryGetProperty("BillingCycle", out var billingCycleEl))
+        // Old data uses "PlanType" field name
+        if (je.TryGetProperty("PlanType", out var planTypeEl2))
+            state.BillingCycle = ConvertToInt32(planTypeEl2);
+        else if (je.TryGetProperty("BillingCycle", out var billingCycleEl))
             state.BillingCycle = ConvertToInt32(billingCycleEl);
 
         // Amount (decimal -> cents)

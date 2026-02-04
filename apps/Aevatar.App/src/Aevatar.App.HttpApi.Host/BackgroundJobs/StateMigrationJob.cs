@@ -1381,8 +1381,28 @@ public class StateMigrationJob
                 typeNamespace = fullCollectionName.Substring("Orleansgodgptprod".Length);
             
             // Build full ID format: "TypeNamespace/GuidWithoutHyphens"
+            // Special handling for Orleans grain states with different ID prefix
             var normalizedId = recordId.Replace("-", "");
-            var fullId = $"{typeNamespace}/{normalizedId}";
+            string fullId;
+            if (fullCollectionName == "OrleansgodgptprodUserPaymentState")
+            {
+                // UserPaymentState uses "userpayment/xxx" format
+                fullId = $"userpayment/{normalizedId}";
+            }
+            else if (fullCollectionName == "OrleansgodgptprodShareState")
+            {
+                // ShareState uses "share/xxx" format
+                fullId = $"share/{normalizedId}";
+            }
+            else if (fullCollectionName == "OrleansgodgptprodUserBillingState")
+            {
+                // UserBillingState uses "userbilling/xxx" format
+                fullId = $"userbilling/{normalizedId}";
+            }
+            else
+            {
+                fullId = $"{typeNamespace}/{normalizedId}";
+            }
             
             // Build URL with id parameter
             var url = $"{_options.OldSystemApiBaseUrl}/api/admin/export/grain" +

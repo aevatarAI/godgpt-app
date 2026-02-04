@@ -311,11 +311,15 @@ public class GodGPTPaymentController : AevatarController
 
     [HttpGet("list-test")]
     [AllowAnonymous]
-    public async Task<List<PaymentSummaryDto>> GetPaymentHistoryTestAsync([FromQuery] GetPaymentHistoryInput input)
+    public async Task<List<PaymentSummaryDto>> GetPaymentHistoryTestAsync(
+        [FromQuery] GetPaymentHistoryInput input,
+        [FromQuery] string? userId = null)
     {
         var stopwatch = Stopwatch.StartNew();
-        // Test userId from inserted data
-        var currentUserId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        // Accept userId parameter or use default test user
+        var currentUserId = string.IsNullOrEmpty(userId) 
+            ? Guid.Parse("00000000-0000-0000-0000-000000000001")
+            : Guid.Parse(userId);
         var pageIndex = input?.PageIndex ?? 1;
         var pageSize = input?.PageSize ?? 10;
         
