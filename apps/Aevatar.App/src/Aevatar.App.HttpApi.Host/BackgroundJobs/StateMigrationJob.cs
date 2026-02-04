@@ -689,6 +689,29 @@ public class StateMigrationJob
     }
 
     /// <summary>
+    /// Map short collection name to full collection name from FixedCollections
+    /// </summary>
+    private string MapToFullCollectionName(string shortName)
+    {
+        // Try to find matching collection in FixedCollections
+        if (_options.FixedCollections != null)
+        {
+            var matchingCollection = _options.FixedCollections
+                .FirstOrDefault(c => c.EndsWith($".{shortName}") || c.EndsWith(shortName));
+            
+            if (!string.IsNullOrEmpty(matchingCollection))
+            {
+                _logger.LogDebug("[StateMigration] Mapped '{ShortName}' to '{FullName}'", shortName, matchingCollection);
+                return matchingCollection;
+            }
+        }
+        
+        // Fallback: return as-is
+        _logger.LogDebug("[StateMigration] No mapping found for '{ShortName}', using as-is", shortName);
+        return shortName;
+    }
+
+    /// <summary>
     /// Bulk write states to MongoDB using BulkWrite for better performance
     /// </summary>
     private async Task<(int SuccessCount, int FailedCount)> BulkWriteStateAsync(
@@ -1346,10 +1369,26 @@ public class StateMigrationJob
     {
         try
         {
-            // Build URL to fetch single record
+            // Map short name to full collection name from FixedCollections
+            var fullCollectionName = MapToFullCollectionName(collectionTypeName);
+            
+            // Extract the type namespace from full collection name 
+            // e.g., "StreamgodgptprodAevatar.Application.Grains.Invitation.InvitationGAgent" 
+            //    -> "Aevatar.Application.Grains.Invitation.InvitationGAgent"
+            var typeNamespace = fullCollectionName;
+            if (fullCollectionName.StartsWith("Streamgodgptprod"))
+                typeNamespace = fullCollectionName.Substring("Streamgodgptprod".Length);
+            else if (fullCollectionName.StartsWith("Orleansgodgptprod"))
+                typeNamespace = fullCollectionName.Substring("Orleansgodgptprod".Length);
+            
+            // Build full ID format: "TypeNamespace/GuidWithoutHyphens"
+            var normalizedId = recordId.Replace("-", "");
+            var fullId = $"{typeNamespace}/{normalizedId}";
+            
+            // Build URL with id parameter
             var url = $"{_options.OldSystemApiBaseUrl}/api/admin/export/grain" +
-                $"?collection={Uri.EscapeDataString(collectionTypeName)}" +
-                $"&id={Uri.EscapeDataString(recordId)}";
+                $"?collection={Uri.EscapeDataString(fullCollectionName)}" +
+                $"&id={Uri.EscapeDataString(fullId)}";
 
             _logger.LogInformation("[StateMigration] Fetching single record: {Url}", url);
 
@@ -1375,7 +1414,16 @@ public class StateMigrationJob
                     var records = JsonSerializer.Deserialize<List<ExportedRecord>>(
                         recordsElement.GetRawText(),
                         new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                    return records?.FirstOrDefault();
+                    
+                    var record = records?.FirstOrDefault();
+                    if (record != null)
+                    {
+                        _logger.LogInformation("[StateMigration] Found record: {Id}", record.Id);
+                        return record;
+                    }
+                    
+                    _logger.LogWarning("[StateMigration] No record found for {RecordId}", recordId);
+                    return null;
                 }
                 
                 // Fallback: data is directly an array
