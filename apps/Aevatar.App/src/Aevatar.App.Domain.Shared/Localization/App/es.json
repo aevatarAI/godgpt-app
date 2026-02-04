@@ -51,6 +51,8 @@
 
     "Permission:PushNotificationManagement": "Gestión de Notificaciones Push",
     "Permission:PushNotificationManagement.Default": "Acceder a Notificaciones Push",
-    "Permission:PushNotificationManagement.SendByTimezone": "Enviar Push por Zona Horaria"
+    "Permission:PushNotificationManagement.SendByTimezone": "Enviar Push por Zona Horaria",
+    "ShowAll": "Mostrar todo",
+    "Collapse": "Colapsar"
   }
 }
