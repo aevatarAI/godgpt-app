@@ -465,11 +465,11 @@ public class UserBillingStateConverter : IStateConverter
         if (el.ValueKind != JsonValueKind.Number)
             return 0;
             
+        // Original data stores amounts in dollars/yuan, convert to cents
+        // Always multiply by 100 to convert to smallest currency unit
         if (el.TryGetDouble(out var d))
         {
-            if (Math.Abs(d - Math.Floor(d)) > 0.0001 || d < 100)
-                return (long)Math.Round(d * 100);
-            return (long)d;
+            return (long)Math.Round(d * 100);
         }
         return 0;
     }

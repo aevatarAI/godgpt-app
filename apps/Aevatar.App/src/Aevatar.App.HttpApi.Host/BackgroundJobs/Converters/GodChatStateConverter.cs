@@ -20,8 +20,7 @@ public class GodChatStateConverter : IStateConverter
         var newState = new GodChatStateProto();
 
         // ChatHistory: List<ChatMessage> -> repeated ChatMessageProto
-        // Note: Old system ChatRole may be serialized as empty object {} due to Orleans enum serialization
-        // We infer ChatRole from message index: even index = User (0), odd index = Assistant (1)
+        // Direct mapping from old system integer values
         if (oldState.TryGetValue("ChatHistory", out var chatHistoryObj) && chatHistoryObj != null)
         {
             var chatList = ConvertToList(chatHistoryObj);
@@ -148,26 +147,10 @@ public class GodChatStateConverter : IStateConverter
             }
         }
 
-        // Handle ChatRole: Orleans may serialize enum as empty object {}
-        // Try to get actual value first, if empty/zero, infer from message index
-        // ChatRole enum: User = 0, Assistant = 1
+        // Handle ChatRole: direct mapping from integer value
         if (dict.TryGetValue("ChatRole", out var chatRoleObj))
         {
-            var chatRoleValue = ConvertToChatRole(chatRoleObj);
-            if (chatRoleValue >= 0)
-            {
-                message.ChatRole = chatRoleValue;
-            }
-            else
-            {
-                // Infer from index: even = User (0), odd = Assistant (1)
-                message.ChatRole = messageIndex % 2;
-            }
-        }
-        else
-        {
-            // No ChatRole field, infer from index
-            message.ChatRole = messageIndex % 2;
+            message.ChatRole = ConvertToInt32(chatRoleObj);
         }
 
         if (dict.TryGetValue("ImageKeys", out var imageKeysObj) && imageKeysObj != null)
@@ -181,65 +164,6 @@ public class GodChatStateConverter : IStateConverter
         }
 
         return message;
-    }
-
-    /// <summary>
-    /// Convert ChatRole value, handling Orleans enum serialization quirks.
-    /// Returns -1 if value cannot be determined (empty object, null, etc.)
-    /// </summary>
-    private int ConvertToChatRole(object? obj)
-    {
-        if (obj == null) return -1;
-        
-        // Direct int value
-        if (obj is int i) return i;
-        if (obj is long l) return (int)l;
-        
-        // JsonElement handling
-        if (obj is JsonElement je)
-        {
-            // Number value
-            if (je.ValueKind == JsonValueKind.Number) 
-                return je.GetInt32();
-            
-            // String value (enum name like "User", "Assistant")
-            if (je.ValueKind == JsonValueKind.String)
-            {
-                var str = je.GetString();
-                return str?.ToLowerInvariant() switch
-                {
-                    "user" => 0,
-                    "assistant" => 1,
-                    "system" => 2,
-                    "tool" => 3,
-                    _ => int.TryParse(str, out var parsed) ? parsed : -1
-                };
-            }
-            
-            // Empty object {} - Orleans enum serialization quirk
-            if (je.ValueKind == JsonValueKind.Object)
-            {
-                // Check if it has a value property or is truly empty
-                if (je.TryGetProperty("value__", out var valueProp))
-                    return valueProp.GetInt32();
-                // Empty object means unknown, return -1 to trigger inference
-                return -1;
-            }
-        }
-        
-        // Try parse string
-        var strValue = obj.ToString();
-        if (string.IsNullOrEmpty(strValue) || strValue == "{}")
-            return -1;
-        
-        return strValue.ToLowerInvariant() switch
-        {
-            "user" => 0,
-            "assistant" => 1,
-            "system" => 2,
-            "tool" => 3,
-            _ => int.TryParse(strValue, out var result) ? result : -1
-        };
     }
 
     private UserProfileProto? ConvertUserProfile(object? obj)
