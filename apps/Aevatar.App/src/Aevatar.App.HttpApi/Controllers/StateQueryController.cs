@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
+using Aevatar.App.Permissions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Volo.Abp.AspNetCore.Mvc;
@@ -33,6 +35,7 @@ public class StateQueryController : AbpControllerBase
     /// <param name="agentId">Agent ID</param>
     /// <returns>Agent state</returns>
     [HttpGet("{agentType}/{agentId}")]
+    [Authorize(Policy = AppPermissions.CqrsManagement.States)]
     public async Task<ActionResult<StateQueryResponseDto>> GetById(
         [FromRoute] string agentType,
         [FromRoute] string agentId)
@@ -62,6 +65,7 @@ public class StateQueryController : AbpControllerBase
     /// <param name="request">Query request</param>
     /// <returns>Paged state results</returns>
     [HttpPost("query")]
+    [Authorize(Policy = AppPermissions.CqrsManagement.States)]
     public async Task<ActionResult<PagedStateQueryResponseDto>> Query([FromBody] StateQueryRequestDto request)
     {
         _logger.LogInformation(
@@ -87,6 +91,7 @@ public class StateQueryController : AbpControllerBase
     /// <param name="queryString">Optional Lucene query string</param>
     /// <returns>Count of matching states</returns>
     [HttpGet("{agentType}/count")]
+    [Authorize(Policy = AppPermissions.CqrsManagement.States)]
     public async Task<ActionResult<StateCountResponseDto>> Count(
         [FromRoute] string agentType,
         [FromQuery] string? queryString = null)
