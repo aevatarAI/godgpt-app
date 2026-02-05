@@ -518,9 +518,16 @@ public class UserBillingStateConverter : IStateConverter
 
         if (obj is JsonElement je && je.ValueKind == JsonValueKind.Object)
         {
-            // PaymentId (required)
+            // PaymentId (required) - try multiple field names
+            // Old data uses PaymentGrainId which references PaymentRecordGAgent
             if (je.TryGetProperty("PaymentId", out var paymentIdEl) || je.TryGetProperty("paymentId", out paymentIdEl))
                 subscription.PaymentId = ConvertToString(paymentIdEl);
+            else if (je.TryGetProperty("PaymentGrainId", out var grainIdEl))
+            {
+                var grainId = ConvertToString(grainIdEl);
+                if (Guid.TryParse(grainId, out var guid))
+                    subscription.PaymentId = guid.ToString("D");
+            }
             else if (je.TryGetProperty("Id", out var idEl) || je.TryGetProperty("id", out idEl))
                 subscription.PaymentId = ConvertToString(idEl);
 
@@ -552,13 +559,42 @@ public class UserBillingStateConverter : IStateConverter
             else
                 subscription.Currency = "USD"; // Default
 
-            // Period end
+            // Period end - try multiple sources with fallback to InvoiceDetails
+            DateTime? periodEnd = null;
+            
+            // 1. Try PeriodEnd field
             if (je.TryGetProperty("PeriodEnd", out var periodEndEl) || je.TryGetProperty("periodEnd", out periodEndEl))
             {
-                var dt = ConvertToDateTime(periodEndEl);
-                if (dt.HasValue)
-                    subscription.PeriodEnd = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
+                periodEnd = ConvertToDateTime(periodEndEl);
+                if (periodEnd.HasValue && periodEnd.Value.Year <= 1) periodEnd = null;
             }
+            
+            // 2. Try SubscriptionEndDate field
+            if (periodEnd == null && (je.TryGetProperty("SubscriptionEndDate", out var subEndEl) || je.TryGetProperty("subscriptionEndDate", out subEndEl)))
+            {
+                periodEnd = ConvertToDateTime(subEndEl);
+                if (periodEnd.HasValue && periodEnd.Value.Year <= 1) periodEnd = null;
+            }
+            
+            // 3. Fallback to InvoiceDetails[0].SubscriptionEndDate if still null
+            if (periodEnd == null && je.TryGetProperty("InvoiceDetails", out var invoicesEl) && invoicesEl.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var inv in invoicesEl.EnumerateArray())
+                {
+                    if (inv.ValueKind == JsonValueKind.Object && inv.TryGetProperty("SubscriptionEndDate", out var invEndEl))
+                    {
+                        var invEnd = ConvertToDateTime(invEndEl);
+                        if (invEnd.HasValue && invEnd.Value.Year > 1)
+                        {
+                            periodEnd = invEnd;
+                            break;
+                        }
+                    }
+                }
+            }
+            
+            if (periodEnd.HasValue)
+                subscription.PeriodEnd = Timestamp.FromDateTime(periodEnd.Value.ToUniversalTime());
 
             // Created at
             if (je.TryGetProperty("CreatedAt", out var createdAtEl) || je.TryGetProperty("createdAt", out createdAtEl))
