@@ -40,6 +40,9 @@ public class VoiceSynthesisGAgent : GAgentBase<VoiceSynthesisStateProto>, IVoice
     [EventHandler]
     public async Task HandleVoiceSynthesisJobAsync(VoiceSynthesisJobProto job)
     {
+        Logger.LogInformation("[VoiceSynthesisGAgent] Received job - StreamId={StreamId}, ChatId={ChatId}, TextDelta={TextDeltaLen}, TextIsLast={TextIsLast}, VoiceLanguage={VoiceLanguage}",
+            job.StreamId, job.ChatId, job.TextDelta?.Length ?? 0, job.TextIsLast, job.VoiceLanguage);
+        
         var speechService = ServiceProvider.GetService<ISpeechService>();
         if (speechService == null)
         {
@@ -191,6 +194,9 @@ public class VoiceSynthesisGAgent : GAgentBase<VoiceSynthesisStateProto>, IVoice
 
     private async Task PublishAudioAsync(VoiceSynthesisJobProto job, AudioChunkProto audio)
     {
+        Logger.LogInformation("[VoiceSynthesisGAgent] PublishAudio - StreamId={StreamId}, ChatId={ChatId}, AudioDataLen={AudioDataLen}, AudioChunkId={AudioChunkId}, IsLast={IsLast}",
+            job.StreamId, job.ChatId, audio.AudioData?.Length ?? 0, audio.AudioChunkId, audio.IsLast);
+        
         var envelope = new GodChatStreamEnvelopeProto
         {
             StreamId = job.StreamId,

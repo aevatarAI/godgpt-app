@@ -648,8 +648,8 @@ public class AIAgentStatusProxy :
     {
         // CRITICAL: If this is an HTTP request AND we have a StreamId, push directly to Kafka
         // This bypasses the parent (GodChatGAgent) callback queue, avoiding the Orleans Grain blocking issue
-        Logger.LogInformation("[AIAgentStatusProxy] SendStreamCallback - IsHttpRequest={IsHttpRequest}, StreamId={StreamId}, SerialNumber={SerialNumber}",
-            isHttpRequest, streamId ?? "null", content?.SerialNumber ?? 0);
+        Logger.LogInformation("[AIAgentStatusProxy] SendStreamCallback - IsHttpRequest={IsHttpRequest}, StreamId={StreamId}, SerialNumber={SerialNumber}, IsVoiceChat={IsVoiceChat}, VoiceLanguage={VoiceLanguage}",
+            isHttpRequest, streamId ?? "null", content?.SerialNumber ?? 0, isVoiceChat, voiceLanguage);
             
         if (isHttpRequest && !string.IsNullOrEmpty(streamId))
         {
@@ -657,6 +657,8 @@ public class AIAgentStatusProxy :
             // IMPORTANT: do NOT feed aggregated persistence message to TTS (it would duplicate audio).
             if (isVoiceChat)
             {
+                Logger.LogInformation("[AIAgentStatusProxy] Dispatching VoiceSynthesis job - StreamId={StreamId}, ContentLen={ContentLen}, IsLastChunk={IsLastChunk}, IsAggregation={IsAggregation}",
+                    streamId, content?.Content?.Length ?? 0, content?.IsLastChunk ?? false, content?.IsAggregationMsg ?? false);
                 _ = DispatchVoiceSynthesisJobAsync(context, errorEnum, content, streamId, voiceLanguage);
             }
 
