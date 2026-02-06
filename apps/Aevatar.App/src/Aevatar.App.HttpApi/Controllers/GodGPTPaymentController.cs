@@ -386,15 +386,9 @@ public class GodGPTPaymentController : AevatarController
                     }
                 }
                 
+                // Filter out all Processing status records (matches old code behavior)
                 var result = expandedItems
-                    .Where(dto => 
-                    {
-                        // Keep all non-Processing records
-                        if (dto.Status != (int)PaymentStatus.Processing)
-                            return true;
-                        // For Processing, keep if recent (< 1 day)
-                        return dto.CreatedAtRaw > oneDayAgo;
-                    })
+                    .Where(dto => dto.Status != (int)PaymentStatus.Processing)
                     .OrderByDescending(dto => dto.CreatedAtRaw)
                     .Skip((pageIndex - 1) * pageSize)
                     .Take(pageSize)
@@ -416,16 +410,19 @@ public class GodGPTPaymentController : AevatarController
         // Fallback to basic PaymentService
         var history = await _paymentService.GetPaymentHistoryAsync(currentUserId, pageIndex, pageSize);
         
-        var fallbackResult = history.Select(h => new PaymentSummaryDto
-        {
-            PaymentGrainId = Guid.TryParse(h.PaymentId, out var id) ? id : Guid.Empty,
-            Amount = h.Amount,
-            Currency = h.Currency,
-            Status = (int)h.Status,
-            Platform = (int)h.Platform,
-            CreatedAtRaw = h.CreatedAt,
-            CompletedAtRaw = h.CompletedAt
-        }).ToList();
+        // Filter out Processing status records (matches old code behavior)
+        var fallbackResult = history
+            .Where(h => h.Status != PaymentStatus.Processing)
+            .Select(h => new PaymentSummaryDto
+            {
+                PaymentGrainId = Guid.TryParse(h.PaymentId, out var id) ? id : Guid.Empty,
+                Amount = h.Amount,
+                Currency = h.Currency,
+                Status = (int)h.Status,
+                Platform = (int)h.Platform,
+                CreatedAtRaw = h.CreatedAt,
+                CompletedAtRaw = h.CompletedAt
+            }).ToList();
         
         _logger.LogDebug("[GodGPTPaymentController][GetPaymentHistoryAsync] userId: {UserId}, duration: {Duration}ms",
             currentUserId, stopwatch.ElapsedMilliseconds);
