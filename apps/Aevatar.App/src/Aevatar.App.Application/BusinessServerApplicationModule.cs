@@ -1,6 +1,7 @@
 using Aevatar.App.Application.Services;
 using Aevatar.App.Application.Services.Payment;
 using Aevatar.App.Application.Services.Push;
+using Aevatar.Payment.Abstractions;
 using Aevatar.App.Application.Contracts.Services;
 using Aevatar.App.Application.Contracts.Services.Push;
 using Aevatar.Application.Grains;
@@ -56,6 +57,9 @@ public class AppApplicationModule : AbpModule
         
         // Register GodGPTPaymentBusinessService (handles Stripe operations in HttpApi layer)
         context.Services.AddScoped<IGodGPTPaymentBusinessService, GodGPTPaymentBusinessService>();
+        
+        // Register payment event pre-handler (ensures agent links exist before events are broadcast)
+        context.Services.AddScoped<IPaymentEventPreHandler, GodGPTPaymentEventPreHandler>();
         
         var configuration = context.Services.GetConfiguration();
         // Push Notification Services
