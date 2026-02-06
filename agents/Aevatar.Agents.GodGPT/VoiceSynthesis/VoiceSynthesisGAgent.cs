@@ -88,9 +88,11 @@ public class VoiceSynthesisGAgent : GAgentBase<VoiceSynthesisStateProto>, IVoice
                 emittedAny = true;
             }
 
-            // NOTE: AllCompleted is now sent by AIAgentStatusProxy (unified completion signal)
-            // VoiceSynthesisGAgent only sends AudioChunks - audio is a "best effort" enhancement
-            // This avoids distributed coordination issues and ensures SSE closes reliably
+            // Send AllCompleted after all audio chunks are done
+            // AIAgentStatusProxy sends TextCompleted for voice chat; we own the final AllCompleted
+            Logger.LogInformation("[VoiceSynthesisGAgent] All audio done, sending AllCompleted - StreamId={StreamId}, ChatId={ChatId}, SentencesEmitted={SentencesEmitted}",
+                job.StreamId, job.ChatId, streamState.NextSentenceIndex);
+            await PublishControlAsync(job, ControlProto.Types.ControlType.AllCompleted, "all", "", 0);
 
             // Cleanup state to avoid unbounded growth
             State.Streams.Remove(job.StreamId);
