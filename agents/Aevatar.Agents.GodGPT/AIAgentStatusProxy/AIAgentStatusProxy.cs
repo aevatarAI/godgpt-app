@@ -849,16 +849,32 @@ public class AIAgentStatusProxy :
                     streamEnvelope.Seq = seq;
                 }
                 
-                // Unified completion signal: Always send AllCompleted
-                // Voice synthesis (VoiceSynthesisGAgent) sends AudioChunks independently
-                // This ensures SSE closes reliably without distributed coordination
-                streamEnvelope.Control = new ControlProto
+                // For voice chat: send TextCompleted instead of AllCompleted
+                // VoiceSynthesisGAgent will send AllCompleted after the last audio chunk
+                // This prevents SSE from closing before all audio chunks are delivered
+                if (isVoiceChat)
                 {
-                    Type = ControlProto.Types.ControlType.AllCompleted,
-                    Scope = "all",
-                    Message = "",
-                    ErrorCode = 0
-                };
+                    streamEnvelope.Control = new ControlProto
+                    {
+                        Type = ControlProto.Types.ControlType.TextCompleted,
+                        Scope = "text",
+                        Message = "",
+                        ErrorCode = 0
+                    };
+                    Logger.LogInformation("[AIAgentStatusProxy] Voice chat: sent TextCompleted (not AllCompleted) - StreamId={StreamId}, ChatId={ChatId}",
+                        streamId, context?.ChatId ?? "null");
+                }
+                else
+                {
+                    // Text chat: send AllCompleted to close SSE immediately
+                    streamEnvelope.Control = new ControlProto
+                    {
+                        Type = ControlProto.Types.ControlType.AllCompleted,
+                        Scope = "all",
+                        Message = "",
+                        ErrorCode = 0
+                    };
+                }
             }
             else
             {
