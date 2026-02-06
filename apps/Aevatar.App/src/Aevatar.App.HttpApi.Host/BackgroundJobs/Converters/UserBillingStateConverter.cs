@@ -596,6 +596,21 @@ public class UserBillingStateConverter : IStateConverter
             if (periodEnd.HasValue)
                 subscription.PeriodEnd = Timestamp.FromDateTime(periodEnd.Value.ToUniversalTime());
 
+            // Status - preserve original status (e.g., 8 = Cancelled)
+            // Processing (2) with no valid PeriodEnd → mark as Expired (12)
+            // These are abandoned/incomplete payment sessions, not real subscriptions
+            if (je.TryGetProperty("Status", out var statusEl))
+            {
+                var rawStatus = ConvertToInt32(statusEl);
+                subscription.Status = (rawStatus == 2 && subscription.PeriodEnd == null)
+                    ? 12 // Expired - incomplete payment, never activated
+                    : rawStatus;
+            }
+
+            // SubscriptionId - for platform subscription lookup
+            if (je.TryGetProperty("SubscriptionId", out var subscriptionIdEl))
+                subscription.SubscriptionId = ConvertToString(subscriptionIdEl);
+
             // Created at
             if (je.TryGetProperty("CreatedAt", out var createdAtEl) || je.TryGetProperty("createdAt", out createdAtEl))
             {

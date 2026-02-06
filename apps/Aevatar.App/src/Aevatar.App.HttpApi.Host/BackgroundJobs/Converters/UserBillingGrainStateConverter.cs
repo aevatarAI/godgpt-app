@@ -197,6 +197,21 @@ public class UserBillingGrainStateConverter : IStateConverter
                     subscription.CreatedAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
             }
 
+            // Status - preserve original status (e.g., 8 = Cancelled)
+            // Processing (2) with no valid PeriodEnd → mark as Expired (12)
+            // These are abandoned/incomplete payment sessions, not real subscriptions
+            if (je.TryGetProperty("Status", out var statusEl2))
+            {
+                var rawStatus = ConvertToInt32(statusEl2);
+                subscription.Status = (rawStatus == 2 && subscription.PeriodEnd == null)
+                    ? 12 // Expired - incomplete payment, never activated
+                    : rawStatus;
+            }
+
+            // SubscriptionId - for platform subscription lookup
+            if (je.TryGetProperty("SubscriptionId", out var subscriptionIdEl))
+                subscription.SubscriptionId = ConvertToString(subscriptionIdEl);
+
             // Business type - default to "godgpt"
             subscription.BusinessType = "godgpt";
         }
