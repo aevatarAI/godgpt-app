@@ -98,7 +98,24 @@ public class SseStreamHandler
                     return;
                 }
 
+                // Log payload type for voice chat debugging
+                _logger.LogInformation(
+                    "[ChatMiddleware][{Handler}] Received payload: PayloadCase={PayloadCase}, SessionId={SessionId}, ChatId={ChatId}, Seq={Seq}",
+                    _handlerName, streamProto.PayloadCase, _sessionId, _chatId, streamProto.Seq);
+
                 var httpResponse = ChatMiddlewareHelper.MapEnvelopeToHttpResponse(streamProto);
+                
+                // Log audio data presence for voice chat debugging
+                if (streamProto.PayloadCase == GodChatStreamEnvelopeProto.PayloadOneofCase.Audio)
+                {
+                    _logger.LogInformation(
+                        "[ChatMiddleware][{Handler}] Audio chunk received: AudioDataLen={AudioDataLen}, HasMetadataJson={HasMetadataJson}, HttpResponseAudioDataLen={HttpAudioLen}, HasHttpMetadata={HasHttpMeta}",
+                        _handlerName, 
+                        streamProto.Audio?.AudioData?.Length ?? 0,
+                        !string.IsNullOrEmpty(streamProto.Audio?.AudioMetadataJson),
+                        httpResponse.AudioData?.Length ?? 0,
+                        httpResponse.AudioMetadata != null);
+                }
 
                 if (_clientDisconnected || _cancellationToken.IsCancellationRequested)
                 {
