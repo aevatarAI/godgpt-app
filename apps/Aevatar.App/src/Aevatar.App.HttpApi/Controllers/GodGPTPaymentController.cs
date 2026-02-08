@@ -1,4 +1,5 @@
 using Aevatar.App.HttpApi.Controllers;
+using Aevatar.App.Services.Subscription;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -43,6 +44,7 @@ public class GodGPTPaymentController : AevatarController
     private readonly IPaymentService _paymentService;
     private readonly IStateIndexService? _stateIndexService;
     private readonly IGAgentActorFactory? _actorFactory;
+    private readonly ISubscriptionProductService? _subscriptionProductService;
     private readonly Dictionary<string, int> _productPlanTypes; // productId/priceId -> PlanType
     private readonly Dictionary<string, bool> _productIsUltimate; // productId/priceId -> IsUltimate
 
@@ -53,13 +55,15 @@ public class GodGPTPaymentController : AevatarController
         IOptions<ApplePayOptions>? appleOptions = null,
         IOptions<GooglePlayOptions>? googleOptions = null,
         IStateIndexService? stateIndexService = null,
-        IGAgentActorFactory? actorFactory = null)
+        IGAgentActorFactory? actorFactory = null,
+        ISubscriptionProductService? subscriptionProductService = null)
     {
         _logger = logger;
         _paymentService = paymentService;
         _stateIndexService = stateIndexService;
         _actorFactory = actorFactory;
-        
+        _subscriptionProductService = subscriptionProductService;
+
         // Build unified product -> PlanType lookup from all platforms
         _productPlanTypes = BuildProductPlanTypeLookup(
             stripeOptions?.Value.Products,
@@ -1191,6 +1195,32 @@ public class GodGPTPaymentController : AevatarController
     #region Subscription Upgrade Validation
 
     /// <summary>
+    /// Gets target product PlanType and IsUltimate: first from config (_productPlanTypes / _productIsUltimate),
+    /// then from ISubscriptionProductService.GetProductByPlatformPriceIdAsync when not in config.
+    /// </summary>
+    /// <param name="productId">Product or price ID (e.g. Stripe price_xxx)</param>
+    /// <returns>PlanType (legacy int) and IsUltimate, or null if not found</returns>
+    private async Task<(int PlanTypeInt, bool IsUltimate)?> GetTargetProductPlanInfoAsync(string productId)
+    {
+        if (_productPlanTypes.TryGetValue(productId, out var planTypeInt))
+            return (planTypeInt, _productIsUltimate.GetValueOrDefault(productId, false));
+
+        if (_subscriptionProductService != null)
+        {
+            var product = await _subscriptionProductService.GetProductByPlatformPriceIdAsync(productId);
+            if (product != null)
+            {
+                _logger.LogDebug(
+                    "[GodGPTPaymentController][GetTargetProductPlanInfo] Resolved product from service: ProductId={ProductId}, PlanType={PlanType}, IsUltimate={IsUltimate}",
+                    productId, (int)product.PlanType, product.IsUltimate);
+                return ((int)product.PlanType, product.IsUltimate);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Validates if the upgrade path is allowed before creating a subscription.
     /// Prevents downgrade purchases (e.g., Year user buying Month plan).
     /// </summary>
@@ -1208,18 +1238,19 @@ public class GodGPTPaymentController : AevatarController
             return (true, null);
         }
 
-        // Get target product configuration
-        if (!_productPlanTypes.TryGetValue(productId, out var targetPlanTypeInt))
+        // Get target product PlanType and IsUltimate (config first, then ISubscriptionProductService)
+        var planInfo = await GetTargetProductPlanInfoAsync(productId);
+        if (planInfo == null)
         {
             _logger.LogWarning(
-                "[GodGPTPaymentController][ValidateSubscriptionUpgradePath] ProductId {ProductId} not found in configuration",
+                "[GodGPTPaymentController][ValidateSubscriptionUpgradePath] ProductId {ProductId} not found in configuration or subscription product service",
                 productId);
             // Allow purchase if product not found (configuration issue, not user error)
             return (true, null);
         }
 
-        var targetPlanType = (QuotaPlanType)targetPlanTypeInt;
-        var targetIsUltimate = _productIsUltimate.GetValueOrDefault(productId, false);
+        var targetPlanType = (QuotaPlanType)planInfo.Value.PlanTypeInt;
+        var targetIsUltimate = planInfo.Value.IsUltimate;
 
         try
         {

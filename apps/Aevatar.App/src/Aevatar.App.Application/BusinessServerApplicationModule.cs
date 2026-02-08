@@ -2,11 +2,13 @@ using Aevatar.App.Application.Services;
 using Aevatar.App.Application.Services.Payment;
 using Aevatar.App.Application.Services.Push;
 using Aevatar.App.Application.Contracts.Services;
+using Aevatar.App.Services.Payment;
 using Aevatar.App.Services.Subscription;
 using Aevatar.App.Services.Subscription.Options;
 using Aevatar.App.Services.Subscription.Providers;
 using Aevatar.App.Application.Contracts.Services.Push;
 using Aevatar.Application.Grains;
+using Aevatar.Payment.Abstractions;
 using Microsoft.Extensions.DependencyInjection;
 using Volo.Abp.PermissionManagement;
 using Volo.Abp.SettingManagement;
@@ -80,5 +82,8 @@ public class AppApplicationModule : AbpModule
         context.Services.AddHttpClient<IFirebaseMessagingClient, FirebaseMessagingClient>();
         context.Services.AddScoped<IUserDeviceService, UserDeviceService>();
         context.Services.AddScoped<IPushNotificationService, PushNotificationService>();
+        
+        // Override Payment module's default NullProductDataSource with GAgent-based implementation
+        context.Services.AddScoped<IProductDataSource, GAgentProductDataSource>();
     }
 }

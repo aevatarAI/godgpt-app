@@ -12,18 +12,21 @@ public class GooglePlayProvider : IPaymentProvider
     private readonly ILogger<GooglePlayProvider> _logger;
     private readonly GooglePlayOptions _options;
     private readonly HttpClient _httpClient;
+    private readonly IProductDataSource _productDataSource;
 
     public PaymentPlatform Platform => PaymentPlatform.GooglePlay;
 
     public GooglePlayProvider(
         ILogger<GooglePlayProvider> logger,
         IOptions<GooglePlayOptions> options,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IProductDataSource productDataSource)
     {
         _logger = logger;
         _options = options?.Value ?? throw new InvalidOperationException(
             $"GooglePlayOptions not configured. Ensure '{GooglePlayOptions.SectionName}' section exists in appsettings.json");
         _httpClient = httpClientFactory.CreateClient("GooglePlay");
+        _productDataSource = productDataSource;
         
         // Log configuration status (similar to StripeProvider)
         _logger.LogDebug(
@@ -40,11 +43,26 @@ public class GooglePlayProvider : IPaymentProvider
         }
     }
 
-    public Task<List<ProductDto>> GetProductsAsync(CancellationToken ct = default)
+    public async Task<List<ProductDto>> GetProductsAsync(CancellationToken ct = default)
+    {
+        var products = await _productDataSource.GetProductsAsync(PaymentPlatform.GooglePlay, null, ct);
+        if (products.Any())
+        {
+            _logger.LogDebug("[GooglePlayProvider] Retrieved {Count} products from data source", products.Count);
+        }
+
+        var productsFromConfiguration = GetProductsFromConfiguration();
+        _logger.LogDebug("[GooglePlayProvider] Retrieved {Count} products from configuration", productsFromConfiguration.Count);
+        
+        products.AddRange(GetProductsFromConfiguration());
+        return products;
+    }
+
+    private List<ProductDto> GetProductsFromConfiguration()
     {
         // Google Play products are configured in Play Console
         // Return configured products from options with originalPlanType metadata
-        return Task.FromResult(_options.Products.Select(p => 
+        return _options.Products.Select(p => 
         {
             var billingCycle = p.GetBillingCycle();
             return new ProductDto
@@ -64,7 +82,7 @@ public class GooglePlayProvider : IPaymentProvider
                     ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, billingCycle)
                 }
             };
-        }).ToList());
+        }).ToList();
     }
 
     private static string CalculateDailyAvgPrice(decimal amount, BillingCycle cycle)
@@ -83,22 +101,34 @@ public class GooglePlayProvider : IPaymentProvider
 
     /// <summary>
     /// Calculate real subscription end date based on product's PlanType.
-    /// This matches old code behavior - Google Play Sandbox may have short periods.
+    /// Tries config first, then IProductDataSource (e.g. Agent) when not in config.
+    /// Google Play Sandbox may have short periods, production returns real dates.
     /// </summary>
-    private DateTime? CalculatePeriodEndFromProduct(string? productId)
+    private async Task<DateTime?> CalculatePeriodEndFromProductAsync(string? productId, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(productId))
             return null;
-        
-        var product = _options.Products.FirstOrDefault(p => p.ProductId == productId);
-        if (product == null)
+
+        BillingCycle? billingCycle = null;
+
+        var configProduct = _options.Products.FirstOrDefault(p => p.ProductId == productId);
+        if (configProduct != null)
+            billingCycle = configProduct.GetBillingCycle();
+
+        if (!billingCycle.HasValue)
         {
-            _logger.LogWarning("[GooglePlayProvider] Product {ProductId} not found, using 30 days default", productId);
+            var productFromSource = await _productDataSource.GetProductByPlatformProductIdAsync(PaymentPlatform.GooglePlay, productId, ct);
+            if (productFromSource != null)
+                billingCycle = productFromSource.BillingCycle;
+        }
+
+        if (!billingCycle.HasValue)
+        {
+            _logger.LogWarning("[GooglePlayProvider] Product {ProductId} not found in config or data source, using 30 days default", productId);
             return DateTime.UtcNow.AddDays(30);
         }
-        
-        var billingCycle = product.GetBillingCycle();
-        var endDate = billingCycle switch
+
+        var endDate = billingCycle.Value switch
         {
             BillingCycle.Daily => DateTime.UtcNow.AddDays(1),
             BillingCycle.Weekly => DateTime.UtcNow.AddDays(7),
@@ -107,11 +137,11 @@ public class GooglePlayProvider : IPaymentProvider
             BillingCycle.Yearly => DateTime.UtcNow.AddDays(390), // Match old code: 390 days for yearly
             _ => DateTime.UtcNow.AddDays(30)
         };
-        
+
         _logger.LogInformation(
             "[GooglePlayProvider] Calculated PeriodEnd for {ProductId}: BillingCycle={Cycle}, EndDate={EndDate}",
-            productId, billingCycle, endDate);
-        
+            productId, billingCycle.Value, endDate);
+
         return endDate;
     }
 
@@ -355,8 +385,8 @@ public class GooglePlayProvider : IPaymentProvider
         public string? Currency { get; set; }
     }
 
-    public Task<WebhookResult> HandleWebhookAsync(
-        WebhookRequest request, 
+    public async Task<WebhookResult> HandleWebhookAsync(
+        WebhookRequest request,
         CancellationToken ct = default)
     {
         try
@@ -366,11 +396,11 @@ public class GooglePlayProvider : IPaymentProvider
             {
                 if (!ValidateRevenueCatHeaders(request.Headers))
                 {
-                    return Task.FromResult(new WebhookResult
+                    return new WebhookResult
                     {
                         Success = false,
                         ErrorMessage = "Invalid request headers"
-                    });
+                    };
                 }
             }
             else
@@ -384,12 +414,12 @@ public class GooglePlayProvider : IPaymentProvider
 
             if (!IsKeyBusinessEvent(webhookEvent))
             {
-                return Task.FromResult(new WebhookResult
+                return new WebhookResult
                 {
                     Success = true,
                     ShouldProcess = false,
                     EventType = webhookEvent.EventType
-                });
+                };
             }
 
             var result = new WebhookResult
@@ -474,18 +504,18 @@ public class GooglePlayProvider : IPaymentProvider
             // Calculate real PeriodEnd based on PlanType (not platform ExpiresDate)
             // Google Play Sandbox may have short periods, production returns real dates
             // This matches old code behavior
-            result.PeriodEnd = CalculatePeriodEndFromProduct(webhookEvent.ProductId);
+            result.PeriodEnd = await CalculatePeriodEndFromProductAsync(webhookEvent.ProductId, ct);
 
-            return Task.FromResult(result);
+            return result;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "[GooglePlayProvider] Webhook processing failed");
-            return Task.FromResult(new WebhookResult
+            return new WebhookResult
             {
                 Success = false,
                 ErrorMessage = ex.Message
-            });
+            };
         }
     }
 

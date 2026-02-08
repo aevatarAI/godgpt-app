@@ -19,6 +19,7 @@ using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using Shouldly;
 using Xunit;
+using Aevatar.App.Services.Subscription;
 using NewPaymentPlatform = Aevatar.Payment.Abstractions.PaymentPlatform;
 using PaymentStripeOptions = Aevatar.Payment.Providers.StripeOptions;
 using PaymentStripeProductConfig = Aevatar.Payment.Providers.StripeProductConfig;
@@ -38,6 +39,7 @@ public class InvitationServiceTests
     private readonly IGAgentActorFactory _mockActorFactory;
     private readonly ILogger<InvitationService> _mockLogger;
     private readonly IPaymentService _mockPaymentService;
+    private readonly ISubscriptionProductService _mockSubscriptionProductService;
     private readonly IOptionsMonitor<CreditsOptions> _mockCreditsOptions;
     private readonly IOptionsMonitor<PaymentStripeOptions> _mockStripeOptions;
     private readonly InvitationService _invitationService;
@@ -55,6 +57,7 @@ public class InvitationServiceTests
         _mockActorFactory = Substitute.For<IGAgentActorFactory>();
         _mockLogger = Substitute.For<ILogger<InvitationService>>();
         _mockPaymentService = Substitute.For<IPaymentService>();
+        _mockSubscriptionProductService = Substitute.For<ISubscriptionProductService>();
         _mockCreditsOptions = new TestOptionsMonitor<CreditsOptions>(new CreditsOptions
         {
             OperatorUserId = new List<string> { "test-operator-1" }
@@ -78,6 +81,7 @@ public class InvitationServiceTests
             _mockActorFactory,
             _mockLogger,
             _mockPaymentService,
+            _mockSubscriptionProductService,
             _mockCreditsOptions,
             _mockStripeOptions);
     }
