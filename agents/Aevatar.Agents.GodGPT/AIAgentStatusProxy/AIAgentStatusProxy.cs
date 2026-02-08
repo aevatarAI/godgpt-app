@@ -260,6 +260,12 @@ public class AIAgentStatusProxy :
                 RequestId = requestId
             };
 
+            // Inject selected history into ChatRequest for multi-turn conversation context
+            if (selectedHistory.Count > 0)
+            {
+                InjectHistoryIntoRequest(request, selectedHistory);
+            }
+
             if (promptSettings?.Temperature != null && double.TryParse(promptSettings.Temperature, out var temp))
             {
                 request.Temperature = (float)temp;
@@ -384,6 +390,14 @@ public class AIAgentStatusProxy :
                 Message = prompt,
                 RequestId = context?.ChatId ?? Guid.NewGuid().ToString()
             };
+
+            // Inject selected history into ChatRequest for multi-turn conversation context
+            if (selectedHistory.Count > 0)
+            {
+                InjectHistoryIntoRequest(request, selectedHistory);
+                Logger.LogInformation("[AIAgentStatusProxy] Injected {Count} history messages into ChatRequest - ChatId={ChatId}",
+                    selectedHistory.Count, context?.ChatId ?? "null");
+            }
 
             if (promptSettings?.Temperature != null && double.TryParse(promptSettings.Temperature, out var temp))
             {
@@ -1117,6 +1131,35 @@ public class AIAgentStatusProxy :
         catch (Exception ex)
         {
             Logger.LogError(ex, "[AIAgentStatusProxy] Failed to send aggregation persistence callback");
+        }
+    }
+
+    #endregion
+
+    #region History Conversion
+
+    /// <summary>
+    /// Convert legacy ChatMessage list to AevatarChatMessage list for ChatRequest.History.
+    /// Maps GodGPT ChatRole → AevatarChatRole (different enum values).
+    /// </summary>
+    private static void InjectHistoryIntoRequest(ChatRequest request, List<ChatMessage> selectedHistory)
+    {
+        foreach (var msg in selectedHistory)
+        {
+            var role = msg.ChatRole switch
+            {
+                Aevatar.GAgents.ChatAgent.Dtos.ChatRole.User => AevatarChatRole.User,
+                Aevatar.GAgents.ChatAgent.Dtos.ChatRole.Assistant => AevatarChatRole.Assistant,
+                Aevatar.GAgents.ChatAgent.Dtos.ChatRole.System => AevatarChatRole.System,
+                Aevatar.GAgents.ChatAgent.Dtos.ChatRole.Tool => AevatarChatRole.Tool,
+                _ => AevatarChatRole.User
+            };
+
+            request.History.Add(new AevatarChatMessage
+            {
+                Role = role,
+                Content = msg.Content ?? ""
+            });
         }
     }
 
