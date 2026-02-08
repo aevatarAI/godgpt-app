@@ -112,7 +112,7 @@ public class SubscriptionRequest
     public string? UiMode { get; set; }
     public string? CouponCode { get; set; }
     public int TrialDays { get; set; }
-    public string Referral { get; set; }
+    public string? Referral { get; set; }
 }
 
 /// <summary>

@@ -145,15 +145,25 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
 
         foreach (var sub in subscriptions.Subscriptions)
         {
-            _logger.LogDebug(
-                "[GodGPTPaymentBusinessService] Checking subscription: PaymentId={PaymentId}, Platform={Platform}, BusinessId={BusinessId}",
-                sub.PaymentId, sub.Platform, sub.BusinessId);
+            _logger.LogInformation(
+                "[GodGPTPaymentBusinessService] Checking subscription: PaymentId={PaymentId}, Platform={Platform}, BusinessId={BusinessId}, SubscriptionId={SubscriptionId}",
+                sub.PaymentId, sub.Platform, sub.BusinessId, sub.SubscriptionId);
             
-            // Skip the new subscription itself
-            if (sub.PaymentId.Contains(newSubscriptionId))
+            // Skip the new subscription itself (compare by SubscriptionId, not PaymentId)
+            // newSubscriptionId is the platform subscription ID (e.g., Apple's transaction ID or Stripe's sub_xxx)
+            if (!string.IsNullOrEmpty(sub.SubscriptionId) && sub.SubscriptionId == newSubscriptionId)
             {
-                _logger.LogDebug(
-                    "[GodGPTPaymentBusinessService] Skipping new subscription: {PaymentId}",
+                _logger.LogInformation(
+                    "[GodGPTPaymentBusinessService] Skipping new subscription (same SubscriptionId): {PaymentId}",
+                    sub.PaymentId);
+                continue;
+            }
+            
+            // Also skip if PaymentId contains the newSubscriptionId (backward compatibility)
+            if (!string.IsNullOrEmpty(newSubscriptionId) && sub.PaymentId.Contains(newSubscriptionId))
+            {
+                _logger.LogInformation(
+                    "[GodGPTPaymentBusinessService] Skipping new subscription (PaymentId contains): {PaymentId}",
                     sub.PaymentId);
                 continue;
             }

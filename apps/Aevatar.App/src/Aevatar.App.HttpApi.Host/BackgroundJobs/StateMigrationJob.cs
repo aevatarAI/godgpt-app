@@ -3,11 +3,20 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.CQRS;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Agents.GodGPT.Protos.UserStatistics;
 using Aevatar.Agents.GodGPT.Protos.Anonymous;
+using Aevatar.App.Application.Services;
+using Aevatar.Application.Grains.Agents.ChatManager;
+using Aevatar.Application.Grains.Agents.Invitation;
+using Aevatar.Application.Grains.UserQuota;
+using Aevatar.Payment.Agents;
 using Aevatar.App.HttpApi.Host.BackgroundJobs.Converters;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -31,6 +40,9 @@ public class StateMigrationJob
     private readonly ILogger<StateMigrationJob> _logger;
     private readonly StateMigrationOptions _options;
     private readonly string _databaseName;
+    private readonly IStateIndexService? _stateIndexService;
+    private readonly IInvitationService? _invitationService;
+    private readonly IGAgentActorFactory? _actorFactory;
     private string? _cachedToken;
 
     public StateMigrationJob(
@@ -38,13 +50,19 @@ public class StateMigrationJob
         IMongoClient mongoClient,
         ILogger<StateMigrationJob> logger,
         IOptions<StateMigrationOptions> options,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        IInvitationService? invitationService = null,
+        IStateIndexService? stateIndexService = null,
+        IGAgentActorFactory? actorFactory = null)
     {
         _httpClientFactory = httpClientFactory;
         _httpClient = httpClientFactory.CreateClient();
         _mongoClient = mongoClient;
         _logger = logger;
         _options = options.Value;
+        _stateIndexService = stateIndexService;
+        _invitationService = invitationService;
+        _actorFactory = actorFactory;
         
         // Get database name from configuration
         _databaseName = configuration.GetSection("Storage")
@@ -312,7 +330,6 @@ public class StateMigrationJob
             return result;
         }
 
-        var jsonFormatter = new JsonFormatter(JsonFormatter.Settings.Default);
         const int limit = 500; // Batch size for pagination
         const int bulkWriteSize = 100; // Bulk write size for MongoDB
         int batchNumber = 0;
@@ -339,8 +356,12 @@ public class StateMigrationJob
                 continue;
             }
 
-            _logger.LogInformation("[StateMigration] [{TypeName}] Processing batch {Batch}: {Count} records (cursor={Cursor}, hasMore={HasMore}, fetchTime={FetchTime}ms)",
-                collection.TypeName, batchNumber, records.Count, cursor ?? "skip=0", hasMore, fetchDuration.ToString("F2"));
+            // Log every 10th batch or first batch to reduce noise
+            if (batchNumber == 1 || batchNumber % 10 == 0)
+            {
+                _logger.LogInformation("[StateMigration] [{TypeName}] Batch {Batch}: {Count} records, hasMore={HasMore}",
+                    collection.TypeName, batchNumber, records.Count, hasMore);
+            }
 
             result.TotalRecords += records.Count;
             
@@ -358,7 +379,7 @@ public class StateMigrationJob
                     // Log sample records (first 3 only)
                     if (sampleLogged < 3)
                     {
-                        LogSampleRecord(collection.TypeName, sampleLogged + 1, record, converter, jsonFormatter);
+                        LogSampleRecord(collection.TypeName, sampleLogged + 1, record);
                         sampleLogged++;
                     }
 
@@ -370,25 +391,18 @@ public class StateMigrationJob
                     var newState = converter.Convert(record.State);
                     if (newState == null)
                     {
-                        _logger.LogWarning(
-                            "[StateMigration] [{TypeName}] Converter returned null for Id={Id}",
-                            collection.TypeName, record.Id);
+                        // Log first 10 null conversions with state keys for debugging
+                        if (result.FailedCount < 10)
+                        {
+                            var stateKeys = record.State?.Keys != null 
+                                ? string.Join(",", record.State.Keys.Take(20)) 
+                                : "null";
+                            _logger.LogWarning(
+                                "[StateMigration] [{TypeName}] Converter returned null for Id={Id}, StateKeys=[{StateKeys}]",
+                                collection.TypeName, record.Id, stateKeys);
+                        }
                         result.FailedCount++;
                         continue;
-                    }
-
-                    // Log first 3 successful conversions
-                    if (result.SuccessCount < 3)
-                    {
-                        var stateBytes = newState.ToByteArray();
-                        var newStateJson = jsonFormatter.Format(newState);
-                        if (newStateJson.Length > 500) newStateJson = newStateJson[..500] + "...(truncated)";
-                        
-                        _logger.LogInformation(
-                            "[StateMigration] [{TypeName}] Converted: OldId={OldId} -> NewId={NewId}, " +
-                            "NewStateType={StateType}, NewStateBytes={Bytes}",
-                            collection.TypeName, record.Id, newAgentId, 
-                            newState.GetType().FullName, stateBytes.Length);
                     }
 
                     // Handle agent type name mapping
@@ -419,26 +433,35 @@ public class StateMigrationJob
                         }
                     }
                     
+                    // Handle AdditionalUserDeviceRecords from ChatManager converter
+                    if (converter is ChatManagerStateConverter chatManagerConverter)
+                    {
+                        foreach (var (agentId, deviceState) in chatManagerConverter.AdditionalUserDeviceRecords)
+                        {
+                            bulkWriteBuffer.Add((agentId, deviceState, "UserDeviceGAgent"));
+                        }
+                    }
+                    
                     // Bulk write when buffer reaches threshold
                     if (bulkWriteBuffer.Count >= bulkWriteSize)
                     {
-                        var writeStartTime = DateTime.UtcNow;
                         var writeResult = await BulkWriteStateAsync(bulkWriteBuffer, cancellationToken);
-                        var writeDuration = (DateTime.UtcNow - writeStartTime).TotalMilliseconds;
-                        
                         result.SuccessCount += writeResult.SuccessCount;
                         result.FailedCount += writeResult.FailedCount;
-                        
-                        _logger.LogInformation("[StateMigration] [{TypeName}] Bulk write: {Success} success, {Failed} failed, time={Time}ms",
-                            collection.TypeName, writeResult.SuccessCount, writeResult.FailedCount, writeDuration.ToString("F2"));
-                        
                         bulkWriteBuffer.Clear();
                     }
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogWarning(ex, "[StateMigration] [{TypeName}] Error converting record {Id}", 
-                        collection.TypeName, record.Id);
+                    // Log first 10 conversion errors with details
+                    if (result.FailedCount < 10)
+                    {
+                        var stateKeys = record.State?.Keys != null 
+                            ? string.Join(",", record.State.Keys.Take(20)) 
+                            : "null";
+                        _logger.LogWarning(ex, "[StateMigration] [{TypeName}] Error converting record {Id}, StateKeys=[{StateKeys}], Error={Error}", 
+                            collection.TypeName, record.Id, stateKeys, ex.Message);
+                    }
                     result.FailedCount++;
                 }
             }
@@ -446,72 +469,40 @@ public class StateMigrationJob
             // Write remaining records in buffer
             if (bulkWriteBuffer.Count > 0)
             {
-                var writeStartTime = DateTime.UtcNow;
                 var writeResult = await BulkWriteStateAsync(bulkWriteBuffer, cancellationToken);
-                var writeDuration = (DateTime.UtcNow - writeStartTime).TotalMilliseconds;
-                
                 result.SuccessCount += writeResult.SuccessCount;
                 result.FailedCount += writeResult.FailedCount;
-                
-                _logger.LogInformation("[StateMigration] [{TypeName}] Final bulk write: {Success} success, {Failed} failed, time={Time}ms",
-                    collection.TypeName, writeResult.SuccessCount, writeResult.FailedCount, writeDuration.ToString("F2"));
-                
                 bulkWriteBuffer.Clear();
             }
-            
-            // Log batch completion
-            _logger.LogInformation("[StateMigration] [{TypeName}] Batch {Batch} done: success={Success}, failed={Failed}",
-                collection.TypeName, batchNumber, result.SuccessCount, result.FailedCount);
 
             // Check if there are more records using hasMore flag
             if (!hasMore)
                 break;
             
-            // Cursor is already updated above (line 348), no need to increment skip
-            
             // Delay between batches
             await Task.Delay(_options.BatchDelayMs, cancellationToken);
         }
 
+        // Log collection completion summary
         _logger.LogInformation(
-            "[StateMigration] {TypeName}: Total={Total}, Success={Success}, Failed={Failed}",
+            "[StateMigration] [{TypeName}] Completed: Total={Total}, Success={Success}, Failed={Failed}",
             collection.TypeName, result.TotalRecords, result.SuccessCount, result.FailedCount);
 
         return result;
     }
 
     /// <summary>
-    /// Log sample record for debugging
+    /// Log sample record for debugging (only first sample, minimal info)
     /// </summary>
-    private void LogSampleRecord(string typeName, int index, ExportedRecord record, 
-        IStateConverter converter, JsonFormatter jsonFormatter)
+    private void LogSampleRecord(string typeName, int index, ExportedRecord record)
     {
-        _logger.LogInformation(
-            "[StateMigration] [{TypeName}] Sample record {Index}: Id={Id}, StateKeys=[{StateKeys}]",
-            typeName, index, record.Id,
-            record.State != null ? string.Join(",", record.State.Keys.Take(10)) : "N/A");
-            
-        if (record.State != null)
-        {
-            try
-            {
-                var originalJson = JsonSerializer.Serialize(record.State, 
-                    new JsonSerializerOptions { WriteIndented = false });
-                if (originalJson.Length > 800) originalJson = originalJson[..800] + "...(truncated)";
-                _logger.LogInformation("[StateMigration] [{TypeName}] Sample {Index} OriginalJson: {Json}",
-                    typeName, index, originalJson);
-                    
-                var convertedState = converter.Convert(record.State);
-                if (convertedState != null)
-                {
-                    var newStateJson = jsonFormatter.Format(convertedState);
-                    if (newStateJson.Length > 800) newStateJson = newStateJson[..800] + "...(truncated)";
-                    _logger.LogInformation("[StateMigration] [{TypeName}] Sample {Index} ConvertedJson: {Json}",
-                        typeName, index, newStateJson);
-                }
-            }
-            catch { /* Ignore logging errors */ }
-        }
+        // Only log first sample with key info
+        if (index > 1) return;
+        
+        _logger.LogDebug(
+            "[StateMigration] [{TypeName}] Sample: Id={Id}, Keys=[{StateKeys}]",
+            typeName, record.Id,
+            record.State != null ? string.Join(",", record.State.Keys.Take(5)) : "N/A");
     }
 
     /// <summary>
@@ -624,13 +615,14 @@ public class StateMigrationJob
             "UserBillingGAgent" => new UserBillingStateConverter(),
             "GoogleAuthGAgent" => new GoogleAuthStateConverter(),
             "GoogleIdentityBindingGAgent" => new GoogleIdentityBindingStateConverter(),
-            "AIAgentStatusProxy" => new AIAgentStatusProxyStateConverter(),
+            // AIAgentStatusProxy skipped - low-value runtime state, proxies will be auto-created
+            // "AIAgentStatusProxy" => new AIAgentStatusProxyStateConverter(),
             "TwitterAuthGAgent" => new TwitterAuthStateConverter(),
             "TwitterIdentityBindingGAgent" => new TwitterIdentityBindingStateConverter(),
             // Orleans grain states (converted to agent states)
             "ShareState" => new ShareStateConverter(),
             "UserPaymentState" => new UserPaymentStateConverter(),
-            "UserBillingState" => new UserBillingGrainStateConverter(), // Orleans grain state
+            // "UserBillingState" => new UserBillingGrainStateConverter(), // Skipped - use UserBillingGAgent instead
             _ => null
         };
     }
@@ -684,6 +676,7 @@ public class StateMigrationJob
         var shortName = ExtractShortTypeName(oldTypeName);
         
         // Handle special cases where agent was refactored
+        // NOTE: ChatGAgentManager is NOT renamed - Orleans Grain uses original class name as ID prefix
         return shortName switch
         {
             "UserBillingGAgent" => "PaymentIndexGAgent",
@@ -693,6 +686,29 @@ public class StateMigrationJob
             "UserBillingState" => "PaymentIndexGAgent", // Orleans grain state -> PaymentIndexGAgent
             _ => shortName
         };
+    }
+
+    /// <summary>
+    /// Map short collection name to full collection name from FixedCollections
+    /// </summary>
+    private string MapToFullCollectionName(string shortName)
+    {
+        // Try to find matching collection in FixedCollections
+        if (_options.FixedCollections != null)
+        {
+            var matchingCollection = _options.FixedCollections
+                .FirstOrDefault(c => c.EndsWith($".{shortName}") || c.EndsWith(shortName));
+            
+            if (!string.IsNullOrEmpty(matchingCollection))
+            {
+                _logger.LogDebug("[StateMigration] Mapped '{ShortName}' to '{FullName}'", shortName, matchingCollection);
+                return matchingCollection;
+            }
+        }
+        
+        // Fallback: return as-is
+        _logger.LogDebug("[StateMigration] No mapping found for '{ShortName}', using as-is", shortName);
+        return shortName;
     }
 
     /// <summary>
@@ -729,12 +745,14 @@ public class StateMigrationJob
                     try
                     {
                         var stateBytes = state.ToByteArray();
+                        // [BsonId] on AgentStateDocument.AgentId maps to _id in MongoDB
+                        // C# driver LINQ query x.AgentId translates to { _id: ... }
                         var document = new BsonDocument
                         {
                             { "_id", agentId },
                             { "StateData", new BsonBinaryData(stateBytes, BsonBinarySubType.Binary) },
                             { "StateType", stateTypeFullName },
-                            { "Version", 0L }, // Set to 0 for Event Sourcing agents (no events migrated yet)
+                            { "Version", 1L }, // Must be > 0 for EventSourcing agents to load snapshot
                             { "UpdatedAt", DateTime.UtcNow }
                         };
 
@@ -813,9 +831,10 @@ public class StateMigrationJob
             // Match AgentStateDocument structure exactly:
             // - _id: AgentId (not a separate AgentId field!)
             // - StateType: Full type name
+            // [BsonId] on AgentStateDocument.AgentId maps to _id in MongoDB
             var document = new BsonDocument
             {
-                { "_id", agentId },  // AgentId as _id (matching [BsonId] attribute)
+                { "_id", agentId },
                 { "StateData", new BsonBinaryData(stateBytes, BsonBinarySubType.Binary) },
                 { "StateType", stateTypeFullName },  // Full type name
                 { "Version", 1L },
@@ -836,6 +855,823 @@ public class StateMigrationJob
             return false;
         }
     }
+
+    #region Elasticsearch Sync
+
+    /// <summary>
+    /// Sync MongoDB state data to Elasticsearch for specified collections.
+    /// Reads from agent_states_{collectionName} and indexes to ES.
+    /// </summary>
+    /// <param name="collectionNames">Collection names to sync (e.g., "UserDeviceState", "PayRecordState")</param>
+    /// <param name="cancellationToken">Cancellation token</param>
+    /// <returns>Sync result with success/failure counts</returns>
+    public async Task<EsSyncResult> SyncToElasticsearchAsync(
+        List<string> collectionNames,
+        CancellationToken cancellationToken = default)
+    {
+        if (_stateIndexService == null)
+        {
+            _logger.LogError("[ES Sync] IStateIndexService is not available. Check Elasticsearch configuration.");
+            return new EsSyncResult { Error = "Elasticsearch service not configured" };
+        }
+
+        var result = new EsSyncResult { StartedAt = DateTime.UtcNow };
+        _logger.LogInformation("[ES Sync] Starting sync for collections: {Collections}", 
+            string.Join(", ", collectionNames));
+
+        var database = _mongoClient.GetDatabase(_databaseName);
+
+        foreach (var collectionName in collectionNames)
+        {
+            var collectionResult = await SyncCollectionToEsAsync(
+                database, collectionName, cancellationToken);
+            result.CollectionResults.Add(collectionResult);
+            result.TotalRecords += collectionResult.TotalRecords;
+            result.SuccessCount += collectionResult.SuccessCount;
+            result.FailedCount += collectionResult.FailedCount;
+        }
+
+        result.CompletedAt = DateTime.UtcNow;
+        _logger.LogInformation(
+            "[ES Sync] Completed. Total={Total}, Success={Success}, Failed={Failed}, Duration={Duration}",
+            result.TotalRecords, result.SuccessCount, result.FailedCount, result.Duration);
+
+        return result;
+    }
+
+    private async Task<EsCollectionSyncResult> SyncCollectionToEsAsync(
+        IMongoDatabase database,
+        string collectionName,
+        CancellationToken cancellationToken)
+    {
+        var result = new EsCollectionSyncResult { CollectionName = collectionName };
+        var mongoCollectionName = $"agent_states_{collectionName}";
+
+        try
+        {
+            var collection = database.GetCollection<BsonDocument>(mongoCollectionName);
+            var totalCount = await collection.CountDocumentsAsync(
+                FilterDefinition<BsonDocument>.Empty, cancellationToken: cancellationToken);
+            
+            result.TotalRecords = (int)totalCount;
+            _logger.LogInformation("[ES Sync] [{Collection}] Found {Count} documents", 
+                collectionName, totalCount);
+
+            if (totalCount == 0)
+                return result;
+
+            // Process in batches
+            var batchSize = _options.BatchSize > 0 ? _options.BatchSize : 1000;
+            var processedCount = 0;
+            var cursor = await collection.FindAsync(
+                FilterDefinition<BsonDocument>.Empty,
+                new FindOptions<BsonDocument> { BatchSize = batchSize },
+                cancellationToken);
+
+            var batch = new List<StateIndexDocument>();
+
+            while (await cursor.MoveNextAsync(cancellationToken))
+            {
+                foreach (var doc in cursor.Current)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var indexDoc = ConvertToStateIndexDocument(doc, collectionName);
+                    if (indexDoc != null)
+                    {
+                        batch.Add(indexDoc);
+                    }
+                    else
+                    {
+                        result.FailedCount++;
+                    }
+
+                    // Write batch when full
+                    if (batch.Count >= batchSize)
+                    {
+                        var (success, failed) = await WriteBatchToEsAsync(batch, cancellationToken);
+                        result.SuccessCount += success;
+                        result.FailedCount += failed;
+                        processedCount += batch.Count;
+                        
+                        _logger.LogInformation(
+                            "[ES Sync] [{Collection}] Progress: {Processed}/{Total}", 
+                            collectionName, processedCount, totalCount);
+                        
+                        batch.Clear();
+                    }
+                }
+            }
+
+            // Write remaining batch
+            if (batch.Count > 0)
+            {
+                var (success, failed) = await WriteBatchToEsAsync(batch, cancellationToken);
+                result.SuccessCount += success;
+                result.FailedCount += failed;
+            }
+
+            _logger.LogInformation(
+                "[ES Sync] [{Collection}] Completed: Success={Success}, Failed={Failed}",
+                collectionName, result.SuccessCount, result.FailedCount);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[ES Sync] [{Collection}] Error during sync", collectionName);
+            result.Error = ex.Message;
+        }
+
+        return result;
+    }
+
+    private StateIndexDocument? ConvertToStateIndexDocument(BsonDocument doc, string collectionName)
+    {
+        try
+        {
+            var agentId = doc["_id"].AsString;
+            var stateType = doc.Contains("StateType") ? doc["StateType"].AsString : null;
+            var version = doc.Contains("Version") ? doc["Version"].ToInt64() : 0;
+            var updatedAt = doc.Contains("UpdatedAt") ? doc["UpdatedAt"].ToUniversalTime() : DateTime.UtcNow;
+
+            // Derive full AgentType from StateType for correct ES index naming
+            // StateType: "Aevatar.Agents.GodGPT.Protos.UserDevice.UserDeviceState"
+            // AgentType: "Aevatar.Agents.GodGPT.UserDevice.UserDeviceGAgent"
+            var agentType = DeriveAgentTypeFromStateType(stateType, agentId, collectionName);
+
+            // Parse StateData (Protobuf bytes) to extract properties
+            var data = new Dictionary<string, object>();
+            
+            if (doc.Contains("StateData") && !string.IsNullOrEmpty(stateType))
+            {
+                var stateBytes = doc["StateData"].AsByteArray;
+                var protoData = ParseProtobufToDict(stateBytes, stateType);
+                if (protoData != null)
+                {
+                    foreach (var kvp in protoData)
+                    {
+                        data[kvp.Key] = kvp.Value;
+                    }
+                }
+            }
+
+            return new StateIndexDocument
+            {
+                AgentId = agentId,
+                AgentType = agentType,
+                Data = data,
+                Version = version,
+                IndexedAt = updatedAt
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[ES Sync] Failed to convert document");
+            return null;
+        }
+    }
+
+    // Explicit mapping for GodGPT agents where Protobuf namespace differs from Agent namespace
+    // Key: Protobuf StateType full name, Value: Actual Agent full type name
+    private static readonly Dictionary<string, string> _stateTypeToAgentTypeMapping = new()
+    {
+        // GodGPT agents - Protobuf namespace (Aevatar.Agents.GodGPT.Protos.*) 
+        // differs from Agent namespace (Aevatar.Application.Grains.*)
+        ["Aevatar.Agents.GodGPT.Protos.UserDevice.UserDeviceState"] = "Aevatar.Application.Grains.Agents.UserDevice.UserDeviceGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserQuota.UserQuotaState"] = "Aevatar.Application.Grains.UserQuota.UserQuotaGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserInfo.UserInfoCollectionState"] = "Aevatar.Application.Grains.UserInfo.UserInfoCollectionGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Invitation.InvitationState"] = "Aevatar.Application.Grains.Invitation.InvitationGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Invitation.InviteCodeState"] = "Aevatar.Application.Grains.Agents.Invitation.InviteCodeGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserStatistics.UserStatisticsState"] = "Aevatar.Application.Grains.UserStatistics.UserStatisticsGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserFeedback.UserFeedbackState"] = "Aevatar.Application.Grains.UserFeedback.UserFeedbackGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Anonymous.AnonymousUserState"] = "Aevatar.Application.Grains.Agents.Anonymous.AnonymousUserGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.GodChat.GodChatStateProto"] = "Aevatar.Application.Grains.Agents.ChatManager.Chat.GodChatGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.ChatManager.ChatManagerStateProto"] = "Aevatar.Application.Grains.Agents.ChatManager.ChatGAgentManager",
+        ["Aevatar.Agents.GodGPT.Protos.Configuration.ConfigurationState"] = "Aevatar.Application.Grains.Agents.ChatManager.ConfigAgent.ConfigurationGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Awakening.AwakeningStateProto"] = "GodGPT.GAgents.Awakening.AwakeningGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserInvitation.UserInvitationState"] = "Aevatar.Application.Grains.UserInvitation.UserInvitationGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.UserProfile.UserProfileState"] = "Aevatar.Application.Grains.UserProfile.UserProfileGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.FreeTrialCode.FreeTrialCodeFactoryState"] = "Aevatar.Application.Grains.FreeTrialCode.FreeTrialCodeFactoryGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Twitter.TwitterAuthState"] = "Aevatar.Application.Grains.Twitter.TwitterAuthGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Twitter.TwitterIdentityBindingState"] = "Aevatar.Application.Grains.Twitter.TwitterIdentityBindingGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Twitter.TwitterMonitorState"] = "Aevatar.Application.Grains.Twitter.TwitterMonitorGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Twitter.TwitterRewardState"] = "Aevatar.Application.Grains.Twitter.TwitterRewardGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.Share.ShareLinkProto"] = "Aevatar.Application.Grains.Agents.ChatManager.Share.ShareLinkGAgent",
+        ["Aevatar.Agents.GodGPT.Protos.VoiceSynthesis.VoiceSynthesisStateProto"] = "Aevatar.Application.Grains.Agents.ChatManager.VoiceSynthesis.VoiceSynthesisGAgent",
+    };
+
+    /// <summary>
+    /// Derive full AgentType from StateType for ES index naming.
+    /// Uses explicit mapping for GodGPT agents, falls back to generic derivation for others (e.g., Payment).
+    /// </summary>
+    private string DeriveAgentTypeFromStateType(string? stateType, string agentId, string collectionName)
+    {
+        if (!string.IsNullOrEmpty(stateType))
+        {
+            // First, try explicit mapping (for GodGPT agents with inconsistent namespaces)
+            if (_stateTypeToAgentTypeMapping.TryGetValue(stateType, out var mappedAgentType))
+            {
+                return mappedAgentType;
+            }
+            
+            // Fallback: Generic derivation (works for Payment module where namespaces are consistent)
+            // Remove ".Protos" from the namespace and replace "State" suffix with "GAgent"
+            var agentType = stateType.Replace(".Protos", "");
+            
+            // Replace State suffix with GAgent
+            if (agentType.EndsWith("State"))
+            {
+                agentType = agentType.Substring(0, agentType.Length - 5) + "GAgent";
+            }
+            else if (agentType.EndsWith("StateProto"))
+            {
+                agentType = agentType.Substring(0, agentType.Length - 10) + "GAgent";
+            }
+            
+            return agentType;
+        }
+        
+        // Fallback: extract from agentId
+        if (agentId.Contains(':'))
+        {
+            return agentId.Substring(0, agentId.IndexOf(':'));
+        }
+        
+        return collectionName.Replace("State", "GAgent");
+    }
+
+    private Dictionary<string, object>? ParseProtobufToDict(byte[] stateBytes, string stateTypeName)
+    {
+        try
+        {
+            // Find the Protobuf type by name
+            var stateType = FindProtobufType(stateTypeName);
+            if (stateType == null)
+            {
+                _logger.LogWarning("[ES Sync] Could not find type: {TypeName}", stateTypeName);
+                return null;
+            }
+
+            // Get the Parser property
+            var parserProperty = stateType.GetProperty("Parser", BindingFlags.Public | BindingFlags.Static);
+            if (parserProperty == null)
+            {
+                _logger.LogWarning("[ES Sync] No Parser found for type: {TypeName}", stateTypeName);
+                return null;
+            }
+
+            var parser = parserProperty.GetValue(null) as MessageParser;
+            if (parser == null)
+                return null;
+
+            // Parse the bytes
+            var message = parser.ParseFrom(stateBytes);
+            
+            // Extract properties to dictionary
+            return ExtractPropertiesToDict(message, stateType);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[ES Sync] Failed to parse Protobuf for type: {TypeName}", stateTypeName);
+            return null;
+        }
+    }
+
+    private static readonly Dictionary<string, System.Type?> _typeCache = new();
+
+    private System.Type? FindProtobufType(string fullTypeName)
+    {
+        if (_typeCache.TryGetValue(fullTypeName, out var cachedType))
+            return cachedType;
+
+        // Extract simple name from full type name
+        var simpleName = fullTypeName.Contains('.')
+            ? fullTypeName.Substring(fullTypeName.LastIndexOf('.') + 1)
+            : fullTypeName;
+
+        // Search all assemblies for the type
+        var type = AppDomain.CurrentDomain.GetAssemblies()
+            .SelectMany(a => { try { return a.GetTypes(); } catch { return Array.Empty<System.Type>(); } })
+            .FirstOrDefault(t =>
+                typeof(IMessage).IsAssignableFrom(t) &&
+                !t.IsAbstract &&
+                (t.FullName == fullTypeName || t.Name == simpleName));
+
+        _typeCache[fullTypeName] = type;
+        return type;
+    }
+
+    private Dictionary<string, object> ExtractPropertiesToDict(IMessage message, System.Type stateType)
+    {
+        var data = new Dictionary<string, object>();
+
+        foreach (var property in stateType.GetProperties())
+        {
+            // Skip Protobuf internal properties
+            if (property.Name is "Parser" or "Descriptor" or "MessageType" ||
+                property.DeclaringType == typeof(IMessage) ||
+                property.DeclaringType == typeof(object))
+                continue;
+
+            try
+            {
+                var value = property.GetValue(message);
+                if (value == null) continue;
+
+                // Convert to camelCase
+                var name = char.ToLowerInvariant(property.Name[0]) + property.Name[1..];
+
+                data[name] = value switch
+                {
+                    Timestamp ts => ts.ToDateTime(),
+                    IMessage nested => JsonSerializer.Serialize(nested, _jsonOptions),
+                    _ when IsBasicType(property.PropertyType) => value,
+                    _ => JsonSerializer.Serialize(value, _jsonOptions)
+                };
+            }
+            catch
+            {
+                // Skip properties that fail to extract
+            }
+        }
+
+        return data;
+    }
+
+    private static bool IsBasicType(System.Type type)
+    {
+        var t = Nullable.GetUnderlyingType(type) ?? type;
+        return t.IsPrimitive || t == typeof(string) || t == typeof(DateTime) ||
+               t == typeof(decimal) || t == typeof(Guid) || t == typeof(Timestamp);
+    }
+
+    private static readonly JsonSerializerOptions _jsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        WriteIndented = false
+    };
+
+    private async Task<(int success, int failed)> WriteBatchToEsAsync(
+        List<StateIndexDocument> batch,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Ensure indices exist for all agent types in the batch
+            var agentTypes = batch.Select(d => d.AgentType).Distinct();
+            foreach (var agentType in agentTypes)
+            {
+                await _stateIndexService!.EnsureIndexExistsAsync(agentType, null, cancellationToken);
+            }
+
+            await _stateIndexService!.IndexStateBatchAsync(batch, cancellationToken);
+            _logger.LogDebug("[ES Sync] Successfully wrote {Count} documents to ES", batch.Count);
+            return (batch.Count, 0);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[ES Sync] Batch write failed for {Count} documents", batch.Count);
+            return (0, batch.Count);
+        }
+    }
+
+    #endregion
+
+    #region Single Record Migration Test
+
+    /// <summary>
+    /// Test migration of a single record by ID
+    /// Fetches from old system, converts, and optionally writes to new system
+    /// </summary>
+    public async Task<SingleRecordMigrationResult> TestSingleRecordMigrationAsync(
+        string collectionTypeName,
+        string recordId,
+        bool writeToDb = false,
+        CancellationToken cancellationToken = default)
+    {
+        var result = new SingleRecordMigrationResult
+        {
+            CollectionTypeName = collectionTypeName,
+            RecordId = recordId,
+            StartedAt = DateTime.UtcNow
+        };
+
+        try
+        {
+            await EnsureAuthenticatedAsync(cancellationToken);
+
+            // 1. Fetch single record from old system
+            var record = await FetchSingleRecordAsync(collectionTypeName, recordId, cancellationToken);
+            if (record == null)
+            {
+                result.Error = $"Record not found: {recordId} in {collectionTypeName}";
+                return result;
+            }
+
+            result.OriginalState = record.State;
+            result.OriginalStateJson = record.State != null 
+                ? JsonSerializer.Serialize(record.State, new JsonSerializerOptions { WriteIndented = true })
+                : null;
+
+            // 2. Get converter
+            var converter = GetConverter(collectionTypeName);
+            if (converter == null)
+            {
+                result.Error = $"No converter found for {collectionTypeName}";
+                return result;
+            }
+
+            result.ConverterUsed = converter.GetType().Name;
+
+            // 3. Convert
+            var newState = converter.Convert(record.State);
+            if (newState == null)
+            {
+                result.Error = "Converter returned null";
+                return result;
+            }
+
+            // 4. Format converted state as JSON
+            var jsonFormatter = new JsonFormatter(JsonFormatter.Settings.Default);
+            result.ConvertedStateJson = jsonFormatter.Format(newState);
+            result.ConvertedStateType = newState.GetType().FullName;
+
+            // 5. Calculate new Agent ID
+            var newAgentId = ConvertAgentId(record.Id, collectionTypeName);
+            var targetAgentTypeName = MapAgentTypeName(collectionTypeName);
+            if (targetAgentTypeName != ExtractShortTypeName(collectionTypeName) && newAgentId.Contains(':'))
+            {
+                var parts = newAgentId.Split(':', 2);
+                if (parts.Length == 2)
+                    newAgentId = $"{targetAgentTypeName}:{parts[1]}";
+            }
+            result.NewAgentId = newAgentId;
+            result.TargetAgentType = targetAgentTypeName;
+
+            // 6. Check additional records (for converters that generate extra records)
+            if (converter is UserBillingGrainStateConverter grainConverter && grainConverter.AdditionalPaymentRecords.Count > 0)
+            {
+                result.AdditionalRecords = grainConverter.AdditionalPaymentRecords
+                    .Select(r => new AdditionalRecordInfo 
+                    { 
+                        AgentId = r.AgentId, 
+                        StateType = r.State.GetType().Name,
+                        ConvertedStateJson = JsonFormatter.Default.Format(r.State)
+                    })
+                    .ToList();
+            }
+            else if (converter is UserBillingStateConverter billingConverter && billingConverter.AdditionalPaymentRecords.Count > 0)
+            {
+                result.AdditionalRecords = billingConverter.AdditionalPaymentRecords
+                    .Select(r => new AdditionalRecordInfo 
+                    { 
+                        AgentId = r.AgentId, 
+                        StateType = r.State.GetType().Name,
+                        ConvertedStateJson = JsonFormatter.Default.Format(r.State)
+                    })
+                    .ToList();
+            }
+
+            // 7. Optionally write to database
+            if (writeToDb)
+            {
+                var recordsToWrite = new List<(string AgentId, IMessage State, string AgentTypeName)> 
+                { 
+                    (newAgentId, newState, targetAgentTypeName) 
+                };
+                
+                // Also write AdditionalPaymentRecords if any
+                if (converter is UserBillingGrainStateConverter grainConv)
+                {
+                    foreach (var (agentId, paymentState) in grainConv.AdditionalPaymentRecords)
+                    {
+                        recordsToWrite.Add((agentId, paymentState, "PaymentRecordGAgent"));
+                    }
+                }
+                else if (converter is UserBillingStateConverter billingConv)
+                {
+                    foreach (var (agentId, paymentState) in billingConv.AdditionalPaymentRecords)
+                    {
+                        recordsToWrite.Add((agentId, paymentState, "PaymentRecordGAgent"));
+                    }
+                }
+                
+                var writeResult = await BulkWriteStateAsync(recordsToWrite, cancellationToken);
+                result.WriteSuccess = writeResult.SuccessCount > 0;
+                result.WriteMessage = $"Written {writeResult.SuccessCount} records to database (main + {recordsToWrite.Count - 1} payment records)";
+            }
+
+            result.Success = true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[StateMigration] Error testing single record migration: {Id}", recordId);
+            result.Error = ex.Message;
+        }
+
+        result.CompletedAt = DateTime.UtcNow;
+        return result;
+    }
+
+    /// <summary>
+    /// Fetch a single record from old system by ID
+    /// </summary>
+    private async Task<ExportedRecord?> FetchSingleRecordAsync(
+        string collectionTypeName,
+        string recordId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // Map short name to full collection name from FixedCollections
+            var fullCollectionName = MapToFullCollectionName(collectionTypeName);
+            
+            // Extract the type namespace from full collection name 
+            // e.g., "StreamgodgptprodAevatar.Application.Grains.Invitation.InvitationGAgent" 
+            //    -> "Aevatar.Application.Grains.Invitation.InvitationGAgent"
+            var typeNamespace = fullCollectionName;
+            if (fullCollectionName.StartsWith("Streamgodgptprod"))
+                typeNamespace = fullCollectionName.Substring("Streamgodgptprod".Length);
+            else if (fullCollectionName.StartsWith("Orleansgodgptprod"))
+                typeNamespace = fullCollectionName.Substring("Orleansgodgptprod".Length);
+            
+            // Build full ID format: "TypeNamespace/GuidWithoutHyphens"
+            // Special handling for Orleans grain states with different ID prefix
+            var normalizedId = recordId.Replace("-", "");
+            string fullId;
+            if (fullCollectionName == "OrleansgodgptprodUserPaymentState")
+            {
+                // UserPaymentState uses "userpayment/xxx" format
+                fullId = $"userpayment/{normalizedId}";
+            }
+            else if (fullCollectionName == "OrleansgodgptprodShareState")
+            {
+                // ShareState uses "share/xxx" format
+                fullId = $"share/{normalizedId}";
+            }
+            else if (fullCollectionName == "OrleansgodgptprodUserBillingState")
+            {
+                // UserBillingState uses "userbilling/xxx" format
+                fullId = $"userbilling/{normalizedId}";
+            }
+            else if (fullCollectionName == "OrleansgodgptprodUserQuotaState")
+            {
+                // UserQuotaState uses "userquota/xxx_Quota" format
+                fullId = $"userquota/{recordId}_Quota";
+            }
+            else
+            {
+                fullId = $"{typeNamespace}/{normalizedId}";
+            }
+            
+            // Build URL with id parameter
+            var url = $"{_options.OldSystemApiBaseUrl}/api/admin/export/grain" +
+                $"?collection={Uri.EscapeDataString(fullCollectionName)}" +
+                $"&id={Uri.EscapeDataString(fullId)}";
+
+            _logger.LogInformation("[StateMigration] Fetching single record: {Url}", url);
+
+            var response = await _httpClient.GetAsync(url, cancellationToken);
+            var content = await response.Content.ReadAsStringAsync(cancellationToken);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning("[StateMigration] API returned {StatusCode}: {Content}", 
+                    response.StatusCode, content);
+                return null;
+            }
+
+            var doc = JsonDocument.Parse(content);
+            
+            // API returns: { "code": "20000", "data": { "records": [...] } }
+            if (doc.RootElement.TryGetProperty("data", out var dataElement))
+            {
+                // Check if data has "records" array (standard API response)
+                if (dataElement.TryGetProperty("records", out var recordsElement) && 
+                    recordsElement.ValueKind == JsonValueKind.Array)
+                {
+                    var records = JsonSerializer.Deserialize<List<ExportedRecord>>(
+                        recordsElement.GetRawText(),
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    
+                    var record = records?.FirstOrDefault();
+                    if (record != null)
+                    {
+                        _logger.LogInformation("[StateMigration] Found record: {Id}", record.Id);
+                        return record;
+                    }
+                    
+                    _logger.LogWarning("[StateMigration] No record found for {RecordId}", recordId);
+                    return null;
+                }
+                
+                // Fallback: data is directly an array
+                if (dataElement.ValueKind == JsonValueKind.Array)
+                {
+                    var records = JsonSerializer.Deserialize<List<ExportedRecord>>(
+                        dataElement.GetRawText(),
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                    return records?.FirstOrDefault();
+                }
+                
+                // Fallback: data is a single object
+                if (dataElement.ValueKind == JsonValueKind.Object)
+                {
+                    return JsonSerializer.Deserialize<ExportedRecord>(
+                        dataElement.GetRawText(),
+                        new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[StateMigration] Failed to fetch single record: {Id}", recordId);
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Verify migrated data by querying Agent via Service layer
+    /// </summary>
+    public async Task<VerifyResult> VerifyAgentStateAsync(
+        string agentType,
+        string userId,
+        CancellationToken cancellationToken)
+    {
+        var result = new VerifyResult
+        {
+            AgentType = agentType,
+            UserId = userId
+        };
+
+        try
+        {
+            if (!Guid.TryParse(userId, out var userGuid))
+            {
+                result.Found = false;
+                result.Message = $"Invalid userId format: {userId}";
+                return result;
+            }
+
+            // Query Agent based on type
+            switch (agentType.ToLowerInvariant())
+            {
+                case "invitationgagent":
+                case "invitation":
+                    if (_invitationService == null)
+                    {
+                        result.Found = false;
+                        result.Message = "IInvitationService not available";
+                        return result;
+                    }
+                    var invitationInfo = await _invitationService.GetInvitationInfoAsync(userGuid);
+                    result.Found = true;
+                    result.AgentData = new
+                    {
+                        InviteCode = invitationInfo.InviteCode,
+                        TotalInvites = invitationInfo.TotalInvites,
+                        ValidInvites = invitationInfo.ValidInvites,
+                        TotalCreditsEarned = invitationInfo.TotalCreditsEarned
+                    };
+                    result.Message = "Agent state retrieved successfully";
+                    break;
+
+                case "userquotagagent":
+                case "userquota":
+                    if (_actorFactory == null)
+                    {
+                        result.Found = false;
+                        result.Message = "IGAgentActorFactory not available";
+                        return result;
+                    }
+                    var quotaActor = await _actorFactory.CreateGAgentActorAsync<UserQuotaGAgent>(userGuid.ToString());
+                    var quotaGAgent = quotaActor.As<IUserQuotaGAgent>();
+                    var quotaState = await quotaGAgent.GetUserQuotaStateAsync();
+                    result.Found = true;
+                    result.AgentData = new
+                    {
+                        Credits = quotaState.Credits,
+                        HasInitialCredits = quotaState.HasInitialCredits,
+                        HasShownInitialCreditsToast = quotaState.HasShownInitialCreditsToast,
+                        Subscription = quotaState.Subscription != null ? new { quotaState.Subscription.IsActive, quotaState.Subscription.PlanType } : null,
+                        UltimateSubscription = quotaState.UltimateSubscription != null ? new { quotaState.UltimateSubscription.IsActive, quotaState.UltimateSubscription.PlanType } : null
+                    };
+                    result.Message = "Agent state retrieved successfully";
+                    break;
+
+                case "userbillinggagent":
+                case "userbilling":
+                case "paymentindexgagent":
+                case "paymentindex":
+                    if (_actorFactory == null)
+                    {
+                        result.Found = false;
+                        result.Message = "IGAgentActorFactory not available";
+                        return result;
+                    }
+                    var billingActor = await _actorFactory.CreateGAgentActorAsync<PaymentIndexGAgent>(userGuid.ToString());
+                    var billingGAgent = billingActor.As<IPaymentIndexGAgent>();
+                    var subscriptions = await billingGAgent.GetAllSubscriptionsAsync();
+                    var paymentCount = await billingGAgent.GetTotalPaymentCountAsync();
+                    result.Found = true;
+                    result.AgentData = new
+                    {
+                        TotalPaymentCount = paymentCount,
+                        SubscriptionCount = subscriptions?.Subscriptions?.Count ?? 0,
+                        Subscriptions = subscriptions?.Subscriptions?.Take(5).Select(s => new { s.PaymentId, s.ProductName, s.BusinessType, s.PeriodEnd })
+                    };
+                    result.Message = "Agent state retrieved successfully";
+                    break;
+
+                case "chatgagentmanager":
+                case "chatmanager":
+                    if (_actorFactory == null)
+                    {
+                        result.Found = false;
+                        result.Message = "IGAgentActorFactory not available";
+                        return result;
+                    }
+                    var chatActor = await _actorFactory.CreateGAgentActorAsync<ChatGAgentManager>(userGuid.ToString());
+                    var chatManager = chatActor.As<IChatManagerGAgent>();
+                    var sessions = await chatManager.GetSessionListAsync();
+                    result.Found = true;
+                    result.AgentData = new
+                    {
+                        SessionCount = sessions?.Sessions?.Count ?? 0,
+                        Sessions = sessions?.Sessions?.Take(5).Select(s => new { s.SessionId, s.Title, s.CreateAt })
+                    };
+                    result.Message = "Agent state retrieved successfully";
+                    break;
+
+                case "invitecodegagent":
+                case "invitecode":
+                    if (_actorFactory == null)
+                    {
+                        result.Found = false;
+                        result.Message = "IGAgentActorFactory not available";
+                        return result;
+                    }
+                    var inviteCodeActor = await _actorFactory.CreateGAgentActorAsync<InviteCodeGAgent>(userGuid.ToString());
+                    var inviteCodeGAgent = inviteCodeActor.As<IInviteCodeGAgent>();
+                    var isInitialized = await inviteCodeGAgent.IsInitialized();
+                    var codeInfo = await inviteCodeGAgent.GetCodeInfoAsync();
+                    result.Found = true;
+                    result.AgentData = new
+                    {
+                        IsInitialized = isInitialized,
+                        BatchId = codeInfo.BatchId,
+                        TrialDays = codeInfo.TrialDays,
+                        PlanType = codeInfo.PlanType.ToString(),
+                        IsUltimate = codeInfo.IsUltimate
+                    };
+                    result.Message = "Agent state retrieved successfully";
+                    break;
+
+                default:
+                    result.Found = false;
+                    result.Message = $"Unsupported agent type: {agentType}. Supported: InvitationGAgent, UserQuotaGAgent, PaymentIndexGAgent, ChatGAgentManager, InviteCodeGAgent";
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            result.Found = false;
+            result.Message = $"Error querying agent: {ex.Message}";
+            _logger.LogError(ex, "[StateMigration] Error verifying agent state: {AgentType}/{UserId}", agentType, userId);
+        }
+
+        return result;
+    }
+
+    #endregion
+}
+
+/// <summary>
+/// ES sync result
+/// </summary>
+public class EsSyncResult
+{
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public TimeSpan? Duration => CompletedAt.HasValue ? CompletedAt.Value - StartedAt : null;
+    public int TotalRecords { get; set; }
+    public int SuccessCount { get; set; }
+    public int FailedCount { get; set; }
+    public string? Error { get; set; }
+    public List<EsCollectionSyncResult> CollectionResults { get; set; } = new();
+}
+
+/// <summary>
+/// ES sync result per collection
+/// </summary>
+public class EsCollectionSyncResult
+{
+    public string CollectionName { get; set; } = string.Empty;
+    public int TotalRecords { get; set; }
+    public int SuccessCount { get; set; }
+    public int FailedCount { get; set; }
+    public string? Error { get; set; }
 }
 
 /// <summary>
@@ -869,7 +1705,14 @@ public class UserStatisticsStateConverter : IStateConverter
         }
 
         // IsInitialized: bool
-        if (oldState.TryGetValue("IsInitialized", out var isInitObj))
+        // IMPORTANT: If any data exists (UserId, AppRatings), mark as initialized
+        // to prevent re-initialization on activation which would overwrite UserId
+        var hasAnyData = oldState.ContainsKey("UserId") || oldState.ContainsKey("AppRatings");
+        if (hasAnyData)
+        {
+            newState.IsInitialized = true;
+        }
+        else if (oldState.TryGetValue("IsInitialized", out var isInitObj))
         {
             newState.IsInitialized = ConvertToBool(isInitObj);
         }
@@ -1101,6 +1944,41 @@ public class AnonymousUserStateConverter : IStateConverter
 }
 
 /// <summary>
+/// Single record migration test result
+/// </summary>
+public class SingleRecordMigrationResult
+{
+    public string CollectionTypeName { get; set; } = string.Empty;
+    public string RecordId { get; set; } = string.Empty;
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public bool Success { get; set; }
+    public string? Error { get; set; }
+    
+    public Dictionary<string, object?>? OriginalState { get; set; }
+    public string? OriginalStateJson { get; set; }
+    
+    public string? ConverterUsed { get; set; }
+    public string? ConvertedStateJson { get; set; }
+    public string? ConvertedStateType { get; set; }
+    
+    public string? NewAgentId { get; set; }
+    public string? TargetAgentType { get; set; }
+    
+    public List<AdditionalRecordInfo>? AdditionalRecords { get; set; }
+    
+    public bool? WriteSuccess { get; set; }
+    public string? WriteMessage { get; set; }
+}
+
+public class AdditionalRecordInfo
+{
+    public string AgentId { get; set; } = string.Empty;
+    public string StateType { get; set; } = string.Empty;
+    public string? ConvertedStateJson { get; set; }
+}
+
+/// <summary>
 /// Migration result
 /// </summary>
 public class MigrationResult
@@ -1139,4 +2017,13 @@ public class ExportedRecord
     public string Id { get; set; } = string.Empty;
     public string? ETag { get; set; }
     public Dictionary<string, object?>? State { get; set; }
+}
+
+public class VerifyResult
+{
+    public string AgentType { get; set; } = string.Empty;
+    public string UserId { get; set; } = string.Empty;
+    public bool Found { get; set; }
+    public string? Message { get; set; }
+    public object? AgentData { get; set; }
 }

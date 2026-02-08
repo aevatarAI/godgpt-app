@@ -24,4 +24,3 @@ public interface IMetricsRecorder
     /// <param name="tags">Optional tags for additional context</param>
     void Record(string metricName, Stopwatch stopwatch, params KeyValuePair<string, object?>[] tags);
 }
-

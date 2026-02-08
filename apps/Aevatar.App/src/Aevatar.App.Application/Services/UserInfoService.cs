@@ -112,7 +112,7 @@ public class UserInfoService : IUserInfoService
         
         if (protoResult == null)
         {
-            return null;
+            return new UserInfoCollectionDto(){IsInitialized = false};
         }
         
         // Convert Protobuf to DTO

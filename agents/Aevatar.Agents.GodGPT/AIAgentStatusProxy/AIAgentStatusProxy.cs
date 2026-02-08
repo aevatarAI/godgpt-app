@@ -648,8 +648,8 @@ public class AIAgentStatusProxy :
     {
         // CRITICAL: If this is an HTTP request AND we have a StreamId, push directly to Kafka
         // This bypasses the parent (GodChatGAgent) callback queue, avoiding the Orleans Grain blocking issue
-        Logger.LogInformation("[AIAgentStatusProxy] SendStreamCallback - IsHttpRequest={IsHttpRequest}, StreamId={StreamId}, SerialNumber={SerialNumber}",
-            isHttpRequest, streamId ?? "null", content?.SerialNumber ?? 0);
+        Logger.LogInformation("[AIAgentStatusProxy] SendStreamCallback - IsHttpRequest={IsHttpRequest}, StreamId={StreamId}, SerialNumber={SerialNumber}, IsVoiceChat={IsVoiceChat}, VoiceLanguage={VoiceLanguage}",
+            isHttpRequest, streamId ?? "null", content?.SerialNumber ?? 0, isVoiceChat, voiceLanguage);
             
         if (isHttpRequest && !string.IsNullOrEmpty(streamId))
         {
@@ -657,6 +657,8 @@ public class AIAgentStatusProxy :
             // IMPORTANT: do NOT feed aggregated persistence message to TTS (it would duplicate audio).
             if (isVoiceChat)
             {
+                Logger.LogInformation("[AIAgentStatusProxy] Dispatching VoiceSynthesis job - StreamId={StreamId}, ContentLen={ContentLen}, IsLastChunk={IsLastChunk}, IsAggregation={IsAggregation}",
+                    streamId, content?.Content?.Length ?? 0, content?.IsLastChunk ?? false, content?.IsAggregationMsg ?? false);
                 _ = DispatchVoiceSynthesisJobAsync(context, errorEnum, content, streamId, voiceLanguage);
             }
 
@@ -847,16 +849,32 @@ public class AIAgentStatusProxy :
                     streamEnvelope.Seq = seq;
                 }
                 
-                // Unified completion signal: Always send AllCompleted
-                // Voice synthesis (VoiceSynthesisGAgent) sends AudioChunks independently
-                // This ensures SSE closes reliably without distributed coordination
-                streamEnvelope.Control = new ControlProto
+                // For voice chat: send TextCompleted instead of AllCompleted
+                // VoiceSynthesisGAgent will send AllCompleted after the last audio chunk
+                // This prevents SSE from closing before all audio chunks are delivered
+                if (isVoiceChat)
                 {
-                    Type = ControlProto.Types.ControlType.AllCompleted,
-                    Scope = "all",
-                    Message = "",
-                    ErrorCode = 0
-                };
+                    streamEnvelope.Control = new ControlProto
+                    {
+                        Type = ControlProto.Types.ControlType.TextCompleted,
+                        Scope = "text",
+                        Message = "",
+                        ErrorCode = 0
+                    };
+                    Logger.LogInformation("[AIAgentStatusProxy] Voice chat: sent TextCompleted (not AllCompleted) - StreamId={StreamId}, ChatId={ChatId}",
+                        streamId, context?.ChatId ?? "null");
+                }
+                else
+                {
+                    // Text chat: send AllCompleted to close SSE immediately
+                    streamEnvelope.Control = new ControlProto
+                    {
+                        Type = ControlProto.Types.ControlType.AllCompleted,
+                        Scope = "all",
+                        Message = "",
+                        ErrorCode = 0
+                    };
+                }
             }
             else
             {

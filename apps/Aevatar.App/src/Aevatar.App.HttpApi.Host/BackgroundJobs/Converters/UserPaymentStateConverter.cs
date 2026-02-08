@@ -82,8 +82,10 @@ public class UserPaymentStateConverter : IStateConverter
             oldState.TryGetValue("Mode", out paymentModeObj))
             newState.PaymentMode = ConvertPaymentMode(paymentModeObj);
 
-        // BillingCycle: int (enum)
-        if (oldState.TryGetValue("BillingCycle", out var billingCycleObj))
+        // BillingCycle: int (enum) - old data uses "PlanType" field name
+        if (oldState.TryGetValue("PlanType", out var planTypeObj) && planTypeObj != null)
+            newState.BillingCycle = ConvertToInt32(planTypeObj);
+        else if (oldState.TryGetValue("BillingCycle", out var billingCycleObj) && billingCycleObj != null)
             newState.BillingCycle = ConvertToInt32(billingCycleObj);
 
         // PeriodStart: DateTime -> Timestamp
@@ -116,7 +118,7 @@ public class UserPaymentStateConverter : IStateConverter
             newState.NetAmount = ConvertToInt64(netAmountObj);
 
         // Status: int (enum)
-        if (oldState.TryGetValue("Status", out var statusObj))
+        if (oldState.TryGetValue("Status", out var statusObj) && statusObj != null)
             newState.Status = ConvertToInt32(statusObj);
 
         // CreatedAt: DateTime -> Timestamp
@@ -153,12 +155,13 @@ public class UserPaymentStateConverter : IStateConverter
         else if (oldState.TryGetValue("InvoiceDetails", out var invoiceDetailsObj) && invoiceDetailsObj != null)
         {
             // Old format: InvoiceDetails -> Transactions
+            // Pass oldState for fallback when invoice fields are missing
             var invoiceList = ConvertToList(invoiceDetailsObj);
             if (invoiceList != null)
             {
                 foreach (var invObj in invoiceList)
                 {
-                    var transaction = ConvertInvoiceDetailToTransaction(invObj);
+                    var transaction = ConvertInvoiceDetailToTransaction(invObj, oldState);
                     if (transaction != null)
                         newState.Transactions.Add(transaction);
                 }
@@ -303,26 +306,18 @@ public class UserPaymentStateConverter : IStateConverter
     }
     
     /// <summary>
-    /// Convert decimal dollars to cents. If value looks like cents already (no decimal places), return as-is.
+    /// Convert decimal dollars to cents. Always multiply by 100.
     /// </summary>
     private static long ConvertDecimalToCents(decimal value)
     {
-        // If value has decimal places, it's likely dollars - convert to cents
-        // If value is a whole number > 100, it's likely already in cents
-        if (value == Math.Floor(value) && value >= 100)
-            return (long)value; // Already in cents
         return (long)Math.Round(value * 100);
     }
     
     /// <summary>
-    /// Convert double dollars to cents.
+    /// Convert double dollars to cents. Always multiply by 100.
     /// </summary>
     private static long ConvertDoubleToCents(double value)
     {
-        // If value has decimal places, it's likely dollars - convert to cents
-        // If value is a whole number > 100, it's likely already in cents
-        if (Math.Abs(value - Math.Floor(value)) < 0.0001 && value >= 100)
-            return (long)value; // Already in cents
         return (long)Math.Round(value * 100);
     }
 
@@ -392,8 +387,9 @@ public class UserPaymentStateConverter : IStateConverter
     /// <summary>
     /// Convert old InvoiceDetail to TransactionProto
     /// Old format: { InvoiceId, Status, CreatedAt, CompletedAt, Amount, AmountNetTotal, Discounts, IsTrial, TrialCode }
+    /// With fallback to parent oldState for missing fields
     /// </summary>
-    private static TransactionProto? ConvertInvoiceDetailToTransaction(object? invObj)
+    private static TransactionProto? ConvertInvoiceDetailToTransaction(object? invObj, Dictionary<string, object?>? parentState = null)
     {
         if (invObj == null) return null;
 
@@ -401,35 +397,105 @@ public class UserPaymentStateConverter : IStateConverter
 
         if (invObj is JsonElement je && je.ValueKind == JsonValueKind.Object)
         {
-            // InvoiceId -> TransactionId (or InvoiceId field)
+            // InvoiceId -> TransactionId and InvoiceId
             if (je.TryGetProperty("InvoiceId", out var invoiceId))
             {
-                trans.TransactionId = ConvertToString(invoiceId);
-                trans.InvoiceId = ConvertToString(invoiceId);
+                var id = ConvertToString(invoiceId);
+                trans.TransactionId = id;
+                trans.InvoiceId = id;
+                if (!string.IsNullOrEmpty(id))
+                    trans.ExternalTransactionId = id;
             }
-            if (je.TryGetProperty("Status", out var status))
-                trans.Status = ConvertToInt32(status);
-            if (je.TryGetProperty("Amount", out var amount))
+            
+            // Status - try invoice first, then parent
+            if (je.TryGetProperty("Status", out var status) && status.ValueKind == JsonValueKind.Number)
+                trans.Status = status.GetInt32();
+            else if (parentState?.TryGetValue("Status", out var parentStatus) == true)
+                trans.Status = ConvertToInt32(parentStatus);
+            
+            // Amount - try invoice first, then parent
+            if (je.TryGetProperty("Amount", out var amount) && amount.ValueKind == JsonValueKind.Number)
                 trans.Amount = ConvertToInt64(amount);
-            if (je.TryGetProperty("AmountNetTotal", out var netAmount))
+            else if (parentState?.TryGetValue("Amount", out var parentAmount) == true)
+                trans.Amount = ConvertToInt64(parentAmount);
+            
+            // Currency - try invoice first, then parent
+            var currency = GetJsonStringValue(je, "Currency");
+            if (string.IsNullOrEmpty(currency) && parentState?.TryGetValue("Currency", out var parentCurrency) == true)
+                currency = ConvertToString(parentCurrency);
+            trans.Currency = currency ?? "USD";
+            
+            // AmountNetTotal -> NetAmount - try invoice first, then parent
+            if (je.TryGetProperty("AmountNetTotal", out var netAmount) && netAmount.ValueKind == JsonValueKind.Number)
                 trans.NetAmount = ConvertToInt64(netAmount);
-            if (je.TryGetProperty("CreatedAt", out var createdAt))
-            {
-                var dt = ConvertToDateTime(createdAt);
-                if (dt.HasValue)
-                    trans.CreatedAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
-            }
-            if (je.TryGetProperty("CompletedAt", out var completedAt))
-            {
-                var dt = ConvertToDateTime(completedAt);
-                if (dt.HasValue)
-                    trans.CompletedAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
-            }
-            // Handle IsTrial and TrialCode
+            else if (je.TryGetProperty("NetAmount", out var netAmount2) && netAmount2.ValueKind == JsonValueKind.Number)
+                trans.NetAmount = ConvertToInt64(netAmount2);
+            else if (parentState?.TryGetValue("NetAmount", out var parentNet) == true)
+                trans.NetAmount = ConvertToInt64(parentNet);
+            else if (parentState?.TryGetValue("AmountNetTotal", out var parentNet2) == true)
+                trans.NetAmount = ConvertToInt64(parentNet2);
+            
+            // PurchaseToken - try invoice first, then parent
+            var purchaseToken = GetJsonStringValue(je, "PurchaseToken");
+            if (string.IsNullOrEmpty(purchaseToken) && parentState?.TryGetValue("PurchaseToken", out var parentToken) == true)
+                purchaseToken = ConvertToString(parentToken);
+            trans.PurchaseToken = purchaseToken ?? "";
+            
+            // CreatedAt - try invoice first, then parent
+            var createdAt = GetJsonDateTime(je, "CreatedAt");
+            if (createdAt == null && parentState?.TryGetValue("CreatedAt", out var parentCreatedAt) == true)
+                createdAt = ConvertToDateTime(parentCreatedAt);
+            if (createdAt.HasValue)
+                trans.CreatedAt = Timestamp.FromDateTime(createdAt.Value.ToUniversalTime());
+            
+            // CompletedAt - try invoice first, then parent
+            var completedAt = GetJsonDateTime(je, "CompletedAt");
+            if (completedAt == null && parentState?.TryGetValue("CompletedAt", out var parentCompletedAt) == true)
+                completedAt = ConvertToDateTime(parentCompletedAt);
+            if (completedAt.HasValue)
+                trans.CompletedAt = Timestamp.FromDateTime(completedAt.Value.ToUniversalTime());
+            
+            // PeriodStart - try invoice first, then parent
+            var periodStart = GetJsonDateTime(je, "SubscriptionStartDate") ?? GetJsonDateTime(je, "PeriodStart");
+            if (periodStart == null && parentState?.TryGetValue("PeriodStart", out var parentStart) == true)
+                periodStart = ConvertToDateTime(parentStart);
+            if (periodStart.HasValue)
+                trans.PeriodStart = Timestamp.FromDateTime(periodStart.Value.ToUniversalTime());
+            
+            // PeriodEnd - try invoice first, then parent
+            var periodEnd = GetJsonDateTime(je, "SubscriptionEndDate") ?? GetJsonDateTime(je, "PeriodEnd");
+            if (periodEnd == null && parentState?.TryGetValue("PeriodEnd", out var parentEnd) == true)
+                periodEnd = ConvertToDateTime(parentEnd);
+            if (periodEnd.HasValue)
+                trans.PeriodEnd = Timestamp.FromDateTime(periodEnd.Value.ToUniversalTime());
+            
+            // IsTrial
             if (je.TryGetProperty("IsTrial", out var isTrial))
                 trans.IsTrial = isTrial.ValueKind == JsonValueKind.True;
-            if (je.TryGetProperty("TrialCode", out var trialCode))
-                trans.TrialCode = ConvertToString(trialCode);
+            
+            // TrialCode
+            var trialCode = GetJsonStringValue(je, "TrialCode");
+            trans.TrialCode = trialCode ?? "";
+            
+            // MembershipLevel - try invoice first, then parent
+            var membershipLevel = GetJsonStringValue(je, "MembershipLevel");
+            if (string.IsNullOrEmpty(membershipLevel) && parentState?.TryGetValue("MembershipLevel", out var parentMembership) == true)
+                membershipLevel = ConvertToString(parentMembership);
+            trans.MembershipLevel = membershipLevel ?? "";
+            
+            // PlanType - try invoice first, then parent
+            if (je.TryGetProperty("PlanType", out var planType) && planType.ValueKind == JsonValueKind.Number)
+                trans.PlanType = planType.GetInt32();
+            else if (parentState?.TryGetValue("PlanType", out var parentPlanType) == true)
+                trans.PlanType = ConvertToInt32(parentPlanType);
+            
+            // ProductId (PriceId) - try invoice first, then parent
+            var productId = GetJsonStringValue(je, "PriceId") ?? GetJsonStringValue(je, "ProductId");
+            if (string.IsNullOrEmpty(productId) && parentState?.TryGetValue("PriceId", out var parentPriceId) == true)
+                productId = ConvertToString(parentPriceId);
+            if (string.IsNullOrEmpty(productId) && parentState?.TryGetValue("ProductId", out var parentProductId) == true)
+                productId = ConvertToString(parentProductId);
+            trans.ProductId = productId ?? "";
             
             // Convert Discounts to Promotions
             if (je.TryGetProperty("Discounts", out var discounts) && 
@@ -445,6 +511,25 @@ public class UserPaymentStateConverter : IStateConverter
         }
 
         return trans;
+    }
+    
+    // Helper: Get string value from JsonElement
+    private static string? GetJsonStringValue(JsonElement el, string propName)
+    {
+        if (el.TryGetProperty(propName, out var prop) && prop.ValueKind == JsonValueKind.String)
+            return prop.GetString();
+        return null;
+    }
+    
+    // Helper: Get valid DateTime from JsonElement (not MinValue)
+    private static DateTime? GetJsonDateTime(JsonElement el, string propName)
+    {
+        if (el.TryGetProperty(propName, out var prop))
+        {
+            var dt = ConvertToDateTime(prop);
+            if (dt.HasValue && dt.Value.Year > 1) return dt;
+        }
+        return null;
     }
 
     /// <summary>

@@ -315,11 +315,15 @@ public class GodGPTPaymentController : AevatarController
 
     [HttpGet("list-test")]
     [AllowAnonymous]
-    public async Task<List<PaymentSummaryDto>> GetPaymentHistoryTestAsync([FromQuery] GetPaymentHistoryInput input)
+    public async Task<List<PaymentSummaryDto>> GetPaymentHistoryTestAsync(
+        [FromQuery] GetPaymentHistoryInput input,
+        [FromQuery] string? userId = null)
     {
         var stopwatch = Stopwatch.StartNew();
-        // Test userId from inserted data
-        var currentUserId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        // Accept userId parameter or use default test user
+        var currentUserId = string.IsNullOrEmpty(userId) 
+            ? Guid.Parse("00000000-0000-0000-0000-000000000001")
+            : Guid.Parse(userId);
         var pageIndex = input?.PageIndex ?? 1;
         var pageSize = input?.PageSize ?? 10;
         
@@ -386,15 +390,9 @@ public class GodGPTPaymentController : AevatarController
                     }
                 }
                 
+                // Filter out all Processing status records (matches old code behavior)
                 var result = expandedItems
-                    .Where(dto => 
-                    {
-                        // Keep all non-Processing records
-                        if (dto.Status != (int)PaymentStatus.Processing)
-                            return true;
-                        // For Processing, keep if recent (< 1 day)
-                        return dto.CreatedAtRaw > oneDayAgo;
-                    })
+                    .Where(dto => dto.Status != (int)PaymentStatus.Processing)
                     .OrderByDescending(dto => dto.CreatedAtRaw)
                     .Skip((pageIndex - 1) * pageSize)
                     .Take(pageSize)
@@ -416,16 +414,19 @@ public class GodGPTPaymentController : AevatarController
         // Fallback to basic PaymentService
         var history = await _paymentService.GetPaymentHistoryAsync(currentUserId, pageIndex, pageSize);
         
-        var fallbackResult = history.Select(h => new PaymentSummaryDto
-        {
-            PaymentGrainId = Guid.TryParse(h.PaymentId, out var id) ? id : Guid.Empty,
-            Amount = h.Amount,
-            Currency = h.Currency,
-            Status = (int)h.Status,
-            Platform = (int)h.Platform,
-            CreatedAtRaw = h.CreatedAt,
-            CompletedAtRaw = h.CompletedAt
-        }).ToList();
+        // Filter out Processing status records (matches old code behavior)
+        var fallbackResult = history
+            .Where(h => h.Status != PaymentStatus.Processing)
+            .Select(h => new PaymentSummaryDto
+            {
+                PaymentGrainId = Guid.TryParse(h.PaymentId, out var id) ? id : Guid.Empty,
+                Amount = h.Amount,
+                Currency = h.Currency,
+                Status = (int)h.Status,
+                Platform = (int)h.Platform,
+                CreatedAtRaw = h.CreatedAt,
+                CompletedAtRaw = h.CompletedAt
+            }).ToList();
         
         _logger.LogDebug("[GodGPTPaymentController][GetPaymentHistoryAsync] userId: {UserId}, duration: {Duration}ms",
             currentUserId, stopwatch.ElapsedMilliseconds);

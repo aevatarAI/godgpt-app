@@ -95,7 +95,6 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
                 if (refundTxn == null)
                 {
                     refundTxn = state.Transactions
-                        .Where(t => t.Status == (int)PaymentStatus.Completed)
                         .OrderByDescending(t => t.CreatedAt)
                         .FirstOrDefault();
                 }

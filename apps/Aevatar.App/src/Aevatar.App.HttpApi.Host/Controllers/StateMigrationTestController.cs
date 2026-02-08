@@ -14,6 +14,7 @@ using Aevatar.Application.Grains.UserFeedback;
 using Aevatar.Application.Grains.Agents.Anonymous;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
 using Aevatar.Application.Grains.Agents.ChatManager;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 using MongoDB.Bson;
@@ -26,7 +27,7 @@ namespace Aevatar.App.HttpApi.Host.Controllers;
 /// Test controller for State Migration - tests agent loading after migration
 /// </summary>
 [Route("api/admin/migration/test")]
-// [Authorize] // Temporarily disabled for testing
+[Authorize(Roles = "admin")]
 public class StateMigrationTestController : AbpControllerBase
 {
     private readonly IMongoClient _mongoClient;

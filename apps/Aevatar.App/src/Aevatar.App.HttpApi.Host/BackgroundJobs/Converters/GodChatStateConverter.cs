@@ -20,14 +20,15 @@ public class GodChatStateConverter : IStateConverter
         var newState = new GodChatStateProto();
 
         // ChatHistory: List<ChatMessage> -> repeated ChatMessageProto
+        // Direct mapping from old system integer values
         if (oldState.TryGetValue("ChatHistory", out var chatHistoryObj) && chatHistoryObj != null)
         {
             var chatList = ConvertToList(chatHistoryObj);
             if (chatList != null)
             {
-                foreach (var chatObj in chatList)
+                for (int i = 0; i < chatList.Count; i++)
                 {
-                    var chatMessage = ConvertChatMessage(chatObj);
+                    var chatMessage = ConvertChatMessage(chatList[i], i);
                     if (chatMessage != null)
                         newState.ChatHistory.Add(chatMessage);
                 }
@@ -70,20 +71,10 @@ public class GodChatStateConverter : IStateConverter
                 newState.ChatManagerGuid = guid.ToString("D");
         }
 
-        // RegionProxies: List<RegionProxiesEntry> -> repeated RegionProxiesEntryProto
-        if (oldState.TryGetValue("RegionProxies", out var regionProxiesObj) && regionProxiesObj != null)
-        {
-            var regionList = ConvertToList(regionProxiesObj);
-            if (regionList != null)
-            {
-                foreach (var regionObj in regionList)
-                {
-                    var regionEntry = ConvertRegionProxiesEntry(regionObj);
-                    if (regionEntry != null)
-                        newState.RegionProxies.Add(regionEntry);
-                }
-            }
-        }
+        // RegionProxies: SKIP migration - let GodChatGAgent create new proxies on demand
+        // Old AIAgentStatusProxy states have low value (temporary availability flags)
+        // and will be garbage after migration. New proxies will be auto-created.
+        // See: GodChatGAgent.ProxyManagement.cs - InitializeRegionProxiesAsync()
 
         // FirstChatTime: DateTime? -> optional Timestamp
         if (oldState.TryGetValue("FirstChatTime", out var firstChatTimeObj))
@@ -116,25 +107,13 @@ public class GodChatStateConverter : IStateConverter
             }
         }
 
-        // ProxyInitStatuses: List<ProxyInitStatusEntry> -> repeated ProxyInitStatusEntryProto
-        if (oldState.TryGetValue("ProxyInitStatuses", out var proxyInitStatusesObj) && proxyInitStatusesObj != null)
-        {
-            var statusList = ConvertToList(proxyInitStatusesObj);
-            if (statusList != null)
-            {
-                foreach (var statusObj in statusList)
-                {
-                    var statusEntry = ConvertProxyInitStatusEntry(statusObj);
-                    if (statusEntry != null)
-                        newState.ProxyInitStatuses.Add(statusEntry);
-                }
-            }
-        }
+        // ProxyInitStatuses: SKIP - related to RegionProxies which is also skipped
+        // No proxies = no proxy init statuses to track
 
         return newState;
     }
 
-    private ChatMessageProto? ConvertChatMessage(object? obj)
+    private ChatMessageProto? ConvertChatMessage(object? obj, int messageIndex = 0)
     {
         if (obj == null) return null;
         var dict = ConvertToDictionary(obj);
@@ -168,8 +147,11 @@ public class GodChatStateConverter : IStateConverter
             }
         }
 
+        // Handle ChatRole: direct mapping from integer value
         if (dict.TryGetValue("ChatRole", out var chatRoleObj))
+        {
             message.ChatRole = ConvertToInt32(chatRoleObj);
+        }
 
         if (dict.TryGetValue("ImageKeys", out var imageKeysObj) && imageKeysObj != null)
         {

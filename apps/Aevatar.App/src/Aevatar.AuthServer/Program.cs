@@ -11,6 +11,7 @@ using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization;
+using MongoDB.Bson.Serialization.Conventions;
 using MongoDB.Bson.Serialization.Serializers;
 
 namespace Aevatar.AuthServer;
@@ -70,21 +71,21 @@ public class Program
 
     /// <summary>
     /// Configure MongoDB GUID serialization to use Legacy format for backward compatibility.
-    /// This must be called BEFORE any ABP modules are loaded to ensure it takes effect.
+    /// Uses ConventionPack (ABP recommended approach for MongoDB Driver 3.x).
+    /// Must be called before any MongoDB operations.
     /// </summary>
     private static void ConfigureMongoGuidSerialization()
     {
         try
         {
-            // Register GUID serializer with Legacy format BEFORE ABP modules load
-            // This ensures compatibility with existing data stored in UuidLegacy format
-            BsonSerializer.RegisterSerializer(new GuidSerializer(GuidRepresentation.CSharpLegacy));
-            Log.Information("✅ MongoDB GUID serialization configured: CSharpLegacy");
+            // Register convention pack for legacy GUID handling (ABP recommended approach)
+            var conventionPack = new ConventionPack { new LegacyGuidConvention() };
+            ConventionRegistry.Register("LegacyGuidConvention", conventionPack, _ => true);
+            Log.Information("✅ MongoDB GUID serialization configured: CSharpLegacy (Convention)");
         }
-        catch (BsonSerializationException ex)
+        catch (Exception ex)
         {
-            // Already registered, log warning but continue
-            Log.Warning(ex, "MongoDB GUID serializer already registered, continuing...");
+            Log.Warning(ex, "MongoDB GUID convention may already be registered, continuing...");
         }
     }
 
@@ -129,5 +130,25 @@ public class Program
                 {
                     options.Endpoint = new Uri(collectorEndpoint);
                 }));
+    }
+}
+
+/// <summary>
+/// Convention to serialize all GUID properties using CSharpLegacy representation.
+/// This is the ABP recommended approach for MongoDB Driver 3.x compatibility.
+/// </summary>
+public class LegacyGuidConvention : ConventionBase, IMemberMapConvention
+{
+    public void Apply(BsonMemberMap memberMap)
+    {
+        if (memberMap.MemberType == typeof(Guid))
+        {
+            memberMap.SetSerializer(new GuidSerializer(GuidRepresentation.CSharpLegacy));
+        }
+        else if (memberMap.MemberType == typeof(Guid?))
+        {
+            var guidSerializer = new GuidSerializer(GuidRepresentation.CSharpLegacy);
+            memberMap.SetSerializer(new NullableSerializer<Guid>(guidSerializer));
+        }
     }
 }

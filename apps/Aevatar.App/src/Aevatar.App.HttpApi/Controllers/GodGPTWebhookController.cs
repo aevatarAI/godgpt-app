@@ -171,7 +171,11 @@ public class GodGPTWebhookController : AevatarController
                 result.Success, result.EventType, result.UserId);
 
             // Process godgpt-specific business logic (cancel old subscriptions)
-            if (result.Success && result.ShouldProcess && result.UserId.HasValue)
+            // CRITICAL: Only trigger on Completed status (invoice.paid), NOT on Processing (checkout.session.completed)
+            // checkout.session.completed only means checkout flow completed, not payment success
+            // invoice.paid is the actual payment success signal
+            if (result.Success && result.ShouldProcess && result.UserId.HasValue &&
+                result.NewStatus == PaymentStatus.Completed)
             {
                 await ProcessGodGPTBusinessLogicAsync(result, PaymentPlatform.Stripe);
             }

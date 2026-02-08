@@ -6,6 +6,8 @@ using Aevatar.App.Services.Payment;
 using Aevatar.App.Services.Subscription;
 using Aevatar.App.Services.Subscription.Options;
 using Aevatar.App.Services.Subscription.Providers;
+using Aevatar.Payment.Abstractions;
+using Aevatar.App.Application.Contracts.Services;
 using Aevatar.App.Application.Contracts.Services.Push;
 using Aevatar.Application.Grains;
 using Aevatar.Payment.Abstractions;
@@ -77,6 +79,9 @@ public class AppApplicationModule : AbpModule
         Configure<UserSubscriptionOptions>(configuration.GetSection(UserSubscriptionOptions.SectionName));
         context.Services.AddTransient<IUserSubscriptionService, UserSubscriptionService>();
 
+        // Register payment event pre-handler (ensures agent links exist before events are broadcast)
+        context.Services.AddScoped<IPaymentEventPreHandler, GodGPTPaymentEventPreHandler>();
+        
         // Push Notification Services
         Configure<FirebaseMessagingOptions>(configuration.GetSection(FirebaseMessagingOptions.SectionName));
         context.Services.AddHttpClient<IFirebaseMessagingClient, FirebaseMessagingClient>();

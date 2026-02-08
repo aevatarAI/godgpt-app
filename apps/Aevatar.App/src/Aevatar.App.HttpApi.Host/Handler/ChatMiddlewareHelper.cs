@@ -3,6 +3,8 @@ using System.Linq;
 using Aevatar.Agents.GodGPT.Protos.GodChatStream;
 using Aevatar.Application.Grains.Agents.ChatManager;
 using Aevatar.Application.Grains.Agents.ChatManager.Chat;
+using GodGPT.GAgents.SpeechChat;
+using Newtonsoft.Json;
 
 namespace Aevatar.App.HttpApi.Host.Handler;
 
@@ -77,7 +79,7 @@ public static class ChatMiddlewareHelper
                 http.Response = string.Empty;
                 http.IsLastChunk = envelope.Audio?.IsLast ?? false;
                 http.AudioData = envelope.Audio?.AudioData?.ToByteArray();
-                http.AudioMetadata = null;
+                http.AudioMetadata = ParseAudioMetadata(envelope.Audio?.AudioMetadataJson);
                 http.VoiceContentType = VoiceContentType.VoiceResponse;
                 return http;
 
@@ -103,6 +105,25 @@ public static class ChatMiddlewareHelper
                 http.Response = string.Empty;
                 http.IsLastChunk = false;
                 return http;
+        }
+    }
+
+    /// <summary>
+    /// Parses AudioMetadata from JSON string (from proto audio_metadata_json field).
+    /// </summary>
+    private static AudioMetadata? ParseAudioMetadata(string? audioMetadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(audioMetadataJson))
+            return null;
+
+        try
+        {
+            return JsonConvert.DeserializeObject<AudioMetadata>(audioMetadataJson);
+        }
+        catch
+        {
+            // If parsing fails, return null rather than crashing
+            return null;
         }
     }
 }
