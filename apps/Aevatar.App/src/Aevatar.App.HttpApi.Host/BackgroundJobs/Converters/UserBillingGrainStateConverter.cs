@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using Aevatar.Payment.Agents;
 using Aevatar.Payment.Agents.Protos;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -124,22 +125,26 @@ public class UserBillingGrainStateConverter : IStateConverter
 
         if (obj is JsonElement je && je.ValueKind == JsonValueKind.Object)
         {
-            // PaymentId - use PaymentGrainId if available, otherwise OrderId
-            if (je.TryGetProperty("PaymentGrainId", out var paymentGrainIdEl))
+            // Platform (read first for PaymentId generation)
+            var subPlatform = 0;
+            if (je.TryGetProperty("Platform", out var platformEl))
+            {
+                subPlatform = ConvertToInt32(platformEl);
+                subscription.Platform = subPlatform;
+            }
+
+            // PaymentId - generate in new format: payment_{platform}_{orderId}
+            var subOrderId = string.Empty;
+            if (je.TryGetProperty("OrderId", out var subOrderIdEl))
+                subOrderId = ConvertToString(subOrderIdEl);
+            
+            if (!string.IsNullOrEmpty(subOrderId))
+                subscription.PaymentId = GetPaymentId(subPlatform, subOrderId);
+            else if (je.TryGetProperty("PaymentGrainId", out var paymentGrainIdEl))
             {
                 var grainId = ConvertToString(paymentGrainIdEl);
                 if (!string.IsNullOrEmpty(grainId) && Guid.TryParse(grainId, out var guid))
                     subscription.PaymentId = guid.ToString("D");
-            }
-            else if (je.TryGetProperty("OrderId", out var orderIdEl))
-            {
-                subscription.PaymentId = ConvertToString(orderIdEl);
-            }
-
-            // Platform
-            if (je.TryGetProperty("Platform", out var platformEl))
-            {
-                subscription.Platform = ConvertToInt32(platformEl);
             }
 
             // Note: ActiveSubscriptionProto doesn't have SubscriptionId field
@@ -197,6 +202,21 @@ public class UserBillingGrainStateConverter : IStateConverter
                     subscription.CreatedAt = Timestamp.FromDateTime(dt.Value.ToUniversalTime());
             }
 
+            // Status - preserve original status (e.g., 8 = Cancelled)
+            // Processing (2) with no valid PeriodEnd → mark as Expired (12)
+            // These are abandoned/incomplete payment sessions, not real subscriptions
+            if (je.TryGetProperty("Status", out var statusEl2))
+            {
+                var rawStatus = ConvertToInt32(statusEl2);
+                subscription.Status = (rawStatus == 2 && subscription.PeriodEnd == null)
+                    ? 12 // Expired - incomplete payment, never activated
+                    : rawStatus;
+            }
+
+            // SubscriptionId - for platform subscription lookup
+            if (je.TryGetProperty("SubscriptionId", out var subscriptionIdEl))
+                subscription.SubscriptionId = ConvertToString(subscriptionIdEl);
+
             // Business type - default to "godgpt"
             subscription.BusinessType = "godgpt";
         }
@@ -219,8 +239,31 @@ public class UserBillingGrainStateConverter : IStateConverter
         var state = new PaymentRecordStateProto();
         string? paymentId = null;
 
-        // PaymentGrainId -> PaymentId
-        if (je.TryGetProperty("PaymentGrainId", out var grainIdEl))
+        // Platform (read first for PaymentId generation)
+        var recPlatform = 0;
+        if (je.TryGetProperty("Platform", out var platformEl))
+        {
+            recPlatform = ConvertToInt32(platformEl);
+            state.Platform = recPlatform;
+        }
+
+        // OrderId -> ExternalOrderId + PaymentId generation
+        string? orderId = null;
+        if (je.TryGetProperty("OrderId", out var orderIdEl))
+        {
+            orderId = ConvertToString(orderIdEl);
+            state.ExternalOrderId = orderId ?? string.Empty;
+        }
+
+        // Generate PaymentId in new format: payment_{platform}_{orderId}
+        if (!string.IsNullOrEmpty(orderId))
+        {
+            paymentId = GetPaymentId(recPlatform, orderId);
+            state.PaymentId = paymentId;
+        }
+        
+        // Fallback to PaymentGrainId if OrderId not available
+        if (string.IsNullOrEmpty(paymentId) && je.TryGetProperty("PaymentGrainId", out var grainIdEl))
         {
             var grainId = ConvertToString(grainIdEl);
             if (Guid.TryParse(grainId, out var guid))
@@ -239,17 +282,9 @@ public class UserBillingGrainStateConverter : IStateConverter
         }
         else if (!string.IsNullOrEmpty(defaultUserId)) state.UserId = defaultUserId;
 
-        // OrderId -> ExternalOrderId
-        if (je.TryGetProperty("OrderId", out var orderIdEl))
-            state.ExternalOrderId = ConvertToString(orderIdEl);
-
         // SubscriptionId
         if (je.TryGetProperty("SubscriptionId", out var subIdEl))
             state.SubscriptionId = ConvertToString(subIdEl);
-
-        // Platform
-        if (je.TryGetProperty("Platform", out var platformEl))
-            state.Platform = ConvertToInt32(platformEl);
 
         // AppStoreEnvironment -> Environment
         if (je.TryGetProperty("AppStoreEnvironment", out var envEl))
@@ -380,7 +415,25 @@ public class UserBillingGrainStateConverter : IStateConverter
         state.LastUpdated = Timestamp.FromDateTime(DateTime.UtcNow);
         state.BusinessType = "godgpt";
 
-        return ($"PaymentRecordGAgent:{paymentId}", state);
+        // AgentId uses MD5-derived GUID from paymentId for consistency with PaymentService
+        var agentGuid = PaymentIdHelper.ToAgentIdString(paymentId);
+        return ($"PaymentRecordGAgent:{agentGuid}", state);
+    }
+
+    /// <summary>
+    /// Generate PaymentId in the standard format: payment_{platform}_{orderId}
+    /// Matches PaymentService.GetPaymentId() logic
+    /// </summary>
+    private static string GetPaymentId(int platform, string orderId)
+    {
+        var platformName = platform switch
+        {
+            0 => "stripe",
+            1 => "appstore",
+            2 => "googleplay",
+            _ => "unknown"
+        };
+        return $"payment_{platformName}_{orderId}";
     }
 
     private static TransactionProto? ConvertInvoiceToTransaction(JsonElement inv, JsonElement parent)
