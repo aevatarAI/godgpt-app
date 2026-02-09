@@ -12,10 +12,6 @@ namespace Aevatar.Application.Grains.Twitter;
 /// </summary>
 public class TwitterIdentityBindingGAgent : GAgentBase<TwitterIdentityBindingState>, ITwitterIdentityBindingGAgent
 {
-    public TwitterIdentityBindingGAgent()
-    {
-    }
-
     public override Task<string> GetDescriptionAsync()
     {
         return Task.FromResult($"Twitter Identity Binding GAgent - Twitter: {State.TwitterUserId}");

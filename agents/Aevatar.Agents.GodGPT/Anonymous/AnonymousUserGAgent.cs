@@ -34,10 +34,6 @@ public class AnonymousUserGAgent : GAgentBase<AnonymousUserState>, IAnonymousUse
     // Cached ConfigurationGAgent interface (new framework)
     private IConfigurationGAgent? _configurationAgentInterface;
 
-    public AnonymousUserGAgent()
-    {
-    }
-
     public override Task<string> GetDescriptionAsync()
     {
         return Task.FromResult("Anonymous User GAgent for guest chat sessions");
