@@ -263,7 +263,9 @@ public class AIAgentStatusProxy :
             // Inject selected history into ChatRequest for multi-turn conversation context
             if (selectedHistory.Count > 0)
             {
-                InjectHistoryIntoRequest(request, selectedHistory);
+                var historyBytes = InjectHistoryIntoRequest(request, selectedHistory);
+                Logger.LogWarning("[SIZE_DEBUG][ChatWithHistory] Injected {Count} history messages ({HistoryKB} KB) - RequestId={RequestId}",
+                    selectedHistory.Count, historyBytes / 1024, requestId);
             }
 
             if (promptSettings?.Temperature != null && double.TryParse(promptSettings.Temperature, out var temp))
@@ -394,9 +396,9 @@ public class AIAgentStatusProxy :
             // Inject selected history into ChatRequest for multi-turn conversation context
             if (selectedHistory.Count > 0)
             {
-                InjectHistoryIntoRequest(request, selectedHistory);
-                Logger.LogInformation("[AIAgentStatusProxy] Injected {Count} history messages into ChatRequest - ChatId={ChatId}",
-                    selectedHistory.Count, context?.ChatId ?? "null");
+                var historyBytes = InjectHistoryIntoRequest(request, selectedHistory);
+                Logger.LogWarning("[SIZE_DEBUG][PromptWithStream] Injected {Count} history messages ({HistoryKB} KB) - ChatId={ChatId}",
+                    selectedHistory.Count, historyBytes / 1024, context?.ChatId ?? "null");
             }
 
             if (promptSettings?.Temperature != null && double.TryParse(promptSettings.Temperature, out var temp))
@@ -1141,9 +1143,14 @@ public class AIAgentStatusProxy :
     /// <summary>
     /// Convert legacy ChatMessage list to AevatarChatMessage list for ChatRequest.History.
     /// Maps GodGPT ChatRole → AevatarChatRole (different enum values).
+    /// Returns total bytes injected for diagnostics.
     /// </summary>
-    private static void InjectHistoryIntoRequest(ChatRequest request, List<ChatMessage> selectedHistory)
+    private long InjectHistoryIntoRequest(ChatRequest request, List<ChatMessage> selectedHistory)
     {
+        long totalBytes = 0;
+        long maxSingleMsgBytes = 0;
+        string? maxMsgRole = null;
+        
         foreach (var msg in selectedHistory)
         {
             var role = msg.ChatRole switch
@@ -1155,12 +1162,27 @@ public class AIAgentStatusProxy :
                 _ => AevatarChatRole.User
             };
 
+            var content = msg.Content ?? "";
+            var msgBytes = (long)System.Text.Encoding.UTF8.GetByteCount(content);
+            totalBytes += msgBytes;
+            
+            if (msgBytes > maxSingleMsgBytes)
+            {
+                maxSingleMsgBytes = msgBytes;
+                maxMsgRole = role.ToString();
+            }
+
             request.History.Add(new AevatarChatMessage
             {
                 Role = role,
-                Content = msg.Content ?? ""
+                Content = content
             });
         }
+        
+        Logger.LogWarning("[SIZE_DEBUG][InjectHistory] Count={Count}, TotalBytes={TotalBytes}, MaxSingleMsgBytes={MaxSingleMsgBytes}, MaxMsgRole={MaxMsgRole}",
+            selectedHistory.Count, totalBytes, maxSingleMsgBytes, maxMsgRole ?? "N/A");
+        
+        return totalBytes;
     }
 
     #endregion
@@ -1242,8 +1264,8 @@ public class AIAgentStatusProxy :
                 var bytes = await blobContainer.GetAllBytesAsync(key, cancellationToken);
                 var mediaType = GetMediaTypeFromKey(key);
                 
-                Logger.LogDebug("[AIAgentStatusProxy] Downloaded image: Key={Key}, Size={Size} bytes, MediaType={MediaType}",
-                    key, bytes.Length, mediaType);
+                Logger.LogWarning("[SIZE_DEBUG][ResolveImage] Downloaded: Key={Key}, Size={SizeKB}KB ({SizeBytes}bytes), MediaType={MediaType}, Base64Est={Base64KB}KB",
+                    key, bytes.Length / 1024, bytes.Length, mediaType, bytes.Length * 4 / 3 / 1024);
                 
                 return new AevatarImageData
                 {
@@ -1269,8 +1291,9 @@ public class AIAgentStatusProxy :
             }
         }
 
-        Logger.LogInformation("[AIAgentStatusProxy] Successfully resolved {Count}/{Total} images",
-            imageDataList.Count, keyList.Count);
+        var totalImageBytes = imageDataList.Sum(img => (long)img.Data.Length);
+        Logger.LogWarning("[SIZE_DEBUG][ResolveImage] Resolved {Count}/{Total} images, TotalRawSize={TotalKB}KB, TotalBase64Est={Base64KB}KB",
+            imageDataList.Count, keyList.Count, totalImageBytes / 1024, totalImageBytes * 4 / 3 / 1024);
         
         return imageDataList.Count > 0 ? imageDataList : null;
     }
