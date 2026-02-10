@@ -72,6 +72,29 @@ public sealed class MEAILLMProvider : AevatarLLMProviderBase
             var messages = BuildChatMessages(request);
             var options = BuildChatOptions(request);
 
+            // Diagnostic: estimate total request payload size
+            long estimatedPayloadBytes = 0;
+            foreach (var msg in messages)
+            {
+                if (msg.Contents != null)
+                {
+                    foreach (var content in msg.Contents)
+                    {
+                        if (content is Microsoft.Extensions.AI.TextContent tc)
+                            estimatedPayloadBytes += System.Text.Encoding.UTF8.GetByteCount(tc.Text ?? "");
+                        else if (content is Microsoft.Extensions.AI.DataContent dc)
+                            estimatedPayloadBytes += (long)dc.Data.Length * 4 / 3;
+                    }
+                }
+                else if (msg.Text != null)
+                {
+                    estimatedPayloadBytes += System.Text.Encoding.UTF8.GetByteCount(msg.Text);
+                }
+            }
+            _logger.LogWarning(
+                "[SIZE_DEBUG][MEAI_Sync] EstimatedPayload={PayloadMB:F2}MB ({PayloadBytes}bytes), Messages={MsgCount}, Model={Model}",
+                estimatedPayloadBytes / (1024.0 * 1024.0), estimatedPayloadBytes, messages.Count, _config.Model);
+
             _logger.LogInformation("[MEAI] Sending request with {MsgCount} messages", messages.Count);
             var response = await _chatClient.GetResponseAsync(messages, options, cancellationToken);
             _logger.LogInformation("[MEAI] Got response: Text='{Text}', MsgCount={MsgCount}",
@@ -494,6 +517,34 @@ public sealed class MEAILLMProvider : AevatarLLMProviderBase
 
         var messages = BuildChatMessages(request);
         var options = BuildChatOptions(request);
+
+        // Diagnostic: estimate total request payload size before sending to API
+        long estimatedPayloadBytes = 0;
+        foreach (var msg in messages)
+        {
+            if (msg.Contents != null)
+            {
+                foreach (var content in msg.Contents)
+                {
+                    if (content is Microsoft.Extensions.AI.TextContent textContent)
+                    {
+                        estimatedPayloadBytes += System.Text.Encoding.UTF8.GetByteCount(textContent.Text ?? "");
+                    }
+                    else if (content is Microsoft.Extensions.AI.DataContent dataContent)
+                    {
+                        // DataContent will be base64 encoded in the JSON request (~133% of raw bytes)
+                        estimatedPayloadBytes += (long)dataContent.Data.Length * 4 / 3;
+                    }
+                }
+            }
+            else if (msg.Text != null)
+            {
+                estimatedPayloadBytes += System.Text.Encoding.UTF8.GetByteCount(msg.Text);
+            }
+        }
+        _logger.LogWarning(
+            "[SIZE_DEBUG][MEAI_Stream] EstimatedPayload={PayloadMB:F2}MB ({PayloadBytes}bytes), Messages={MsgCount}, Model={Model}",
+            estimatedPayloadBytes / (1024.0 * 1024.0), estimatedPayloadBytes, messages.Count, _config.Model);
 
         await foreach (var chatUpdate in _chatClient.GetStreamingResponseAsync(messages, options, cancellationToken))
         {
