@@ -22,6 +22,8 @@ using Volo.Abp;
 using Volo.Abp.Application.Services;
 using Volo.Abp.Auditing;
 using Aevatar.App.Application.Contracts.Services.Admin;
+using Aevatar.App.Services.Subscription;
+using Aevatar.Application.Grains.Subscription;
 
 namespace Aevatar.App.Application.Services.Admin;
 
@@ -37,6 +39,7 @@ public class GodGPTAdminService : ApplicationService, IGodGPTAdminService
     private readonly IOptionsMonitor<ManagerOptions> _managerOptions;
     private readonly IOptionsMonitor<CreditsOptions> _creditsOptions;
     private readonly IOptionsMonitor<PaymentStripeOptions> _stripeOptions;
+    private readonly ISubscriptionProductService _subscriptionProductService;
     private readonly ILogger<GodGPTAdminService> _logger;
 
     public GodGPTAdminService(
@@ -44,6 +47,7 @@ public class GodGPTAdminService : ApplicationService, IGodGPTAdminService
         IOptionsMonitor<ManagerOptions> managerOptions,
         IOptionsMonitor<CreditsOptions> creditsOptions,
         IOptionsMonitor<PaymentStripeOptions> stripeOptions,
+        ISubscriptionProductService subscriptionProductService,
         ILogger<GodGPTAdminService> logger)
     {
         _actorFactory = actorFactory;
@@ -51,6 +55,7 @@ public class GodGPTAdminService : ApplicationService, IGodGPTAdminService
         _creditsOptions = creditsOptions;
         _stripeOptions = stripeOptions;
         _logger = logger;
+        _subscriptionProductService = subscriptionProductService;
     }
 
     /// <inheritdoc />
@@ -68,7 +73,8 @@ public class GodGPTAdminService : ApplicationService, IGodGPTAdminService
             return BuildGenerateCodesFailure($"Unsupported payment platform: {input.Platform}");
         }
 
-        if (!TryGetStripeProductConfig(input.ProductId, out var productConfig, out var productError))
+        var (productConfig, productError) = await GetStripeProductConfigAsync(input.ProductId);
+        if (productConfig == null)
         {
             _logger.LogWarning("[GodGPTAdminService] Invalid product id for free trial code: {ProductId}", input.ProductId);
             return BuildGenerateCodesFailure(productError);
@@ -164,27 +170,41 @@ public class GodGPTAdminService : ApplicationService, IGodGPTAdminService
         return operators.Contains(operatorId);
     }
 
-    private bool TryGetStripeProductConfig(string productId, out PaymentStripeProductConfig productConfig, out string errorMessage)
+    private async Task<(PaymentStripeProductConfig?, string)> GetStripeProductConfigAsync(string productId)
     {
-        productConfig = null!;
-        errorMessage = string.Empty;
+        var errorMessage = string.Empty;
+
+        var product = await _subscriptionProductService.GetProductByPlatformPriceIdAsync(productId);
+        if (product != null)
+        {
+            return (new PaymentStripeProductConfig
+            {
+                PriceId = product.PlatformPriceId,
+                PlanType = (int)product.PlanType,
+                Amount = (decimal)product.Price,
+                Currency = product.Currency,
+                IsUltimate = product.IsUltimate,
+                Mode = "subscription",
+                Description = product.Description,
+                Name = product.Name
+            }, errorMessage);
+        }
 
         var products = _stripeOptions.CurrentValue.Products;
         if (products == null || products.Count == 0)
         {
             errorMessage = "Stripe products are not configured";
-            return false;
+            return (null, errorMessage);
         }
 
         var matched = products.FirstOrDefault(p => p.PriceId == productId);
         if (matched == null)
         {
             errorMessage = $"Invalid priceId: {productId}. Product not found in configuration.";
-            return false;
+            return (null, errorMessage);
         }
 
-        productConfig = matched;
-        return true;
+        return (matched, errorMessage);
     }
 
     private static FactoryPlanType MapPlanType(int planType)

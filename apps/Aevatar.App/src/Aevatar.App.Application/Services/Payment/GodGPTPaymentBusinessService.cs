@@ -3,6 +3,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents.Abstractions.Extensions;
+using Aevatar.App.Services.Subscription;
+using Aevatar.Application.Grains.Subscription;
 using Aevatar.Payment.Abstractions;
 using Aevatar.Payment.Agents;
 using Aevatar.Payment.Providers;
@@ -49,6 +51,7 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
     private readonly IPaymentService _paymentService;
     private readonly IGAgentActorFactory _actorFactory;
     private readonly PaymentBusinessRegistrationService _registrationService;
+    private readonly ISubscriptionProductService _subscriptionProductService;
     private readonly ILogger<GodGPTPaymentBusinessService> _logger;
     private readonly StripeOptions _stripeOptions;
     private readonly ApplePayOptions _applePayOptions;
@@ -58,6 +61,7 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
         IPaymentService paymentService,
         IGAgentActorFactory actorFactory,
         PaymentBusinessRegistrationService registrationService,
+        ISubscriptionProductService subscriptionProductService,
         ILogger<GodGPTPaymentBusinessService> logger,
         IOptions<StripeOptions> stripeOptions,
         IOptions<ApplePayOptions> applePayOptions,
@@ -67,6 +71,7 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
         _actorFactory = actorFactory;
         _registrationService = registrationService;
         _logger = logger;
+        _subscriptionProductService = subscriptionProductService;
         _stripeOptions = stripeOptions.Value;
         _applePayOptions = applePayOptions.Value;
         _googlePlayOptions = googlePlayOptions.Value;
@@ -100,7 +105,7 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
         // Same-platform logic is handled in CancelOldSubscriptionsAsync.
 
         // Determine isUltimate from product configuration
-        var isUltimate = GetIsUltimateFromProductId(platform, productId);
+        var isUltimate = await GetIsUltimateFromProductIdAsync(platform, productId);
 
         try
         {
@@ -166,7 +171,7 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
             // Get subscription's platform and productId to determine isUltimate
             var subPlatform = (PaymentPlatform)sub.Platform;
             var subProductId = sub.BusinessId; // BusinessId stores productId
-            var subIsUltimate = GetIsUltimateFromStoredPayment(subPlatform, subProductId);
+            var subIsUltimate = await GetIsUltimateFromStoredPaymentAsync(subPlatform, subProductId);
             
             // Get real SubscriptionId from PaymentRecordGAgent state
             // PaymentId now uses OrderId as key, so we need to query the agent
@@ -264,33 +269,47 @@ public class GodGPTPaymentBusinessService : IGodGPTPaymentBusinessService
     /// <summary>
     /// Determine if subscription is Ultimate tier from product configuration.
     /// </summary>
-    private bool GetIsUltimateFromProductId(PaymentPlatform platform, string? productId)
+    private async Task<bool> GetIsUltimateFromProductIdAsync(PaymentPlatform platform, string? productId)
     {
         if (string.IsNullOrEmpty(productId))
         {
             _logger.LogWarning("[GodGPTPaymentBusinessService] ProductId is null, defaulting isUltimate=false");
             return false;
         }
-
-        return platform switch
+        
+        if (platform == PaymentPlatform.Stripe)
         {
-            PaymentPlatform.Stripe => _stripeOptions.Products
-                .FirstOrDefault(p => p.PriceId == productId)?.IsUltimate ?? false,
-            PaymentPlatform.AppStore => _applePayOptions.Products
-                .FirstOrDefault(p => p.ProductId == productId)?.IsUltimate ?? false,
-            PaymentPlatform.GooglePlay => _googlePlayOptions.Products
-                .FirstOrDefault(p => p.ProductId == productId)?.IsUltimate ?? false,
-            _ => false
-        };
+            var product = await _subscriptionProductService.GetProductByPlatformPriceIdAsync(productId);
+            if (product != null) return product.IsUltimate;
+            return _stripeOptions.Products
+                .FirstOrDefault(p => p.PriceId == productId)?.IsUltimate ?? false;
+        }
+        else if (platform ==PaymentPlatform.AppStore)
+        {
+            var product = await _subscriptionProductService.GetProductByPlatformProductIdAsync(productId,
+                (Aevatar.Agents.GodGPT.Protos.InviteCode.PaymentPlatform)platform);
+            if (product != null) return product.IsUltimate;
+            return _applePayOptions.Products
+                .FirstOrDefault(p => p.ProductId == productId)?.IsUltimate ?? false;
+        }
+        else if (platform ==PaymentPlatform.GooglePlay)
+        {
+            var product = await _subscriptionProductService.GetProductByPlatformProductIdAsync(productId,
+                (Aevatar.Agents.GodGPT.Protos.InviteCode.PaymentPlatform)platform);
+            if (product != null) return product.IsUltimate;
+            return _googlePlayOptions.Products
+                .FirstOrDefault(p => p.ProductId == productId)?.IsUltimate ?? false;
+        }
+        return false;
     }
 
     /// <summary>
     /// Get isUltimate status for an existing subscription from its stored productId.
     /// Used when cancelling old subscriptions.
     /// </summary>
-    private bool GetIsUltimateFromStoredPayment(PaymentPlatform platform, string? productId)
+    private async Task<bool> GetIsUltimateFromStoredPaymentAsync(PaymentPlatform platform, string? productId)
     {
         // Reuse the same logic
-        return GetIsUltimateFromProductId(platform, productId);
+        return await GetIsUltimateFromProductIdAsync(platform, productId);
     }
 }

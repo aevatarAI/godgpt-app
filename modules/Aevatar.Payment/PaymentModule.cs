@@ -1,10 +1,12 @@
 using Aevatar.Payment.Abstractions;
 using Aevatar.Payment.Agents;
 using Aevatar.Payment.Analytics;
+using Aevatar.Payment.DataSources;
 using Aevatar.Payment.Options;
 using Aevatar.Payment.Providers;
 using Aevatar.Payment.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Volo.Abp.AspNetCore.Mvc;
 using Volo.Abp.Autofac;
 using Volo.Abp.Modularity;
@@ -51,6 +53,9 @@ public class PaymentModule : AbpModule
         
         // Register analytics service (for PaymentAnalyticsGAgent)
         context.Services.AddScoped<IPaymentAnalyticsService, GA4AnalyticsService>();
+        
+        // Default null implementation of IProductDataSource (can be overridden by App layer)
+        context.Services.TryAddScoped<IProductDataSource, NullProductDataSource>();
     }
 }
 
