@@ -17,6 +17,7 @@ using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.FreeTrialCode;
 using Aevatar.Application.Grains.FreeTrialCode.Dtos;
 using Aevatar.Agents.GodGPT.Protos.FreeTrialCode;
+using Aevatar.App.Services.Subscription;
 using Aevatar.Application.Grains.Invitation;
 using Aevatar.Application.Grains.UserInvitation;
 using Aevatar.GodGPT.Dtos;
@@ -44,6 +45,7 @@ public class InvitationService : IInvitationService
     private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<InvitationService> _logger;
     private readonly IPaymentService _paymentService;
+    private readonly ISubscriptionProductService _subscriptionProductService;
     private readonly IOptionsMonitor<CreditsOptions> _creditsOptions;
     private readonly IOptionsMonitor<PaymentStripeOptions> _stripeOptions;
 
@@ -51,6 +53,7 @@ public class InvitationService : IInvitationService
         IGAgentActorFactory actorFactory,
         ILogger<InvitationService> logger,
         IPaymentService paymentService,
+        ISubscriptionProductService subscriptionProductService,
         IOptionsMonitor<CreditsOptions> creditsOptions,
         IOptionsMonitor<PaymentStripeOptions> stripeOptions)
     {
@@ -59,6 +62,7 @@ public class InvitationService : IInvitationService
         _paymentService = paymentService;
         _creditsOptions = creditsOptions;
         _stripeOptions = stripeOptions;
+        _subscriptionProductService = subscriptionProductService;
     }
 
     private async Task<IInvitationGAgent> GetInvitationAgentAsync(Guid userId)
@@ -262,27 +266,41 @@ public class InvitationService : IInvitationService
         return operators.Contains(userId.ToString());
     }
 
-    private bool TryGetStripeProductConfig(string productId, out PaymentStripeProductConfig productConfig, out string errorMessage)
+    private async Task<(PaymentStripeProductConfig?, string)> GetStripeProductConfigAsync(string productId)
     {
-        productConfig = null!;
-        errorMessage = string.Empty;
+        var errorMessage = string.Empty;
+
+        var product = await _subscriptionProductService.GetProductByPlatformPriceIdAsync(productId);
+        if (product != null)
+        {
+            return (new PaymentStripeProductConfig
+            {
+                PriceId = product.PlatformPriceId,
+                PlanType = (int)product.PlanType,
+                Amount = (decimal)product.Price,
+                Currency = product.Currency,
+                IsUltimate = product.IsUltimate,
+                Mode = "subscription",
+                Description = product.Description,
+                Name = product.Name
+            }, errorMessage);
+        }
 
         var products = _stripeOptions.CurrentValue.Products;
         if (products == null || products.Count == 0)
         {
             errorMessage = "Stripe products are not configured";
-            return false;
+            return (null, errorMessage);
         }
 
         var matched = products.FirstOrDefault(p => p.PriceId == productId);
         if (matched == null)
         {
             errorMessage = $"Invalid priceId: {productId}. Product not found in configuration.";
-            return false;
+            return (null, errorMessage);
         }
 
-        productConfig = matched;
-        return true;
+        return (matched,errorMessage);
     }
 
     private static FactoryPlanType MapPlanType(int planType)
@@ -338,7 +356,8 @@ public class InvitationService : IInvitationService
             return BuildGenerateCodesFailure($"Unsupported payment platform: {request.Platform}");
         }
 
-        if (!TryGetStripeProductConfig(request.ProductId, out var productConfig, out var productError))
+        var (product, productError) = await GetStripeProductConfigAsync(request.ProductId);
+        if (product == null)
         {
             _logger.LogWarning("[InvitationService] Invalid product id for free trial code: {ProductId}", request.ProductId);
             return BuildGenerateCodesFailure(productError);
@@ -353,9 +372,9 @@ public class InvitationService : IInvitationService
         var batchConfig = new BatchConfig
         {
             TrialDays = request.TrialDays,
-            ProductId = productConfig.PriceId,
-            PlanType = MapPlanType((int)productConfig.PlanType),
-            IsUltimate = productConfig.IsUltimate,
+            ProductId = product.PriceId,
+            PlanType = MapPlanType((int)product.PlanType),
+            IsUltimate = product.IsUltimate,
             Platform = (FactoryPaymentPlatform)request.Platform,
             StartTime = Timestamp.FromDateTime(DateTime.SpecifyKind(request.StartTime, DateTimeKind.Utc)),
             EndTime = Timestamp.FromDateTime(DateTime.SpecifyKind(request.EndTime, DateTimeKind.Utc)),

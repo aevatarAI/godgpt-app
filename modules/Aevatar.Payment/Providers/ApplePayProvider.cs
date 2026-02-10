@@ -17,24 +17,42 @@ public class ApplePayProvider : IPaymentProvider
     private readonly ILogger<ApplePayProvider> _logger;
     private readonly ApplePayOptions _options;
     private readonly HttpClient _httpClient;
+    private readonly IProductDataSource _productDataSource;
 
     public PaymentPlatform Platform => PaymentPlatform.AppStore;
 
     public ApplePayProvider(
         ILogger<ApplePayProvider> logger,
         IOptions<ApplePayOptions> options,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        IProductDataSource productDataSource)
     {
         _logger = logger;
         _options = options.Value;
         _httpClient = httpClientFactory.CreateClient("ApplePay");
+        _productDataSource = productDataSource;
     }
 
-    public Task<List<ProductDto>> GetProductsAsync(CancellationToken ct = default)
+    public async Task<List<ProductDto>> GetProductsAsync(CancellationToken ct = default)
+    {
+        var products = await _productDataSource.GetProductsAsync(PaymentPlatform.AppStore, null, ct);
+        if (products.Any())
+        {
+            _logger.LogDebug("[ApplePayProvider] Retrieved {Count} products from data source", products.Count);
+        }
+
+        var productsFromConfiguration = GetProductsFromConfiguration();
+        _logger.LogDebug("[ApplePayProvider] Retrieved {Count} products from configuration", productsFromConfiguration.Count);
+        
+        products.AddRange(GetProductsFromConfiguration());
+        return products;
+    }
+
+    private List<ProductDto> GetProductsFromConfiguration()
     {
         // Apple products are configured in App Store Connect
         // Return configured products from options with originalPlanType metadata
-        return Task.FromResult(_options.Products.Select(p => 
+        return _options.Products.Select(p => 
         {
             var billingCycle = p.GetBillingCycle();
             return new ProductDto
@@ -54,7 +72,7 @@ public class ApplePayProvider : IPaymentProvider
                     ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, billingCycle)
                 }
             };
-        }).ToList());
+        }).ToList();
     }
 
     private static string CalculateDailyAvgPrice(decimal amount, BillingCycle cycle)
@@ -73,23 +91,34 @@ public class ApplePayProvider : IPaymentProvider
 
     /// <summary>
     /// Calculate real subscription end date based on product's PlanType.
-    /// This matches old code (UserBillingGAgent.CalculateSubscriptionDurationAsync) behavior.
+    /// Tries config first, then IProductDataSource (e.g. Agent) when not in config.
     /// Apple Sandbox returns short periods (3-5 minutes), so we calculate real EndDate ourselves.
     /// </summary>
-    private DateTime? CalculatePeriodEndFromProduct(string? productId)
+    private async Task<DateTime?> CalculatePeriodEndFromProductAsync(string? productId, CancellationToken ct = default)
     {
         if (string.IsNullOrEmpty(productId))
             return null;
-        
-        var product = _options.Products.FirstOrDefault(p => p.ProductId == productId);
-        if (product == null)
+
+        BillingCycle? billingCycle = null;
+
+        var configProduct = _options.Products.FirstOrDefault(p => p.ProductId == productId);
+        if (configProduct != null)
+            billingCycle = configProduct.GetBillingCycle();
+
+        if (!billingCycle.HasValue)
         {
-            _logger.LogWarning("[ApplePayProvider] Product {ProductId} not found, using 30 days default", productId);
+            var productFromSource = await _productDataSource.GetProductByPlatformProductIdAsync(PaymentPlatform.AppStore, productId, ct);
+            if (productFromSource != null)
+                billingCycle = productFromSource.BillingCycle;
+        }
+
+        if (!billingCycle.HasValue)
+        {
+            _logger.LogWarning("[ApplePayProvider] Product {ProductId} not found in config or data source, using 30 days default", productId);
             return DateTime.UtcNow.AddDays(30);
         }
-        
-        var billingCycle = product.GetBillingCycle();
-        var endDate = billingCycle switch
+
+        var endDate = billingCycle.Value switch
         {
             BillingCycle.Daily => DateTime.UtcNow.AddDays(1),
             BillingCycle.Weekly => DateTime.UtcNow.AddDays(7),
@@ -98,11 +127,11 @@ public class ApplePayProvider : IPaymentProvider
             BillingCycle.Yearly => DateTime.UtcNow.AddDays(390), // Match old code: 390 days for yearly
             _ => DateTime.UtcNow.AddDays(30)
         };
-        
+
         _logger.LogInformation(
             "[ApplePayProvider] Calculated PeriodEnd for {ProductId}: BillingCycle={Cycle}, EndDate={EndDate}",
-            productId, billingCycle, endDate);
-        
+            productId, billingCycle.Value, endDate);
+
         return endDate;
     }
 
@@ -329,7 +358,7 @@ public class ApplePayProvider : IPaymentProvider
                 // Calculate real PeriodEnd based on PlanType (not platform ExpiresDate)
                 // Apple Sandbox returns short periods (3-5 minutes), production returns real dates
                 // Old code used CalculateSubscriptionDurationAsync to get real EndDate
-                result.PeriodEnd = CalculatePeriodEndFromProduct(transactionInfo.ProductId);
+                result.PeriodEnd = await CalculatePeriodEndFromProductAsync(transactionInfo.ProductId, ct);
             }
 
             // Enhanced logging for refund events

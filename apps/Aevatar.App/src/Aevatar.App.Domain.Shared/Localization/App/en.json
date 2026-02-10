@@ -199,6 +199,8 @@
     "ConfirmDeletePrice": "This action cannot be undone.",
     "PriceDeletedSuccessfully": "Price deleted successfully",
     "SelectCurrency": "Select Currency to Delete",
+    "ShowAll": "Show All",
+    "Collapse": "Collapse",
 
     "pricing_card_title_2": "Monthly",
     "pricing_card_title_3": "Annual",

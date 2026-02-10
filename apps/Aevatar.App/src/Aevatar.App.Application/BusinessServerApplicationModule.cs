@@ -3,6 +3,7 @@ using Aevatar.App.Application.Services.Payment;
 using Aevatar.App.Application.Services.Push;
 using Aevatar.Payment.Abstractions;
 using Aevatar.App.Application.Contracts.Services;
+using Aevatar.App.Services.Payment;
 using Aevatar.App.Services.Subscription;
 using Aevatar.App.Services.Subscription.Options;
 using Aevatar.App.Services.Subscription.Providers;
@@ -83,5 +84,8 @@ public class AppApplicationModule : AbpModule
         context.Services.AddHttpClient<IFirebaseMessagingClient, FirebaseMessagingClient>();
         context.Services.AddScoped<IUserDeviceService, UserDeviceService>();
         context.Services.AddScoped<IPushNotificationService, PushNotificationService>();
+        
+        // Override Payment module's default NullProductDataSource with GAgent-based implementation
+        context.Services.AddScoped<IProductDataSource, GAgentProductDataSource>();
     }
 }

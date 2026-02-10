@@ -14,15 +14,18 @@ public class StripeProvider : IPaymentProvider
     private readonly ILogger<StripeProvider> _logger;
     private readonly StripeOptions _options;
     private readonly IStripeClient _client;
+    private readonly IProductDataSource _productDataSource;
 
     public PaymentPlatform Platform => PaymentPlatform.Stripe;
 
     public StripeProvider(
         ILogger<StripeProvider> logger,
-        IOptions<StripeOptions> options)
+        IOptions<StripeOptions> options,
+        IProductDataSource productDataSource)
     {
         _logger = logger;
         _options = options.Value;
+        _productDataSource = productDataSource;
         
         // Support test mode without API key (only webhook parsing works)
         if (!string.IsNullOrEmpty(_options.SecretKey))
@@ -39,13 +42,27 @@ public class StripeProvider : IPaymentProvider
 
     // ========== Product Operations ==========
 
-    public Task<List<ProductDto>> GetProductsAsync(CancellationToken ct = default)
+    public async Task<List<ProductDto>> GetProductsAsync(CancellationToken ct = default)
     {
-        // Read from configuration (consistent with old UserBillingGAgent)
+        var products = await _productDataSource.GetProductsAsync(PaymentPlatform.Stripe, null, ct);
+        if (products.Any())
+        {
+            _logger.LogDebug("[StripeProvider] Retrieved {Count} products from data source", products.Count);
+        }
+        
+        var productsFromConfiguration = GetProductsFromConfiguration();
+        _logger.LogDebug("[StripeProvider] Retrieved {Count} products from configuration", productsFromConfiguration.Count);
+        
+        products.AddRange(GetProductsFromConfiguration());
+        return products;
+    }
+
+    private List<ProductDto> GetProductsFromConfiguration()
+    {
         if (_options.Products == null || !_options.Products.Any())
         {
             _logger.LogWarning("[StripeProvider] No products configured in StripeOptions");
-            return Task.FromResult(new List<ProductDto>());
+            return new List<ProductDto>();
         }
 
         var products = _options.Products
@@ -75,7 +92,7 @@ public class StripeProvider : IPaymentProvider
             .ToList();
 
         _logger.LogDebug("[StripeProvider] Retrieved {Count} products from configuration", products.Count);
-        return Task.FromResult(products);
+        return products;
     }
 
     // ========== Customer Operations ==========
@@ -203,6 +220,11 @@ public class StripeProvider : IPaymentProvider
                 ["price_id"] = request.ProductId ?? string.Empty,
                 ["quantity"] = "1"
             };
+
+            if (!string.IsNullOrWhiteSpace(request.Referral))
+            {
+                commonMetadata.Add("tolt_referral", request.Referral);
+            }
             
             var mode = request.Mode ?? "subscription";
             var sessionOptions = new SessionCreateOptions
