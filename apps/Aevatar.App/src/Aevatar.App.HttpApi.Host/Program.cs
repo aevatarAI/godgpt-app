@@ -14,10 +14,7 @@ using Orleans.Streams.Kafka.Config;
 using Serilog;
 using Serilog.Events;
 using Orleans.Serialization;
-using MongoDB.Bson;
-using MongoDB.Bson.Serialization;
-using MongoDB.Bson.Serialization.Conventions;
-using MongoDB.Bson.Serialization.Serializers;
+using Aevatar.App.MongoDB;
 using MongoDB.Driver;
 using Orleans.Providers.MongoDB.Configuration;
 using OpenTelemetry.Metrics;
@@ -146,25 +143,8 @@ public class Program
         });
     }
 
-    /// <summary>
-    /// Configure MongoDB GUID serialization for ABP data compatibility.
-    /// Uses ConventionPack (ABP recommended approach for MongoDB Driver 3.x).
-    /// Must be called before any MongoDB operations.
-    /// </summary>
     private static void ConfigureMongoGuidSerialization()
-    {
-        try
-        {
-            // Register convention pack for legacy GUID handling (ABP recommended approach)
-            var conventionPack = new ConventionPack { new LegacyGuidConvention() };
-            ConventionRegistry.Register("LegacyGuidConvention", conventionPack, _ => true);
-            Log.Information("✅ MongoDB GUID serialization configured: CSharpLegacy (Convention)");
-        }
-        catch (Exception ex)
-        {
-            Log.Warning(ex, "MongoDB GUID convention may already be registered, continuing...");
-        }
-    }
+        => MongoGuidSerialization.Configure();
 
     /// <summary>
     /// Configure OpenTelemetry for distributed tracing and metrics
@@ -212,25 +192,5 @@ public class Program
                 .AddMeter(serviceName));
         builder.Services.AddSingleton<IInstrumentationProvider>(_ =>
             new InstrumentationProvider(serviceName, serviceVersion));
-    }
-}
-
-/// <summary>
-/// Convention to serialize all GUID properties using CSharpLegacy representation.
-/// This is the ABP recommended approach for MongoDB Driver 3.x compatibility.
-/// </summary>
-public class LegacyGuidConvention : ConventionBase, IMemberMapConvention
-{
-    public void Apply(BsonMemberMap memberMap)
-    {
-        if (memberMap.MemberType == typeof(Guid))
-        {
-            memberMap.SetSerializer(new GuidSerializer(GuidRepresentation.CSharpLegacy));
-        }
-        else if (memberMap.MemberType == typeof(Guid?))
-        {
-            var guidSerializer = new GuidSerializer(GuidRepresentation.CSharpLegacy);
-            memberMap.SetSerializer(new NullableSerializer<Guid>(guidSerializer));
-        }
     }
 }
