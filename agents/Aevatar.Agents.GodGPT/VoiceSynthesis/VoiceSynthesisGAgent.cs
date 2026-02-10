@@ -40,6 +40,9 @@ public class VoiceSynthesisGAgent : GAgentBase<VoiceSynthesisStateProto>, IVoice
     [EventHandler]
     public async Task HandleVoiceSynthesisJobAsync(VoiceSynthesisJobProto job)
     {
+        Logger.LogInformation("[VoiceSynthesisGAgent] Received job - StreamId={StreamId}, ChatId={ChatId}, TextDelta={TextDeltaLen}, TextIsLast={TextIsLast}, VoiceLanguage={VoiceLanguage}",
+            job.StreamId, job.ChatId, job.TextDelta?.Length ?? 0, job.TextIsLast, job.VoiceLanguage);
+        
         var speechService = ServiceProvider.GetService<ISpeechService>();
         if (speechService == null)
         {
@@ -85,9 +88,11 @@ public class VoiceSynthesisGAgent : GAgentBase<VoiceSynthesisStateProto>, IVoice
                 emittedAny = true;
             }
 
-            // NOTE: AllCompleted is now sent by AIAgentStatusProxy (unified completion signal)
-            // VoiceSynthesisGAgent only sends AudioChunks - audio is a "best effort" enhancement
-            // This avoids distributed coordination issues and ensures SSE closes reliably
+            // Send AllCompleted after all audio chunks are done
+            // AIAgentStatusProxy sends TextCompleted for voice chat; we own the final AllCompleted
+            Logger.LogInformation("[VoiceSynthesisGAgent] All audio done, sending AllCompleted - StreamId={StreamId}, ChatId={ChatId}, SentencesEmitted={SentencesEmitted}",
+                job.StreamId, job.ChatId, streamState.NextSentenceIndex);
+            await PublishControlAsync(job, ControlProto.Types.ControlType.AllCompleted, "all", "", 0);
 
             // Cleanup state to avoid unbounded growth
             State.Streams.Remove(job.StreamId);
@@ -191,6 +196,9 @@ public class VoiceSynthesisGAgent : GAgentBase<VoiceSynthesisStateProto>, IVoice
 
     private async Task PublishAudioAsync(VoiceSynthesisJobProto job, AudioChunkProto audio)
     {
+        Logger.LogInformation("[VoiceSynthesisGAgent] PublishAudio - StreamId={StreamId}, ChatId={ChatId}, AudioDataLen={AudioDataLen}, AudioChunkId={AudioChunkId}, IsLast={IsLast}",
+            job.StreamId, job.ChatId, audio.AudioData?.Length ?? 0, audio.AudioChunkId, audio.IsLast);
+        
         var envelope = new GodChatStreamEnvelopeProto
         {
             StreamId = job.StreamId,

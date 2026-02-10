@@ -21,17 +21,20 @@ public class PaymentService : IPaymentService
     private readonly IGAgentActorFactory _actorFactory;
     private readonly ILogger<PaymentService> _logger;
     private readonly IStateIndexService? _stateIndexService;
+    private readonly IPaymentEventPreHandler? _eventPreHandler;
 
     public PaymentService(
         IEnumerable<IPaymentProvider> providers,
         IGAgentActorFactory actorFactory,
         ILogger<PaymentService> logger,
-        IStateIndexService? stateIndexService = null)
+        IStateIndexService? stateIndexService = null,
+        IPaymentEventPreHandler? eventPreHandler = null)
     {
         _providers = providers;
         _actorFactory = actorFactory;
         _logger = logger;
         _stateIndexService = stateIndexService;
+        _eventPreHandler = eventPreHandler;
     }
 
     private IPaymentProvider GetProvider(PaymentPlatform platform)
@@ -256,6 +259,12 @@ public class PaymentService : IPaymentService
         // OrderId is the stable key used for PaymentRecordGAgent lookup
         if (result.Success && result.ShouldProcess && !string.IsNullOrEmpty(result.OrderId))
         {
+            // Ensure business agent subscriptions exist before events are broadcast
+            if (_eventPreHandler != null && result.UserId.HasValue)
+            {
+                await _eventPreHandler.OnBeforePaymentNotificationAsync(result.UserId.Value);
+            }
+
             await ProcessWebhookResultAsync(platform, result);
         }
         else if (result.Success && result.ShouldProcess && string.IsNullOrEmpty(result.OrderId))

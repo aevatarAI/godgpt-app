@@ -20,14 +20,15 @@ public class GodChatStateConverter : IStateConverter
         var newState = new GodChatStateProto();
 
         // ChatHistory: List<ChatMessage> -> repeated ChatMessageProto
+        // Direct mapping from old system integer values
         if (oldState.TryGetValue("ChatHistory", out var chatHistoryObj) && chatHistoryObj != null)
         {
             var chatList = ConvertToList(chatHistoryObj);
             if (chatList != null)
             {
-                foreach (var chatObj in chatList)
+                for (int i = 0; i < chatList.Count; i++)
                 {
-                    var chatMessage = ConvertChatMessage(chatObj);
+                    var chatMessage = ConvertChatMessage(chatList[i], i);
                     if (chatMessage != null)
                         newState.ChatHistory.Add(chatMessage);
                 }
@@ -112,7 +113,7 @@ public class GodChatStateConverter : IStateConverter
         return newState;
     }
 
-    private ChatMessageProto? ConvertChatMessage(object? obj)
+    private ChatMessageProto? ConvertChatMessage(object? obj, int messageIndex = 0)
     {
         if (obj == null) return null;
         var dict = ConvertToDictionary(obj);
@@ -146,8 +147,11 @@ public class GodChatStateConverter : IStateConverter
             }
         }
 
+        // Handle ChatRole: direct mapping from integer value
         if (dict.TryGetValue("ChatRole", out var chatRoleObj))
+        {
             message.ChatRole = ConvertToInt32(chatRoleObj);
+        }
 
         if (dict.TryGetValue("ImageKeys", out var imageKeysObj) && imageKeysObj != null)
         {

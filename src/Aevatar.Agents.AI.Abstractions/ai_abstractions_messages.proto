@@ -192,6 +192,7 @@ message ChatRequest {
   repeated string stop_sequences = 6;
   string stage_hint = 7;
   repeated string image_keys = 8;  // Image keys for multimodal input
+  repeated AevatarChatMessage history = 9;  // External chat history for multi-turn conversations
 }
 
 // Chat response

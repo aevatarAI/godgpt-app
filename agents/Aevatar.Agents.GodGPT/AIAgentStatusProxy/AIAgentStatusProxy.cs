@@ -260,6 +260,14 @@ public class AIAgentStatusProxy :
                 RequestId = requestId
             };
 
+            // Inject selected history into ChatRequest for multi-turn conversation context
+            if (selectedHistory.Count > 0)
+            {
+                var historyBytes = InjectHistoryIntoRequest(request, selectedHistory);
+                Logger.LogWarning("[SIZE_DEBUG][ChatWithHistory] Injected {Count} history messages ({HistoryKB} KB) - RequestId={RequestId}",
+                    selectedHistory.Count, historyBytes / 1024, requestId);
+            }
+
             if (promptSettings?.Temperature != null && double.TryParse(promptSettings.Temperature, out var temp))
             {
                 request.Temperature = (float)temp;
@@ -384,6 +392,14 @@ public class AIAgentStatusProxy :
                 Message = prompt,
                 RequestId = context?.ChatId ?? Guid.NewGuid().ToString()
             };
+
+            // Inject selected history into ChatRequest for multi-turn conversation context
+            if (selectedHistory.Count > 0)
+            {
+                var historyBytes = InjectHistoryIntoRequest(request, selectedHistory);
+                Logger.LogWarning("[SIZE_DEBUG][PromptWithStream] Injected {Count} history messages ({HistoryKB} KB) - ChatId={ChatId}",
+                    selectedHistory.Count, historyBytes / 1024, context?.ChatId ?? "null");
+            }
 
             if (promptSettings?.Temperature != null && double.TryParse(promptSettings.Temperature, out var temp))
             {
@@ -648,8 +664,8 @@ public class AIAgentStatusProxy :
     {
         // CRITICAL: If this is an HTTP request AND we have a StreamId, push directly to Kafka
         // This bypasses the parent (GodChatGAgent) callback queue, avoiding the Orleans Grain blocking issue
-        Logger.LogInformation("[AIAgentStatusProxy] SendStreamCallback - IsHttpRequest={IsHttpRequest}, StreamId={StreamId}, SerialNumber={SerialNumber}",
-            isHttpRequest, streamId ?? "null", content?.SerialNumber ?? 0);
+        Logger.LogInformation("[AIAgentStatusProxy] SendStreamCallback - IsHttpRequest={IsHttpRequest}, StreamId={StreamId}, SerialNumber={SerialNumber}, IsVoiceChat={IsVoiceChat}, VoiceLanguage={VoiceLanguage}",
+            isHttpRequest, streamId ?? "null", content?.SerialNumber ?? 0, isVoiceChat, voiceLanguage);
             
         if (isHttpRequest && !string.IsNullOrEmpty(streamId))
         {
@@ -657,6 +673,8 @@ public class AIAgentStatusProxy :
             // IMPORTANT: do NOT feed aggregated persistence message to TTS (it would duplicate audio).
             if (isVoiceChat)
             {
+                Logger.LogInformation("[AIAgentStatusProxy] Dispatching VoiceSynthesis job - StreamId={StreamId}, ContentLen={ContentLen}, IsLastChunk={IsLastChunk}, IsAggregation={IsAggregation}",
+                    streamId, content?.Content?.Length ?? 0, content?.IsLastChunk ?? false, content?.IsAggregationMsg ?? false);
                 _ = DispatchVoiceSynthesisJobAsync(context, errorEnum, content, streamId, voiceLanguage);
             }
 
@@ -847,16 +865,32 @@ public class AIAgentStatusProxy :
                     streamEnvelope.Seq = seq;
                 }
                 
-                // Unified completion signal: Always send AllCompleted
-                // Voice synthesis (VoiceSynthesisGAgent) sends AudioChunks independently
-                // This ensures SSE closes reliably without distributed coordination
-                streamEnvelope.Control = new ControlProto
+                // For voice chat: send TextCompleted instead of AllCompleted
+                // VoiceSynthesisGAgent will send AllCompleted after the last audio chunk
+                // This prevents SSE from closing before all audio chunks are delivered
+                if (isVoiceChat)
                 {
-                    Type = ControlProto.Types.ControlType.AllCompleted,
-                    Scope = "all",
-                    Message = "",
-                    ErrorCode = 0
-                };
+                    streamEnvelope.Control = new ControlProto
+                    {
+                        Type = ControlProto.Types.ControlType.TextCompleted,
+                        Scope = "text",
+                        Message = "",
+                        ErrorCode = 0
+                    };
+                    Logger.LogInformation("[AIAgentStatusProxy] Voice chat: sent TextCompleted (not AllCompleted) - StreamId={StreamId}, ChatId={ChatId}",
+                        streamId, context?.ChatId ?? "null");
+                }
+                else
+                {
+                    // Text chat: send AllCompleted to close SSE immediately
+                    streamEnvelope.Control = new ControlProto
+                    {
+                        Type = ControlProto.Types.ControlType.AllCompleted,
+                        Scope = "all",
+                        Message = "",
+                        ErrorCode = 0
+                    };
+                }
             }
             else
             {
@@ -1104,6 +1138,55 @@ public class AIAgentStatusProxy :
 
     #endregion
 
+    #region History Conversion
+
+    /// <summary>
+    /// Convert legacy ChatMessage list to AevatarChatMessage list for ChatRequest.History.
+    /// Maps GodGPT ChatRole → AevatarChatRole (different enum values).
+    /// Returns total bytes injected for diagnostics.
+    /// </summary>
+    private long InjectHistoryIntoRequest(ChatRequest request, List<ChatMessage> selectedHistory)
+    {
+        long totalBytes = 0;
+        long maxSingleMsgBytes = 0;
+        string? maxMsgRole = null;
+        
+        foreach (var msg in selectedHistory)
+        {
+            var role = msg.ChatRole switch
+            {
+                Aevatar.GAgents.ChatAgent.Dtos.ChatRole.User => AevatarChatRole.User,
+                Aevatar.GAgents.ChatAgent.Dtos.ChatRole.Assistant => AevatarChatRole.Assistant,
+                Aevatar.GAgents.ChatAgent.Dtos.ChatRole.System => AevatarChatRole.System,
+                Aevatar.GAgents.ChatAgent.Dtos.ChatRole.Tool => AevatarChatRole.Tool,
+                _ => AevatarChatRole.User
+            };
+
+            var content = msg.Content ?? "";
+            var msgBytes = (long)System.Text.Encoding.UTF8.GetByteCount(content);
+            totalBytes += msgBytes;
+            
+            if (msgBytes > maxSingleMsgBytes)
+            {
+                maxSingleMsgBytes = msgBytes;
+                maxMsgRole = role.ToString();
+            }
+
+            request.History.Add(new AevatarChatMessage
+            {
+                Role = role,
+                Content = content
+            });
+        }
+        
+        Logger.LogWarning("[SIZE_DEBUG][InjectHistory] Count={Count}, TotalBytes={TotalBytes}, MaxSingleMsgBytes={MaxSingleMsgBytes}, MaxMsgRole={MaxMsgRole}",
+            selectedHistory.Count, totalBytes, maxSingleMsgBytes, maxMsgRole ?? "N/A");
+        
+        return totalBytes;
+    }
+
+    #endregion
+
     #region State Transition
 
     protected override void TransitionState(AIAgentStatusProxyStateProto state, IMessage evt)
@@ -1181,8 +1264,8 @@ public class AIAgentStatusProxy :
                 var bytes = await blobContainer.GetAllBytesAsync(key, cancellationToken);
                 var mediaType = GetMediaTypeFromKey(key);
                 
-                Logger.LogDebug("[AIAgentStatusProxy] Downloaded image: Key={Key}, Size={Size} bytes, MediaType={MediaType}",
-                    key, bytes.Length, mediaType);
+                Logger.LogWarning("[SIZE_DEBUG][ResolveImage] Downloaded: Key={Key}, Size={SizeKB}KB ({SizeBytes}bytes), MediaType={MediaType}, Base64Est={Base64KB}KB",
+                    key, bytes.Length / 1024, bytes.Length, mediaType, bytes.Length * 4 / 3 / 1024);
                 
                 return new AevatarImageData
                 {
@@ -1208,8 +1291,9 @@ public class AIAgentStatusProxy :
             }
         }
 
-        Logger.LogInformation("[AIAgentStatusProxy] Successfully resolved {Count}/{Total} images",
-            imageDataList.Count, keyList.Count);
+        var totalImageBytes = imageDataList.Sum(img => (long)img.Data.Length);
+        Logger.LogWarning("[SIZE_DEBUG][ResolveImage] Resolved {Count}/{Total} images, TotalRawSize={TotalKB}KB, TotalBase64Est={Base64KB}KB",
+            imageDataList.Count, keyList.Count, totalImageBytes / 1024, totalImageBytes * 4 / 3 / 1024);
         
         return imageDataList.Count > 0 ? imageDataList : null;
     }

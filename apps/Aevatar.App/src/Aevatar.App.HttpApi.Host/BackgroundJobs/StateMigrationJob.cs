@@ -14,6 +14,7 @@ using Aevatar.Agents.GodGPT.Protos.UserStatistics;
 using Aevatar.Agents.GodGPT.Protos.Anonymous;
 using Aevatar.App.Application.Services;
 using Aevatar.Application.Grains.Agents.ChatManager;
+using Aevatar.Application.Grains.Agents.Invitation;
 using Aevatar.Application.Grains.UserQuota;
 using Aevatar.Payment.Agents;
 using Aevatar.App.HttpApi.Host.BackgroundJobs.Converters;
@@ -621,7 +622,7 @@ public class StateMigrationJob
             // Orleans grain states (converted to agent states)
             "ShareState" => new ShareStateConverter(),
             "UserPaymentState" => new UserPaymentStateConverter(),
-            "UserBillingState" => new UserBillingGrainStateConverter(), // Orleans grain state
+            // "UserBillingState" => new UserBillingGrainStateConverter(), // Skipped - use UserBillingGAgent instead
             _ => null
         };
     }
@@ -744,6 +745,8 @@ public class StateMigrationJob
                     try
                     {
                         var stateBytes = state.ToByteArray();
+                        // [BsonId] on AgentStateDocument.AgentId maps to _id in MongoDB
+                        // C# driver LINQ query x.AgentId translates to { _id: ... }
                         var document = new BsonDocument
                         {
                             { "_id", agentId },
@@ -828,9 +831,10 @@ public class StateMigrationJob
             // Match AgentStateDocument structure exactly:
             // - _id: AgentId (not a separate AgentId field!)
             // - StateType: Full type name
+            // [BsonId] on AgentStateDocument.AgentId maps to _id in MongoDB
             var document = new BsonDocument
             {
-                { "_id", agentId },  // AgentId as _id (matching [BsonId] attribute)
+                { "_id", agentId },
                 { "StateData", new BsonBinaryData(stateBytes, BsonBinarySubType.Binary) },
                 { "StateType", stateTypeFullName },  // Full type name
                 { "Version", 1L },
@@ -1307,13 +1311,23 @@ public class StateMigrationJob
             if (converter is UserBillingGrainStateConverter grainConverter && grainConverter.AdditionalPaymentRecords.Count > 0)
             {
                 result.AdditionalRecords = grainConverter.AdditionalPaymentRecords
-                    .Select(r => new AdditionalRecordInfo { AgentId = r.AgentId, StateType = r.State.GetType().Name })
+                    .Select(r => new AdditionalRecordInfo 
+                    { 
+                        AgentId = r.AgentId, 
+                        StateType = r.State.GetType().Name,
+                        ConvertedStateJson = JsonFormatter.Default.Format(r.State)
+                    })
                     .ToList();
             }
             else if (converter is UserBillingStateConverter billingConverter && billingConverter.AdditionalPaymentRecords.Count > 0)
             {
                 result.AdditionalRecords = billingConverter.AdditionalPaymentRecords
-                    .Select(r => new AdditionalRecordInfo { AgentId = r.AgentId, StateType = r.State.GetType().Name })
+                    .Select(r => new AdditionalRecordInfo 
+                    { 
+                        AgentId = r.AgentId, 
+                        StateType = r.State.GetType().Name,
+                        ConvertedStateJson = JsonFormatter.Default.Format(r.State)
+                    })
                     .ToList();
             }
 
@@ -1381,8 +1395,33 @@ public class StateMigrationJob
                 typeNamespace = fullCollectionName.Substring("Orleansgodgptprod".Length);
             
             // Build full ID format: "TypeNamespace/GuidWithoutHyphens"
+            // Special handling for Orleans grain states with different ID prefix
             var normalizedId = recordId.Replace("-", "");
-            var fullId = $"{typeNamespace}/{normalizedId}";
+            string fullId;
+            if (fullCollectionName == "OrleansgodgptprodUserPaymentState")
+            {
+                // UserPaymentState uses "userpayment/xxx" format
+                fullId = $"userpayment/{normalizedId}";
+            }
+            else if (fullCollectionName == "OrleansgodgptprodShareState")
+            {
+                // ShareState uses "share/xxx" format
+                fullId = $"share/{normalizedId}";
+            }
+            else if (fullCollectionName == "OrleansgodgptprodUserBillingState")
+            {
+                // UserBillingState uses "userbilling/xxx" format
+                fullId = $"userbilling/{normalizedId}";
+            }
+            else if (fullCollectionName == "OrleansgodgptprodUserQuotaState")
+            {
+                // UserQuotaState uses "userquota/xxx_Quota" format
+                fullId = $"userquota/{recordId}_Quota";
+            }
+            else
+            {
+                fullId = $"{typeNamespace}/{normalizedId}";
+            }
             
             // Build URL with id parameter
             var url = $"{_options.OldSystemApiBaseUrl}/api/admin/export/grain" +
@@ -1565,9 +1604,33 @@ public class StateMigrationJob
                     result.Message = "Agent state retrieved successfully";
                     break;
 
+                case "invitecodegagent":
+                case "invitecode":
+                    if (_actorFactory == null)
+                    {
+                        result.Found = false;
+                        result.Message = "IGAgentActorFactory not available";
+                        return result;
+                    }
+                    var inviteCodeActor = await _actorFactory.CreateGAgentActorAsync<InviteCodeGAgent>(userGuid.ToString());
+                    var inviteCodeGAgent = inviteCodeActor.As<IInviteCodeGAgent>();
+                    var isInitialized = await inviteCodeGAgent.IsInitialized();
+                    var codeInfo = await inviteCodeGAgent.GetCodeInfoAsync();
+                    result.Found = true;
+                    result.AgentData = new
+                    {
+                        IsInitialized = isInitialized,
+                        BatchId = codeInfo.BatchId,
+                        TrialDays = codeInfo.TrialDays,
+                        PlanType = codeInfo.PlanType.ToString(),
+                        IsUltimate = codeInfo.IsUltimate
+                    };
+                    result.Message = "Agent state retrieved successfully";
+                    break;
+
                 default:
                     result.Found = false;
-                    result.Message = $"Unsupported agent type: {agentType}. Supported: InvitationGAgent, UserQuotaGAgent, PaymentIndexGAgent, ChatGAgentManager";
+                    result.Message = $"Unsupported agent type: {agentType}. Supported: InvitationGAgent, UserQuotaGAgent, PaymentIndexGAgent, ChatGAgentManager, InviteCodeGAgent";
                     break;
             }
         }
@@ -1912,6 +1975,7 @@ public class AdditionalRecordInfo
 {
     public string AgentId { get; set; } = string.Empty;
     public string StateType { get; set; } = string.Empty;
+    public string? ConvertedStateJson { get; set; }
 }
 
 /// <summary>

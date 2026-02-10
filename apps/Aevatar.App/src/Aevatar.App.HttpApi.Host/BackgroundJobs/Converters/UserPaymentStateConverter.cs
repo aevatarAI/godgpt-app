@@ -82,8 +82,10 @@ public class UserPaymentStateConverter : IStateConverter
             oldState.TryGetValue("Mode", out paymentModeObj))
             newState.PaymentMode = ConvertPaymentMode(paymentModeObj);
 
-        // BillingCycle: int (enum)
-        if (oldState.TryGetValue("BillingCycle", out var billingCycleObj))
+        // BillingCycle: int (enum) - old data uses "PlanType" field name
+        if (oldState.TryGetValue("PlanType", out var planTypeObj) && planTypeObj != null)
+            newState.BillingCycle = ConvertToInt32(planTypeObj);
+        else if (oldState.TryGetValue("BillingCycle", out var billingCycleObj) && billingCycleObj != null)
             newState.BillingCycle = ConvertToInt32(billingCycleObj);
 
         // PeriodStart: DateTime -> Timestamp
@@ -116,7 +118,7 @@ public class UserPaymentStateConverter : IStateConverter
             newState.NetAmount = ConvertToInt64(netAmountObj);
 
         // Status: int (enum)
-        if (oldState.TryGetValue("Status", out var statusObj))
+        if (oldState.TryGetValue("Status", out var statusObj) && statusObj != null)
             newState.Status = ConvertToInt32(statusObj);
 
         // CreatedAt: DateTime -> Timestamp
@@ -304,26 +306,18 @@ public class UserPaymentStateConverter : IStateConverter
     }
     
     /// <summary>
-    /// Convert decimal dollars to cents. If value looks like cents already (no decimal places), return as-is.
+    /// Convert decimal dollars to cents. Always multiply by 100.
     /// </summary>
     private static long ConvertDecimalToCents(decimal value)
     {
-        // If value has decimal places, it's likely dollars - convert to cents
-        // If value is a whole number > 100, it's likely already in cents
-        if (value == Math.Floor(value) && value >= 100)
-            return (long)value; // Already in cents
         return (long)Math.Round(value * 100);
     }
     
     /// <summary>
-    /// Convert double dollars to cents.
+    /// Convert double dollars to cents. Always multiply by 100.
     /// </summary>
     private static long ConvertDoubleToCents(double value)
     {
-        // If value has decimal places, it's likely dollars - convert to cents
-        // If value is a whole number > 100, it's likely already in cents
-        if (Math.Abs(value - Math.Floor(value)) < 0.0001 && value >= 100)
-            return (long)value; // Already in cents
         return (long)Math.Round(value * 100);
     }
 
