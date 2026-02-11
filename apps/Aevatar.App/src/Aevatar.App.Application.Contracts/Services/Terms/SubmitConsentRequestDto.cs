@@ -31,7 +31,7 @@ public class SubmitConsentRequestDto
     /// <summary>
     /// Operating system version.
     /// </summary>
-    [MaxLength(60)]
+    [MaxLength(200)]
     public string? OsVersion { get; set; }
 
     /// <summary>
