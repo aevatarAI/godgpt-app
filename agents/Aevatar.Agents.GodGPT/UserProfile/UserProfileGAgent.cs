@@ -26,10 +26,6 @@ public class UserProfileGAgent : GAgentBase<UserProfileState>, IUserProfileGAgen
     // Injected by OrleansGAgentGrain via reflection
     public IGAgentActorFactory? ActorFactory { get; set; }
 
-    public UserProfileGAgent()
-    {
-    }
-
     public override Task<string> GetDescriptionAsync()
     {
         return Task.FromResult("User Profile Management GAgent");
@@ -48,6 +44,7 @@ public class UserProfileGAgent : GAgentBase<UserProfileState>, IUserProfileGAgen
             FullName = fullName
         });
         
+        await ConfirmEventsAsync();
         return Guid.Parse(AgentId.ExtractRawId(Id));
     }
 

@@ -893,12 +893,22 @@ Open questions:
             settings.StopSequences = request.StopSequences.ToList();
         }
 
-        // Build message list:
-        // - Default (history disabled): only include current user message.
-        // - History enabled: include previous State.History + current user message.
+        // Build message list (priority order):
+        // 1. External history from request.History (caller-provided, e.g. from session state)
+        // 2. Internal State.History (when EnableChatHistoryInState is true)
+        // 3. Current user message (always appended last)
         var messages = new List<AevatarChatMessage>();
-        if (EnableChatHistoryInState)
+        if (request.History.Count > 0)
         {
+            // External history provided by caller — use it directly
+            foreach (var msg in request.History)
+            {
+                messages.Add(msg);
+            }
+        }
+        else if (EnableChatHistoryInState)
+        {
+            // Fallback: use internal state history
             lock (_historyLock)
             {
                 if (State.History != null && State.History.Count > 0)

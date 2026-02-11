@@ -26,10 +26,6 @@ public class TwitterAuthGAgent : GAgentBase<TwitterAuthState>, ITwitterAuthGAgen
     // Injected by OrleansGAgentGrain via reflection
     public IGAgentActorFactory? ActorFactory { get; set; }
 
-    public TwitterAuthGAgent()
-    {
-    }
-
     /// <summary>
     /// HTTP client factory for making HTTP requests
     /// </summary>
