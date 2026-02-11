@@ -50,7 +50,7 @@ public class UserTermsConsent : CreationAuditedAggregateRoot<Guid>
     /// <summary>
     /// Operating system version.
     /// </summary>
-    [MaxLength(20)]
+    [MaxLength(60)]
     public string? OsVersion { get; set; }
 
     /// <summary>
