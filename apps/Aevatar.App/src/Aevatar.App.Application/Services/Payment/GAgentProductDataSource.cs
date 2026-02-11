@@ -127,7 +127,7 @@ public class GAgentProductDataSource : IProductDataSource
             Metadata = new Dictionary<string, string>
             {
                 ["isUltimate"] = src.IsUltimate.ToString().ToLower(),
-                ["originalPlanType"] = src.PlanType.ToString(),
+                ["originalPlanType"] = ((int)src.PlanType).ToString(),
                 ["dailyAvgPrice"] = CalculateDailyAvgPrice((decimal)src.Price, billingCycle)
             }
         };
