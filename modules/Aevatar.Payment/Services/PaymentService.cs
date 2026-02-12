@@ -584,7 +584,7 @@ public class PaymentService : IPaymentService
                 if (product != null)
                 {
                     productName = product.Name ?? product.ProductId;
-                    currency = product.Currency ?? currency;
+                    currency = currency ?? product.Currency;
                     if (product.Price > 0)
                     {
                         productAmount = product.Price;
