@@ -306,12 +306,11 @@ public class ApplePayProvider : IPaymentProvider
                 Guid.TryParse(transactionInfo.AppAccountToken, out var userId))
             {
                 result.UserId = userId;
-                _logger.LogDebug($"[ApplePayProvider] Webhook UserId - AppAccountToken={transactionInfo?.AppAccountToken}");
+                _logger.LogDebug($"[ApplePayProvider] Webhook UserId - AppAccountToken={transactionInfo?.AppAccountToken??string.Empty}");
             }
             else
             {
-                _logger.LogWarning("[ApplePayProvider] Webhook missing UserId - AppAccountToken={Token}", 
-                    transactionInfo?.AppAccountToken);
+                _logger.LogWarning($"[ApplePayProvider] Webhook missing UserId - AppAccountToken={transactionInfo?.AppAccountToken??string.Empty}");
             }
             
             result.NewStatus = MapAppleEventToStatus(notification.NotificationType, notification.Subtype);
