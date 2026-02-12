@@ -587,7 +587,7 @@ public class PaymentService : IPaymentService
                 {
                     productName = product.Name ?? product.ProductId;
                     var previousCurrency = currency;
-                    currency = product.Currency ?? currency;
+                    currency = currency ?? product.Currency;
                     _logger.LogInformation("[PaymentService] Currency after product lookup: {Currency} (previous: {PreviousCurrency}, product.Currency: {ProductCurrency}, ProductId={ProductId}, PaymentId={PaymentId})",
                         currency, previousCurrency, product.Currency, result.ProductId, paymentId);
                     if (product.Price > 0)
