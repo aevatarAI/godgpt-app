@@ -332,7 +332,7 @@ public class ApplePayProvider : IPaymentProvider
             }
 
             // Fallback: try to get user ID from app account token
-            if (result.UserId == Guid.Empty &&
+            if ((result.UserId == Guid.Empty || result.UserId == null) &&
                 !string.IsNullOrEmpty(transactionInfo?.AppAccountToken) &&
                 Guid.TryParse(transactionInfo.AppAccountToken, out var userId))
             {
@@ -340,7 +340,7 @@ public class ApplePayProvider : IPaymentProvider
                 _logger.LogInformation("[ApplePayProvider] Webhook UserId from AppAccountToken: {UserId}", userId);
             }
 
-            if (result.UserId == Guid.Empty)
+            if (result.UserId == Guid.Empty || result.UserId == null)
             {
                 _logger.LogWarning("[ApplePayProvider] Webhook missing UserId - OrderId={OrderId}, AppAccountToken={AppAccountToken}",
                     orderId ?? string.Empty, transactionInfo?.AppAccountToken ?? string.Empty);
