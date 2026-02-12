@@ -782,7 +782,7 @@ public class ApplePayProvider : IPaymentProvider
             // - AUTO_RENEW_ENABLED: User re-enabled auto-renewal, actual payment via DID_RENEW
             // Old code only updated PaymentSummary.Status but did NOT call UserQuotaGAgent.UpdateSubscriptionAsync
             // The actual cancellation happens when EXPIRED event is received
-            "DID_CHANGE_RENEWAL_STATUS" => null, // No status change for either subtype
+            "DID_CHANGE_RENEWAL_STATUS" => subtype == "AUTO_RENEW_DISABLED" ? PaymentStatus.Cancelled : null, // No status change for either subtype
             
             // Renewal preference change (plan upgrade/downgrade)
             "DID_CHANGE_RENEWAL_PREF" when subtype == "UPGRADE" => PaymentStatus.Completed,
