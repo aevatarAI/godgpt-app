@@ -301,12 +301,13 @@ public class ApplePayProvider : IPaymentProvider
                 ShouldProcess = true
             };
 
+            _logger.LogInformation($"[ApplePayProvider] Webhook - AppAccountToken={transactionInfo?.AppAccountToken??string.Empty}");
             // Try to get user ID from app account token
             if (!string.IsNullOrEmpty(transactionInfo?.AppAccountToken) &&
                 Guid.TryParse(transactionInfo.AppAccountToken, out var userId))
             {
                 result.UserId = userId;
-                _logger.LogDebug($"[ApplePayProvider] Webhook UserId - AppAccountToken={transactionInfo?.AppAccountToken??string.Empty}");
+                _logger.LogInformation($"[ApplePayProvider] Webhook UserId - AppAccountToken={transactionInfo?.AppAccountToken??string.Empty}");
             }
             else
             {
