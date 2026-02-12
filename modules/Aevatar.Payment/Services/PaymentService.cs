@@ -571,6 +571,8 @@ public class PaymentService : IPaymentService
         string productName = result.ProductId ?? string.Empty;
         decimal productAmount = result.VerificationResult?.Amount ?? 0;
         string currency = result.VerificationResult?.Currency ?? "USD";
+        _logger.LogInformation("[PaymentService] Currency initial value: {Currency} (from VerificationResult: {VrCurrency}, PaymentId={PaymentId})",
+            currency, result.VerificationResult?.Currency, paymentId);
         int legacyPlanType = 0;
         bool isUltimate = false;
         
@@ -584,7 +586,10 @@ public class PaymentService : IPaymentService
                 if (product != null)
                 {
                     productName = product.Name ?? product.ProductId;
+                    var previousCurrency = currency;
                     currency = product.Currency ?? currency;
+                    _logger.LogInformation("[PaymentService] Currency after product lookup: {Currency} (previous: {PreviousCurrency}, product.Currency: {ProductCurrency}, ProductId={ProductId}, PaymentId={PaymentId})",
+                        currency, previousCurrency, product.Currency, result.ProductId, paymentId);
                     if (product.Price > 0)
                     {
                         productAmount = product.Price;
