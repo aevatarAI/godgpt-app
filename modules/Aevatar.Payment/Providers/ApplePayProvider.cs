@@ -2,10 +2,16 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using Aevatar.Agents.Abstractions;
+using Aevatar.Agents.Abstractions.Extensions;
 using Aevatar.Payment.Abstractions;
+using Aevatar.Payment.Agents;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using BillingCycle = Aevatar.Payment.Abstractions.BillingCycle;
+using PaymentPlatform = Aevatar.Payment.Abstractions.PaymentPlatform;
+using PaymentStatus = Aevatar.Payment.Abstractions.PaymentStatus;
 
 namespace Aevatar.Payment.Providers;
 
@@ -18,6 +24,7 @@ public class ApplePayProvider : IPaymentProvider
     private readonly ApplePayOptions _options;
     private readonly HttpClient _httpClient;
     private readonly IProductDataSource _productDataSource;
+    private readonly IGAgentActorFactory _actorFactory;
 
     public PaymentPlatform Platform => PaymentPlatform.AppStore;
 
@@ -25,12 +32,14 @@ public class ApplePayProvider : IPaymentProvider
         ILogger<ApplePayProvider> logger,
         IOptions<ApplePayOptions> options,
         IHttpClientFactory httpClientFactory,
-        IProductDataSource productDataSource)
+        IProductDataSource productDataSource,
+        IGAgentActorFactory actorFactory)
     {
         _logger = logger;
         _options = options.Value;
         _httpClient = httpClientFactory.CreateClient("ApplePay");
         _productDataSource = productDataSource;
+        _actorFactory = actorFactory;
     }
 
     public async Task<List<ProductDto>> GetProductsAsync(CancellationToken ct = default)
@@ -302,16 +311,39 @@ public class ApplePayProvider : IPaymentProvider
             };
 
             _logger.LogInformation($"[ApplePayProvider] Webhook - AppAccountToken={transactionInfo?.AppAccountToken??string.Empty}");
-            // Try to get user ID from app account token
-            if (!string.IsNullOrEmpty(transactionInfo?.AppAccountToken) &&
+            // Try to get user ID from PaymentRecordGAgent via orderId first
+            if (!string.IsNullOrEmpty(orderId))
+            {
+                try
+                {
+                    var paymentId = GetPaymentId(PaymentPlatform.AppStore, orderId);
+                    var recordAgent = await GetRecordAgentAsync(paymentId);
+                    var userIdStr = await recordAgent.GetUserIdAsync();
+                    if (!string.IsNullOrEmpty(userIdStr) && Guid.TryParse((string)userIdStr, out var userIdFromRecord))
+                    {
+                        result.UserId = userIdFromRecord;
+                        _logger.LogInformation("[ApplePayProvider] Webhook UserId from PaymentRecordGAgent: {UserId}, OrderId={OrderId}", userIdFromRecord, orderId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "[ApplePayProvider] Failed to get UserId from PaymentRecordGAgent, OrderId={OrderId}", orderId);
+                }
+            }
+
+            // Fallback: try to get user ID from app account token
+            if (result.UserId == Guid.Empty &&
+                !string.IsNullOrEmpty(transactionInfo?.AppAccountToken) &&
                 Guid.TryParse(transactionInfo.AppAccountToken, out var userId))
             {
                 result.UserId = userId;
-                _logger.LogInformation($"[ApplePayProvider] Webhook UserId - AppAccountToken={transactionInfo?.AppAccountToken??string.Empty}");
+                _logger.LogInformation("[ApplePayProvider] Webhook UserId from AppAccountToken: {UserId}", userId);
             }
-            else
+
+            if (result.UserId == Guid.Empty)
             {
-                _logger.LogWarning($"[ApplePayProvider] Webhook missing UserId - AppAccountToken={transactionInfo?.AppAccountToken??string.Empty}");
+                _logger.LogWarning("[ApplePayProvider] Webhook missing UserId - OrderId={OrderId}, AppAccountToken={AppAccountToken}",
+                    orderId ?? string.Empty, transactionInfo?.AppAccountToken ?? string.Empty);
             }
             
             result.NewStatus = MapAppleEventToStatus(notification.NotificationType, notification.Subtype);
@@ -450,7 +482,27 @@ public class ApplePayProvider : IPaymentProvider
     }
 
     #region Private Helpers
+    
+    private static string GetPaymentId(PaymentPlatform platform, string orderId)
+    {
+        var platformName = platform switch
+        {
+            PaymentPlatform.Stripe => "stripe",
+            PaymentPlatform.AppStore => "appstore",
+            PaymentPlatform.GooglePlay => "googleplay",
+            _ => "unknown"
+        };
+        return $"payment_{platformName}_{orderId}";
+    }
 
+    private async Task<IPaymentRecordGAgent> GetRecordAgentAsync(string paymentId)
+    {
+        // Convert paymentId to stable Agent ID using shared helper
+        var agentId = PaymentIdHelper.ToAgentIdString(paymentId);
+        var actor = await _actorFactory.CreateGAgentActorAsync<PaymentRecordGAgent>(agentId);
+        return actor.As<IPaymentRecordGAgent>();
+    }
+    
     /// <summary>
     /// Verifies the JWT signature using the x5c certificate chain from the JWT header.
     /// This validates that the notification came from Apple.
