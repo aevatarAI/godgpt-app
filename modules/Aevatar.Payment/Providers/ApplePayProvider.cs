@@ -306,8 +306,7 @@ public class ApplePayProvider : IPaymentProvider
                 Guid.TryParse(transactionInfo.AppAccountToken, out var userId))
             {
                 result.UserId = userId;
-                _logger.LogDebug("[ApplePayProvider] Webhook UserId - AppAccountToken={Token}", 
-                    transactionInfo?.AppAccountToken);
+                _logger.LogDebug($"[ApplePayProvider] Webhook UserId - AppAccountToken={transactionInfo?.AppAccountToken}");
             }
             else
             {
