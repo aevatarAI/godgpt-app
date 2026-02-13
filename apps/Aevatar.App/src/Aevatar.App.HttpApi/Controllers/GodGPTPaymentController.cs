@@ -45,6 +45,7 @@ public class GodGPTPaymentController : AevatarController
     private readonly IStateIndexService? _stateIndexService;
     private readonly IGAgentActorFactory? _actorFactory;
     private readonly ISubscriptionProductService? _subscriptionProductService;
+    private readonly StripeOptions? _options;
     private readonly Dictionary<string, int> _productPlanTypes; // productId/priceId -> PlanType
     private readonly Dictionary<string, bool> _productIsUltimate; // productId/priceId -> IsUltimate
 
@@ -63,6 +64,7 @@ public class GodGPTPaymentController : AevatarController
         _stateIndexService = stateIndexService;
         _actorFactory = actorFactory;
         _subscriptionProductService = subscriptionProductService;
+        _options = stripeOptions?.Value;
 
         // Build unified product -> PlanType lookup from all platforms
         _productPlanTypes = BuildProductPlanTypeLookup(
@@ -172,8 +174,38 @@ public class GodGPTPaymentController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
-        
-        var products = await _paymentService.GetProductsAsync(PaymentPlatform.Stripe);
+
+        if (_options == null || _options.Products == null || !_options.Products.Any())
+        {
+            _logger.LogWarning("[StripeProvider] No products configured in StripeOptions");
+            return new List<StripeProductDto>();
+        }
+
+        var products = _options.Products
+            .Where(p => p.PlanType != 1) // Skip daily plans (PlanType 1 = Day)
+            .Select(p => 
+            {
+                var billingCycle = p.GetBillingCycle();
+                return new ProductDto
+                {
+                    ProductId = p.PriceId,
+                    Name = p.Name,
+                    Description = p.Description,
+                    Price = p.Amount,
+                    Currency = p.Currency,
+                    PlanType = p.IsUltimate ? PlanType.Premium : PlanType.Basic,
+                    BillingCycle = billingCycle,
+                    IsActive = true,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["isUltimate"] = p.IsUltimate.ToString().ToLower(),
+                        ["mode"] = p.Mode,
+                        ["originalPlanType"] = p.PlanType.ToString(),
+                        ["dailyAvgPrice"] = CalculateDailyAvgPrice(p.Amount, billingCycle)
+                    }
+                };
+            })
+            .ToList();
         
         var result = products.Select(p => new StripeProductDto
         {
@@ -1303,6 +1335,20 @@ public class GodGPTPaymentController : AevatarController
             // On error, allow purchase to avoid blocking legitimate payments
             return (true, null);
         }
+    }
+    
+    private static string CalculateDailyAvgPrice(decimal amount, BillingCycle cycle)
+    {
+        var days = cycle switch
+        {
+            BillingCycle.Daily => 1,
+            BillingCycle.Weekly => 7,
+            BillingCycle.Monthly => 30,
+            BillingCycle.Quarterly => 90,
+            BillingCycle.Yearly => 365,
+            _ => 30
+        };
+        return Math.Round(amount / days, 2).ToString("F2");
     }
 
     #endregion
