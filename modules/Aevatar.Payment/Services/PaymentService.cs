@@ -1043,7 +1043,7 @@ public class PaymentService : IPaymentService
                 indexAgent = await GetIndexAgentAsync(result.UserId.Value);
                 
                 // Add to index agent if payment record was just created and payment is completed
-                if (!initialized && result.NewStatus == PaymentStatus.Completed)
+                if (result.NewStatus == PaymentStatus.Completed)
                 {
                     // Get product info again for index (already fetched above, but need to ensure we have it)
                     string indexProductName = result.ProductId ?? string.Empty;
