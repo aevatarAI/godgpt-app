@@ -571,8 +571,6 @@ public class PaymentService : IPaymentService
         string productName = result.ProductId ?? string.Empty;
         decimal productAmount = result.VerificationResult?.Amount ?? 0;
         string currency = result.VerificationResult?.Currency ?? "USD";
-        _logger.LogInformation("[PaymentService] Currency initial value: {Currency} (from VerificationResult: {VrCurrency}, PaymentId={PaymentId})",
-            currency, result.VerificationResult?.Currency, paymentId);
         int legacyPlanType = 0;
         bool isUltimate = false;
         
@@ -586,10 +584,7 @@ public class PaymentService : IPaymentService
                 if (product != null)
                 {
                     productName = product.Name ?? product.ProductId;
-                    var previousCurrency = currency;
                     currency = currency ?? product.Currency;
-                    _logger.LogInformation("[PaymentService] Currency after product lookup: {Currency} (previous: {PreviousCurrency}, product.Currency: {ProductCurrency}, ProductId={ProductId}, PaymentId={PaymentId})",
-                        currency, previousCurrency, product.Currency, result.ProductId, paymentId);
                     if (product.Price > 0)
                     {
                         productAmount = product.Price;
@@ -920,18 +915,194 @@ public class PaymentService : IPaymentService
             
             var paymentId = GetPaymentId(platform, orderId);
             var recordAgent = await GetRecordAgentAsync(paymentId);
-            
-            // Ensure PaymentRecord and ActiveSubscription are created together
-            var (effectiveUserId, indexAgent) = await EnsurePaymentRecordAndIndexAsync(
-                recordAgent, platform, paymentId, orderId, result);
-            
-            if (!effectiveUserId.HasValue)
+
+            var initialized = await recordAgent.IsInitializedAsync();
+            if (!initialized)
             {
-                return; // Cannot proceed without UserId
+                // Like old code: if payment record not found, create a new one from webhook data
+                // This handles cases where:
+                // 1. Server restarted after checkout session creation but before persistence
+                // 2. User completed payment through direct Stripe link
+                // 3. Old subscriptions created before this code was deployed
+                if (!result.UserId.HasValue)
+                {
+                    _logger.LogWarning(
+                        "[PaymentService] Payment record {PaymentId} not found and UserId is missing, cannot create from webhook " +
+                        "(OrderId={OrderId}, SubscriptionId={SubscriptionId})",
+                        paymentId, result.OrderId, result.SubscriptionId);
+                    return;
+                }
+                
+                _logger.LogInformation(
+                    "[PaymentService] Payment record {PaymentId} not found, creating from webhook data " +
+                    "(OrderId={OrderId}, SubscriptionId={SubscriptionId}, UserId={UserId})",
+                    paymentId, orderId, result.SubscriptionId, result.UserId);
+                
+                // Initialize payment record from webhook data
+                var createFromWebhook = new AgentModels.Protos.CreatePaymentRequestProto
+                {
+                    PaymentId = paymentId, // Business payment ID for ES display
+                    UserId = result.UserId.Value.ToString(),
+                    Platform = (int)ToAgentPlatform(platform),
+                    ExternalOrderId = orderId, // Store orderId for business logic reference
+                    SubscriptionId = result.SubscriptionId ?? string.Empty,
+                    CustomerId = string.Empty, // Not available in webhook
+                    ProductId = result.ProductId ?? string.Empty,
+                    ProductName = result.ProductId ?? string.Empty, // Will be updated below
+                    PaymentMode = (int)AgentModels.PaymentMode.Subscription,
+                    BusinessType = "godgpt",
+                    BusinessId = result.ProductId ?? string.Empty
+                };
+                
+                // Get product config for ProductName and Amount
+                string productName = result.ProductId ?? string.Empty;
+                decimal productAmount = result.VerificationResult?.Amount ?? 0;
+                string currency = result.VerificationResult?.Currency ?? "USD";
+                
+                // Auto-infer plan_type and is_ultimate from product config (like old code: GetProductConfigAsync)
+                if (!string.IsNullOrEmpty(result.ProductId))
+                {
+                    try
+                    {
+                        var provider = GetProvider(platform);
+                        var products = await provider.GetProductsAsync();
+                        var product = products.FirstOrDefault(p => p.ProductId == result.ProductId);
+                        
+                        if (product != null)
+                        {
+                            // Use product display name instead of ProductId (Price ID)
+                            productName = product.Name ?? product.ProductId;
+                            // Use product price if verification result doesn't have amount
+                            if (productAmount == 0)
+                            {
+                                productAmount = product.Price;
+                            }
+                            currency = product.Currency ?? currency;
+                            
+                            // Use originalPlanType from metadata (1=Day, 2=Month, 3=Year, 4=Week)
+                            // This is the correct Common.Constants.PlanType value, not Payment.Abstractions.PlanType
+                            int legacyPlanType = 0;
+                            if (product.Metadata != null && product.Metadata.TryGetValue("originalPlanType", out var originalPlanTypeStr))
+                            {
+                                createFromWebhook.BusinessMetadata["plan_type"] = originalPlanTypeStr;
+                                int.TryParse(originalPlanTypeStr, out legacyPlanType);
+                            }
+                            else
+                            {
+                                // Fallback: convert BillingCycle to legacy PlanType (Day=1, Month=2, Year=3, Week=4)
+                                legacyPlanType = BillingCycleToLegacyPlanType(product.BillingCycle);
+                                _logger.LogWarning(
+                                    "[PaymentService] originalPlanType not found in product metadata for {ProductId}, using BillingCycle fallback: {LegacyPlanType}",
+                                    result.ProductId, legacyPlanType);
+                                createFromWebhook.BusinessMetadata["plan_type"] = legacyPlanType.ToString();
+                            }
+                            // PlanType.Premium is used to indicate Ultimate tier in config
+                            createFromWebhook.BusinessMetadata["is_ultimate"] = (product.PlanType == PlanType.Premium).ToString().ToLower();
+                            
+                            // Store BillingCycle as legacy PlanType value for consistent ES querying
+                            if (legacyPlanType > 0)
+                            {
+                                createFromWebhook.BillingCycle = legacyPlanType;
+                            }
+                            
+                            var inferredPlanType = createFromWebhook.BusinessMetadata.ContainsKey("plan_type")
+                                ? createFromWebhook.BusinessMetadata["plan_type"]
+                                : "unknown";
+                            _logger.LogInformation(
+                                "[PaymentService] Inferred plan_type={PlanType}, is_ultimate={IsUltimate} for webhook record from product {ProductId}",
+                                inferredPlanType, product.PlanType == PlanType.Premium, result.ProductId);
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "[PaymentService] Product {ProductId} not found in config, using defaults for webhook record",
+                                result.ProductId);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "[PaymentService] Failed to infer plan_type/is_ultimate from product config for webhook record");
+                    }
+                }
+                
+                // Update ProductName and Amount in createFromWebhook
+                createFromWebhook.ProductName = productName;
+                createFromWebhook.Amount = (long)(productAmount * 100); // Convert to smallest unit (cents)
+                createFromWebhook.Currency = currency;
+                
+                await recordAgent.InitializeAsync(createFromWebhook);
             }
 
             // Get payment record state (Protobuf) for event context
             var recordState = await recordAgent.GetRecordStateAsync();
+            
+            // Get index agent once for both updates and event broadcasting (requires UserId)
+            AgentModels.IPaymentIndexGAgent? indexAgent = null;
+            if (result.UserId.HasValue)
+            {
+                indexAgent = await GetIndexAgentAsync(result.UserId.Value);
+                
+                // Add to index agent if payment record was just created and payment is completed
+                if (result.NewStatus == PaymentStatus.Completed)
+                {
+                    // Get product info again for index (already fetched above, but need to ensure we have it)
+                    string indexProductName = result.ProductId ?? string.Empty;
+                    decimal indexProductAmount = result.VerificationResult?.Amount ?? 0;
+                    string indexCurrency = result.VerificationResult?.Currency ?? "USD";
+                    
+                    if (!string.IsNullOrEmpty(result.ProductId))
+                    {
+                        try
+                        {
+                            var provider = GetProvider(platform);
+                            var products = await provider.GetProductsAsync();
+                            var product = products.FirstOrDefault(p => p.ProductId == result.ProductId);
+                            if (product != null)
+                            {
+                                indexProductName = product.Name ?? product.ProductId;
+                                if (indexProductAmount == 0)
+                                {
+                                    indexProductAmount = product.Price;
+                                }
+                                indexCurrency = product.Currency ?? indexCurrency;
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogWarning(ex, "[PaymentService] Failed to get product info for index agent");
+                        }
+                    }
+                    
+                    // For PeriodEnd in PaymentIndexGAgent:
+                    // - Stripe: use webhook-provided PeriodEnd (accurate)
+                    // - Apple/Google: use default 1 month (actual EndDate is managed by UserQuotaGAgent)
+                    Google.Protobuf.WellKnownTypes.Timestamp indexPeriodEnd;
+                    if (platform == PaymentPlatform.Stripe && result.PeriodEnd.HasValue)
+                    {
+                        indexPeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime());
+                    }
+                    else
+                    {
+                        // Default to 1 month for Apple/Google (UserQuotaGAgent calculates actual EndDate)
+                        indexPeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1));
+                    }
+                    
+                    await indexAgent.AddActiveSubscriptionAsync(new AgentModels.Protos.ActiveSubscriptionProto
+                    {
+                        PaymentId = paymentId,
+                        BusinessType = "godgpt",
+                        BusinessId = result.ProductId ?? string.Empty,
+                        Platform = (int)ToAgentPlatform(platform),
+                        ProductName = indexProductName, // Use actual product name, not Price ID
+                        Amount = (long)(indexProductAmount * 100), // Convert to smallest unit (cents)
+                        Currency = indexCurrency,
+                        SubscriptionId = result.SubscriptionId ?? string.Empty,
+                        PeriodEnd = indexPeriodEnd,
+                        CreatedAt = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow)
+                    });
+                    await indexAgent.IncrementPaymentCountAsync();
+                }
+            }
             
             // Update SubscriptionId if webhook provides one (real sub_xxx after checkout)
             if (!string.IsNullOrEmpty(result.SubscriptionId) && 

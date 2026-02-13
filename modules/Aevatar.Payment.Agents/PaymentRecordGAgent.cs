@@ -234,6 +234,13 @@ public class PaymentRecordGAgent : GAgentBase<PaymentRecordStateProto>, IPayment
         Logger.LogInformation(
             "[PaymentRecordGAgent] Updating status from {OldStatus} to {NewStatus}",
             (PaymentStatus)State.Status, status);
+        if(State.Status == (int)PaymentStatus.Completed && status == PaymentStatus.Processing)
+        {
+            Logger.LogWarning(
+                "[PaymentRecordGAgent] Cannot update status from Completed to Processing",
+                State.PaymentId);
+            return;
+        }
 
         RaiseEvent(new RecordStatusChangedEvent
         {
