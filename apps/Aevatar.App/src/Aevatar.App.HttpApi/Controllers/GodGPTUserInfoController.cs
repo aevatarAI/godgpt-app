@@ -1,8 +1,12 @@
 using System;
 using System.Diagnostics;
 using System.Threading.Tasks;
+using Aevatar.Agents.Abstractions.Context;
+using Aevatar.Agents.Core.Context;
 using Aevatar.App.Application.Contracts.Services;
 using Aevatar.App.HttpApi.Controllers;
+using Aevatar.App.HttpApi.Extensions;
+using Aevatar.Application.Grains.Agents.ChatManager.Common;
 using Aevatar.Application.Grains.UserFeedback.Dtos;
 using Aevatar.Application.Grains.UserInfo.Dtos;
 using Aevatar.Dtos;
@@ -27,15 +31,18 @@ public class GodGPTUserInfoController : AevatarController
     private readonly IUserInfoService _userInfoService;
     private readonly IUserFeedbackService _userFeedbackService;
     private readonly ILogger<GodGPTUserInfoController> _logger;
+    private readonly IAgentContextAccessor _agentContextAccessor;
 
     public GodGPTUserInfoController(
         IUserInfoService userInfoService,
         IUserFeedbackService userFeedbackService,
-        ILogger<GodGPTUserInfoController> logger)
+        ILogger<GodGPTUserInfoController> logger,
+        IAgentContextAccessor agentContextAccessor)
     {
         _userInfoService = userInfoService;
         _userFeedbackService = userFeedbackService;
         _logger = logger;
+        _agentContextAccessor = agentContextAccessor;
     }
 
     /// <summary>
@@ -46,6 +53,11 @@ public class GodGPTUserInfoController : AevatarController
     {
         var stopwatch = Stopwatch.StartNew();
         var currentUserId = (Guid)CurrentUser.Id!;
+        
+        // Set language context from HTTP header for agent localization
+        var language = HttpContext.GetGodGPTLanguage();
+        var agentContext = _agentContextAccessor.GetOrCreate();
+        agentContext.Set(GodGPTContextKeys.GodGPTLanguage, language.ToString());
         
         var response = await _userInfoService.GetUserInfoOptionsAsync(currentUserId);
         
