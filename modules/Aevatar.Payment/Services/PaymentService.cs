@@ -1295,17 +1295,26 @@ public class PaymentService : IPaymentService
                         }
                     }
 
-                    // Build payment completed event
-                    // For Stripe: use PeriodEnd from webhook result (invoice.paid) - Stripe periods are accurate
-                    // For Apple/Google: DON'T use platform ExpiresDate (Sandbox has short periods like 3-5 minutes)
-                    //   Let UserQuotaGAgent calculate using SubscriptionHelper.GetSubscriptionEndDate
+                    // Build payment completed event - determine PeriodEnd for UserQuotaGAgent
+                    // 
+                    // PeriodEnd controls EndDate calculation in UserQuotaGAgent:
+                    //   - If PeriodEnd != null: EndDate = PeriodEnd (direct overwrite)
+                    //   - If PeriodEnd == null: EndDate = max(currentEndDate, now) + planDuration (cumulative)
+                    //
+                    // Strategy:
+                    //   - Stripe RENEWAL (billing_reason=subscription_cycle): use precise PeriodEnd from invoice
+                    //   - Stripe NON-RENEWAL (first purchase / plan change): leave null → cumulative logic
+                    //     This ensures remaining time from old subscription is preserved on plan change
+                    //     (e.g., Weekly with 5 days left → Monthly = now + 30 + 5 days)
+                    //   - Apple/Google: always null → cumulative logic (Sandbox has unreliable short periods)
                     DateTime? periodEnd = null;
-                    if (platform == PaymentPlatform.Stripe)
+                    if (platform == PaymentPlatform.Stripe && isRenewal)
                     {
-                        // Stripe periods are reliable, use them
+                        // Stripe renewal: use precise PeriodEnd (subscription_cycle has accurate period)
                         periodEnd = result.PeriodEnd ?? result.VerificationResult?.ExpiresDate;
                     }
-                    // For Apple/Google: leave periodEnd as null, UserQuotaGAgent will calculate based on PlanType
+                    // All other cases (Stripe plan change/first purchase, Apple/Google):
+                    // leave periodEnd as null → UserQuotaGAgent accumulates based on PlanType
                     
                     _logger.LogInformation(
                         "[PaymentService] Building PaymentCompletedEvent: Platform={Platform}, " +
