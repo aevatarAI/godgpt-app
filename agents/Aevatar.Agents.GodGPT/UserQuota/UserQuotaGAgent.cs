@@ -964,7 +964,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
 
         // Calculate subscription end date
         // Logic from old code:
-        // - If evt.PeriodEnd is provided (e.g., from Apple ExpiresDate), use it directly
+        // - If evt.PeriodEnd is provided (e.g., from Stripe renewal), use it directly
         // - Otherwise, if subscription is active, extend from current EndDate (cumulative)
         // - Otherwise, start from current time (new subscription)
         DateTime periodEnd;

@@ -121,6 +121,14 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
                 }
                 break;
                 
+            case SubscriptionStatusUpdatedEvent e:
+                var subForStatus = state.ActiveSubscriptions.FirstOrDefault(s => s.PaymentId == e.PaymentId);
+                if (subForStatus != null)
+                {
+                    subForStatus.Status = e.NewStatus;
+                }
+                break;
+                
             case PaymentCountIncrementedEvent e:
                 state.TotalPaymentCount = e.NewCount;
                 break;
@@ -169,6 +177,21 @@ public class PaymentIndexGAgent : GAgentBase<PaymentIndexStateProto>, IPaymentIn
         // Idempotent: skip if already exists
         if (State.ActiveSubscriptions.Any(s => s.PaymentId == subscription.PaymentId))
         {
+            var sub = State.ActiveSubscriptions.First(s => s.PaymentId == subscription.PaymentId);
+            if(sub.Status != 0)
+            {
+               
+                RaiseEvent(new SubscriptionStatusUpdatedEvent
+                {
+                    PaymentId = subscription.PaymentId,
+                    NewStatus = 0
+                });
+                await ConfirmEventsAsync();
+                Logger.LogInformation(
+                    "[PaymentIndexGAgent] Subscription {PaymentId} already exists, but status is not 0, updated status to 0",
+                    subscription.PaymentId);
+                return;
+            }
             Logger.LogDebug(
                 "[PaymentIndexGAgent] Subscription {PaymentId} already exists, skipping",
                 subscription.PaymentId);
