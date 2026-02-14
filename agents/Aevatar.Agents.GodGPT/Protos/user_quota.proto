@@ -55,6 +55,16 @@ message SubscriptionInfoProto {
     repeated string invoice_ids = 7;
     string platform_product_id = 8;
     optional int32 platform = 9;
+    repeated SubscriptionRecord subscription_records = 10;  // Historical records for plan fallback
+}
+
+// Tracks individual subscription product purchases for accurate plan fallback on cancellation.
+// Unique key: {subscription_id, product_id}
+message SubscriptionRecord {
+    string subscription_id = 1;
+    string product_id = 2;        // Platform product ID (precise identifier)
+    QuotaPlanType plan_type = 3;  // Redundant but needed for fallback plan level comparison
+    google.protobuf.Timestamp end_date = 4;
 }
 
 message RateLimitInfoProto {
@@ -153,6 +163,16 @@ message CancelSubscriptionEvent {
     optional string subscription_id = 2;  // If provided, remove from list; cancel only if list becomes empty
     optional string reason = 3;           // "refund" / "user_cancelled" / etc
     optional int32 rollback_days = 4;     // Days to rollback EndDate (for refunds)
+    optional string cancelled_product_id = 5;  // Product ID of the cancelled subscription (for precise record matching)
+}
+
+// event: adds/updates a subscription record for plan fallback tracking
+message AddSubscriptionRecordEvent {
+    bool is_ultimate = 1;
+    string subscription_id = 2;
+    string product_id = 3;
+    QuotaPlanType plan_type = 4;
+    google.protobuf.Timestamp end_date = 5;
 }
 
 message UpdateCreditsEvent {
