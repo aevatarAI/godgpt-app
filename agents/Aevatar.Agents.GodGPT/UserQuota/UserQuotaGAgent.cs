@@ -1031,6 +1031,24 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         subscriptionInfo.Platform = evt.Context.Platform;
 
         await UpdateSubscriptionAsync(subscriptionInfo, isUltimate);
+        
+        // Track subscription record for accurate plan fallback on cancellation
+        if (!string.IsNullOrEmpty(evt.Context.SubscriptionId) && !string.IsNullOrEmpty(evt.Context.ProductId))
+        {
+            RaiseEvent(new AddSubscriptionRecordEvent
+            {
+                IsUltimate = isUltimate,
+                SubscriptionId = evt.Context.SubscriptionId,
+                ProductId = evt.Context.ProductId,
+                PlanType = quotaPlanType,
+                EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(periodEnd, DateTimeKind.Utc))
+            });
+            await ConfirmEventsAsync();
+            
+            Logger.LogInformation(
+                "[UserQuotaGAgent][HandlePaymentCompleted] Added subscription record: SubscriptionId={SubscriptionId}, ProductId={ProductId}, PlanType={PlanType}, EndDate={EndDate}",
+                evt.Context.SubscriptionId, evt.Context.ProductId, quotaPlanType, periodEnd);
+        }
 
         Logger.LogInformation(
             "[UserQuotaGAgent][HandlePaymentCompleted] Updated subscription for user {UserId}, PlanType: {PlanType}, IsUltimate: {IsUltimate}, IsActive: {IsActive}, StartDate: {StartDate}, EndDate: {EndDate}, SubscriptionIds: [{SubscriptionIds}]",
@@ -1226,16 +1244,20 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 planType, rollbackDays);
         }
         
+        // Extract product_id for precise subscription record matching
+        var cancelledProductId = evt.Context?.ProductId ?? string.Empty;
+        
         Logger.LogInformation(
-            "[UserQuotaGAgent][HandlePaymentCancelled] Processing {Reason} for {SubscriptionType} subscription, UserId={UserId}, SubscriptionId={SubscriptionId}, RollbackDays={RollbackDays}",
-            evt.Reason, isUltimate.Value ? "Ultimate" : "Premium", userId, subId, rollbackDays);
+            "[UserQuotaGAgent][HandlePaymentCancelled] Processing {Reason} for {SubscriptionType} subscription, UserId={UserId}, SubscriptionId={SubscriptionId}, ProductId={ProductId}, RollbackDays={RollbackDays}",
+            evt.Reason, isUltimate.Value ? "Ultimate" : "Premium", userId, subId, cancelledProductId, rollbackDays);
         
         RaiseEvent(new CancelSubscriptionEvent 
         { 
             IsUltimate = isUltimate.Value, 
             SubscriptionId = subId,
             Reason = evt.Reason,
-            RollbackDays = rollbackDays
+            RollbackDays = rollbackDays,
+            CancelledProductId = cancelledProductId
         });
         await ConfirmEventsAsync();
     }
@@ -1503,6 +1525,36 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                         sub.SubscriptionIds.Remove(cancelSubscription.SubscriptionId);
                     }
                     
+                    // Remove the cancelled product's record from subscription_records
+                    if (!string.IsNullOrEmpty(cancelSubscription.SubscriptionId))
+                    {
+                        if (!string.IsNullOrEmpty(cancelSubscription.CancelledProductId))
+                        {
+                            // Precise match: {subscription_id, product_id}
+                            var recordToRemove = sub.SubscriptionRecords
+                                .FirstOrDefault(r => r.SubscriptionId == cancelSubscription.SubscriptionId 
+                                                  && r.ProductId == cancelSubscription.CancelledProductId);
+                            if (recordToRemove != null)
+                            {
+                                sub.SubscriptionRecords.Remove(recordToRemove);
+                            }
+                        }
+                        else
+                        {
+                            // Fallback: remove all records for this subscription_id
+                            var recordsToRemove = sub.SubscriptionRecords
+                                .Where(r => r.SubscriptionId == cancelSubscription.SubscriptionId)
+                                .ToList();
+                            foreach (var r in recordsToRemove)
+                            {
+                                sub.SubscriptionRecords.Remove(r);
+                            }
+                        }
+                    }
+                    
+                    // Clean expired records (end_date < now)
+                    CleanExpiredRecords(sub);
+                    
                     // Handle based on Reason:
                     // - refund: Rollback EndDate (user got money back), revoke if EndDate is now in past
                     // - grace_period_expired: Immediate revocation (user failed to pay)
@@ -1516,22 +1568,48 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                             sub.EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(newEndDate, DateTimeKind.Utc));
                         }
                         
-                        // If EndDate is now in the past after rollback, revoke immediately
+                        // If EndDate is now in the past after rollback, apply fallback from remaining records
                         var endDate = sub.EndDate?.ToDateTime() ?? DateTime.MinValue;
                         if (endDate <= DateTime.UtcNow)
                         {
-                            sub.IsActive = false;
-                            sub.PlanType = QuotaPlanType.None;
-                            sub.Status = QuotaPaymentStatus.None;
+                            ApplyFallbackPlanType(sub);
                         }
                     }
                     else if (cancelSubscription.Reason == "grace_period_expired")
                     {
-                        // Grace period expired: immediate revocation
-                        // User failed to pay during grace period, revoke access now
-                        sub.IsActive = false;
-                        sub.PlanType = QuotaPlanType.None;
-                        sub.Status = QuotaPaymentStatus.None;
+                        // Grace period expired: apply fallback from remaining records
+                        ApplyFallbackPlanType(sub);
+                    }
+                }
+                break;
+            
+            case AddSubscriptionRecordEvent addRecord:
+                var targetSub = addRecord.IsUltimate ? state.UltimateSubscription : state.Subscription;
+                if (targetSub != null)
+                {
+                    // Clean expired records first (end_date < now)
+                    CleanExpiredRecords(targetSub);
+                    
+                    // Match by unique key: {subscription_id, product_id}
+                    var existingRecord = targetSub.SubscriptionRecords
+                        .FirstOrDefault(r => r.SubscriptionId == addRecord.SubscriptionId 
+                                          && r.ProductId == addRecord.ProductId);
+                    
+                    if (existingRecord != null)
+                    {
+                        // Same product renewal: update end_date
+                        existingRecord.EndDate = addRecord.EndDate;
+                    }
+                    else
+                    {
+                        // New product (upgrade/new subscription): add new record
+                        targetSub.SubscriptionRecords.Add(new SubscriptionRecord
+                        {
+                            SubscriptionId = addRecord.SubscriptionId,
+                            ProductId = addRecord.ProductId,
+                            PlanType = addRecord.PlanType,
+                            EndDate = addRecord.EndDate
+                        });
                     }
                 }
                 break;
@@ -1573,6 +1651,48 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             default:
                 Logger.LogWarning("Unhandled event type {EventType}", evt.GetType().Name);
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Applies fallback PlanType from remaining valid subscription records.
+    /// Selects the highest-level plan among records with end_date > now.
+    /// If no valid records remain, sets subscription to inactive/None.
+    /// </summary>
+    private static void ApplyFallbackPlanType(SubscriptionInfoProto sub)
+    {
+        var now = DateTime.UtcNow;
+        var validRecord = sub.SubscriptionRecords
+            .Where(r => r.EndDate != null && r.EndDate.ToDateTime() > now)
+            .OrderByDescending(r => SubscriptionHelper.GetPlanTypeLogicalOrder(r.PlanType))
+            .FirstOrDefault();
+        
+        if (validRecord != null)
+        {
+            sub.PlanType = validRecord.PlanType;
+            sub.EndDate = validRecord.EndDate;
+            // Keep IsActive = true, Status unchanged
+        }
+        else
+        {
+            sub.IsActive = false;
+            sub.PlanType = QuotaPlanType.None;
+            sub.Status = QuotaPaymentStatus.None;
+        }
+    }
+    
+    /// <summary>
+    /// Removes expired subscription records (end_date &lt; now) to prevent list from growing indefinitely.
+    /// </summary>
+    private static void CleanExpiredRecords(SubscriptionInfoProto sub)
+    {
+        var now = DateTime.UtcNow;
+        var expiredRecords = sub.SubscriptionRecords
+            .Where(r => r.EndDate != null && r.EndDate.ToDateTime() < now)
+            .ToList();
+        foreach (var expired in expiredRecords)
+        {
+            sub.SubscriptionRecords.Remove(expired);
         }
     }
 
