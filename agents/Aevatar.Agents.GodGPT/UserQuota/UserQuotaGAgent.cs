@@ -192,6 +192,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 StartDate = startDate,
                 EndDate = endDate,
                 SubscriptionIds = subscriptionInfo.SubscriptionIds.ToList(),
+                SubscriptionRecords = subscriptionInfo.SubscriptionRecords.ToList(),
                 InvoiceIds = subscriptionInfo.InvoiceIds.ToList(),
                 PlatformProductId = !string.IsNullOrWhiteSpace(subscriptionInfo!.PlatformProductId) ? subscriptionInfo.PlatformProductId : null
             };
@@ -566,6 +567,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             EndDate = expiresDate,
             Status = PaymentStatus.Completed,
             SubscriptionIds = State.Subscription?.SubscriptionIds.ToList() ?? new List<string>(),
+            SubscriptionRecords = State.Subscription?.SubscriptionRecords.ToList() ?? new List<SubscriptionRecord>(),
             InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>(),
             PlatformProductId = !string.IsNullOrWhiteSpace(State.Subscription?.PlatformProductId)
                 ? State.Subscription?.PlatformProductId
@@ -590,6 +592,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             StartDate = State.Subscription?.StartDate?.ToDateTime() ?? DateTime.MinValue,
             EndDate = State.Subscription?.EndDate?.ToDateTime() ?? DateTime.MinValue,
             SubscriptionIds = State.Subscription?.SubscriptionIds.ToList() ?? new List<string>(),
+            SubscriptionRecords = State.Subscription?.SubscriptionRecords.ToList() ?? new List<SubscriptionRecord>(),
             InvoiceIds = State.Subscription?.InvoiceIds.ToList() ?? new List<string>(),
             PlatformProductId = !string.IsNullOrWhiteSpace(State.Subscription?.PlatformProductId)
                 ? State.Subscription?.PlatformProductId
@@ -676,7 +679,8 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 StartDate = startDate,
                 EndDate = SubscriptionHelper.GetSubscriptionEndDate(planType, startDate),
                 SubscriptionIds = null,
-                InvoiceIds = null
+                InvoiceIds = null,
+                SubscriptionRecords = null
             };
             await UpdateSubscriptionAsync(subscriptionInfoDto, ultimate);
         }
@@ -820,6 +824,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             StartDate = DateTime.UtcNow,
             EndDate = SubscriptionHelper.GetSubscriptionEndDate(PlanType.Week, startDate),
             SubscriptionIds = null,
+            SubscriptionRecords = null,
             InvoiceIds = null
         }, false);
 
@@ -1447,6 +1452,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         if (sub.Platform.HasValue) result.Platform = sub.Platform.Value;
         if (sub.SubscriptionIds != null) result.SubscriptionIds.AddRange(sub.SubscriptionIds);
         if (sub.InvoiceIds != null) result.InvoiceIds.AddRange(sub.InvoiceIds);
+        if (sub.SubscriptionRecords != null) result.SubscriptionRecords.AddRange(sub.SubscriptionRecords);
         return result;
     }
     
@@ -1511,6 +1517,16 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                 if (updateSubscription.SubscriptionInfo.HasPlatform)
                 {
                     subscription.Platform = updateSubscription.SubscriptionInfo.Platform;
+                }
+                
+                // Sync EndDate to the latest subscription record (highest end_date)
+                // so that ApplyFallbackPlanType uses consistent data on cancellation
+                if (updateSubscription.SubscriptionInfo.EndDate != null && subscription.SubscriptionRecords.Count > 0)
+                {
+                    var latestRecord = subscription.SubscriptionRecords
+                        .OrderByDescending(r => r.EndDate?.ToDateTime() ?? DateTime.MinValue)
+                        .First();
+                    latestRecord.EndDate = updateSubscription.SubscriptionInfo.EndDate;
                 }
                 
                 break;
@@ -1665,7 +1681,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
         if (validRecord != null)
         {
             sub.PlanType = validRecord.PlanType;
-            sub.EndDate = validRecord.EndDate;
+            validRecord.EndDate = sub.EndDate;
             // Keep IsActive = true, Status unchanged
         }
         else

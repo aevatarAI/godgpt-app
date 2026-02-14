@@ -1,3 +1,4 @@
+using Aevatar.Agents.GodGPT.Protos.UserQuota;
 using Aevatar.Application.Grains.Common.Constants;
 
 namespace Aevatar.Application.Grains.UserQuota;
@@ -15,6 +16,7 @@ public class SubscriptionInfoDto
     public DateTime EndDate { get; set; }
     public List<string> SubscriptionIds { get; set; } = new();
     public List<string> InvoiceIds { get; set; } = new();
+    public List<SubscriptionRecord>? SubscriptionRecords { get; set; }
     
     public string? PlatformProductId { get; set; }
     
