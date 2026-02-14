@@ -1567,13 +1567,8 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                             var newEndDate = currentEndDate.AddDays(-cancelSubscription.RollbackDays);
                             sub.EndDate = Timestamp.FromDateTime(DateTime.SpecifyKind(newEndDate, DateTimeKind.Utc));
                         }
-                        
-                        // If EndDate is now in the past after rollback, apply fallback from remaining records
-                        var endDate = sub.EndDate?.ToDateTime() ?? DateTime.MinValue;
-                        if (endDate <= DateTime.UtcNow)
-                        {
-                            ApplyFallbackPlanType(sub);
-                        }
+                        // Apply fallback plan type from remaining records
+                        ApplyFallbackPlanType(sub);
                     }
                     else if (cancelSubscription.Reason == "grace_period_expired")
                     {
