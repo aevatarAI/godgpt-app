@@ -1519,16 +1519,6 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
                     subscription.Platform = updateSubscription.SubscriptionInfo.Platform;
                 }
                 
-                // Sync EndDate to the latest subscription record (highest end_date)
-                // so that ApplyFallbackPlanType uses consistent data on cancellation
-                if (updateSubscription.SubscriptionInfo.EndDate != null && subscription.SubscriptionRecords.Count > 0)
-                {
-                    var latestRecord = subscription.SubscriptionRecords
-                        .OrderByDescending(r => r.EndDate?.ToDateTime() ?? DateTime.MinValue)
-                        .First();
-                    latestRecord.EndDate = updateSubscription.SubscriptionInfo.EndDate;
-                }
-                
                 break;
 
             case CancelSubscriptionEvent cancelSubscription:
