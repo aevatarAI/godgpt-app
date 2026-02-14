@@ -211,6 +211,7 @@ public class UserQuotaGAgent : GAgentBase<UserQuotaState>, IUserQuotaGAgent
             {
                 RaiseEvent(new ClearRateLimitEvent { ActionType = "conversation" });
             }
+            await ConfirmEventsAsync();
         }
 
         return isSubscribed;

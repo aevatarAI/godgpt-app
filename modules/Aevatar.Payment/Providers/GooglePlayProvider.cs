@@ -624,7 +624,7 @@ public class GooglePlayProvider : IPaymentProvider
         if (!isCoreEvent) return false;
 
         // For status change events, always process
-        if (evt.EventType is "CANCELLATION" or "EXPIRATION" or "UNCANCELLATION" or "BILLING_ISSUE")
+        if (evt.EventType is "CANCELLATION" or "EXPIRATION" or "UNCANCELLATION" or "BILLING_ISSUE" or "PRODUCT_CHANGE")
             return true;
 
         // For purchase/renewal/product_change, require non-zero price
@@ -660,7 +660,7 @@ public class GooglePlayProvider : IPaymentProvider
             "EXPIRATION" => PaymentStatus.Expired,
             "REFUND" => PaymentStatus.Refunded,
             "UNCANCELLATION" => PaymentStatus.Completed, // User re-enabled auto-renewal
-            "PRODUCT_CHANGE" => PaymentStatus.Completed, // User changed subscription product
+            "PRODUCT_CHANGE" => PaymentStatus.Cancelled, // User changed subscription product
             "BILLING_ISSUE" => PaymentStatus.Failed,     // Payment method issue
             _ => PaymentStatus.Pending
         };
