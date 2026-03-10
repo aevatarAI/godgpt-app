@@ -505,11 +505,9 @@ public class GooglePlayProvider : IPaymentProvider
             // - Sandbox may return a short platform period
             // - Production may return a longer natural-month period than local calculation
             var calculatedPeriodEnd = await CalculatePeriodEndFromProductAsync(webhookEvent.ProductId, ct);
-            result.PeriodEnd = calculatedPeriodEnd.HasValue && webhookEvent.ExpiresDate.HasValue
-                ? (calculatedPeriodEnd.Value >= webhookEvent.ExpiresDate.Value
-                    ? calculatedPeriodEnd.Value
-                    : webhookEvent.ExpiresDate.Value)
-                : calculatedPeriodEnd ?? webhookEvent.ExpiresDate;
+            result.PeriodEnd = PaymentPeriodEndHelper.MaxPeriodEnd(
+                calculatedPeriodEnd,
+                webhookEvent.ExpiresDate);
 
             return result;
         }
