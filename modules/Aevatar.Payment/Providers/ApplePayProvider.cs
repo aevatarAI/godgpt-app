@@ -392,11 +392,9 @@ public class ApplePayProvider : IPaymentProvider
                 // - Sandbox often returns very short platform periods
                 // - Production may return a longer natural-month period than local calculation
                 var calculatedPeriodEnd = await CalculatePeriodEndFromProductAsync(transactionInfo.ProductId, ct);
-                result.PeriodEnd = calculatedPeriodEnd.HasValue && transactionInfo.ExpiresDate.HasValue
-                    ? (calculatedPeriodEnd.Value >= transactionInfo.ExpiresDate.Value
-                        ? calculatedPeriodEnd.Value
-                        : transactionInfo.ExpiresDate.Value)
-                    : calculatedPeriodEnd ?? transactionInfo.ExpiresDate;
+                result.PeriodEnd = PaymentPeriodEndHelper.MaxPeriodEnd(
+                    calculatedPeriodEnd,
+                    transactionInfo.ExpiresDate);
             }
 
             // Enhanced logging for refund events
