@@ -658,7 +658,7 @@ public class PaymentService : IPaymentService
             await recordAgent.InitializeAsync(createRequest);
             
             // Add ActiveSubscription together with PaymentRecord
-            Google.Protobuf.WellKnownTypes.Timestamp periodEnd = (platform == PaymentPlatform.Stripe && result.PeriodEnd.HasValue)
+            Google.Protobuf.WellKnownTypes.Timestamp periodEnd = result.PeriodEnd.HasValue
                 ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
                 : Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1));
             
@@ -1073,19 +1073,10 @@ public class PaymentService : IPaymentService
                         }
                     }
                     
-                    // For PeriodEnd in PaymentIndexGAgent:
-                    // - Stripe: use webhook-provided PeriodEnd (accurate)
-                    // - Apple/Google: use default 1 month (actual EndDate is managed by UserQuotaGAgent)
-                    Google.Protobuf.WellKnownTypes.Timestamp indexPeriodEnd;
-                    if (platform == PaymentPlatform.Stripe && result.PeriodEnd.HasValue)
-                    {
-                        indexPeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime());
-                    }
-                    else
-                    {
-                        // Default to 1 month for Apple/Google (UserQuotaGAgent calculates actual EndDate)
-                        indexPeriodEnd = Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1));
-                    }
+                    // All platforms now use the provider-resolved period end.
+                    Google.Protobuf.WellKnownTypes.Timestamp indexPeriodEnd = result.PeriodEnd.HasValue
+                        ? Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(result.PeriodEnd.Value.ToUniversalTime())
+                        : Google.Protobuf.WellKnownTypes.Timestamp.FromDateTime(DateTime.UtcNow.AddMonths(1));
                     
                     await indexAgent.AddActiveSubscriptionAsync(new AgentModels.Protos.ActiveSubscriptionProto
                     {
@@ -1123,9 +1114,8 @@ public class PaymentService : IPaymentService
                 recordState = await recordAgent.GetRecordStateAsync();
             }
             
-            // Update PeriodEnd in PaymentIndexGAgent if webhook provides one (invoice.paid renewals)
-            // Only for Stripe - Apple/Google have short Sandbox periods, we let UserQuotaGAgent calculate
-            if (indexAgent != null && result.PeriodEnd.HasValue && platform == PaymentPlatform.Stripe)
+            // Update PeriodEnd in PaymentIndexGAgent for all platforms when provider returns one.
+            if (indexAgent != null && result.PeriodEnd.HasValue)
             {
                 _logger.LogInformation(
                     "[PaymentService] Updating PeriodEnd for {PaymentId} to {PeriodEnd}",
@@ -1302,19 +1292,9 @@ public class PaymentService : IPaymentService
                     //   - If PeriodEnd == null: EndDate = max(currentEndDate, now) + planDuration (cumulative)
                     //
                     // Strategy:
-                    //   - Stripe RENEWAL (billing_reason=subscription_cycle): use precise PeriodEnd from invoice
-                    //   - Stripe NON-RENEWAL (first purchase / plan change): leave null → cumulative logic
-                    //     This ensures remaining time from old subscription is preserved on plan change
-                    //     (e.g., Weekly with 5 days left → Monthly = now + 30 + 5 days)
-                    //   - Apple/Google: always null → cumulative logic (Sandbox has unreliable short periods)
-                    DateTime? periodEnd = null;
-                    if (platform == PaymentPlatform.Stripe && isRenewal)
-                    {
-                        // Stripe renewal: use precise PeriodEnd (subscription_cycle has accurate period)
-                        periodEnd = result.PeriodEnd ?? result.VerificationResult?.ExpiresDate;
-                    }
-                    // All other cases (Stripe plan change/first purchase, Apple/Google):
-                    // leave periodEnd as null → UserQuotaGAgent accumulates based on PlanType
+                    //   - All platforms now pass through the provider-resolved period end
+                    //   - Providers already normalize sandbox/platform differences before this point
+                    DateTime? periodEnd = result.PeriodEnd;
                     
                     _logger.LogInformation(
                         "[PaymentService] Building PaymentCompletedEvent: Platform={Platform}, " +

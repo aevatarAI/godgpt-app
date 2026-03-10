@@ -388,10 +388,15 @@ public class ApplePayProvider : IPaymentProvider
                     Currency = transactionInfo.Currency
                 };
                 
-                // Calculate real PeriodEnd based on PlanType (not platform ExpiresDate)
-                // Apple Sandbox returns short periods (3-5 minutes), production returns real dates
-                // Old code used CalculateSubscriptionDurationAsync to get real EndDate
-                result.PeriodEnd = await CalculatePeriodEndFromProductAsync(transactionInfo.ProductId, ct);
+                // Keep the larger end date to avoid shortening user entitlement:
+                // - Sandbox often returns very short platform periods
+                // - Production may return a longer natural-month period than local calculation
+                var calculatedPeriodEnd = await CalculatePeriodEndFromProductAsync(transactionInfo.ProductId, ct);
+                result.PeriodEnd = calculatedPeriodEnd.HasValue && transactionInfo.ExpiresDate.HasValue
+                    ? (calculatedPeriodEnd.Value >= transactionInfo.ExpiresDate.Value
+                        ? calculatedPeriodEnd.Value
+                        : transactionInfo.ExpiresDate.Value)
+                    : calculatedPeriodEnd ?? transactionInfo.ExpiresDate;
             }
 
             // Enhanced logging for refund events

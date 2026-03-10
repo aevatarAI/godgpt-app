@@ -501,10 +501,15 @@ public class GooglePlayProvider : IPaymentProvider
                 Currency = webhookEvent.Currency
             };
             
-            // Calculate real PeriodEnd based on PlanType (not platform ExpiresDate)
-            // Google Play Sandbox may have short periods, production returns real dates
-            // This matches old code behavior
-            result.PeriodEnd = await CalculatePeriodEndFromProductAsync(webhookEvent.ProductId, ct);
+            // Keep the larger end date to avoid shortening user entitlement:
+            // - Sandbox may return a short platform period
+            // - Production may return a longer natural-month period than local calculation
+            var calculatedPeriodEnd = await CalculatePeriodEndFromProductAsync(webhookEvent.ProductId, ct);
+            result.PeriodEnd = calculatedPeriodEnd.HasValue && webhookEvent.ExpiresDate.HasValue
+                ? (calculatedPeriodEnd.Value >= webhookEvent.ExpiresDate.Value
+                    ? calculatedPeriodEnd.Value
+                    : webhookEvent.ExpiresDate.Value)
+                : calculatedPeriodEnd ?? webhookEvent.ExpiresDate;
 
             return result;
         }
