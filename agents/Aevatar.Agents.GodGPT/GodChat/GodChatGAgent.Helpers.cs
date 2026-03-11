@@ -165,8 +165,8 @@ public partial class GodChatGAgent
 
         var mergedPrompt = $"Use the following user background when it is relevant to the reply:\n{response.Prompt}";
         Logger.LogDebug(
-            "[GodChatGAgent][GetSharedUserInfoPromptAsync] SessionId={SessionId}, UserId={UserId}, SharedPromptLength={PromptLength}, SharedPrompt={SharedPrompt}",
-            Id, State.ChatManagerGuid, mergedPrompt.Length, mergedPrompt);
+            "[GodChatGAgent][GetSharedUserInfoPromptAsync] SessionId={SessionId}, UserId={UserId}, SharedPromptLength={PromptLength}",
+            Id, State.ChatManagerGuid, mergedPrompt.Length);
         return mergedPrompt;
     }
 
