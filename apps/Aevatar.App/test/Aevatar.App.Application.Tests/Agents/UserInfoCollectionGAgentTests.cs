@@ -162,5 +162,6 @@ public class UserInfoCollectionGAgentTests
         response.Prompt.ShouldContain("User Message Time: 2026-03-11 09:30:15");
         response.Prompt.ShouldContain("User Name: Ada Lovelace");
         response.Prompt.ShouldContain("User Location: London, UK");
+        response.Prompt.ShouldNotContain("Generate a personalized \"Today's Dos and Don'ts\"");
     }
 }
