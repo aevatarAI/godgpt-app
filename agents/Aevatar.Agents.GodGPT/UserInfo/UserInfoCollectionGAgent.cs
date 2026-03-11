@@ -374,8 +374,14 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
 
         var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
         var currentTime = request.UserLocalTime != null
-            ? request.UserLocalTime.ToDateTime() 
+            ? request.UserLocalTime.ToDateTime()
             : DateTime.UtcNow;
+        if (request.UserLocalTime == null)
+        {
+            Logger.LogDebug(
+                "[UserInfoCollectionGAgent][GenerateUserInfoPromptAsync] UserLocalTime missing, falling back to UTC for user {UserId}",
+                State.UserId);
+        }
         
         var fullName = $"{State.FirstName} {State.LastName}".Trim();
         if (string.IsNullOrWhiteSpace(fullName))
@@ -427,8 +433,7 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
         
         var timeText = currentTime.ToString("yyyy-MM-dd HH:mm:ss");
         
-        var prompt = $@"Generate a personalized ""Today's Dos and Don'ts"" for the user based on their information and cosmological theories.
-User Name: {fullName}
+        var prompt = $@"User Name: {fullName}
 User Location: {location}
 User Message Time: {timeText}
 User Gender: {genderText}
