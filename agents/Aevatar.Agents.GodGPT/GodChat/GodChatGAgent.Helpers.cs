@@ -150,8 +150,9 @@ public partial class GodChatGAgent
 
         var response = await userInfoCollectionGAgent.GenerateUserInfoPromptAsync(request);
         Logger.LogDebug(
-            "[GodChatGAgent][GetUserInfoPromptResponseAsync] SessionId={SessionId}, UserId={UserId}, HasPrompt={HasPrompt}, PromptLength={PromptLength}",
-            Id, State.ChatManagerGuid, !string.IsNullOrWhiteSpace(response?.Prompt), response?.Prompt?.Length ?? 0);
+            "[GodChatGAgent][GetUserInfoPromptResponseAsync] SessionId={SessionId}, UserId={UserId}, HasPrompt={HasPrompt}, PromptLength={PromptLength}, FullName={FullName}, Prompt={Prompt}",
+            Id, State.ChatManagerGuid, !string.IsNullOrWhiteSpace(response?.Prompt), response?.Prompt?.Length ?? 0,
+            response?.FullName ?? string.Empty, response?.Prompt ?? string.Empty);
         return response;
     }
 
@@ -178,8 +179,8 @@ public partial class GodChatGAgent
 
         var mergedPrompt = $"Use the following user background when it is relevant to the reply:\n{sharedContext}";
         Logger.LogDebug(
-            "[GodChatGAgent][GetSharedUserInfoPromptAsync] SessionId={SessionId}, UserId={UserId}, SharedPromptLength={PromptLength}",
-            Id, State.ChatManagerGuid, mergedPrompt.Length);
+            "[GodChatGAgent][GetSharedUserInfoPromptAsync] SessionId={SessionId}, UserId={UserId}, SharedPromptLength={PromptLength}, SharedPrompt={SharedPrompt}",
+            Id, State.ChatManagerGuid, mergedPrompt.Length, mergedPrompt);
         return mergedPrompt;
     }
 
