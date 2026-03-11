@@ -374,8 +374,14 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
 
         var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
         var currentTime = request.UserLocalTime != null
-            ? request.UserLocalTime.ToDateTime() 
+            ? request.UserLocalTime.ToDateTime()
             : DateTime.UtcNow;
+        if (request.UserLocalTime == null)
+        {
+            Logger.LogDebug(
+                "[UserInfoCollectionGAgent][GenerateUserInfoPromptAsync] UserLocalTime missing, falling back to UTC for user {UserId}",
+                State.UserId);
+        }
         
         var fullName = $"{State.FirstName} {State.LastName}".Trim();
         if (string.IsNullOrWhiteSpace(fullName))
