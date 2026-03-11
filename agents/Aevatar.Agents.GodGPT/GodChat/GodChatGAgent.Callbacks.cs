@@ -20,6 +20,7 @@ using Orleans.Streams;
 using Aevatar.Agents.Abstractions;
 using Aevatar.Agents; // For EventEnvelope
 using Aevatar.Agents.GodGPT.Protos.GodChatStream;
+using Newtonsoft.Json.Linq;
 
 namespace Aevatar.Application.Grains.Agents.ChatManager.Chat;
 
@@ -105,6 +106,7 @@ public partial class GodChatGAgent
                 var voiceLanguageValue = dictionary.GetValueOrDefault("VoiceLanguage", 0);
                 var voiceLanguage = (VoiceLanguageEnum)Convert.ToInt32(voiceLanguageValue);
                 var voiceDurationSeconds = Convert.ToDouble(dictionary.GetValueOrDefault("VoiceDurationSeconds", 0.0));
+                var userTimeContext = ExtractUserTimeContext(dictionary);
 
                 GodVoiceStreamChatAsync(contextDto.RequestId,
                     (string)dictionary.GetValueOrDefault("LLM", systemLlm),
@@ -112,18 +114,19 @@ public partial class GodChatGAgent
                     (string)dictionary.GetValueOrDefault("Message", string.Empty),
                     contextDto.ChatId, null, (bool)dictionary.GetValueOrDefault("IsHttpRequest", true),
                     (string)dictionary.GetValueOrDefault("Region", null),
-                    voiceLanguage, voiceDurationSeconds, false);
+                    voiceLanguage, voiceDurationSeconds, false, userTimeContext);
             }
             else
             {
                 // Regular chat retry: call GodStreamChatAsync
+                var userTimeContext = ExtractUserTimeContext(dictionary);
                 GodStreamChatAsync(contextDto.RequestId,
                     (string)dictionary.GetValueOrDefault("LLM", systemLlm),
                     (bool)dictionary.GetValueOrDefault("StreamingModeEnabled", true),
                     (string)dictionary.GetValueOrDefault("Message", string.Empty),
                     contextDto.ChatId, null, (bool)dictionary.GetValueOrDefault("IsHttpRequest", true),
                     (string)dictionary.GetValueOrDefault("Region", null),
-                    false, (List<string>?)dictionary.GetValueOrDefault("Images"));
+                    false, (List<string>?)dictionary.GetValueOrDefault("Images"), userTimeContext);
             }
             
             return;
@@ -669,6 +672,44 @@ public partial class GodChatGAgent
         }
     }
 
+    private static UserTimeContext? ExtractUserTimeContext(Dictionary<string, object> dictionary)
+    {
+        DateTime? userLocalTime = null;
+        if (dictionary.TryGetValue("UserLocalTime", out var rawUserLocalTime))
+        {
+            userLocalTime = rawUserLocalTime switch
+            {
+                DateTime dateTime => dateTime,
+                string text when DateTimeOffset.TryParse(text, out var parsed) => parsed.UtcDateTime,
+                JValue value when value.Value is DateTime dateTime => dateTime,
+                JValue value when value.Value is string text && DateTimeOffset.TryParse(text, out var parsed) => parsed.UtcDateTime,
+                _ => null
+            };
+        }
+
+        string? userTimeZoneId = null;
+        if (dictionary.TryGetValue("UserTimeZoneId", out var rawUserTimeZoneId))
+        {
+            userTimeZoneId = rawUserTimeZoneId switch
+            {
+                string text => text,
+                JValue value when value.Value is string text => text,
+                _ => null
+            };
+        }
+
+        if (!userLocalTime.HasValue && string.IsNullOrWhiteSpace(userTimeZoneId))
+        {
+            return null;
+        }
+
+        return new UserTimeContext
+        {
+            UserLocalTime = userLocalTime,
+            UserTimeZoneId = userTimeZoneId
+        };
+    }
+
     private async Task PushMessageToClientAsync(ResponseStreamGodChat chatMessage)
     {
         // Use session ID (Guid) for stream identification
@@ -842,4 +883,3 @@ public partial class GodChatGAgent
         Logger.LogInformation($"[GodChatGAgent][PushMessageToClientAsync] Successfully pushed message to MassTransit stream, StreamId={streamId}");
     }
 }
-

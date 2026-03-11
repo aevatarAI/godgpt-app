@@ -299,7 +299,7 @@ public partial class GodChatGAgent
         string message,
         string chatId, ExecutionPromptSettings? promptSettings = null, bool isHttpRequest = false,
         string? region = null, VoiceLanguageEnum voiceLanguage = VoiceLanguageEnum.English,
-        double voiceDurationSeconds = 0.0, bool addToHistory = true)
+        double voiceDurationSeconds = 0.0, bool addToHistory = true, UserTimeContext? userTimeContext = null)
     {
         var totalStopwatch = Stopwatch.StartNew();
         Logger.LogDebug(
@@ -313,7 +313,7 @@ public partial class GodChatGAgent
 
         // Step 3: Create voice chat context with voice-specific metadata
         var aiChatContextDto = CreateVoiceChatContext(sessionId, llm, streamingModeEnabled, message, chatId, 
-            promptSettings, isHttpRequest, region, voiceLanguage, voiceDurationSeconds);
+            promptSettings, isHttpRequest, region, voiceLanguage, voiceDurationSeconds, userTimeContext);
 
         // Step 4: Get AI proxy and start streaming chat (same as GodStreamChatAsync)
         var (aiAgentStatusProxy, proxyId) = await GetProxyByRegionAsync(region);
@@ -328,7 +328,7 @@ public partial class GodChatGAgent
             settings.Temperature = "1.0";
             
             // Start streaming with voice context (timestamp now in system prompt)
-            var sharedUserInfoPrompt = await GetSharedUserInfoPromptAsync(null);
+            var sharedUserInfoPrompt = await GetSharedUserInfoPromptAsync(userTimeContext);
             Logger.LogDebug(
                 "[GodChatGAgent][GodVoiceStreamChatAsync] SessionId={SessionId}, ChatId={ChatId}, SharedUserInfoInjected={Injected}, SharedPromptLength={PromptLength}",
                 sessionId, chatId, !string.IsNullOrWhiteSpace(sharedUserInfoPrompt), sharedUserInfoPrompt?.Length ?? 0);
@@ -442,7 +442,7 @@ public partial class GodChatGAgent
     private AIChatContextDto CreateVoiceChatContext(Guid sessionId, string llm, bool streamingModeEnabled,
         string message, string chatId, ExecutionPromptSettings? promptSettings = null, bool isHttpRequest = false,
         string? region = null, VoiceLanguageEnum voiceLanguage = VoiceLanguageEnum.English,
-        double voiceDurationSeconds = 0.0)
+        double voiceDurationSeconds = 0.0, UserTimeContext? userTimeContext = null)
     {
         var aiChatContextDto = new AIChatContextDto()
         {
@@ -460,11 +460,12 @@ public partial class GodChatGAgent
                 { "Message", message },
                 { "Region", region },
                 { "VoiceLanguage", (int)voiceLanguage },
-                { "VoiceDurationSeconds", voiceDurationSeconds }
+                { "VoiceDurationSeconds", voiceDurationSeconds },
+                { "UserLocalTime", userTimeContext?.UserLocalTime },
+                { "UserTimeZoneId", userTimeContext?.UserTimeZoneId }
             });
         }
 
         return aiChatContextDto;
     }
 }
-

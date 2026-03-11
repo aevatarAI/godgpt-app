@@ -44,8 +44,11 @@ public partial class GodChatGAgent
         string? region = input.HasRegion ? input.Region : null;
         List<string>? images = input.Images?.Count > 0 ? input.Images.ToList() : null;
         // For Timestamp message types, use null check instead of Has property
-        DateTime? userLocalTime = input.UserLocalTime != null ? input.UserLocalTime.ToDateTime() : null;
-        string? userTimeZoneId = input.HasUserTimeZoneId ? input.UserTimeZoneId : null;
+        var userTimeContext = new UserTimeContext
+        {
+            UserLocalTime = input.UserLocalTime != null ? input.UserLocalTime.ToDateTime() : null,
+            UserTimeZoneId = input.HasUserTimeZoneId ? input.UserTimeZoneId : null
+        };
         
         var totalStopwatch = Stopwatch.StartNew();
         Logger.LogInformation($"[GodChatGAgent][StartStreamChatAsync] {sessionId.ToString()} start. region:{region}, ChatManagerGuid:{State.ChatManagerGuid}");
@@ -124,8 +127,8 @@ public partial class GodChatGAgent
         Logger.LogInformation($"[GodChatGAgent][StartStreamChatAsync] {sessionId} - Calling GodStreamChatAsync: systemLLM={systemLLM}, streamingEnabled={streamingEnabled}, isHttpRequest={isHttpRequest}");
         
         await GodStreamChatAsync(sessionId, systemLLM, streamingEnabled,
-            content, chatId, promptSettings, isHttpRequest, region, images: images, 
-            userLocalTime: userLocalTime, userTimeZoneId: userTimeZoneId);
+            content, chatId, promptSettings, isHttpRequest, region, images: images,
+            userTimeContext: userTimeContext);
         
         Logger.LogInformation($"[GodChatGAgent][StartStreamChatAsync] {sessionId} - GodStreamChatAsync completed");
         
@@ -153,8 +156,8 @@ public partial class GodChatGAgent
 
     public async Task<string> GodStreamChatAsync(Guid sessionId, string llm, bool streamingModeEnabled, string message,
         string chatId, ExecutionPromptSettings? promptSettings = null, bool isHttpRequest = false,
-        string? region = null, bool addToHistory = true, List<string>? images = null, DateTime? userLocalTime = null,
-        string? userTimeZoneId = null)
+        string? region = null, bool addToHistory = true, List<string>? images = null,
+        UserTimeContext? userTimeContext = null)
     {
         var totalStopwatch = Stopwatch.StartNew();
         Logger.LogDebug(
@@ -162,7 +165,7 @@ public partial class GodChatGAgent
         
         var aiChatContextDto =
             CreateAIChatContext(sessionId, llm, streamingModeEnabled, message, chatId, promptSettings, isHttpRequest,
-                region, images);
+                region, images, userTimeContext);
 
         Logger.LogInformation($"[GodChatGAgent][GodStreamChatAsync] {sessionId} - Calling GetProxyByRegionAsync with region={region}");
         var (aiAgentStatusProxy, proxyId) = await GetProxyByRegionAsync(region);
@@ -195,7 +198,7 @@ public partial class GodChatGAgent
             if (!isPromptVoiceChat)
             {
                 var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
-                var sharedUserInfoPrompt = await GetSharedUserInfoPromptAsync(userLocalTime);
+                var sharedUserInfoPrompt = await GetSharedUserInfoPromptAsync(userTimeContext);
                 Logger.LogDebug(
                     "[GodChatGAgent][GodStreamChatAsync] SessionId={SessionId}, ChatId={ChatId}, SharedUserInfoInjected={Injected}, SharedPromptLength={PromptLength}",
                     sessionId, chatId, !string.IsNullOrWhiteSpace(sharedUserInfoPrompt), sharedUserInfoPrompt?.Length ?? 0);
@@ -207,7 +210,7 @@ public partial class GodChatGAgent
                 var isDailyGuide = State.PromptTemplate == DailyGuide;
                 if (isDailyGuide && (message.StartsWith(homeDosAndDontPromptMessage) || message.StartsWith(chatPageMessageAfterSync)))
                 {
-                    enhancedMessage = await GenerateDailyRecommendationsAsync(language, userLocalTime, userTimeZoneId);
+                    enhancedMessage = await GenerateDailyRecommendationsAsync(language, userTimeContext);
                     Logger.LogDebug($"[GodChatGAgent][GodStreamChatAsync] {sessionId} enhancedMessage: {enhancedMessage}");
                 }
                 else
@@ -342,7 +345,8 @@ public partial class GodChatGAgent
 
     public async Task<ChatMessageListProto> ChatWithHistory(Guid sessionId, string systemLLM, string content,
         string chatId,
-        ExecutionPromptSettings promptSettings = null, bool isHttpRequest = false, string? region = null)
+        ExecutionPromptSettings promptSettings = null, bool isHttpRequest = false, string? region = null,
+        UserTimeContext? userTimeContext = null)
     {
         var sw = new Stopwatch();
         sw.Start();
@@ -377,13 +381,13 @@ public partial class GodChatGAgent
         var settings = promptSettings ?? new ExecutionPromptSettings();
         settings.Temperature = "1.0";
 
-        var sharedUserInfoPrompt = await GetSharedUserInfoPromptAsync(null);
+        var sharedUserInfoPrompt = await GetSharedUserInfoPromptAsync(userTimeContext);
         var requestMessage = MergeUserInfoPrompt(sharedUserInfoPrompt, content);
         Logger.LogDebug(
             "[GodChatGAgent][ChatWithHistory] SessionId={SessionId}, ChatId={ChatId}, SharedUserInfoInjected={Injected}, SharedPromptLength={PromptLength}",
             sessionId, chatId, !string.IsNullOrWhiteSpace(sharedUserInfoPrompt), sharedUserInfoPrompt?.Length ?? 0);
         var aiChatContextDto = CreateAIChatContext(sessionId, llm, streamingModeEnabled, content, chatId,
-            promptSettings, isHttpRequest, region);
+            promptSettings, isHttpRequest, region, userTimeContext: userTimeContext);
         var protoInput = BuildChatWithHistoryInputProto(requestMessage, State.ChatHistory.FromProtoList(), settings, aiChatContextDto);
         
         var llmStartMs = sw.ElapsedMilliseconds;
@@ -448,4 +452,3 @@ public partial class GodChatGAgent
         return ConvertToChatMessageListProto(response);
     }
 }
-

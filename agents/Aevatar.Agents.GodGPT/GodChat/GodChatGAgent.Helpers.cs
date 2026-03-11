@@ -113,7 +113,7 @@ public partial class GodChatGAgent
     
     private AIChatContextDto CreateAIChatContext(Guid sessionId, string llm, bool streamingModeEnabled,
         string message, string chatId, ExecutionPromptSettings? promptSettings = null, bool isHttpRequest = false,
-        string? region = null, List<string>? images = null)
+        string? region = null, List<string>? images = null, UserTimeContext? userTimeContext = null)
     {
         var aiChatContextDto = new AIChatContextDto()
         {
@@ -125,7 +125,8 @@ public partial class GodChatGAgent
             aiChatContextDto.MessageId = JsonConvert.SerializeObject(new Dictionary<string, object>()
             {
                 { "IsHttpRequest", true }, { "LLM", llm }, { "StreamingModeEnabled", streamingModeEnabled },
-                { "Message", message }, { "Region", region }, { "Images", images }
+                { "Message", message }, { "Region", region }, { "Images", images },
+                { "UserLocalTime", userTimeContext?.UserLocalTime }, { "UserTimeZoneId", userTimeContext?.UserTimeZoneId }
             });
         }
 
@@ -136,14 +137,14 @@ public partial class GodChatGAgent
 
     #region Daily Recommendations
 
-    private async Task<GenerateUserInfoPromptResponseProto> GetUserInfoPromptResponseAsync(DateTime? userLocalTime)
+    private async Task<GenerateUserInfoPromptResponseProto> GetUserInfoPromptResponseAsync(UserTimeContext? userTimeContext)
     {
         var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(State.ChatManagerGuid);
         var request = new GenerateUserInfoPromptRequestProto
         {
             UserId = State.ChatManagerGuid,
-            UserLocalTime = userLocalTime.HasValue
-                ? Timestamp.FromDateTime(DateTime.SpecifyKind(userLocalTime.Value, DateTimeKind.Utc))
+            UserLocalTime = userTimeContext?.UserLocalTime.HasValue == true
+                ? Timestamp.FromDateTime(DateTime.SpecifyKind(userTimeContext.UserLocalTime.Value, DateTimeKind.Utc))
                 : null
         };
 
@@ -154,9 +155,9 @@ public partial class GodChatGAgent
         return response;
     }
 
-    private async Task<string> GetSharedUserInfoPromptAsync(DateTime? userLocalTime)
+    private async Task<string> GetSharedUserInfoPromptAsync(UserTimeContext? userTimeContext)
     {
-        var response = await GetUserInfoPromptResponseAsync(userLocalTime);
+        var response = await GetUserInfoPromptResponseAsync(userTimeContext);
         if (string.IsNullOrWhiteSpace(response?.Prompt))
         {
             return string.Empty;
@@ -193,7 +194,7 @@ public partial class GodChatGAgent
     }
     
     private async Task<string> GenerateDailyRecommendationsAsync(GodGPTLanguage language,
-        DateTime? userLocalTime, string? userTimeZoneId)
+        UserTimeContext? userTimeContext)
     {
         // TODO: [GOOGLE_CALENDAR_DISABLED] Google Calendar integration temporarily disabled
         // This method previously fetched calendar events and generated personalized recommendations
@@ -201,7 +202,7 @@ public partial class GodChatGAgent
         Logger.LogDebug($"[GodChatGAgent][GenerateDailyRecommendationsAsync] {Id} Google Calendar disabled - returning empty prompt");
         
         var userQuotaGAgent = await GetUserQuotaAgentAsync(State.ChatManagerGuid);
-        var response = await GetUserInfoPromptResponseAsync(userLocalTime);
+        var response = await GetUserInfoPromptResponseAsync(userTimeContext);
         var prompt = response.Prompt;
         var isSubscribed = await userQuotaGAgent.IsSubscribedAsync(true) || await userQuotaGAgent.IsSubscribedAsync(false);
         
@@ -282,4 +283,3 @@ xxxxx (A brief one-sentence summary, under 20 words)";
     */
     #endregion
 }
-

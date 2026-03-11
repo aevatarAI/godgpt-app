@@ -30,7 +30,7 @@ public interface IGodChat : IGAgent
 
     Task<string> GodStreamChatAsync(Guid sessionId, string llm, bool streamingModeEnabled, string message,
         string chatId, ExecutionPromptSettings? promptSettings = null, bool isHttpRequest = false, string? region = null,
-        bool addToHistory = true, List<string>? images = null, DateTime? userLocalTime = null, string? userTimeZoneId = null);
+        bool addToHistory = true, List<string>? images = null, UserTimeContext? userTimeContext = null);
 
     [ReadOnly]
     Task<ChatMessageListProto> GetChatMessageAsync();
@@ -53,8 +53,9 @@ public interface IGodChat : IGAgent
         AIExceptionEnum aiExceptionEnum, string? errorMessage,
         AIStreamChatContentProto? aiStreamChatContent);
     
-    Task<ChatMessageListProto> ChatWithHistory(Guid sessionId, string systemLLM, string content, string chatId, 
-        ExecutionPromptSettings promptSettings = null, bool isHttpRequest = false, string? region = null);
+    Task<ChatMessageListProto> ChatWithHistory(Guid sessionId, string systemLLM, string content, string chatId,
+        ExecutionPromptSettings promptSettings = null, bool isHttpRequest = false, string? region = null,
+        UserTimeContext? userTimeContext = null);
     
     /// <summary>
     /// Chat without history using Protobuf input (for RPC calls with custom settings)
