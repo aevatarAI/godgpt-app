@@ -170,20 +170,7 @@ public partial class GodChatGAgent
             return string.Empty;
         }
 
-        var promptLines = response.Prompt
-            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-        if (promptLines.Length <= 1)
-        {
-            return string.Empty;
-        }
-
-        var sharedContext = string.Join('\n', promptLines.Skip(1));
-        if (string.IsNullOrWhiteSpace(sharedContext))
-        {
-            return string.Empty;
-        }
-
-        var mergedPrompt = $"Use the following user background when it is relevant to the reply:\n{sharedContext}";
+        var mergedPrompt = $"Use the following user background when it is relevant to the reply:\n{response.Prompt}";
         Logger.LogDebug(
             "[GodChatGAgent][GetSharedUserInfoPromptAsync] SessionId={SessionId}, UserId={UserId}, SharedPromptLength={PromptLength}, SharedPrompt={SharedPrompt}",
             Id, State.ChatManagerGuid, mergedPrompt.Length, mergedPrompt);
@@ -214,7 +201,10 @@ public partial class GodChatGAgent
         var isSubscribed = await userQuotaGAgent.IsSubscribedAsync(true) || await userQuotaGAgent.IsSubscribedAsync(false);
         
         var languageEnglishName = GodGPTLanguageHelper.GetLanguageEnglishName(language);
-        prompt = $"Use {languageEnglishName} to respond including titles like DO, DON'T \n {prompt}";
+        prompt =
+            $"Use {languageEnglishName} to respond including titles like DO, DON'T.\n" +
+            "Generate a personalized \"Today's Dos and Don'ts\" for the user based on their information and cosmological theories.\n" +
+            $"{prompt}";
         
         // Return prompt without calendar events
         return prompt;

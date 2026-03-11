@@ -433,8 +433,7 @@ public class UserInfoCollectionGAgent : GAgentBase<UserInfoCollectionState>, IUs
         
         var timeText = currentTime.ToString("yyyy-MM-dd HH:mm:ss");
         
-        var prompt = $@"Generate a personalized ""Today's Dos and Don'ts"" for the user based on their information and cosmological theories.
-User Name: {fullName}
+        var prompt = $@"User Name: {fullName}
 User Location: {location}
 User Message Time: {timeText}
 User Gender: {genderText}
