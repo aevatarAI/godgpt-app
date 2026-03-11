@@ -139,6 +139,9 @@ public partial class GodChatGAgent
 
     private async Task<GenerateUserInfoPromptResponseProto> GetUserInfoPromptResponseAsync(UserTimeContext? userTimeContext)
     {
+        Logger.LogInformation(
+            "[GodChatGAgent][GetUserInfoPromptResponseAsync] UserInfoCollection actor lookup - SessionId={SessionId}, ActorId={ActorId}, RequestUserId={RequestUserId}",
+            Id, State.ChatManagerGuid, State.ChatManagerGuid);
         var userInfoCollectionGAgent = await GetUserInfoCollectionAgentAsync(State.ChatManagerGuid);
         var request = new GenerateUserInfoPromptRequestProto
         {
@@ -148,6 +151,9 @@ public partial class GodChatGAgent
                 : null
         };
 
+        Logger.LogInformation(
+            "[GodChatGAgent][GetUserInfoPromptResponseAsync] UserInfoCollection request prepared - SessionId={SessionId}, ActorId={ActorId}, ProtoRequestUserId={ProtoRequestUserId}",
+            Id, State.ChatManagerGuid, request.UserId);
         var response = await userInfoCollectionGAgent.GenerateUserInfoPromptAsync(request);
         Logger.LogDebug(
             "[GodChatGAgent][GetUserInfoPromptResponseAsync] SessionId={SessionId}, UserId={UserId}, HasPrompt={HasPrompt}, PromptLength={PromptLength}, FullName={FullName}, Prompt={Prompt}",

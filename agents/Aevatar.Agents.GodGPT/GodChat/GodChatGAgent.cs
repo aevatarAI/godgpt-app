@@ -171,6 +171,9 @@ public partial class GodChatGAgent : Aevatar.Agents.Core.GAgentBase<GodChatState
     public async Task InitAsync(Guid ChatManagerGuid)
     {
         Logger.LogInformation($"[GodChatGAgent][InitAsync] Start - SessionId: {Id}, ChatManagerGuid: {ChatManagerGuid}");
+        Logger.LogInformation(
+            "[GodChatGAgent][InitAsync] Binding chat session to user context - SessionId={SessionId}, IncomingChatManagerGuid={IncomingChatManagerGuid}",
+            Id, ChatManagerGuid);
         
         RaiseEvent(new SetChatManagerGuidEvent
         {

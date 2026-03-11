@@ -38,6 +38,9 @@ public class UserInfoService : IUserInfoService
     public async Task<UserInfoCollectionResponseDto> UpdateUserInfoCollectionAsync(Guid userId, UpdateUserInfoCollectionDto updateDto)
     {
         _logger.LogInformation("[UserInfoService] Updating user info collection for user {UserId}", userId);
+        _logger.LogInformation(
+            "[UserInfoService] UserInfoCollection actor lookup - ActorId={ActorId}, RequestUserId={RequestUserId}",
+            userId.ToString(), userId);
         
         var agent = await GetAgentAsync(userId);
         
@@ -96,6 +99,10 @@ public class UserInfoService : IUserInfoService
         {
             protoRequest.SourceChannels.AddRange(updateDto.SourceChannels.Select(s => (int)s));
         }
+
+        _logger.LogInformation(
+            "[UserInfoService] UserInfoCollection request prepared - ActorId={ActorId}, ProtoRequestUserId={ProtoRequestUserId}",
+            userId.ToString(), protoRequest.UserId);
         
         var protoResult = await agent.UpdateUserInfoCollectionAsync(protoRequest);
         
@@ -273,4 +280,3 @@ public class UserInfoService : IUserInfoService
         return dto;
     }
 }
-
