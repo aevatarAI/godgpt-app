@@ -328,7 +328,11 @@ public partial class GodChatGAgent
             settings.Temperature = "1.0";
             
             // Start streaming with voice context (timestamp now in system prompt)
-            var promptMsg = message;
+            var sharedUserInfoPrompt = await GetSharedUserInfoPromptAsync(null);
+            Logger.LogDebug(
+                "[GodChatGAgent][GodVoiceStreamChatAsync] SessionId={SessionId}, ChatId={ChatId}, SharedUserInfoInjected={Injected}, SharedPromptLength={PromptLength}",
+                sessionId, chatId, !string.IsNullOrWhiteSpace(sharedUserInfoPrompt), sharedUserInfoPrompt?.Length ?? 0);
+            var promptMsg = MergeUserInfoPrompt(sharedUserInfoPrompt, message);
             switch (voiceLanguage)
             {
                 case  VoiceLanguageEnum.English:

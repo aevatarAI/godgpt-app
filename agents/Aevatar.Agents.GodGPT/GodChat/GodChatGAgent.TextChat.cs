@@ -195,6 +195,10 @@ public partial class GodChatGAgent
             if (!isPromptVoiceChat)
             {
                 var language = GodGPTLanguageHelper.GetGodGPTLanguage(Context);
+                var sharedUserInfoPrompt = await GetSharedUserInfoPromptAsync(userLocalTime);
+                Logger.LogDebug(
+                    "[GodChatGAgent][GodStreamChatAsync] SessionId={SessionId}, ChatId={ChatId}, SharedUserInfoInjected={Injected}, SharedPromptLength={PromptLength}",
+                    sessionId, chatId, !string.IsNullOrWhiteSpace(sharedUserInfoPrompt), sharedUserInfoPrompt?.Length ?? 0);
                 Logger.LogDebug($"[GodChatGAgent][GodStreamChatAsync] {sessionId} Language from context: {language}");
                 var homeDosAndDontPromptMessage = _localizationService.GetLocalizedMessage(ExceptionMessageKeys.HomeDosAndDontPrompt,language);
                 var chatPageMessageAfterSync = _localizationService.GetLocalizedMessage(ExceptionMessageKeys.ChatPageMessageAfterSync,language);
@@ -205,6 +209,10 @@ public partial class GodChatGAgent
                 {
                     enhancedMessage = await GenerateDailyRecommendationsAsync(language, userLocalTime, userTimeZoneId);
                     Logger.LogDebug($"[GodChatGAgent][GodStreamChatAsync] {sessionId} enhancedMessage: {enhancedMessage}");
+                }
+                else
+                {
+                    enhancedMessage = MergeUserInfoPrompt(sharedUserInfoPrompt, message);
                 }
                 
                 enhancedMessage = enhancedMessage + ChatPrompts.ConversationSuggestionsPrompt;
@@ -369,9 +377,14 @@ public partial class GodChatGAgent
         var settings = promptSettings ?? new ExecutionPromptSettings();
         settings.Temperature = "1.0";
 
+        var sharedUserInfoPrompt = await GetSharedUserInfoPromptAsync(null);
+        var requestMessage = MergeUserInfoPrompt(sharedUserInfoPrompt, content);
+        Logger.LogDebug(
+            "[GodChatGAgent][ChatWithHistory] SessionId={SessionId}, ChatId={ChatId}, SharedUserInfoInjected={Injected}, SharedPromptLength={PromptLength}",
+            sessionId, chatId, !string.IsNullOrWhiteSpace(sharedUserInfoPrompt), sharedUserInfoPrompt?.Length ?? 0);
         var aiChatContextDto = CreateAIChatContext(sessionId, llm, streamingModeEnabled, content, chatId,
             promptSettings, isHttpRequest, region);
-        var protoInput = BuildChatWithHistoryInputProto(content, State.ChatHistory.FromProtoList(), settings, aiChatContextDto);
+        var protoInput = BuildChatWithHistoryInputProto(requestMessage, State.ChatHistory.FromProtoList(), settings, aiChatContextDto);
         
         var llmStartMs = sw.ElapsedMilliseconds;
         Logger.LogInformation("[PERF][GodChatGAgent] ChatWithHistory_LLM_START - SessionId={SessionId}, ChatId={ChatId}, HistoryCount={HistoryCount}",
